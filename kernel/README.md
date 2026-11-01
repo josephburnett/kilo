@@ -54,7 +54,7 @@ images link (`lib`, `usb`, `input`, `fs`, `sched`, `net`, and the addons
 
 | Output | What | Size |
 |---|---|---|
-| `build/kernel7.img` | the mind kernel | 511,140 bytes (`KILO_BODY_SERIAL=pl011`: 511,396) |
+| `build/kernel7.img` | the mind kernel | 512,164 bytes (`KILO_BODY_SERIAL=auto`: 511,908) |
 | `build/netboot/kernel7.img` | the network loader | 305,420 bytes |
 
 Of the mind kernel, the SD card (FatFs about 23 KB, the SD driver about
@@ -356,14 +356,17 @@ Plan rule 1 (docs/fast-boot.md §3): the control loop comes first and never
 waits for the network. `CKiloNet` (`src/net.*`), a Circle task, is created
 last in `Initialize` and first runs at the main loop's first sleep:
 
-1. **USB** (only with `KILO_BODY_SERIAL=pl011`). The LAN9514 Ethernet chip
-   is a USB device, so Circle's USB host must scan first. With the default
-   `auto`, `ChooseSerial` already did, before the link. With `pl011` the
-   task waits for the body's first HELLO (or 1 s), then scans. Circle's
-   enumeration spins (`CTimer::MsDelay`, no yield), so **the main loop stops
-   for the length of the scan**, about a second (est.), once. The body's
-   watchdog covers it; at boot nothing is walking. The log line `USB scan
-   for Ethernet: done, N ms (the main loop waited)` measures it.
+1. **USB** (the default `KILO_BODY_SERIAL=pl011` build). The LAN9514
+   Ethernet chip is a USB device, so Circle's USB host must scan first.
+   The link is already up on the PL011, so the task waits for the main
+   loop's go-ahead: the body's first HELLO (or 3 s), the boot flash check
+   and any flash it starts ("Flashing the body"; at most 30 s), then scans.
+   Circle's enumeration spins (`CTimer::MsDelay`, no yield), so **the main
+   loop stops for the length of the scan**, about a second (est.), once.
+   The body's watchdog covers it; at boot nothing is walking. The log line
+   `USB scan for Ethernet: done, N ms (the main loop waited)` measures it.
+   With `auto` (the USB cable), `ChooseSerial` already scanned, before the
+   link, and this step is skipped.
 2. **TCP/IP**: `CNetSubSystem::Initialize(FALSE)`: do not wait for the PHY
    (Circle would spin up to 4 s). Circle's `net` task then finds the
    device, the `netphy` task watches the link, and a `dhcp` task asks for a
@@ -457,16 +460,20 @@ flash cut off is aborted when the pause ends.
 
 ### Body link: two serial back ends
 
-**Selection rule** (`CKernel::ChooseSerial`): initialise Circle's USB host
+**The default** (`KILO_BODY_SERIAL=pl011`): the PL011, opened at once.
+The Pi sits on the NyBoard's socket: the header UART (GPIO14/15) is the
+body link and GPIO4 the body's reset line, and USB enumeration (about a
+second or more, est.) does not come before the link (docs/fast-boot.md §3
+rule 1); the net task scans USB for Ethernet later ("Network bring-up").
+Kilo's USB adapter cable is retired.
+
+**The fallback** (`make -C kernel KILO_BODY_SERIAL=auto`, for the USB
+cable; `CKernel::ChooseSerial`): initialise Circle's USB host
 (`CUSBHCIDevice`, one scan, no plug-and-play) and use the USB serial device
-`utty1` if one enumerated; else the PL011. The log line `body link on ...`
-says which. A USB adapter plugged in after boot is not seen.
+`utty1` if one enumerated; else the PL011. A USB adapter plugged in after
+boot is not seen. Either way the log line `body link on ...` says which.
 
-`make -C kernel KILO_BODY_SERIAL=pl011` skips the USB scan and opens the
-PL011 at once: the production wiring, where USB enumeration (about a second
-or more, est.) must not come before the link (docs/fast-boot.md §3 rule 1).
-
-- **USB** (today's wiring): Kilo's CH343 adapter enumerates as CDC-ACM
+- **USB** (the `auto` fallback): Kilo's CH343 adapter enumerates as CDC-ACM
   (interface class 2-2-1), so Circle's `CUSBSerialCDCDevice` drives it and
   names it `utty1` (any USB serial adapter Circle knows gets that name).
   Baud is set with CDC `SET_LINE_CODING` (250000, 8N1), the same request
@@ -477,7 +484,7 @@ or more, est.) must not come before the link (docs/fast-boot.md §3 rule 1).
   full-speed packets) and reads one USB packet (64 B) per completed IN
   request: at a 1 ms loop that is up to 64 kB/s, against 25 kB/s line rate.
   `tx_free()` is a constant 512: there is no queue on this side to measure.
-- **PL011** (GPIO14/15, header pins 8 and 10; `ttyS1`): Circle's
+- **PL011** (the default; GPIO14/15, header pins 8 and 10; `ttyS1`): Circle's
   `CSerialDevice`, interrupt driven. Built only when chosen, because its
   constructor takes over GPIO14/15. 250000 baud is exact: UARTCLK 48 MHz /
   (16 x 250000) = 12, remainder 0, so IBRD 12, FBRD 0. The NL -> CR NL
@@ -542,7 +549,7 @@ a frame only when `tx_free()` covers all of it; otherwise it counts
 
 | Pattern | Meaning |
 |---|---|
-| steady on | starting up (the USB scan) |
+| steady on | starting up (with `KILO_BODY_SERIAL=auto`, the USB scan: a second or more) |
 | 0.5 Hz (1 s on, 1 s off) | no body: no HELLO yet, or no TELEMETRY for 300 ms |
 | 2 Hz | the body is alive: TELEMETRY flowing |
 | 5 Hz | the body's HELLO has another protocol major: the kernel stays up and keeps the heartbeat, but sends no goals or FEET (kilo-mind-host exits 2 instead) |
@@ -551,9 +558,9 @@ a frame only when `tx_free()` covers all of it; otherwise it counts
 
 The LED says nothing about the network (the log does). The blink freezes
 for a moment while the SD card is read (after the first HELLO) and while a
-`--persist` writes to it; with `KILO_BODY_SERIAL=pl011` it also freezes
-once for about a second (est.) early on: the USB scan for Ethernet
-("Network bring-up").
+`--persist` writes to it; with the default `KILO_BODY_SERIAL=pl011` it
+also freezes once for about a second (est.) early on: the USB scan for
+Ethernet ("Network bring-up").
 
 ### The Mind's settings
 
@@ -620,11 +627,12 @@ moment cannot have it overwritten (its `FLASH_COMMIT` is refused
 `FLASHING` while the boot flash runs).
 
 **Order at boot**: link up -> HELLO (or 3 s) -> SD card -> flash if needed
--> the go-ahead for the net task's USB scan (`KILO_BODY_SERIAL=pl011`).
-The scan stalls the main loop for about a second (est.), and optiboot
-gives up after 1 s without a byte, so it must not cut into a flash; it
-waits for the go-ahead (at most 30 s). With the default `auto` build the
-scan came before the link, so nothing waits.
+-> the go-ahead for the net task's USB scan (the default
+`KILO_BODY_SERIAL=pl011`). The scan stalls the main loop for about a
+second (est.), and optiboot gives up after 1 s without a byte, so it must
+not cut into a flash; it waits for the go-ahead (at most 30 s). With the
+`auto` build (the USB cable) the scan came before the link, so nothing
+waits.
 
 **`--persist`**: after a DONE from a `FLASH_BEGIN` with `PERSIST`, the
 kernel removes `body.json`, writes `body.bin`, then writes `body.json`
@@ -716,7 +724,7 @@ accept, receive and send through `GetStatus()` as read from Circle's source;
 `kilo status`, `log`, `monitor`, `posture` and the bridge over the cable;
 `kilo reboot` (the OK reaching the laptop in 200 ms; the loader coming back);
 the loop's period with the net task running (the stats line); the USB scan
-from the net task with `KILO_BODY_SERIAL=pl011` and how long it stalls the
+from the net task (the default `pl011` build) and how long it stalls the
 loop; the planner's cost on the Cortex-A7 (the bench line).
 Flashing: the PL011 rate switch (`set_baud()` in place) at 115200
 against optiboot and back; GPIO4 reaching the NyBoard's reset line (header
@@ -750,9 +758,10 @@ compiled but has never run.
   above); the loader does not, so on a direct cable it gets no address.
   The loader could also blink its address on the LED or announce it over
   the network.
-- **Flashing over the USB cable.** Needs a DTR pulse (CDC
-  `SET_CONTROL_LINE_STATE`), which Circle's driver cannot send ("Baud
-  switching"). Today it needs header pin 7 wired to the reset line.
+- **Flashing over the USB cable** (the `auto` fallback). Needs a DTR
+  pulse (CDC `SET_CONTROL_LINE_STATE`), which Circle's driver cannot send
+  ("Baud switching"). On the cable it needs header pin 7 wired to the
+  reset line; on the NyBoard's socket (the default) pin 7 is that line.
 - **`--persist` outcome on the laptop.** `kilo flash --host --persist`
   does not hear whether the write worked; a FLASH_STATUS field or a log
   line the CLI waits for would tell it.

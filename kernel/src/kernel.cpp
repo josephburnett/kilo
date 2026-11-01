@@ -29,7 +29,8 @@
 // the HDMI screen if the firmware gives us a frame buffer, else nowhere
 // (Kilo has no monitor). The LED:
 //
-//   steady on      starting up (the USB scan takes about a second or more)
+//   steady on      starting up (with KILO_BODY_SERIAL=auto the USB scan comes
+//                  first: about a second or more)
 //   0.5 Hz blink   no body: no HELLO yet, or no TELEMETRY for 300 ms
 //   2 Hz blink     the body is alive: TELEMETRY flowing
 //   5 Hz blink     the body speaks another protocol major: not driven (flash it)
@@ -239,10 +240,12 @@ boolean CKernel::Initialize (void)
 	return TRUE;
 }
 
-// The body link's device. Rule: a USB serial adapter (utty1, the CH343 on
-// Kilo's cable today) if one enumerated, else the PL011 on GPIO14/15. Built
-// with KILO_BODY_SERIAL=pl011, the USB scan is skipped and the PL011 is
-// used at once (the production wiring: no USB before the link, plan rule 1).
+// The body link's device. The default build (KILO_BODY_SERIAL=pl011) uses
+// the PL011 on GPIO14/15 at once: the Pi on the NyBoard's socket, no USB
+// before the link (plan rule 1); the net task scans USB later. Built with
+// KILO_BODY_SERIAL=auto (the fallback for Kilo's USB adapter cable): a USB
+// serial adapter (utty1, the cable's CH343) if one enumerated, else the
+// PL011.
 kilo::Serial *CKernel::ChooseSerial (void)
 {
 #ifndef KILO_BODY_SERIAL_PL011
@@ -404,8 +407,9 @@ TShutdownMode CKernel::Run (void)
 // `kilo flash --sd`): once the body's first HELLO arrived (or none came
 // BootHelloWaitUs after link.connect()), read body.json and body.bin and
 // flash them if the body runs another build. Then the go-ahead for the net
-// task's USB scan (KILO_BODY_SERIAL=pl011), which stalls the main loop and
-// so must not cut into a flash. A missing or bad file is no error.
+// task's USB scan (the default KILO_BODY_SERIAL=pl011 build), which stalls
+// the main loop and so must not cut into a flash. A missing or bad file is
+// no error.
 //
 // The card is read only here, after the HELLO, so neither the link nor the
 // boot probe (GPIO21 falls at the first HELLO) waits for it; the read

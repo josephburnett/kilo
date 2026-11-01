@@ -46,13 +46,15 @@ OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/
 
 # Build options (README "Body link", "Boot probe", "Planner bench", "mDNS",
 # "The Mind's settings"):
-#   KILO_BODY_SERIAL=auto   a USB serial adapter if one enumerates, else the PL011 (default)
-#   KILO_BODY_SERIAL=pl011  the PL011 only, without the USB scan before the link
+#   KILO_BODY_SERIAL=pl011  the PL011 on GPIO14/15 (default): the Pi on the NyBoard's socket, its
+#                           header UART and GPIO4 reset; USB (Ethernet) is scanned after the link is up
+#   KILO_BODY_SERIAL=auto   a USB serial adapter if one enumerates, else the PL011: the fallback for
+#                           Kilo's USB adapter cable (USB is scanned before the link)
 #   KILO_BOOT_PROBE=1|0     GPIO21 (header pin 40) marks the boot for a scope (default 1)
 #   KILO_PLANNER_BENCH=1|0  time the walking planner once at boot, no body involved (default 1)
 #   KILO_MDNS=1|0           answer for kilo.local and announce _kilo._tcp (default 1)
 #   KILO_BEHAVIOUR=0|1      run the behaviour runner, as kilo run --behaviour (default 0)
-KILO_BODY_SERIAL ?= auto
+KILO_BODY_SERIAL ?= pl011
 KILO_BOOT_PROBE ?= 1
 KILO_PLANNER_BENCH ?= 1
 KILO_MDNS ?= 1

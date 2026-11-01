@@ -9,7 +9,8 @@
 //     a non-blocking Send() queues without limit (heap) when the peer stops
 //     reading;
 //   - the address and the link are read from CNetConfig / CNetDeviceLayer.
-// The one long call is the USB scan (KILO_BODY_SERIAL=pl011 only): Circle's
+// The one long call is the USB scan (the default KILO_BODY_SERIAL=pl011
+// build; with auto the kernel scanned before the link): Circle's
 // USB enumeration spins in CTimer::MsDelay, so it stalls the main loop once,
 // about a second (est.), after the body's first HELLO and the boot-time
 // flash check (CKiloNet::BringUp).
