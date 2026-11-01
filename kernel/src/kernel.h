@@ -1,6 +1,7 @@
 //
-// kernel.h: the Kilo mind kernel: the body link (P1), the laptop interface
-// over Ethernet (P2), the walking planner (P3) and flashing the body (P4).
+// kernel.h: the Kilo mind kernel: the whole mind core (kilo::Mind: the body
+// link, the walker, tricks, perception, the IR remote, the behaviour runner
+// and the laptop interface) on Circle, and flashing the body (P4).
 //
 #ifndef KILO_KERNEL_H
 #define KILO_KERNEL_H
@@ -11,10 +12,7 @@
 #include "plannerbench.h"
 #include "flash/flasher.h"
 #include "flash/image.h"
-#include "link/serial_link.h"
-#include "net/host_server.h"
-#include "planner/walker.h"
-#include "util/logring.h"
+#include "mind.h"
 #include <circle/actled.h>
 #include <circle/bcmrandom.h>
 #include <circle/devicenameservice.h>
@@ -37,17 +35,15 @@ enum TShutdownMode
 	ShutdownReboot
 };
 
-// What the main loop learns from the link between two stats lines. It is
-// the link's one listener, so it also feeds the walker.
+// What the main loop learns from the link between two stats lines: the
+// Mind's tap (Mind::set_tap); the Mind keeps the link's own listener.
 struct CLinkWatch : kilo::LinkListener
 {
 	void on_hello (const kilo_hello_t &rHello, bool bSolicited) override;
 	void on_telemetry (const kilo_telemetry_t &rTelemetry) override;
-	void on_event (const kilo_event_t &rEvent) override;
 
 	CircleClock *m_pClock = 0;
 	kilo::Log *m_pLog = 0;
-	kilo::planner::Walker *m_pWalker = 0;
 	uint64_t m_nBootUs = 0;			// clock at the top of the kernel
 	bool m_bFirstHello = false;		// the boot-time flash check waits for it
 	unsigned m_nTelemetry = 0;		// in the current second
@@ -110,24 +106,28 @@ private:
 
 	CircleClock		m_Clock;
 	CircleLog		m_CircleLog;	// into CLogger: the screen, or nowhere
-	kilo::LogRing		*m_pRing;	// the last lines, for `kilo log --host`
-	KernelLog		*m_pLog;	// every core line: the ring, then CLogger
-	CircleResetGpio		m_ResetGpio;	// GPIO4 released at once; P4 pulses it
-	Pl011Serial		*m_pPl011;	// the body link's device: one of these two
+	KernelLog		m_KernelLog;	// the Mind's platform Log: on to CircleLog
+	CircleResetGpio		m_ResetGpio;	// GPIO4 released at once; the flasher pulses it
+	SerialSlot		m_Serial;	// the Mind's Serial: one of these two once chosen
+	Pl011Serial		*m_pPl011;
 	UsbSerial		*m_pUsbSerial;
-	kilo::Serial		*m_pSerial;
 	const char		*m_pSerialName;
-	kilo::SerialLink	*m_pLink;	// built once the Serial is chosen
+
+	// The whole mind core (mind/mind.h): about 60 KB, on the heap (this
+	// object lives on main()'s stack), built first in Initialize so that
+	// every line, the USB scan's included, is in its ring. m_pLog is that
+	// ring (mind.log(): `kilo log --host`), which passes each line on to
+	// m_KernelLog; every part of the kernel logs through it.
+	kilo::Mind		*m_pMind;
+	kilo::Log		*m_pLog;
 	CLinkWatch		m_Watch;
 
-	CircleListener		*m_pListener;	// the network seams, served by the net task
+	CircleListener		*m_pListener;	// the network seams (32 KB of rings), served by the net task
 	CKiloNet		*m_pNetTask;
-	kilo::HostServer	*m_pHost;
-	kilo::planner::Walker	*m_pWalker;
 	CPlannerBench		*m_pBench;	// 0 once done, or built without it
 
-	// Flashing the body (P4): the laptop's FLASH_* through the host server,
-	// and the image on the SD card at boot.
+	// Flashing the body (P4): the laptop's FLASH_* through the Mind's host
+	// server, and the image on the SD card at boot.
 	kilo::Flasher		*m_pFlasher;	// polled by the host server
 	CBootCard		*m_pBootCard;	// body.bin, body.json on the FAT partition
 	kilo::FlashImage	*m_pHostImage;	// 32 KB: FLASH_BEGIN..COMMIT fills it
@@ -139,13 +139,14 @@ private:
 		BootFlashDone
 	};
 	TBootFlash		m_BootFlash;
-	uint64_t		m_nLinkUpUs;	// link.connect() at boot
+	uint64_t		m_nLinkUpUs;	// mind.start() (link.connect()) at boot
 	boolean			m_bGoAhead;	// the boot flash check is over: the net task may scan USB
 	boolean			m_bWasFlashing;
+	boolean			m_bPoweroffLogged;
 
 	CTiming			m_Period;	// pass to pass: the 1 ms sleep and the other tasks
 	CTiming			m_Work;		// one pass's own work
-	CTiming			m_WalkerPoll;	// Walker::poll()
+	CTiming			m_MindPoll;	// Mind::poll()
 };
 
 #endif

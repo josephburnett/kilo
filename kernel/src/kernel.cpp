@@ -1,18 +1,31 @@
 //
-// kernel.cpp: the Kilo mind kernel (docs/fast-boot.md): the body link (P1),
-// the laptop interface over Ethernet (P2), the walking planner (P3) and
-// flashing the body (P4).
+// kernel.cpp: the Kilo mind kernel (docs/fast-boot.md): the whole mind core
+// as one kilo::Mind (mind/mind.h), as kernel/host/main.cpp runs it on
+// Linux: the body link (P1), the laptop interface over Ethernet (P2), the
+// walker, the trick player, perception, the IR remote and the behaviour
+// runner (P3, the runner off unless built with KILO_BEHAVIOUR=1), and
+// flashing the body from the laptop or the SD card (P4).
 //
-// It exchanges HELLO with the body, keeps the link fed (HEARTBEAT, HELLO_REQ
-// while the body is lost), flashes the body from the SD card at boot when
-// the card holds another build, serves `kilo --host` on TCP port 5300 from a
-// net task in the background (`kilo flash --host` included), polls the
-// walker, logs statistics once a second and shows the link's state on the
-// ACT LED.
+// Initialize: the screen (or nothing), interrupts, timer, then the Mind
+// (so every line is in its ring), the body link's Serial, the flasher,
+// mind.start() (the link connects: HELLO_REQ), the planner bench and last
+// the net task. Then one pass every 1 ms:
 //
-// Logs go into a RAM ring that `kilo log --host` reads, and to the HDMI
-// screen if the firmware gives us a frame buffer, else nowhere (Kilo has no
-// monitor). The LED:
+//   mind.poll()        stamp liveness, serve the laptop (and poll the
+//                      flasher), then unless the bridge or the flasher has
+//                      the UART: the link, the walker, the trick player,
+//                      the remote, the behaviour runner
+//   the end of a flash: log it; --persist: write the image to SD
+//   the boot flash check: once, after the first HELLO (or 3 s)
+//   link.connect() again once a second if the Serial failed
+//   a planner bench step: once, after the first laptop client
+//   Circle's log events into the ring
+//   the stats lines once a second, the ACT LED
+//   CScheduler::usSleep(1000): the net task and Circle's run here
+//
+// Logs go into the Mind's RAM ring, which `kilo log --host` reads, and to
+// the HDMI screen if the firmware gives us a frame buffer, else nowhere
+// (Kilo has no monitor). The LED:
 //
 //   steady on      starting up (the USB scan takes about a second or more)
 //   0.5 Hz blink   no body: no HELLO yet, or no TELEMETRY for 300 ms
@@ -34,14 +47,29 @@
 #define KILO_PLANNER_BENCH 1
 #endif
 
+// The behaviour runner (kilo run --behaviour): off, as the Pi's daemon ran.
+// make -C kernel KILO_BEHAVIOUR=1 turns it on.
+#ifndef KILO_BEHAVIOUR
+#define KILO_BEHAVIOUR 0
+#endif
+
 using namespace kilo;
-using namespace kilo::planner;
+
+// The Pi's daemon ran `kilo run --remote --balance 0.99` (docs/setup.md,
+// ~/.config/kilo/env KILO_RUN_ARGS): the IR remote live, and balance on
+// from the start with this Kp.
+static const bool RemoteOn = true;
+static const double BalanceKp = 0.99;
+
+// STATS_REQ to the body this often, the answer logged ("body STATS: ..."),
+// as kilo-mind-host does.
+static const uint32_t BodyStatsPeriodMs = 1000;
 
 // The main loop's period. The link wants poll() at least every ~10 ms (the
 // heartbeat is due after 100 ms of silence, a command is retried after
-// 50 ms) and the walker wakes on a 20 ms grid; 1 ms keeps the RX ring short
-// and the walker's wake within 1 ms of its deadline, and gives the net task
-// its turn in every sleep.
+// 50 ms), the walker wakes on a 20 ms grid and the behaviour runner on a
+// 100 ms one; 1 ms keeps the RX ring short and the walker's wake within
+// 1 ms of its deadline, and gives the net task its turn in every sleep.
 static const unsigned LoopPeriodUs = 1000;
 
 // After the Serial failed: how often the link tries again.
@@ -52,15 +80,16 @@ static const uint32_t BodyLostUs = KILO_BODY_LOST_MS * 1000u;
 
 // The planner bench starts this long after the first laptop client
 // connects, so that a `kilo log --host` tail sees its lines live: the RAM
-// ring holds about 20 s of log, and nobody reads the screen.
+// ring holds about 15 s of log (four stats lines a second), and nobody
+// reads the screen.
 static const uint64_t BenchDelayUs = 1000000;
 
 // Circle's own log events copied into the ring per pass, at most.
 static const unsigned CircleEventsPerPass = 4;
 
-// The boot-time flash check waits this long after link.connect() for the
-// body's first HELLO; with none, the SD card's image counts as another build
-// (an empty or broken firmware sends no HELLO).
+// The boot-time flash check waits this long after mind.start() for the
+// body's first HELLO; with none, the SD card's image counts as another
+// build (an empty or broken firmware sends no HELLO).
 static const uint64_t BootHelloWaitUs = 3000000;
 
 void CLinkWatch::on_hello (const kilo_hello_t &rHello, bool bSolicited)
@@ -84,12 +113,6 @@ void CLinkWatch::on_telemetry (const kilo_telemetry_t &rTelemetry)
 	{
 		m_nOverruns++;
 	}
-	m_pWalker->on_telemetry (rTelemetry);
-}
-
-void CLinkWatch::on_event (const kilo_event_t &rEvent)
-{
-	m_pWalker->on_event (rEvent);
 }
 
 CKernel::CKernel (void)
@@ -99,17 +122,14 @@ CKernel::CKernel (void)
 	m_USBHCI (&m_Interrupt, &m_Timer),	// no plug-and-play: one scan
 	m_Net (0, 0, 0, 0, "kilo"),		// DHCP, hostname kilo (net.cpp: the fallback)
 	m_CircleLog (&m_Logger, LogLevel::Info),
-	m_pRing (0),
-	m_pLog (0),
+	m_KernelLog (&m_CircleLog),
 	m_pPl011 (0),
 	m_pUsbSerial (0),
-	m_pSerial (0),
 	m_pSerialName ("none"),
-	m_pLink (0),
+	m_pMind (0),
+	m_pLog (0),
 	m_pListener (0),
 	m_pNetTask (0),
-	m_pHost (0),
-	m_pWalker (0),
 	m_pBench (0),
 	m_pFlasher (0),
 	m_pBootCard (0),
@@ -118,7 +138,8 @@ CKernel::CKernel (void)
 	m_BootFlash (BootFlashWait),
 	m_nLinkUpUs (0),
 	m_bGoAhead (FALSE),
-	m_bWasFlashing (FALSE)
+	m_bWasFlashing (FALSE),
+	m_bPoweroffLogged (FALSE)
 {
 	m_ActLED.On ();		// first sign of life, before anything can fail
 	m_Watch.m_pClock = &m_Clock;
@@ -140,50 +161,58 @@ boolean CKernel::Initialize (void)
 		return FALSE;
 	}
 
-	// The ring has no sink of its own: KernelLog sends each core line on to
-	// CLogger, and DrainCircleLog copies Circle's own lines into the ring only.
-	m_pRing = new LogRing (m_Clock);
-	m_pLog = new KernelLog (m_pRing, &m_CircleLog);
+	// The mind core, as `kilo run --remote --balance 0.99` ran it on the
+	// Pi. The laptop interface's network seams first: the Mind's host
+	// server serves them, the net task (last, below) fills them. Nothing
+	// on the network is up yet: the net task brings it up once the main
+	// loop runs (docs/fast-boot.md §3 rule 1).
+	m_pListener = new CircleListener;
+	MindConfig Config;
+	Config.mind_build = (uint32_t) KILO_BUILD;
+	Config.remote = RemoteOn;
+	Config.behaviour = KILO_BEHAVIOUR != 0;
+	Config.balance_kp = BalanceKp;
+	// The behaviour RNG's seed: 32 bits, so that the logged seed (the
+	// runner logs it as %u) replays the same choices.
+	Config.seed = m_Random.GetNumber ();
+	Config.stats_period_ms = BodyStatsPeriodMs;
+	m_pMind = new Mind (m_Serial, m_Clock, m_KernelLog, m_pListener, Config);
+	m_pLog = &m_pMind->log ();
 	m_Watch.m_pLog = m_pLog;
+	m_pMind->set_tap (&m_Watch);
 
-	logf (*m_pLog, LogLevel::Info, "Kilo mind, build %08x", (unsigned) KILO_BUILD);
+	logf (*m_pLog, LogLevel::Info, "Kilo mind, build %08x%s", (unsigned) KILO_BUILD,
+	      KILO_BEHAVIOUR ? " (behaviour runner on)" : "");
 
-	m_pSerial = ChooseSerial ();
-	if (m_pSerial == 0)
+	kilo::Serial *pSerial = ChooseSerial ();
+	if (pSerial == 0)
 	{
 		return FALSE;
 	}
-
-	m_pLink = new SerialLink (*m_pSerial, m_Clock, *m_pLog);
-	m_pWalker = new Walker (*m_pLink, m_Clock, *m_pLog);
-	m_Watch.m_pWalker = m_pWalker;
-	m_pLink->set_listener (&m_Watch);
-	// The clock reads nearly the same at every boot, so the core's clock-based
-	// seed would repeat (seq, type) pairs inside the body's 500 ms de-dup
-	// window after a quick reboot of the mind. The hardware RNG does not.
-	m_pLink->seed_seq ((uint8_t) m_Random.GetNumber ());
-	m_pLink->connect ();
-	m_nLinkUpUs = m_Clock.now_us ();
-
-	// The laptop interface. Nothing on the network is up yet: the net task
-	// brings it up once the main loop runs (docs/fast-boot.md §3 rule 1).
-	m_pListener = new CircleListener;
-	m_pHost = new HostServer (*m_pListener, *m_pLink, *m_pSerial, m_Clock, *m_pLog, *m_pRing,
-				  (uint32_t) KILO_BUILD);
+	m_Serial.Set (pSerial);
 
 	// Flashing the body: the flasher takes the link's Serial (115200 for
-	// optiboot, then back) and GPIO4 (the body's RESET). The host server
-	// fills the laptop's image from FLASH_*, starts the flasher and polls
-	// it, for the boot-time flash from SD too (BootFlash). Two images of
+	// optiboot, then back) and GPIO4 (the body's RESET). The Mind's host
+	// server fills the laptop's image from FLASH_*, starts the flasher and
+	// polls it, for the boot-time flash from SD too (BootFlash), and while
+	// it has the UART the Mind pauses everything on the link. Two images of
 	// 32 KB on the heap (static, their initialisers would put 64 KB into the
 	// kernel image): a laptop sending one while the boot check reads the
 	// card cannot have it overwritten. The card is touched only once the
 	// link has its HELLO (BootFlash): reading it spins.
 	m_pHostImage = new FlashImage;
 	m_pCardImage = new FlashImage;
-	m_pFlasher = new Flasher (*m_pSerial, m_Clock, m_ResetGpio, *m_pLink, *m_pLog);
-	m_pHost->attach_flasher (*m_pFlasher, *m_pHostImage);
+	m_pFlasher = new Flasher (m_Serial, m_Clock, m_ResetGpio, m_pMind->link (), *m_pLog);
+	m_pMind->host ().attach_flasher (*m_pFlasher, *m_pHostImage);
 	m_pBootCard = new CBootCard (&m_Interrupt, &m_Timer, m_pLog);
+
+	// The clock reads nearly the same at every boot, so the core's
+	// clock-based seed would repeat (seq, type) pairs inside the body's
+	// 500 ms de-dup window after a quick reboot of the mind. The hardware
+	// RNG does not.
+	m_pMind->link ().seed_seq ((uint8_t) m_Random.GetNumber ());
+	m_pMind->start ();		// balance on, then link.connect(): HELLO_REQ
+	m_nLinkUpUs = m_Clock.now_us ();
 
 #if KILO_PLANNER_BENCH
 	m_pBench = new CPlannerBench (m_pLog);
@@ -252,12 +281,12 @@ kilo::Serial *CKernel::ChooseSerial (void)
 
 TShutdownMode CKernel::Run (void)
 {
+	SerialLink &Link = m_pMind->link ();
 	uint64_t nStart = m_Clock.now_us ();
 	uint64_t nNextStats = nStart + 1000000;
 	uint64_t nNextReconnect = 0;
 	uint64_t nBenchAt = 0;			// 0: no laptop client yet
 	unsigned nLastPass = CTimer::GetClockTicks ();
-	boolean bWasPaused = FALSE;
 
 	for (;;)
 	{
@@ -266,41 +295,19 @@ TShutdownMode CKernel::Run (void)
 		m_Period.Add (nPass - nLastPass);
 		nLastPass = nPass;
 
-		// This loop is the mind: it is alive while it runs.
-		m_pLink->mark_alive ();
-		m_pHost->poll ();			// accept, answer, stream, flash; never blocks
-		// Paused: the raw bridge is open, or the flasher has the UART (from
-		// FLASH_COMMIT or the boot check until optiboot hands over to the
-		// new firmware). Nothing may go out on the link, FEET included.
-		boolean bPaused = m_pHost->link_paused ();
-		if (!bPaused)
-		{
-			if (bWasPaused && m_pWalker->active ())
-			{
-				// A walk the bridge or a flash cut off: the body stopped
-				// streaming (FEET underrun) or was reset while the link was
-				// paused. End it now that the link may send again (abort()
-				// can send SET_STREAM, which must not go out while paused,
-				// and HostServer starts a flash inside poll(), so there is
-				// no pass to abort in before it). Nothing starts a walk on
-				// the kernel yet (P3's Mind will).
-				m_pWalker->abort ();
-			}
-
-			m_pLink->poll ();
-
-			unsigned t0 = CTimer::GetClockTicks ();
-			m_pWalker->poll ();
-			m_WalkerPoll.Add (CTimer::GetClockTicks () - t0);
-		}
-		bWasPaused = bPaused;
+		// The mind: this loop is alive while it runs, and Mind::poll()
+		// stamps the link's liveness for the body's watchdog. While the raw
+		// bridge is open or the flasher has the UART, it serves the laptop
+		// only; a walk such a pause cut off is aborted when it ends.
+		m_pMind->poll ();
+		m_MindPoll.Add (CTimer::GetClockTicks () - nPass);
 
 		uint64_t nNow = m_Clock.now_us ();
 
 		WatchFlash ();			// first: it names a boot flash that just ended
 		BootFlash (nNow);
 
-		if (!m_pLink->connected ())
+		if (!Link.connected ())
 		{
 			// The Serial failed (a USB adapter gone). The PL011 does not
 			// fail; a USB device that went away does not come back without
@@ -308,27 +315,38 @@ TShutdownMode CKernel::Run (void)
 			if (nNow >= nNextReconnect)
 			{
 				nNextReconnect = nNow + ReconnectUs;
-				m_pLink->connect ();
+				Link.connect ();
 			}
 		}
 
-		// The planner bench: one call per pass, never during a walk or bridge.
-		if (nBenchAt == 0 && m_pHost->clients () > 0)
+		// The planner bench: one call per pass, never while the body moves
+		// (a walk, a trick) or the UART is taken (bridge, flash).
+		if (nBenchAt == 0 && m_pMind->host ().clients () > 0)
 		{
 			nBenchAt = nNow + BenchDelayUs;
 		}
 		if (   m_pBench != 0
 		    && nBenchAt != 0
 		    && nNow >= nBenchAt
-		    && !bPaused
+		    && !m_pMind->host ().link_paused ()
 		    && !m_pFlasher->busy ()
-		    && !m_pWalker->active ())
+		    && !m_pMind->walker ().active ()
+		    && !m_pMind->player ().busy ())
 		{
 			if (!m_pBench->Step ())
 			{
 				delete m_pBench;
 				m_pBench = 0;
 			}
+		}
+
+		// The behaviour runner's wind-down ends in a poweroff the daemon
+		// would run; the kernel cannot switch the Pi off.
+		if (m_pMind->poweroff_requested () && !m_bPoweroffLogged)
+		{
+			m_bPoweroffLogged = TRUE;
+			logf (*m_pLog, LogLevel::Warn, "behaviour runner asked for poweroff: the kernel cannot switch "
+			      "the Pi off; the runner has stopped, the link stays up");
 		}
 
 		DrainCircleLog ();
@@ -375,7 +393,7 @@ void CKernel::BootFlash (uint64_t nNowUs)
 		{
 			return;
 		}
-		if (m_pHost->link_paused () || m_pFlasher->busy ())
+		if (m_pMind->host ().link_paused () || m_pFlasher->busy ())
 		{
 			return;			// a bridge or a laptop's flash first
 		}
@@ -395,7 +413,7 @@ void CKernel::BootFlash (uint64_t nNowUs)
 	}
 
 	m_BootFlash = BootFlashDone;
-	const BodyState &b = m_pLink->state ();
+	const BodyState &b = m_pMind->link ().state ();
 	const kilo_hello_t *pHello = b.has_hello ? &b.hello : 0;
 	if (pHello == 0)
 	{
@@ -430,8 +448,11 @@ void CKernel::BootFlash (uint64_t nNowUs)
 		      (unsigned) nCard);
 	}
 
-	// Nothing walks at boot; the walker ends before the flasher takes the UART.
-	m_pWalker->abort ();
+	// A walk the remote started in the first seconds ends before the
+	// flasher takes the UART (abort() may send SET_STREAM, which must go
+	// out first). A trick is not stopped: the flash resets the body, and
+	// the player gives up on it by its own timeout.
+	m_pMind->walker ().abort ();
 	if (!m_pFlasher->start (*m_pCardImage, false))	// the host server polls it
 	{
 		logf (*m_pLog, LogLevel::Warn, "boot flash check: the flasher is busy: not flashing");
@@ -478,9 +499,11 @@ void CKernel::WatchFlash (void)
 }
 
 // Circle's own log lines (USB, Ethernet, DHCP, TCP) into the RAM ring, so
-// `kilo log --host` shows them. Our own lines go to CLogger with
-// WriteNoAlloc, which makes no event, so nothing is copied twice. CLogger
-// keeps the last 50 events; Debug and Trace are left out.
+// `kilo log --host` shows them. The ring passes every line on to
+// KernelLog, which is muted meanwhile, so CLogger does not print them a
+// second time. Our own lines go to CLogger with WriteNoAlloc, which makes
+// no event, so nothing is copied twice. CLogger keeps the last 50 events;
+// Debug and Trace are left out.
 void CKernel::DrainCircleLog (void)
 {
 	for (unsigned n = 0; n < CircleEventsPerPass; n++)
@@ -504,7 +527,9 @@ void CKernel::DrainCircleLog (void)
 				 : Severity == LogWarning ? LogLevel::Warn : LogLevel::Info;
 		char Line[kLogLineMax];
 		format (Line, sizeof Line, "%s: %s", Source, Message);
-		m_pRing->write (Level, Line);
+		m_KernelLog.Mute (TRUE);		// CLogger printed it already: the ring only
+		m_pLog->write (Level, Line);
+		m_KernelLog.Mute (FALSE);
 	}
 }
 
@@ -513,8 +538,8 @@ static inline unsigned U (uint32_t n) { return (unsigned) n; }
 
 void CKernel::LogStats (void)
 {
-	const LinkStats &s = m_pLink->stats ();
-	const BodyState &b = m_pLink->state ();
+	const LinkStats &s = m_pMind->link ().stats ();
+	const BodyState &b = m_pMind->link ().state ();
 	logf (*m_pLog, LogLevel::Info,
 	      "link %s: telemetry %u/s (total %u) rx %u frames, tx %u (%u heartbeats) "
 	      "decode errors %u (crc %u cobs %u overflow %u) tx deferred %u short %u",
@@ -540,24 +565,26 @@ void CKernel::LogStats (void)
 
 	// The loop's timing, for the first boot to measure with no scope.
 	// period: pass to pass (1000 us asked); work: a pass without the sleep;
-	// walker.poll: the planner's share (a walk's wake runs it every 20 ms).
+	// mind.poll: the mind core's share (the link, the laptop, the walker,
+	// whose wake every 20 ms of a walk runs the planner, the trick player,
+	// the remote, the behaviour runner's 10 Hz tick).
 	logf (*m_pLog, LogLevel::Info,
-	      "loop %u/s: period max %u mean %u us, work max %u mean %u us, walker.poll max %u mean %u us%s; "
+	      "loop %u/s: period max %u mean %u us, work max %u mean %u us, mind.poll max %u mean %u us%s; "
 	      "%u clients",
 	      m_Period.m_nCount, m_Period.m_nMax, m_Period.Mean (), m_Work.m_nMax, m_Work.Mean (),
-	      m_WalkerPoll.m_nMax, m_WalkerPoll.Mean (), m_pBench != 0 ? " (bench)" : "",
-	      U (m_pHost->clients ()));
+	      m_MindPoll.m_nMax, m_MindPoll.Mean (), m_pBench != 0 ? " (bench)" : "",
+	      U (m_pMind->host ().clients ()));
 
 	m_Watch.m_nTelemetry = 0;
 	m_Watch.m_nOverruns = 0;
 	m_Period.Reset ();
 	m_Work.Reset ();
-	m_WalkerPoll.Reset ();
+	m_MindPoll.Reset ();
 }
 
 void CKernel::UpdateLED (uint64_t nNowUs)
 {
-	const BodyState &b = m_pLink->state ();
+	const BodyState &b = m_pMind->link ().state ();
 
 	// Flashing: two 100 ms flashes a second, a pattern no link state uses.
 	if (m_pFlasher->busy ())

@@ -206,7 +206,7 @@ void CircleLog::write (kilo::LogLevel Level, const char *pLine)
 		return;
 	}
 
-	// KernelLog has already put the line in the RAM ring (`kilo log --host`).
+	// The Mind's ring has already taken the line (`kilo log --host`).
 
 	static const TLogSeverity Severity[] = {LogDebug, LogNotice, LogWarning, LogError};
 

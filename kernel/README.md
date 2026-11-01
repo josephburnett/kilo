@@ -5,9 +5,10 @@ The mind as a bare-metal kernel for the Raspberry Pi 2 B, built on
 cross-compiled on the laptop; nothing is built on the Pi. Phase P0 gave the
 toolchain, Circle, a network boot loader and a hello-world kernel; phase P1
 runs the mind core's body link on Circle (below, "The mind kernel"); P2
-serves `kilo --host` over Ethernet from it ("The laptop interface"), the
-P3 walker runs in its loop, and P4 flashes the body from the laptop or the
-SD card ("Flashing the body"). P5's production card is
+serves `kilo --host` over Ethernet from it ("The laptop interface"), P3's
+whole mind core runs in its loop as one `Mind` (the walker, tricks,
+perception, the IR remote, the behaviour runner: "The Mind's settings"), and
+P4 flashes the body from the laptop or the SD card ("Flashing the body"). P5's production card is
 `make-sd.sh --kernel` ("Two SD cards"). Not yet run on a Pi:
 docs/fast-boot-first-boot.md is the procedure.
 
@@ -53,11 +54,14 @@ images link (`lib`, `usb`, `input`, `fs`, `sched`, `net`, and the addons
 
 | Output | What | Size |
 |---|---|---|
-| `build/kernel7.img` | the mind kernel | 445,516 bytes |
+| `build/kernel7.img` | the mind kernel | 511,140 bytes (`KILO_BODY_SERIAL=pl011`: 511,396) |
 | `build/netboot/kernel7.img` | the network loader | 305,420 bytes |
 
 Of the mind kernel, the SD card (FatFs about 23 KB, the SD driver about
-18 KB) and mDNS (about 9 KB) came with P4.
+18 KB) and mDNS (about 9 KB) came with P4. The linker keeps every object of
+`MIND_SRCS` whether or not it is called (no `--gc-sections`), so P3's
+sources were in the image before the kernel used them; composing the
+`Mind` changed its size by less than 1 KB.
 
 The `.elf`, `.map` and `.lst` beside each image are for debugging. A second
 `make` with nothing changed does nothing. From clean (Circle included) the
@@ -206,24 +210,47 @@ change of build, not of a flag.
 
 ## The mind kernel
 
-`src/kernel.cpp`: initialise (screen or null log, interrupts, timer, the
-body link's serial device, the link, the walker, the host server, the
-flasher, then the net task), then one loop, every 1 ms:
+`src/kernel.cpp` runs the whole core as one `kilo::Mind` (`mind/mind.h`,
+`mind/README.md` "The Mind"), as `kernel/host/main.cpp` does on Linux.
+`Initialize`: the screen or a null log, interrupts, timer, then the
+`Mind` (first, so every later line is in its ring), the body link's
+serial device (below), the flasher (attached through `mind.host()`),
+`mind.start()` (balance on, then `link.connect()`: HELLO_REQ), the
+planner bench, and last the net task. Then one loop, every 1 ms:
 
 ```
-link.mark_alive()
-host.poll()                       accept, answer, stream, flush; polls the flasher (never blocks)
-if !host.link_paused():           the bridge is closed and the flasher does not have the UART
+mind.poll()                       timed: the loop stats line
+  link.mark_alive()               unless the behaviour runner stalled (mind/README.md "Liveness")
+  host.poll()                     accept, answer, stream, flush; polls the flasher (never blocks)
+  if host.link_paused(): done     the raw bridge is open or the flasher has the UART
   walker.abort() if a pause just ended and a walk was on
   link.poll()
-  walker.poll()                   timed: the loop stats line
+  the command slot's answer       to the trick player; the body's STATS once a second
+  walker.poll(), player.poll()
+  remote.poll()                   IR keys (on)
+  runner.poll()                   the behaviour runner at 10 Hz (KILO_BEHAVIOUR=1 only)
 end of a flash: log it; --persist: write the image to SD
 boot flash check                  once, after the first HELLO (or 3 s): SD image, flash if another build
+link.connect() again              once a second, only if the Serial failed
 planner bench step                once, after the first laptop client (below)
 Circle's log events -> the ring   (USB, Ethernet, DHCP lines for `kilo log --host`)
 stats once a second, the ACT LED
 CScheduler::usSleep(1000)         the net task runs here
 ```
+
+Where the memory is: the `Mind` (68 KB: the log ring 11 KB, the host
+server's per-client buffers 18 KB, perception's windows 17 KB, the
+behaviour runner 6 KB), the network slots (`CircleListener`, 32 KB of
+rings) and the two flash images (32 KB each) are on Circle's heap, built in
+`Initialize`. `CKernel` itself (4 KB) lives on `main()`'s stack, so they
+are not its members; as statics, their initialisers would go into the
+image. With the net task's 64 KB stack that is about 0.25 MB of a heap of
+about 1000 MB (1 GB less `gpu_mem=16` and Circle's low memory; est.).
+
+The `Mind` is built before the serial device is chosen, so it takes a
+`SerialSlot` (`src/seams.h`) that forwards to `Pl011Serial` or
+`UsbSerial` once `ChooseSerial` has picked one; nothing calls it before
+`mind.start()`.
 
 This is the composition `mind/README.md` gives ("Laptop interface", "The
 planner"), as `kernel/host/main.cpp` and `walk_demo.cpp` do on the laptop.
@@ -234,15 +261,16 @@ implement its seams:
 |---|---|
 | `Serial` | `Pl011Serial` or `UsbSerial` (below) |
 | `Clock` | `CTimer::GetClockTicks64()`: 1 MHz, 64 bits, no wrap |
-| `Log` | `KernelLog`: every line into the RAM ring (`LogRing`, 64 lines, `kilo log --host`, Debug included), then `CircleLog`: `CLogger::WriteNoAlloc` (no heap), Info and above; Debug -> `LogDebug`, Info -> `LogNotice`, Warn -> `LogWarning`, Error -> `LogError` |
+| `Log` | every part logs into the `Mind`'s RAM ring (`mind.log()`, a `LogRing` of 64 lines, `kilo log --host`, Debug included), which passes each line to the platform log, `KernelLog`, and that to `CircleLog`: `CLogger::WriteNoAlloc` (no heap), Info and above; Debug -> `LogDebug`, Info -> `LogNotice`, Warn -> `LogWarning`, Error -> `LogError` |
 | `Gpio` | GPIO4 (header pin 7, the NyBoard's reset line) as an emulated open drain: released = input, no pull; asserted = latch low, then output. Never driven high. Released at boot; only the flasher pulses it. |
 | `Listener`, `Conn` | `CircleListener`, `CircleConn`: four slots of RX and TX rings, served by the net task (below) |
 
 Circle's own log lines (`usbdev0-1: ...`, `dhcp: IP address is ...`) are
 copied into the ring too, Notice and above, four per pass: CLogger keeps
-its last 50 as events, which `CLogger::ReadEvent` hands over. Our lines go
-to CLogger with `WriteNoAlloc`, which makes no event, so none is copied
-twice.
+its last 50 as events, which `CLogger::ReadEvent` hands over. `KernelLog`
+is muted while they are written, so the ring does not hand them back to
+CLogger to print again. Our lines go to CLogger with `WriteNoAlloc`, which
+makes no event, so none is copied twice.
 
 The build id (`KILO_BUILD`, below) is also `STATUS.mind_build`, as
 `KILO_MIND_BUILD` is on the laptop: the same 8 hex digits of the commit.
@@ -265,12 +293,14 @@ about 10 ms); the stats line below shows the longest gap.
 Once a second, after the link lines:
 
 ```
-loop 998/s: period max 1043 mean 1001 us, work max 61 mean 9 us, walker.poll max 2 mean 0 us; 1 clients
+loop 998/s: period max 1043 mean 1001 us, work max 61 mean 9 us, mind.poll max 120 mean 6 us; 1 clients
 ```
 
 (numbers made up: not run yet). *period* is pass to pass, the 1 ms sleep
 plus whatever the other tasks took; *work* is one pass without the sleep;
-*walker.poll* is the walker's share; `(bench)` marks seconds when the
+*mind.poll* is the mind core's share (the laptop, the link, the walker,
+the trick player, the remote, the behaviour runner); `(bench)` marks
+seconds when the
 planner bench ran. Timed with `CTimer::GetClockTicks()` (1 MHz), so with no
 scope.
 
@@ -279,7 +309,9 @@ Estimate per pass (est., from the host: `make -C kernel/host bench` gives
 Cortex-A7 at 900 MHz is taken as 20 times slower): `link.poll()` a few us
 (a 66-byte frame's COBS and CRC), `host.poll()` tens of us with four
 clients streaming TELEM at 50 Hz, `walker.poll()` near 0 between wakes and
-about 100 us on a 20 ms wake (one or two planned ticks, the attitude fit).
+about 100 us on a 20 ms wake (one or two planned ticks, the attitude fit),
+perception a few us per TELEMETRY; the behaviour runner's tick every
+100 ms (with `KILO_BEHAVIOUR=1`) is not estimated.
 That is under 0.2 ms of a 1 ms pass, so the 1 ms sleep stays: shorter
 gains nothing (the walker's grid is 20 ms, the link's deadlines 10 ms and
 up), longer delays the walker's wake. The planner's real cost on the Pi 2 B
@@ -288,7 +320,7 @@ is still to be measured: the bench and this line do it at the first boot.
 ### Planner bench
 
 Once, from 1 s after the first laptop client connects (so a `kilo log
---host` tail shows its lines live: the 64-line ring holds only about 20 s
+--host` tail shows its lines live: the 64-line ring holds only about 15 s
 of log), one call per loop pass, a `Planner` of its own (not
 the walker's; nothing goes to the body) walks trot, walk and crawl as
 `kernel/host/tests/bench_planner.cpp` does once each (a speed change, a
@@ -299,7 +331,8 @@ logs one line per pattern:
 planner bench trot: start 612 us; next() x1450 mean 31.20 us max 140 us (a tick is 20000 us; Python on the Pi: max 4500 us)
 ```
 
-(numbers made up.) It pauses during a walk or the raw bridge, takes about
+(numbers made up.) It pauses during a walk, a trick, a flash or the raw
+bridge, takes about
 5 s, then frees its planner. `make -C kernel KILO_PLANNER_BENCH=0` leaves
 it out (about 400 bytes). Interrupts (USB, the PL011) land inside the timed calls,
 so *max* includes them, as a real walk's would.
@@ -394,15 +427,16 @@ skipped first).
 
 ### What `--host` does on the kernel today
 
-What `HostServer` serves, the same as `kilo-mind-host` on the laptop:
+Everything `kilo-mind-host` serves on the laptop, from the same `Mind`:
 `kilo status`, `kilo monitor` (TELEM), `kilo log` (the ring, Circle's lines
 included), `kilo posture NAME [--for S]` (REST when the controller lets go
-or goes silent), and the raw bridge (`kilo.link` over TCP; the link and the
-walker pause). Not yet: walking, tricks, params (`PARAM_*` answer
-UNSUPPORTED). `HostServer` has no walk command; the walker runs in the loop
-and gets the link's TELEMETRY and EVENTs, but nothing on the kernel starts a
-walk yet. P3's `Mind` composition will own that. A walk the raw bridge cut
-off is aborted when the bridge closes.
+or goes silent), `kilo flash --host` and the raw bridge (`kilo.link` over
+TCP; everything on the link pauses). Params (`PARAM_*`) answer
+UNSUPPORTED. There is still no walk or trick command over `--host`: walks
+and tricks come from the IR remote (and from the behaviour runner when it
+is built in). A laptop client holding control (`kilo posture`) silences
+the remote and pauses the runner meanwhile. A walk the raw bridge or a
+flash cut off is aborted when the pause ends.
 
 ### Body link: two serial back ends
 
@@ -504,6 +538,25 @@ for a moment while the SD card is read (after the first HELLO) and while a
 once for about a second (est.) early on: the USB scan for Ethernet
 ("Network bring-up").
 
+### The Mind's settings
+
+`MindConfig` as the Pi's daemon ran (`kilo run --remote --balance 0.99`,
+`KILO_RUN_ARGS` in docs/setup.md and `mind/systemd/env.example`). There is
+no settings file on the card, so they are compiled in (`src/kernel.cpp`):
+
+| Setting | Kernel | Why |
+|---|---|---|
+| `mind_build` | `KILO_BUILD` | `STATUS.mind_build`, the commit's 8 hex digits |
+| `remote` | on | `--remote`: the IR remote drives Kilo; logged `IR remote on` |
+| `balance_kp` | 0.99 | `--balance 0.99`: SET_BALANCE on at start, logged `balance on by default (Kp 253/256)` |
+| `behaviour` | off; `make -C kernel KILO_BEHAVIOUR=1` turns it on | the daemon's default. With it on, the remote is ignored while the runner is active, and the kernel logs `Kilo mind, build ... (behaviour runner on)` |
+| `seed` | 32 bits from the hardware RNG | the behaviour runner logs it (`seed N`), so a run can be replayed on the laptop |
+| `stats_period_ms` | 1000 | a STATS_REQ to the body each second, logged `body STATS: ...`, as `kilo-mind-host` does |
+
+The runner's wind-down ends in a poweroff, which the daemon ran through
+systemd. The kernel cannot switch the Pi off: it logs `behaviour runner
+asked for poweroff ...` once and keeps the link up (the runner has stopped).
+
 ### Boot probe
 
 GPIO21, header pin 40 (pin 39 is ground), outside the NyBoard socket's pins
@@ -522,10 +575,12 @@ through optiboot on the body link's UART, resetting it with GPIO4.
 **From the laptop**, `kilo flash --host IP [--persist]`: `HostServer`
 fills a 32 KB image from `FLASH_BEGIN`/`FLASH_DATA`, starts the flasher at
 `FLASH_COMMIT` and polls it. While the flasher has the UART,
-`host.link_paused()` is true and the main loop polls neither the link nor
-the walker, as for the raw bridge; a walk that was on is aborted when the
-pause ends (HostServer starts the flash inside `poll()`, so there is no
-pass in which to abort it first; nothing starts a walk on the kernel yet).
+`host.link_paused()` is true and `Mind::poll()` polls nothing on the
+link (the link, walker, trick player, remote, runner), as for the raw
+bridge; a walk that was on (from the remote) is aborted when the pause
+ends (HostServer starts the flash inside `poll()`, so there is no pass in
+which to abort it first). The boot flash from the SD card aborts a walk
+before it starts the flasher.
 The kernel logs the end: `body flashed from the laptop: build ..., HELLO
 build ... reset FLASHED`, or `body flash from the laptop FAILED: ...`.
 
@@ -615,9 +670,13 @@ measurable. `make -C kernel KILO_MDNS=0` leaves it out (about 9 KB).
 
 `MIND_SRCS` are compiled with Circle's flags (`-mcpu=cortex-a7
 -mfpu=neon-vfpv4 -mfloat-abi=hard`; `readelf -A` on the objects: VFPv4,
-VFP-register arguments). The planner is the core's floating point
-(`mind/README.md`, "The planner"; built with `-ffp-contract=off
--fno-math-errno` as on the host). A probe
+VFP-register arguments). The planner, perception and the behaviour layer
+are the core's floating point (`mind/README.md`, "The planner",
+"Perception", "Behaviour"); their objects are built with
+`-ffp-contract=off -fno-math-errno` as on the host (which builds
+everything so): no fused multiply-add, so the planner's prediction equals
+what it computes, and perception and behaviour, in double, round as
+Python does. A probe
 compiled with the same flags turns float arithmetic into VFP instructions
 (`vmul.f32`, `vfma.f32`, `vdiv.f32`) and calls `sqrtf`, which in the
 toolchain's hard-float `libm` (`thumb/v7ve+simd/hard`) is a wrapper around
@@ -649,14 +708,22 @@ card: Circle's SDHOST driver on Kilo's card, how long initialisation,
 mount and the 31 KB read take (the log lines), FatFs writing body.bin and
 body.json and the laptop then reading them; the boot flash check with a
 matching build, another build and no HELLO; `--persist`; the LED's double
-flash; the USB scan waiting for the go-ahead (`pl011` build). mDNS:
+flash; the USB scan waiting for the go-ahead (`pl011` build). The
+`Mind` on the Pi: IR remote keys through the kernel (the body's
+`EVENT IR_KEY` reaching the remote; walks and postures from the keys);
+tricks from the compiled-in library (upload and play on the real body);
+perception's percept lines from the real IMU and ultrasonic; balance on
+at start (Kp 0.99); the body's STATS line each second; `mind.poll`'s
+cost; the behaviour runner with `KILO_BEHAVIOUR=1` (never run on the
+kernel: its 10 Hz tick, the liveness gate). mDNS:
 Circle's responder and publisher on the 2 B, `kilo.local` from Debian, a
 second announcement after an address change, and whether the responder's
 multicast membership (joined from the first address) survives it.
 `kernel/host/test.sh` covers the core, the link (including `tx_free()`
 deferral), `HostServer` over POSIX sockets, the flasher against a fake
-optiboot, and the walker on Linux only; `src/*` is compiled but has never
-run.
+optiboot, the walker, tricks, perception, the remote, the behaviour
+runner and the `Mind` (`kilo-mind-host`) on Linux only; `src/*` is
+compiled but has never run.
 
 ## Open questions
 

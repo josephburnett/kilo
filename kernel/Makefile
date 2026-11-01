@@ -43,22 +43,26 @@ MIND_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(patsubst %.cpp,$(BUILD)/%.o,$(MIND_SR
 OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/src/bootprobe.o \
 	$(BUILD)/src/net.o $(BUILD)/src/plannerbench.o $(BUILD)/src/bootcard.o $(MIND_OBJS)
 
-# Build options (README "Body link", "Boot probe", "Planner bench", "mDNS"):
+# Build options (README "Body link", "Boot probe", "Planner bench", "mDNS",
+# "The Mind's settings"):
 #   KILO_BODY_SERIAL=auto   a USB serial adapter if one enumerates, else the PL011 (default)
 #   KILO_BODY_SERIAL=pl011  the PL011 only, without the USB scan before the link
 #   KILO_BOOT_PROBE=1|0     GPIO21 (header pin 40) marks the boot for a scope (default 1)
 #   KILO_PLANNER_BENCH=1|0  time the walking planner once at boot, no body involved (default 1)
 #   KILO_MDNS=1|0           answer for kilo.local and announce _kilo._tcp (default 1)
+#   KILO_BEHAVIOUR=0|1      run the behaviour runner, as kilo run --behaviour (default 0)
 KILO_BODY_SERIAL ?= auto
 KILO_BOOT_PROBE ?= 1
 KILO_PLANNER_BENCH ?= 1
 KILO_MDNS ?= 1
+KILO_BEHAVIOUR ?= 0
 ifeq ($(KILO_BODY_SERIAL),pl011)
 KILO_DEFS := -DKILO_BODY_SERIAL_PL011
 else ifneq ($(KILO_BODY_SERIAL),auto)
 $(error KILO_BODY_SERIAL must be auto or pl011)
 endif
-KILO_DEFS += -DKILO_BOOT_PROBE=$(KILO_BOOT_PROBE) -DKILO_PLANNER_BENCH=$(KILO_PLANNER_BENCH) -DKILO_MDNS=$(KILO_MDNS)
+KILO_DEFS += -DKILO_BOOT_PROBE=$(KILO_BOOT_PROBE) -DKILO_PLANNER_BENCH=$(KILO_PLANNER_BENCH) -DKILO_MDNS=$(KILO_MDNS) \
+	-DKILO_BEHAVIOUR=$(KILO_BEHAVIOUR)
 LIBS := $(CIRCLE_LIBS)
 
 NETBOOT_SRC  := $(CIRCLEHOME)/sample/38-bootloader
@@ -77,10 +81,15 @@ include $(CIRCLEHOME)/Rules.mk
 
 INCLUDE += -I mind
 
-# The planner as on the host (kernel/host/Makefile FPFLAGS): no fused
-# multiply-add (its slot-end prediction must equal what it then computes),
-# sqrtf as an instruction.
-$(BUILD)/mind/planner/%.o: CPPFLAGS += -ffp-contract=off -fno-math-errno
+# The planner, perception and behaviour as on the host (kernel/host/Makefile
+# FPFLAGS): no fused multiply-add (the planner's slot-end prediction must
+# equal what it then computes; perception and behaviour compute in double
+# as Python does, and their golden tests compare against Python's rounding),
+# sqrt as an instruction.
+FPFLAGS := -ffp-contract=off -fno-math-errno
+$(BUILD)/mind/planner/%.o: CPPFLAGS += $(FPFLAGS)
+$(BUILD)/mind/perception/%.o: CPPFLAGS += $(FPFLAGS)
+$(BUILD)/mind/behaviour/%.o: CPPFLAGS += $(FPFLAGS)
 
 # Build id: the first 8 hex digits of the commit, as for the body
 # (-DKILO_BUILD=0x<hash>, mind/kilo/tools/flash.py); the kernel logs it and

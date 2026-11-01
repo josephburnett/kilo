@@ -11,7 +11,6 @@
 #define KILO_SRC_SEAMS_H
 
 #include "platform.h"		// the core's seams (mind/platform.h, -I mind)
-#include "util/logring.h"
 #include <circle/gpiopin.h>
 #include <circle/interrupt.h>
 #include <circle/logger.h>
@@ -103,23 +102,59 @@ private:
 	kilo::LogLevel m_Min;
 };
 
-// The kernel's log: every line into the RAM ring (`kilo log --host`, P2),
-// then to CircleLog. The ring has no sink of its own, so Circle's own log
-// events can be copied into it alone (CKernel::DrainCircleLog) without
-// printing them twice.
+// The kernel's platform Log, behind the Mind's RAM ring (mind.log(): the
+// ring takes every core line first, for `kilo log --host`, then hands it
+// here). It passes lines on to CircleLog, except while muted:
+// CKernel::DrainCircleLog mutes it to copy Circle's own log events into the
+// ring alone, since CLogger already printed them.
 class KernelLog final : public kilo::Log
 {
 public:
-	KernelLog (kilo::LogRing *pRing, kilo::Log *pNext) : m_pRing (pRing), m_pNext (pNext) {}
+	KernelLog (kilo::Log *pNext) : m_pNext (pNext), m_bMuted (FALSE) {}
 	void write (kilo::LogLevel Level, const char *pLine) override
 	{
-		m_pRing->write (Level, pLine);
-		m_pNext->write (Level, pLine);
+		if (!m_bMuted)
+		{
+			m_pNext->write (Level, pLine);
+		}
+	}
+	void Mute (boolean bMuted)	{ m_bMuted = bMuted; }
+
+private:
+	kilo::Log *m_pNext;
+	boolean m_bMuted;
+};
+
+// The body link's Serial for the Mind, which is built before the device is
+// chosen (so the lines of the USB scan and the choice are in its ring):
+// every call goes to the device set with Set(). Nothing calls it before
+// then (the link opens in Mind::start()); if something did, it would read
+// nothing and fail its writes.
+class SerialSlot final : public kilo::Serial
+{
+public:
+	SerialSlot (void) : m_pSerial (0) {}
+	void Set (kilo::Serial *pSerial)	{ m_pSerial = pSerial; }
+
+	int32_t read (uint8_t *pBuffer, uint32_t nCount) override
+	{
+		return m_pSerial != 0 ? m_pSerial->read (pBuffer, nCount) : 0;
+	}
+	int32_t write (const uint8_t *pBuffer, uint32_t nCount) override
+	{
+		return m_pSerial != 0 ? m_pSerial->write (pBuffer, nCount) : -1;
+	}
+	uint32_t tx_free (void) override
+	{
+		return m_pSerial != 0 ? m_pSerial->tx_free () : 0;
+	}
+	bool set_baud (uint32_t nBaud) override
+	{
+		return m_pSerial != 0 && m_pSerial->set_baud (nBaud);
 	}
 
 private:
-	kilo::LogRing *m_pRing;
-	kilo::Log *m_pNext;
+	kilo::Serial *m_pSerial;
 };
 
 // GPIO4, the body's RESET, as an emulated open drain (mind/kilo/tools/gpio.py):
