@@ -3,11 +3,13 @@
 
 Neither consumer can reach protocol/ at build or run time on its own:
 arduino-cli copies the sketch to a build directory before compiling (so a
-relative #include of ../../protocol breaks), and the mind is installed as a
-Python package. So both vendor exact copies, which this script keeps in step:
+relative #include of ../../protocol breaks), the mind is installed as a
+Python package, and the Circle kernel's tree (kernel/mind/) is built with
+include paths relative to kernel/. So all of them vendor exact copies, which
+this script keeps in step:
 
-  protocol/gen/kilo_protocol.h          -> body/src/proto/
-  protocol/c/{cobs,crc16,kilo_frame}.*  -> body/src/proto/
+  protocol/gen/kilo_protocol.h          -> body/src/proto/, kernel/mind/proto/
+  protocol/c/{cobs,crc16,kilo_frame}.*  -> body/src/proto/, kernel/mind/proto/
   protocol/gen/kilo_protocol.py         -> mind/kilo/protocol/
   protocol/py/kilo_link_codec.py        -> mind/kilo/protocol/
 
@@ -26,10 +28,13 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 BODY = REPO / "body" / "src" / "proto"
 MIND = REPO / "mind" / "kilo" / "protocol"
+KERNEL = REPO / "kernel" / "mind" / "proto"
+C_SOURCES = [HERE / "gen" / "kilo_protocol.h",
+             *(HERE / "c" / f"{n}.{ext}" for n in ("cobs", "crc16", "kilo_frame") for ext in ("c", "h"))]
 
 COPIES = [
-    (HERE / "gen" / "kilo_protocol.h", BODY),
-    *((HERE / "c" / f"{n}.{ext}", BODY) for n in ("cobs", "crc16", "kilo_frame") for ext in ("c", "h")),
+    *((src, BODY) for src in C_SOURCES),
+    *((src, KERNEL) for src in C_SOURCES),
     (HERE / "gen" / "kilo_protocol.py", MIND),
     (HERE / "py" / "kilo_link_codec.py", MIND),
 ]
