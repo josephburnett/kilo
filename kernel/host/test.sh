@@ -9,6 +9,10 @@
 #      against a silent pty and a protocol-1 fake body; walk-demo trotting the virtual body;
 #   5. body flashing (P4): kilo flash --host through kilo-mind-host to a fake optiboot
 #      (tests/fake_optiboot.py), a refused CRC, a sync timeout, and kilo flash --sd.
+
+#   5. P3: the generated trick and personality tables and the perception and behaviour golden
+#      vectors up to date with the Python mind (their unit tests run in 1.); IR keys, the
+#      behaviour runner and perception against the virtual body (vbody.core --control).
 #
 #   kernel/host/test.sh
 #   PYTHON=/path/to/python   interpreter with the mind's kilo package (default ~/OpenCat/.venv/bin/python)

@@ -738,6 +738,11 @@ a stand-in for the real firmware core, which `kilo/vbody/core.py` runs as a
 virtual body (`body/test/core_harness.cpp` on host fakes; `python -m
 kilo.vbody.core` serves it on a pty, `tests/test_corebody.py` drives it in
 lockstep); the differences found between the two are listed in that test.
+`python -m kilo.vbody.core --control FIFO` also reads test commands from a
+FIFO, one per line: `ir CODE [repeat]` (EVENT IR_KEY, made in Python: the
+harness has no IR decoder), `att P R [RP RR RY]`, `batt MV|none`, `imu
+fresh|none|err` (`kernel/host/test.sh` drives the C++ mind's remote and
+perception with it).
 
 ## Tricks
 

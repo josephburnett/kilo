@@ -11,6 +11,16 @@ functions are `memcpy` and `memset`, through the compiler's builtins
 `make -C kernel/host freestanding` proves it by linking the core with
 `-nostdlib`.
 
+`docs/fast-boot.md`: the body link; P2: the laptop interface; P3: the
+walking planner, tricks, perception, the behaviour layer and the IR remote,
+composed in one `Mind`. Platform-free C++17: no exceptions, RTTI, heap,
+`std::` or `printf`; the only libc functions are `memcpy` and `memset`,
+through the compiler's builtins (`util/mem.h`), and the only libm functions
+the planner's `sinf`, `cosf`, `sincosf`, `tanf`, `atanf`, `atan2f`
+(`planner/fmath.h`) and the drives' `exp`, `log`, `sin`, `cos`, `sincos`
+(`util/dmath.h`; Circle links libm). `make -C kernel/host freestanding`
+proves it by linking the core with `-nostdlib`.
+
 ```
 platform.h        the seams: Serial (non-blocking bytes, tx_free), Clock (us), Log (lines), Gpio (body RESET)
 platform_net.h    the network seams: Listener (accept into a fixed slot) and Conn (non-blocking TCP stream)
@@ -28,6 +38,13 @@ planner/          the walking planner: a port of mind/kilo/planner (model, patte
 flash/image       the body image in RAM (32 KB) and its manifest (body.json parse and write)
 flash/crc32       the image's CRC-32, as zlib.crc32
 flash/flasher     the STK500v1 flasher: RESET, optiboot, pages, verify, the HELLO after
+
+tricks/           the trick model, the compiled-in library (library.gen.cpp) and the player (upload, play)
+perception/       ultrasonic and IMU detectors, the Percepts aggregator (kilo/perception)
+behaviour/        tree engine, drives, utility selector, library, 10 Hz runner, personality.gen.cpp (kilo/behaviour)
+remote/           the IR key map and RemoteControl (kilo/ir.py); client.cpp: BodyClient's posture/balance/look
+mind.h, mind.cpp  Mind: all of the above, the link and the laptop server in one object
+util/dmath, str   double helpers with Python's sums (dmath), string compare (str)
 proto/            vendored by protocol/vendor.py: never edit; run python3 protocol/vendor.py
 sources.mk        MIND_SRCS, for the Circle Makefile and kernel/host/Makefile
 ```
@@ -264,3 +281,147 @@ optiboot body reads. Without it the edges are only logged.
 - `kilo flash --rollback` (keep the last good image on SD) is not designed
   yet.
 
+## The Mind
+
+`mind.h` puts the whole core in one object, so a platform's main loop is
+a few lines (`kernel/host/main.cpp`):
+
+```cpp
+MindConfig cfg;                       // remote, behaviour, balance_kp, seed, stats_period_ms ...
+static Mind mind(serial, clock, platform_log, &listener, cfg);  // ~70 KB: static; listener null = no laptop
+mind.start();                         // the port is open: start goals, HELLO_REQ
+for (;;) mind.poll();                 // a few ms apart; never blocks
+```
+
+One pass: stamp the link's liveness, serve the laptop, then, unless the
+raw bridge is open, poll the link, hand the command slot's answer to its
+owner (the trick player, the STATS poll) before anything may send
+another request, and run the walker, the trick player, the remote and the
+behaviour runner. Every TELEMETRY feeds perception; every EVENT goes to
+the walker, the player, the snapshot's last 8 and, for IR_KEY, the remote.
+
+**Liveness.** `Mind::poll()` stamps `link.mark_alive()` once per pass.
+Every part runs in this one cooperative loop, so a pass that returns
+proves nothing is stuck, and a part that hangs stops the stamp, which is
+what the body's watchdog needs. Python stamps from the behaviour runner's
+tick and lets the daemon's pump stamp only while the runner ticked within
+1 s (`daemon/behaviour.py`); here the same check gates the stamp when the
+runner is on (10 s of grace before its first tick), because its 10 Hz grid
+could stall while the loop runs.
+
+**Who drives.** A laptop client holding control (`CONTROL take=1`) pauses
+the behaviour runner and silences the remote: Python refuses client goals
+while the runner is active unless `--override` pauses it, and a controller
+is that override here. With the runner active the remote is ignored, as
+in `remote_ir.py`. `MindConfig` defaults are the daemon's: remote and
+behaviour off (the Pi's `KILO_RUN_ARGS` turn on `--remote --balance 0.99`).
+
+`kilo-mind-host` takes `--remote`, `--behaviour`, `--seed N` and
+`--balance KP` besides its P1/P2 flags.
+
+## Tricks
+
+`tricks/` ports `kilo/tricks/model.py` and `player.py` and the trick part
+of `kilo/body/client.py`. The library is compiled in: the mind only ever
+uploads it, so a `Trick` is already in wire form (the TRICK_BEGIN fields and
+the 14 B keyframes exactly as Python's `Trick.begin()` and
+`Keyframe.to_wire()` make them). `tricks/gen_library.py` writes
+`library.gen.{h,cpp}` from `mind/kilo/tricks/library/*.json` (13 tricks,
+43 frames, about 940 B of tables), with Python's CRC, trick_id and duration
+for the tests:
+
+```
+~/OpenCat/.venv/bin/python kernel/mind/tricks/gen_library.py          # after changing the JSON
+~/OpenCat/.venv/bin/python kernel/mind/tricks/gen_library.py --check  # test.sh
+```
+
+`TrickPlayer` is `upload_trick`/`start_trick`/`play`/`stop_trick` as a
+state machine over the link's one command slot: TRICK_COMMIT alone asks
+the body whether it holds the trick (cached by id, CRC and reboots), else
+TRICK_BEGIN, the TRICK_FRAMES chunks and TRICK_COMMIT; the posture goal is
+released; TRICK_PLAY (NO_TRICK: upload again once); done on TRICK_DONE for
+its id, or failed after the expected duration + 1 s (then TRICK_STOP).
+`KeyframeTimer` and `total_ticks` are the body's player timing
+(`player.py`).
+
+What differs: no float angles, JSON, `mirror()` or `speed()` in the mind
+(the body mirrors and changes speed from TRICK_PLAY); `start()` returns at
+once and `result()` reports the play; a second play while one runs is
+refused until it is stopped.
+
+## Perception
+
+`perception/` ports `kilo/perception` (ultrasonic: median, range rate,
+zones with hysteresis, approaching; IMU: tilted/level, picked_up/put_down,
+tap, pet, startle; `Percepts`) with the same thresholds, windows and
+hysteresis, in double. `link/body_state` gains `state.py`'s derived values
+(distance median and approach speed, battery percent, fallen, upright,
+moving). The Mind feeds `Percepts` on every TELEMETRY with its arrival
+time, as the daemon does, and logs each percept event.
+
+The golden test replays `mind/tests/test_perception.py`'s traces through
+both: `kernel/host/tests/gen_perception_vectors.py` writes them (quantised
+to TELEMETRY's 1/16 degree and whole mm) with Python's events, and every
+event must come out on the same sample. Sums are Python's (`util/dmath.h`:
+Neumaier `sum()`, exact `fsum` for `fmean`), so they round alike.
+
+What differs: fixed rings instead of deques (the IMU history holds 256
+samples, 4.5 s at up to 56 Hz); the 10 s `TelemetryRing` is not ported (no
+detector reads it); no `SharedPercepts` lock (one loop).
+
+## Behaviour
+
+`behaviour/` ports `kilo/behaviour`: the tree engine (`tree`), the drives,
+the utility selector with the safety branches, the library of behaviours
+node for node with Python's names (the active path reads the same), and
+the 10 Hz runner. `personality.yaml` is converted on the laptop with
+Python's loader (merge over the defaults, validation) into a 1000 B table:
+
+```
+~/OpenCat/.venv/bin/python kernel/mind/behaviour/gen_personality.py [FILE.yaml]   # writes personality.gen.cpp
+~/OpenCat/.venv/bin/python kernel/mind/behaviour/gen_personality.py --check
+```
+
+The RNG is Python's Mersenne Twister seeded as `random.Random(int)` seeds
+it (`random`, `uniform`, `gauss`), so a seeded C++ runner makes the same
+choices. `kernel/host/tests/gen_behaviour_vectors.py` runs
+`test_behaviour.py`'s scenarios and three more through the Python runner
+and `test_behaviour.cpp` replays them: 9432 ticks, every choice, reason,
+path, drive, score and call on the body equal.
+
+In the Mind the behaviours' body is the link (`remote/client.cpp`:
+`BodyClient`'s posture, set_balance and look) and the trick player;
+perception's flags are the percepts (`runner.py` `PerceptFeed`, face always
+false). Each posture, look and trick first quiets the IMU detectors
+(`adapter.py`'s 0.5, 0.3, 2 s).
+
+What differs: no JSONL behaviour log (a log line when the choice changes,
+body events and the behaviours' postures as log lines); `poll()` keeps the
+10 Hz grid instead of an asyncio loop; the wind-down's poweroff only stops
+the runner and sets `Mind::poweroff_requested()`; `beep` is not in the body
+(as in Python's adapter). Python's `play:` action fails after every real
+trick (`_as_status` rejects the `TrickResult` that `BodyClient.play`
+returns); here a trick that ends DONE succeeds.
+
+## Remote
+
+`remote/` ports `kilo/ir.py`: the key table and map (keys named by grid,
+`remote/keys.h`) and `RemoteControl`, driving the walker, the postures and
+the trick player as `kilo run --remote` does. Direction keys walk with the
+selected pattern and speed; pattern and speed keys change a walk in
+progress; a posture or trick key makes the planned stop and waits for it,
+stops a playing trick, and for a trick from LIMP takes STAND and waits 1 s;
+C7 toggles the balance. The daemon's blocking waits are phases of `poll()`
+and keys that come meanwhile queue (4), as its lock queues them. Repeats and
+other remotes' keys are ignored; there is no shutdown key (Python has none).
+
+What differs: log lines name a key by grid and legacy meaning, `B3 (0x18,
+sit)`, without the printed label.
+
+Integration (`kernel/host/test.sh`): `python -m kilo.vbody.core --control
+FIFO` takes `ir CODE`, `att P R`, `batt MV` and `imu ...` lines
+(`CoreBody.serve_control`; the harness has no IR decoder, so IR_KEY frames
+are made in Python), and the script plays hi to TRICK_DONE, trots, turns,
+stands after the planned stop and rests by IR keys, idles the behaviour
+runner 5 s at 10 Hz, and tilts and drops the virtual body for perception
+and the fallen branch.
