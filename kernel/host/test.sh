@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Every check of the mind core on the Linux host:
-#   1. the C++ unit tests (sanitizers): formatter, framing vectors, names, link state machine;
-#   2. the freestanding build (no libc, libm or libstdc++ beyond memcpy/memset/memcmp);
-#   3. kilo-mind-host against the virtual body (the real body core on a pty), and
-#      against a silent pty and a protocol-1 fake body.
+#   1. the C++ unit tests (sanitizers): formatter, framing vectors, names, link state machine,
+#      planner, walker, and the planner against the Python planner's vectors (float and double);
+#   2. the planner's cost per tick on this machine;
+#   3. the freestanding build (no libc or libstdc++ beyond memcpy/memset/memcmp, libm's
+#      float sinf cosf sincosf tanf atanf atan2f);
+#   4. kilo-mind-host against the virtual body (the real body core on a pty), and
+#      against a silent pty and a protocol-1 fake body; walk-demo trotting the virtual body.
 #
 #   kernel/host/test.sh
 #   PYTHON=/path/to/python   interpreter with the mind's kilo package (default ~/OpenCat/.venv/bin/python)
@@ -25,6 +28,9 @@ make -s -C "$HERE" -j"$JOBS" all
 
 echo "== unit tests"
 make -s -C "$HERE" -j"$JOBS" check
+
+echo "== planner cost per tick"
+make -s -C "$HERE" -j"$JOBS" bench
 
 echo "== freestanding core"
 make -s -C "$HERE" freestanding
@@ -186,5 +192,19 @@ wait "$MIND_PID" || { echo "FAILED: kilo-mind-host exit status $?"; cat "$OUT/ho
 stop_body
 trap - EXIT
 if grep -Eq "decode errors [1-9]" "$OUT/host_listen.log"; then echo "FAILED: decode errors"; exit 1; fi
+
+echo "== integration: walk-demo trots the virtual body for 3 s and stops"
+start_body "$OUT/vbody_walk.log" "$PYTHON" -u -m kilo.vbody.core
+trap stop_body EXIT
+set +e
+"$HERE/build/walk-demo" --port "$PTY" --seconds 3 2> "$OUT/walk.log"
+status=$?
+set -e
+stop_body
+trap - EXIT
+cat "$OUT/walk.log"
+[ "$status" -eq 0 ] || { echo "FAILED: walk-demo exit status $status"; exit 1; }
+expect "$OUT/walk.log" "walk trot forward at 55\.6 mm/s" "the walk started"
+expect "$OUT/walk.log" "walked: .* ended: stopped$" "the planned stop"
 
 echo "== all kernel host tests passed"

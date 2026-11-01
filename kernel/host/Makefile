@@ -1,9 +1,11 @@
 # The mind core on the Linux host: the kilo-mind-host program, the unit
 # tests, and a freestanding build that proves the core needs nothing from
-# libc, libm or libstdc++ beyond memcpy/memset/memcmp (what Circle gives).
+# libc or libstdc++ beyond memcpy/memset/memcmp and from libm beyond the
+# planner's float functions (what Circle gives).
 #
-#   make              build/kilo-mind-host
-#   make check        unit tests (sanitizers)
+#   make              build/kilo-mind-host, build/walk-demo
+#   make check        unit tests (sanitizers), the planner against the Python vectors
+#   make bench        the planner's cost per tick (no sanitizers)
 #   make freestanding the core built and linked with -ffreestanding -nostdlib
 #
 # kernel/host/test.sh runs all three and the integration run against vbody.
@@ -18,14 +20,19 @@ PYTHON ?= python3
 B := build
 
 WARN := -Wall -Wextra -Werror
-CXXFLAGS := -std=c++17 $(WARN) -O2 -fno-exceptions -fno-rtti -I$(KERNEL)/mind -I.
+# -ffp-contract=off: no fused multiply-add, so the planner's prediction of
+# a slot's end matches what next() then computes (as on the Cortex-A7, which
+# has FMA). -fno-math-errno: sqrtf is an instruction, not a libm call.
+FPFLAGS := -ffp-contract=off -fno-math-errno
+CXXFLAGS := -std=c++17 $(WARN) -O2 -fno-exceptions -fno-rtti $(FPFLAGS) -I$(KERNEL)/mind -I.
 CFLAGS := -std=c99 $(WARN) -O2
 SAN := -fsanitize=address,undefined -fno-sanitize-recover=all -g
 
 CORE_CXX := $(filter %.cpp,$(MIND_SRCS))
 CORE_C := $(filter %.c,$(MIND_SRCS))
 HOST_SRCS := main.cpp posix.cpp baud.cpp
-TESTS := test_fmt test_frames test_link test_names
+TESTS := test_fmt test_frames test_link test_names test_planner test_walker
+PLANNER_VECTORS := tests/planner_vectors.txt
 
 # The laptop interface (docs/fast-boot.md P2): POSIX sockets for --listen, its
 # unit tests, and the build id STATUS reports (the commit's first 8 hex digits,
@@ -37,8 +44,8 @@ $(shell mkdir -p $(B) && (echo $(MIND_BUILD) | cmp -s - $(B)/mind-build-id || ec
 $(B)/obj/host/main.o: CXXFLAGS += -DKILO_MIND_BUILD=0x$(MIND_BUILD)
 $(B)/obj/host/main.o: $(B)/mind-build-id
 
-.PHONY: all check freestanding clean
-all: $(B)/kilo-mind-host
+.PHONY: all check bench freestanding clean
+all: $(B)/kilo-mind-host $(B)/walk-demo
 
 # ---- the program ----------------------------------------------------------
 CORE_OBJS := $(CORE_CXX:%.cpp=$(B)/obj/%.o) $(CORE_C:%.c=$(B)/obj/%.o)
@@ -55,6 +62,10 @@ $(B)/obj/host/%.o: %.cpp
 	$(CXX) $(CXXFLAGS) -MMD -c $< -o $@
 
 $(B)/kilo-mind-host: $(CORE_OBJS) $(HOST_OBJS)
+	$(CXX) $^ -o $@
+
+# The walk against the virtual body (kernel/host/test.sh).
+$(B)/walk-demo: $(CORE_OBJS) $(B)/obj/host/walk_demo.o $(B)/obj/host/posix.o $(B)/obj/host/baud.o
 	$(CXX) $^ -o $@
 
 # ---- unit tests (sanitizers, own objects) ----------------------------------
@@ -74,17 +85,48 @@ $(B)/vectors.txt: tests/flatten_vectors.py $(wildcard $(REPO)/protocol/vectors/*
 	@mkdir -p $(B)
 	$(PYTHON) tests/flatten_vectors.py $(REPO) > $@
 
-check: $(TESTS:%=$(B)/%) $(B)/vectors.txt
-	@fail=0; for t in $(TESTS); do $(B)/$$t $(B)/vectors.txt || fail=1; done; exit $$fail
+# The planner in double precision throughout (-DKILO_PLANNER_DOUBLE), for
+# the vector test's twin: it shows how much of a deviation from Python is
+# the port and how much is float.
+PLANNER_CXX := $(filter mind/planner/%,$(CORE_CXX))
+DBL_OBJS := $(filter-out $(PLANNER_CXX:%.cpp=$(B)/san/%.o),$(SAN_OBJS)) $(PLANNER_CXX:%.cpp=$(B)/dbl/%.o)
+$(B)/dbl/%.o: $(KERNEL)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -DKILO_PLANNER_DOUBLE $(SAN) -O1 -MMD -c $< -o $@
+$(B)/test_planner_vectors: tests/test_planner_vectors.cpp $(SAN_OBJS)
+	$(CXX) $(CXXFLAGS) $(SAN) -O1 -MMD $< $(SAN_OBJS) -o $@
+$(B)/test_planner_vectors_double: tests/test_planner_vectors.cpp $(DBL_OBJS)
+	$(CXX) $(CXXFLAGS) -DKILO_PLANNER_DOUBLE $(SAN) -O1 -MMD $< $(DBL_OBJS) -o $@
+
+check: $(TESTS:%=$(B)/%) $(B)/vectors.txt $(B)/test_planner_vectors $(B)/test_planner_vectors_double
+	@fail=0; for t in $(TESTS); do $(B)/$$t $(B)/vectors.txt || fail=1; done; \
+	$(B)/test_planner_vectors $(PLANNER_VECTORS) || fail=1; \
+	$(B)/test_planner_vectors_double $(PLANNER_VECTORS) || fail=1; exit $$fail
+
+# ---- the planner's cost per tick (optimised as the kernel is, no sanitizers) --------
+BENCH_DBL_OBJS := $(PLANNER_CXX:%.cpp=$(B)/bdbl/%.o) $(filter-out $(PLANNER_CXX:%.cpp=$(B)/obj/%.o),$(CORE_OBJS))
+$(B)/bdbl/%.o: $(KERNEL)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -DKILO_PLANNER_DOUBLE -MMD -c $< -o $@
+$(B)/bench_planner: tests/bench_planner.cpp $(CORE_OBJS)
+	$(CXX) $(CXXFLAGS) $< $(CORE_OBJS) -o $@
+$(B)/bench_planner_double: tests/bench_planner.cpp $(BENCH_DBL_OBJS)
+	$(CXX) $(CXXFLAGS) -DKILO_PLANNER_DOUBLE $< $(BENCH_DBL_OBJS) -o $@
+bench: $(B)/bench_planner $(B)/bench_planner_double
+	$(B)/bench_planner
+	$(B)/bench_planner_double
 
 # ---- freestanding check -----------------------------------------------------
 # Only the compiler's own headers (stdint.h, stddef.h, stdarg.h), no libc's;
 # then a static link with -nostdlib against stubs of the allowed functions:
 # any other undefined symbol (printf, sqrt, operator new, __cxa_*) fails it.
 FREE := -ffreestanding -nostdinc -isystem $(shell $(CXX) -print-file-name=include) \
-        -fno-stack-protector -fno-pie -fno-asynchronous-unwind-tables -O2 $(WARN)
+        -fno-stack-protector -fno-pie -fno-asynchronous-unwind-tables -O2 $(WARN) $(FPFLAGS)
 FREE_OBJS := $(CORE_CXX:%.cpp=$(B)/free/%.o) $(CORE_C:%.c=$(B)/free/%.o)
-ALLOWED := memcpy memset memcmp
+# memcpy memset memcmp: circle/util.h. The rest: the toolchain's libm, which
+# Circle links (STDLIB_SUPPORT 1), the planner's float functions (planner/fmath.h;
+# GCC turns a sinf and a cosf of the same angle into sincosf).
+ALLOWED := memcpy memset memcmp sinf cosf sincosf tanf atanf atan2f
 
 $(B)/free/%.o: $(KERNEL)/%.cpp
 	@mkdir -p $(dir $@)

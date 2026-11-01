@@ -2,9 +2,11 @@
 
 The part of the mind that runs both in the Circle kernel on the Pi 2 B and
 on the laptop (`kernel/host/`), against the virtual body. Phase P1 of
-`docs/fast-boot.md`: the body link. Platform-free C++17: no exceptions, RTTI,
-heap, `std::`, `printf` or libm; the only libc functions are
-`memcpy` and `memset`, through the compiler's builtins (`util/mem.h`).
+`docs/fast-boot.md`: the body link; P3: the walking planner. Platform-free
+C++17: no exceptions, RTTI, heap, `std::` or `printf`; the only libc
+functions are `memcpy` and `memset`, through the compiler's builtins
+(`util/mem.h`), and the only libm functions the planner's `sinf`, `cosf`,
+`sincosf`, `tanf`, `atanf`, `atan2f` (`planner/fmath.h`; Circle links libm).
 `make -C kernel/host freestanding` proves it by linking the core with
 `-nostdlib`.
 
@@ -21,6 +23,7 @@ link/goals        latched goals, one per type
 link/consts       message classes and timings (kilo/link/consts.py, LinkConfig)
 link/names        names of message types and enums, for logs
 link/stats.h      link counters (kilo/body/state.py LinkStats)
+planner/          the walking planner: a port of mind/kilo/planner (model, patterns, plan, errors, walker)
 proto/            vendored by protocol/vendor.py: never edit; run python3 protocol/vendor.py
 sources.mk        MIND_SRCS, for the Circle Makefile and kernel/host/Makefile
 ```
@@ -105,3 +108,52 @@ On the laptop: `kilo-mind-host --port PTY --listen 127.0.0.1:0` logs
 and the virtual body (status, monitor, posture, log tail, REST when the
 controller is killed, and `kilo.link` through the bridge,
 `tests/bridge_client.py`).
+
+## The planner
+
+`planner/` is a port of `mind/kilo/planner` and the stream part of
+`kilo/planner/walker.py`: the same algorithms, constants (margin 14 mm,
+hold 25 ticks, catch 7 deg, ...) and outputs, one file per Python module.
+`Walker` drives a walk from the mind's loop:
+
+```cpp
+Walker walker(link, clock, log);      // owns a Planner; fixed size, no heap
+// in your LinkListener: walker.on_telemetry(t); walker.on_event(e);
+WalkGoal g;                           // pattern (find_pattern), direction, speed, balance
+const char* why = walker.start(g);    // null: accepted; while walking it changes the walk
+for (;;) { link.mark_alive(); link.poll(); walker.poll(); }   // every few ms
+walker.stop();                        // the planned stop; abort() ends at once
+```
+
+`poll()` does what Python's walk thread does: SET_STREAM telem_div 1, the
+STANCE posture for 0.6 s, then every 20 ms (on a deadline grid) the
+TELEMETRY and EVENTs since the last wake, and FEET up to the body's tick + 5
+through `SerialLink::send_stream`; at the end STANCE, then the rates and
+balance put back.
+
+What differs from Python:
+
+- `float`, except fit_attitude's normal equations and the lean's quadratic
+  program, which stay in double (on two feet the regularisation is 1e-7 of
+  the matrix; the program tests feasibility to 1e-6). The plan has exact
+  .5 mm ties (a trot's foot lands at stride / 2 = 12.5 mm), where float and
+  Python's double round either way: 14 of 18800 foot values in the vectors
+  differ by 1 mm there, and nothing else does. `-DKILO_PLANNER_DOUBLE` builds
+  everything in double, which matches Python exactly.
+- Built with `-ffp-contract=off` (no fused multiply-add): the prediction of
+  a slot's end must equal what `next()` then computes, or the lean is solved
+  again and the slot waits.
+- `Walker::start()` returns at once; a start during a planned stop is
+  queued (Python blocks). No per-tick frame log. `errors.from_history` is
+  not ported (the link keeps no history).
+
+The golden test (`kernel/host/tests/test_planner_vectors.cpp`, float and
+double) replays `kernel/host/tests/planner_vectors.txt`, made from the
+Python planner. After changing either planner, regenerate it:
+
+```
+~/OpenCat/.venv/bin/python kernel/host/tests/gen_planner_vectors.py > kernel/host/tests/planner_vectors.txt
+```
+
+`make -C kernel/host bench` prints the cost per tick; `build/walk-demo`
+trots the virtual body (`kernel/host/test.sh` runs both).

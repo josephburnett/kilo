@@ -69,6 +69,11 @@ include $(CIRCLEHOME)/Rules.mk
 
 INCLUDE += -I mind
 
+# The planner as on the host (kernel/host/Makefile FPFLAGS): no fused
+# multiply-add (its slot-end prediction must equal what it then computes),
+# sqrtf as an instruction.
+$(BUILD)/mind/planner/%.o: CPPFLAGS += -ffp-contract=off -fno-math-errno
+
 # Build id: the first 8 hex digits of the commit, as for the body
 # (-DKILO_BUILD=0x<hash>, mind/kilo/tools/flash.py). build/build-id changes
 # only when the hash does, so kernel.o is rebuilt only then.

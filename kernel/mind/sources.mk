@@ -8,6 +8,11 @@ MIND_SRCS = \
 	mind/link/goals.cpp \
 	mind/link/names.cpp \
 	mind/link/serial_link.cpp \
+	mind/planner/errors.cpp \
+	mind/planner/model.cpp \
+	mind/planner/patterns.cpp \
+	mind/planner/plan.cpp \
+	mind/planner/walker.cpp \
 	mind/proto/crc16.c \
 	mind/proto/kilo_frame.c
 
