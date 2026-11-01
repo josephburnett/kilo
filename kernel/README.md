@@ -5,14 +5,16 @@ The mind as a bare-metal kernel for the Raspberry Pi 2 B, built on
 cross-compiled on the laptop; nothing is built on the Pi. Phase P0 gave the
 toolchain, Circle, a network boot loader and a hello-world kernel; phase P1
 runs the mind core's body link on Circle (below, "The mind kernel"); P2
-serves `kilo --host` over Ethernet from it ("The laptop interface"), and the
-P3 walker runs in its loop. Not yet run on a Pi:
+serves `kilo --host` over Ethernet from it ("The laptop interface"), the
+P3 walker runs in its loop, and P4 flashes the body from the laptop or the
+SD card ("Flashing the body"). P5's production card is
+`make-sd.sh --kernel` ("Two SD cards"). Not yet run on a Pi:
 docs/fast-boot-first-boot.md is the procedure.
 
 | Path | What |
 |---|---|
 | `circle/` | Circle, a git submodule pinned to `Step51.1.1` |
-| `src/` | the mind kernel (`kernel7.img`): the core's seams on Circle (`seams.*`), the main loop (`kernel.*`), the network and its seams (`net.*`), the planner bench (`plannerbench.*`), the boot probe (`bootprobe.*`) |
+| `src/` | the mind kernel (`kernel7.img`): the core's seams on Circle (`seams.*`), the main loop (`kernel.*`), the network and its seams, mDNS (`net.*`), the body image on the SD card (`bootcard.*`), the planner bench (`plannerbench.*`), the boot probe (`bootprobe.*`) |
 | `netboot/` | the network loader: Circle's `sample/38-bootloader` with our `kernel.cpp`, `kernel.h`, `main.cpp` (see below) |
 | `boot/config.txt` | the Pi's `config.txt` |
 | `tools/make-sd.sh` | writes a boot card |
@@ -46,13 +48,16 @@ make -C kernel boot     # once: download the Pi firmware into circle/boot (wget)
 
 `make -C kernel` writes `circle/Config.mk` (`RASPPI = 2`, `AARCH = 32`, the
 toolchain prefix, `STDLIB_SUPPORT = 1`), builds the Circle libraries the
-images link (`lib`, `usb`, `input`, `fs`, `fs/fat`, `sched`, `net`) inside the
-submodule, then:
+images link (`lib`, `usb`, `input`, `fs`, `sched`, `net`, and the addons
+`fatfs` and `SDCard`) inside the submodule, then:
 
 | Output | What | Size |
 |---|---|---|
-| `build/kernel7.img` | the mind kernel | 369,652 bytes |
+| `build/kernel7.img` | the mind kernel | 445,516 bytes |
 | `build/netboot/kernel7.img` | the network loader | 305,420 bytes |
+
+Of the mind kernel, the SD card (FatFs about 23 KB, the SD driver about
+18 KB) and mDNS (about 9 KB) came with P4.
 
 The `.elf`, `.map` and `.lst` beside each image are for debugging. A second
 `make` with nothing changed does nothing. From clean (Circle included) the
@@ -64,6 +69,13 @@ commit, as `-DKILO_BUILD=0x<hash>`, the same convention as the body firmware.
 
 ## Two SD cards
 
+Decided in P5 (docs/fast-boot.md P5 left "a second card, or an option the
+production kernel can chain to" open): **two cards**. Chaining from the
+mind kernel to the loader would put the loader's code and a decision
+(when to chain, how to ask for it with no keyboard) into every production
+boot; a second card costs nothing and cannot get in the way of the fast
+boot.
+
 **Bench card** (network loader), on a FAT-formatted card, mounted:
 
 ```
@@ -73,16 +85,29 @@ kernel/tools/make-sd.sh /media/$USER/BOOT --netboot
 **Production card** (the mind kernel boots directly):
 
 ```
-kernel/tools/make-sd.sh /media/$USER/BOOT --kernel
+kernel/tools/make-sd.sh /media/$USER/BOOT --kernel [--body ~/.cache/kilo-build]
 ```
 
 Both write `bootcode.bin`, `start_cd.elf`, `fixup_cd.dat`, `LICENCE.broadcom`,
-`config.txt` and `kernel7.img`, about 1.2 MB. The script never partitions or
+`config.txt` and `kernel7.img`, about 1.3 MB. `--body DIR` also copies a
+body image, `DIR/body.bin` and `DIR/body.json` (what `kilo flash` builds;
+both or neither, and the manifest's size must be body.bin's), which the
+mind kernel flashes at boot when the body runs another build ("Flashing
+the body"). It works on either card: a kernel netbooted from the bench
+card reads the bench card. Without `--body`, a body image already on the
+card stays (the script says so). The script never partitions or
 formats. It refuses anything that is not the root of a mounted vfat
 filesystem, and any partition holding files other than Pi boot files, so a
 Raspberry Pi OS card (it has `cmdline.txt` and `overlays/`) is refused rather
 than losing its Linux `kernel7.img`. `--force-dir` skips the mount checks; it
 exists for testing on a plain directory and is not for real cards.
+
+That is the whole production boot path: the GPU firmware reads
+`config.txt`, loads `kernel7.img` and starts it; nothing else on the card
+is read until the kernel reads `body.json` (after the body's first HELLO).
+P5's "mind config" and "log directory" on the card do not exist: the
+kernel has no settings file yet, and logs stay in RAM (the open question
+of docs/fast-boot.md §7, "Persistent logs").
 
 `boot/config.txt` is Circle's `boot/config32.txt` without its Pi 4 sections,
 plus the fast-boot lines from docs/fast-boot.md P5: `boot_delay=0`,
@@ -182,15 +207,18 @@ change of build, not of a flag.
 ## The mind kernel
 
 `src/kernel.cpp`: initialise (screen or null log, interrupts, timer, the
-body link's serial device, the link, the walker, the host server, then the
-net task), then one loop, every 1 ms:
+body link's serial device, the link, the walker, the host server, the
+flasher, then the net task), then one loop, every 1 ms:
 
 ```
 link.mark_alive()
-host.poll()                       accept, answer, stream, flush (never blocks)
-if the bridge is closed:
+host.poll()                       accept, answer, stream, flush; polls the flasher (never blocks)
+if !host.link_paused():           the bridge is closed and the flasher does not have the UART
+  walker.abort() if a pause just ended and a walk was on
   link.poll()
   walker.poll()                   timed: the loop stats line
+end of a flash: log it; --persist: write the image to SD
+boot flash check                  once, after the first HELLO (or 3 s): SD image, flash if another build
 planner bench step                once, after the first laptop client (below)
 Circle's log events -> the ring   (USB, Ethernet, DHCP lines for `kilo log --host`)
 stats once a second, the ACT LED
@@ -207,7 +235,7 @@ implement its seams:
 | `Serial` | `Pl011Serial` or `UsbSerial` (below) |
 | `Clock` | `CTimer::GetClockTicks64()`: 1 MHz, 64 bits, no wrap |
 | `Log` | `KernelLog`: every line into the RAM ring (`LogRing`, 64 lines, `kilo log --host`, Debug included), then `CircleLog`: `CLogger::WriteNoAlloc` (no heap), Info and above; Debug -> `LogDebug`, Info -> `LogNotice`, Warn -> `LogWarning`, Error -> `LogError` |
-| `Gpio` | GPIO4 as an emulated open drain: released = input, no pull; asserted = latch low, then output. Never driven high. Released at boot; nothing pulses it until P4. |
+| `Gpio` | GPIO4 (header pin 7, the NyBoard's reset line) as an emulated open drain: released = input, no pull; asserted = latch low, then output. Never driven high. Released at boot; only the flasher pulses it. |
 | `Listener`, `Conn` | `CircleListener`, `CircleConn`: four slots of RX and TX rings, served by the net task (below) |
 
 Circle's own log lines (`usbdev0-1: ...`, `dhcp: IP address is ...`) are
@@ -406,8 +434,7 @@ or more, est.) must not come before the link (docs/fast-boot.md §3 rule 1).
   frames). Line errors (break, overrun, framing, parity) come back from
   `Read()` once, negative, with the data still queued: counted, logged with
   the stats, and the read repeated. `tx_free()` is the TX ring's free space.
-  `set_baud()` only accepts the rate it was opened with: `CSerialDevice`
-  cannot be initialised twice; switching to 115200 for flashing is P4's.
+  `set_baud()` changes the rate in place ("Baud switching" below).
 
 **Ring sizes** (PL011): Circle's `SERIAL_BUF_SIZE`, 2048 bytes each way,
 kept. Needs: RX is TELEMETRY (<= 66 B wire) at 25-50 Hz plus events and
@@ -423,6 +450,43 @@ too (it sets the class layout), for 2 KB of RAM.
 a frame only when `tx_free()` covers all of it; otherwise it counts
 `tx_deferred` and retries at the next poll, so a frame is never cut.
 
+**Baud switching** (the flasher: 115200 for optiboot, then back to 250000):
+
+- **PL011**: Circle's `CSerialDevice` has no call for a new rate, and its
+  `Initialize()` must not run twice: each call adds `ttyS1` to the device
+  name service again (a heap entry that is never freed) and counts the
+  interrupt user again, so the destructor would never disconnect the IRQ.
+  Destroying and re-creating the device is worse: the destructor
+  disconnects the IRQ, turns GPIO14/15 into inputs (TXD floats, so the
+  328P may see a break or garbage) and frees both rings. So
+  `Pl011Serial::set_baud()` does what Circle's own `SetParity()` does for
+  the line settings: wait until the TX ring and the shift register are
+  empty (at most 100 ms; 2 KB at 250000 baud is 82 ms; a timeout is
+  counted and shown with the line errors), then, with IRQs off for a few
+  register writes, disable the UART, write IBRD/FBRD, write LCRH back (the
+  PL011 latches the divisor on that write), enable it. The interrupt
+  mask, the FIFOs, the pins and both rings stay as they are; `tx_free()`
+  means the same before and after. Divisors from 48 MHz: 115200 is IBRD
+  26, FBRD 3 (115176 baud, -0.02 %); 250000 is 12, 0 (exact). Optiboot's
+  own 115200 on the 16 MHz 328P (U2X, UBRR 16) is 117647 baud, +2.1 %, as
+  under avrdude on Linux. A byte arriving during the few microseconds the
+  UART is off may be lost or garbled; the flasher drops what comes in
+  around a switch anyway. Risk: the PL011 TRM wants the UART idle before
+  its control registers change; the drain and the BUSY wait give that for
+  TX, but a byte being received at that moment is lost.
+- **USB serial**: `UsbSerial::set_baud()` sends CDC `SET_LINE_CODING`
+  (Circle's `SetBaudRate()` and `SetLineProperties()`): a synchronous
+  control transfer. Writes are synchronous too, so nothing is queued on
+  the Pi's side; whether the CH343 sends its own FIFO out at the old rate
+  first is the adapter's business (not checked). **But flashing does not
+  work over the USB cable**: the body's RESET is wired to the adapter's
+  DTR line there, and Circle's CDC driver raises DTR once when it
+  configures the adapter and has no call to pulse it. The flasher pulses
+  GPIO4 (header pin 7), so over USB it ends in `SYNC_TIMEOUT` (link restored)
+  unless pin 7 is also wired to the NyBoard's reset line. Pulsing DTR
+  would need a CDC `SET_CONTROL_LINE_STATE` request from a patched or
+  subclassed Circle driver.
+
 ### ACT LED
 
 | Pattern | Meaning |
@@ -431,18 +495,121 @@ a frame only when `tx_free()` covers all of it; otherwise it counts
 | 0.5 Hz (1 s on, 1 s off) | no body: no HELLO yet, or no TELEMETRY for 300 ms |
 | 2 Hz | the body is alive: TELEMETRY flowing |
 | 5 Hz | the body's HELLO has another protocol major: the kernel stays up and keeps the heartbeat, but sends no goals or FEET (kilo-mind-host exits 2 instead) |
+| double flash (two 100 ms flashes, once a second) | flashing the body, from the laptop or the SD card, until the new firmware's HELLO (or FAILED) |
 | steady on or off for more than ~20 s | stopped: `Initialize` failed or a crash (Circle halts, the LED freezes) |
 
-The LED says nothing about the network (the log does). With
-`KILO_BODY_SERIAL=pl011` the blink freezes once for about a second (est.)
-early on: the USB scan for Ethernet ("Network bring-up").
+The LED says nothing about the network (the log does). The blink freezes
+for a moment while the SD card is read (after the first HELLO) and while a
+`--persist` writes to it; with `KILO_BODY_SERIAL=pl011` it also freezes
+once for about a second (est.) early on: the USB scan for Ethernet
+("Network bring-up").
 
 ### Boot probe
 
 GPIO21, header pin 40 (pin 39 is ground), outside the NyBoard socket's pins
 1-10. High at the top of `main()`, low at the first HELLO, for a scope
 against the 5 V rail (docs/fast-boot.md P6). On by default;
-`make -C kernel KILO_BOOT_PROBE=0` leaves the pin alone.
+`make -C kernel KILO_BOOT_PROBE=0` leaves the pin alone. The SD card is
+read only after the first HELLO, so the probe never includes it, nor a
+boot-time flash.
+
+### Flashing the body
+
+Phase P4 (docs/fast-boot.md §6; the core's side in `mind/README.md`
+"Flashing"). The flasher (`mind/flash/flasher.*`) programs the 328P
+through optiboot on the body link's UART, resetting it with GPIO4.
+
+**From the laptop**, `kilo flash --host IP [--persist]`: `HostServer`
+fills a 32 KB image from `FLASH_BEGIN`/`FLASH_DATA`, starts the flasher at
+`FLASH_COMMIT` and polls it. While the flasher has the UART,
+`host.link_paused()` is true and the main loop polls neither the link nor
+the walker, as for the raw bridge; a walk that was on is aborted when the
+pause ends (HostServer starts the flash inside `poll()`, so there is no
+pass in which to abort it first; nothing starts a walk on the kernel yet).
+The kernel logs the end: `body flashed from the laptop: build ..., HELLO
+build ... reset FLASHED`, or `body flash from the laptop FAILED: ...`.
+
+**From the SD card at boot** (§6 path B, `kilo flash --sd MOUNT` or
+`make-sd.sh --body DIR`): once the body's first HELLO has arrived, or 3 s
+after `link.connect()` with none (no firmware, a broken one, or the body
+is off), the main loop mounts the card's FAT partition, reads `body.json`
+(`parse_manifest`) and `body.bin` (`load_from`: size and CRC), and asks
+`needs_flash(hello or null)`. Another build: the flasher starts with that
+image (no `--persist`), the host server polls it, and the kernel logs
+`body flashed from the SD card (boot): ...`. The same build: nothing
+(`boot flash check: the body runs build X, the card's: no flash`). A
+missing or bad file is not an error: one Info line (`SD: no body.json:
+nothing to flash at boot`, `... does not match ...`) and the boot goes on.
+With no HELLO and a good image, the kernel flashes: with the body
+switched off that fails in sync (two attempts, about 3 s) and the link is
+restored; the check runs once per boot. The SD image has its own 32 KB
+buffer, separate from the laptop's, so a laptop sending an image at that
+moment cannot have it overwritten (its `FLASH_COMMIT` is refused
+`FLASHING` while the boot flash runs).
+
+**Order at boot**: link up -> HELLO (or 3 s) -> SD card -> flash if needed
+-> the go-ahead for the net task's USB scan (`KILO_BODY_SERIAL=pl011`).
+The scan stalls the main loop for about a second (est.), and optiboot
+gives up after 1 s without a byte, so it must not cut into a flash; it
+waits for the go-ahead (at most 30 s). With the default `auto` build the
+scan came before the link, so nothing waits.
+
+**`--persist`**: after a DONE from a `FLASH_BEGIN` with `PERSIST`, the
+kernel removes `body.json`, writes `body.bin`, then writes `body.json`
+(`format_manifest`; manifest last, as `kilo flash --sd` does, so a power
+cut never pairs a manifest with half an image; the CRC is checked at boot
+anyway), then calls `persist_done()`. `persist_done()` is called whatever
+happened: a card that is missing, write-protected or failing is logged
+(`--persist: the image is NOT on the SD card; the body runs it anyway`)
+and the next `FLASH_BEGIN` is accepted, rather than refused `FLASHING`
+forever. The laptop does not learn the outcome (it prints "the mind keeps
+the image on SD" when it asked): check `kilo log --host` for `SD:
+--persist: wrote body.bin ...`. A power cut during the write can still
+damage the FAT on the boot partition (FatFs updates the FAT and the
+directory entry in place), which could stop the card from booting; the
+write takes a fraction of a second right after a flash.
+
+**SD card access**: Circle's FatFs addon (`addon/fatfs`, long file names,
+read and write; Circle's own `lib/fs/fat` reads 8.3 names only, and
+`body.json` is not one) over its SD driver (`addon/SDCard`; on the Pi 2 B
+the SDHOST controller, PIO). Mounted read-write, at the first use; nothing
+is written except by `--persist`. The SD driver busy-waits (Circle's
+`NO_BUSY_WAIT` is off; turning it on changes the USB driver too), so every
+card access stalls the main loop, logged: `SD: FAT partition mounted in
+N ms (card M ms ...)`, `SD: body image ... (read in N ms)`, `SD: --persist:
+wrote ... in N ms`.
+
+**Boot time**: card initialisation (the GPU firmware already started the
+card, but Circle resets it: CMD0, then ACMD41 until it is ready) about
+50-300 ms (est.), the mount a few sectors, a 31 KB read at 25 MHz 4-bit
+PIO a few ms: about 0.1-0.4 s (est.). Before `connect()` that would delay
+the link and the boot probe; after the first HELLO it delays neither, only
+the loop for that long once, with nothing walking. A HELLO that arrives
+meanwhile waits in the PL011's 2 KB RX ring. So the read is after the
+HELLO. A flash, when needed, takes about 10 s (est.) plus the new
+firmware's boot.
+
+### mDNS
+
+With an address (DHCP or the link-local fallback), the net task starts a
+small task, `kilomdns`, which starts Circle's mDNS responder
+(`CmDNSDaemon`) and publisher (`CmDNSPublisher`):
+
+- `kilo.local` answers A queries with the current address (the DHCP
+  hostname, `kilo`; Circle probes the name for about 1 s first and takes
+  `kilo-2` if another host answers for it). So `kilo status --host
+  kilo.local` works without the router's lease table, if the laptop
+  resolves `.local` names (Debian: `libnss-mdns`, with avahi).
+- The service `kilo._kilo._tcp.local`, port 5300, TXT `build=<hash>`, is
+  announced unsolicited three times at start and every 110 s; Circle's
+  publisher does not answer service queries itself, so `avahi-browse
+  _kilo._tcp` may take up to 110 s to see it.
+- A new address (the fallback, then a lease): the service is withdrawn and
+  announced again; the responder always answers with the address of the
+  moment.
+
+The tasks sleep in Circle's socket calls and cost the loop nothing
+measurable. `make -C kernel KILO_MDNS=0` leaves it out (about 9 KB).
 
 ### Floating point
 
@@ -474,9 +641,22 @@ accept, receive and send through `GetStatus()` as read from Circle's source;
 the loop's period with the net task running (the stats line); the USB scan
 from the net task with `KILO_BODY_SERIAL=pl011` and how long it stalls the
 loop; the planner's cost on the Cortex-A7 (the bench line).
+Flashing: the PL011 rate switch (`set_baud()` in place) at 115200
+against optiboot and back; GPIO4 reaching the NyBoard's reset line (header
+pin 7 in the socket; on the bench a fourth wire); the `optiboot in sync N
+ms after release` timing on the real 328P; a whole flash's time; the SD
+card: Circle's SDHOST driver on Kilo's card, how long initialisation,
+mount and the 31 KB read take (the log lines), FatFs writing body.bin and
+body.json and the laptop then reading them; the boot flash check with a
+matching build, another build and no HELLO; `--persist`; the LED's double
+flash; the USB scan waiting for the go-ahead (`pl011` build). mDNS:
+Circle's responder and publisher on the 2 B, `kilo.local` from Debian, a
+second announcement after an address change, and whether the responder's
+multicast membership (joined from the first address) survives it.
 `kernel/host/test.sh` covers the core, the link (including `tx_free()`
-deferral), `HostServer` over POSIX sockets and the walker on Linux only;
-`src/net.*` is compiled but has never run.
+deferral), `HostServer` over POSIX sockets, the flasher against a fake
+optiboot, and the walker on Linux only; `src/*` is compiled but has never
+run.
 
 ## Open questions
 
@@ -485,9 +665,14 @@ deferral), `HostServer` over POSIX sockets and the walker on Linux only;
   above); the loader does not, so on a direct cable it gets no address.
   The loader could also blink its address on the LED or announce it over
   the network.
-- **Finding the mind kernel by name.** Circle has an mDNS publisher
-  (`CmDNSPublisher`); announcing `kilo.local` would save reading the
-  router's lease table. Not done.
+- **Flashing over the USB cable.** Needs a DTR pulse (CDC
+  `SET_CONTROL_LINE_STATE`), which Circle's driver cannot send ("Baud
+  switching"). Today it needs header pin 7 wired to the reset line.
+- **`--persist` outcome on the laptop.** `kilo flash --host --persist`
+  does not hear whether the write worked; a FLASH_STATUS field or a log
+  line the CLI waits for would tell it.
+- **`kilo flash --rollback`** (keep the last good image on SD): not
+  designed (mind/README.md).
 - **Loader on the 2 B.** Not run on hardware yet (docs/fast-boot.md §7). If it
   fails, write `kernel7.img` to the card with `make-sd.sh --kernel`.
 - **Licence.** Circle is GPLv3, so any `kernel7.img` that links it is too,

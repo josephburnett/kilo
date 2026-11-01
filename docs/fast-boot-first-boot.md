@@ -2,9 +2,11 @@
 
 What you need to do to start the new mind kernel on the Pi 2 B for the
 first time, and what you should see. It is the hardware check for phases
-P1 and P2 of docs/fast-boot.md: the Pi says hello to Kilo's board and keeps
-the link alive, with no Linux, and the laptop talks to the Pi over the
-network cable (`kilo status`, `kilo log`, `kilo posture`).
+P1, P2 and P4 of docs/fast-boot.md: the Pi says hello to Kilo's board and
+keeps the link alive, with no Linux, the laptop talks to the Pi over the
+network cable (`kilo status`, `kilo log`, `kilo posture`), and, as an
+optional last step, the Pi rewrites Kilo's board firmware itself
+(`kilo flash --host`, step 11).
 
 Nothing here is timed. Every step waits for you, and you can stop at any
 step and carry on later. Write what you see in
@@ -24,6 +26,12 @@ Words used below:
   router hands it out (that is DHCP) under a name you can look up.
 - **Link-local**: addresses that start with `169.254.`. Two machines on one
   cable with no router between them can use them to reach each other.
+- **Flashing**: writing new firmware (the program Kilo's board runs) into
+  the board's chip. The board's chip has a tiny start-up program,
+  **optiboot**, which listens for new firmware for about a second after
+  the chip is reset.
+- **Reset line**: the wire that restarts Kilo's board when it is pulled
+  low. The Pi pulls it with its header pin 7 (GPIO4).
 
 ## What you need
 
@@ -127,7 +135,8 @@ the mind kernel.
 | Steady on, for a second or a few | The kernel is starting; it is looking for USB devices. |
 | Slow blink: 1 s on, 1 s off | The kernel runs but hears no Kilo yet. Normal for a few seconds: with the USB cable, the kernel opening the adapter may restart Kilo's board, which then takes a second or two to start. |
 | Even blink, twice a second | **Success**: Kilo's board is talking to the Pi. |
-| Fast blink, five times a second | Kilo's board runs firmware with another protocol version. The Pi keeps the link alive but will not drive Kilo. Flash the body firmware (the way you do today, from Linux). |
+| Fast blink, five times a second | Kilo's board runs firmware with another protocol version. The Pi keeps the link alive but will not drive Kilo. Flash the body firmware (step 11, or the way you do today, from Linux). |
+| Two short flashes, then a pause, once a second | The Pi is flashing Kilo's board (step 11, or a `body.bin` on the card). Leave it alone until the pattern changes, about 10 to 20 s. |
 | Steady on or steady off for more than 20 s | The kernel stopped (it could not start, or it crashed). |
 
 Leave it running for a minute. The light should keep its even blink.
@@ -138,7 +147,21 @@ The kernel now asks the router for an address of its own, under the name
 **kilo** (not `kilo-netboot`: that was the loader). It may get the same
 address as the loader, or another one.
 
-**Find the address.** Open the router's list of devices again (step 4) and
+**Find the address.** First try the name: the kernel answers to
+**kilo.local** (that is mDNS: the laptop asks the network "who is
+kilo.local?" and the Pi answers). On the laptop:
+
+```
+ping -c 3 kilo.local
+```
+
+If that prints replies, its address (`192.168.88.Y`) is in them, and you can
+also use `kilo.local` instead of the address everywhere below. If it says
+"Name or service not known", the laptop may not ask the network for
+`.local` names (on Debian that needs the package `libnss-mdns`), or the
+Pi's mDNS does not work: note which, and use the router instead.
+
+Otherwise open the router's list of devices again (step 4) and
 look for **kilo**, or for the same `b8:27:eb` hardware address. Write the
 address down; below it is `192.168.88.Y`. If the list shows nothing new,
 try the loader's address from step 4: routers often give the same machine
@@ -232,7 +255,69 @@ on pin 40 and the Pi's 5 V, from a cold power-on with the production card
 - rising to falling edge: our start-up (USB scan included) plus Kilo's
   board starting.
 
-### 11. Finish
+### 11. Optional: flash Kilo's board from the laptop, through the Pi
+
+This rewrites Kilo's board firmware with the build on the laptop, the way
+`kilo flash` does today from Linux, but done by the Pi's new kernel. If it
+fails, the board keeps working with the firmware it had or, at worst, waits
+in optiboot until flashed again (optiboot itself is never overwritten).
+
+**Wiring.** The Pi must be able to pull Kilo's reset line:
+
+- With the Pi plugged into the NyBoard's socket, pin 7 already lands on the
+  reset line (docs/raspberry-pi.md). Nothing to add.
+- Way B (header wires): add a fourth wire, Pi pin 7 (GPIO4: the inner
+  row, fourth pin counting pin 1 as the first) to the NyBoard's reset
+  line: the pin marked DTR on the 6-pin header where the USB adapter plugs
+  in. Check the marking on the board first; if there is none, stop here
+  and note it.
+- Way A (USB cable) does **not** work for this: on the cable, the reset
+  line is the adapter's DTR, and the kernel cannot pulse it. The kernel
+  will try for about 3 s and report `SYNC_TIMEOUT`; Kilo keeps its old
+  firmware.
+
+**Flash.** With Kilo on and the even blink (step 7), on the laptop:
+
+```
+~/OpenCat/.venv/bin/kilo flash --host 192.168.88.Y
+```
+
+It first builds the firmware on the laptop (a few minutes the first time),
+then sends it. While the Pi flashes, the ACT light gives **two short
+flashes, then a pause**, once a second; the laptop prints progress lines
+starting `flash:`. The last line should be like:
+
+```
+verified: HELLO build 3d441ec0 reset FLASHED
+```
+
+and the light should go back to the even blink.
+
+**Read the log** straight after (the mind keeps only its last 64 lines):
+
+```
+~/OpenCat/.venv/bin/kilo log --host 192.168.88.Y --lines 64 --duration 5
+```
+
+Copy into the results the lines starting with:
+
+- `flash: optiboot in sync ... ms after release`: how long optiboot took to
+  answer after the reset;
+- `flash: programmed`, `flash: verified` and `flash: done in ... ms`;
+- `body flashed from the laptop` (or `body flash from the laptop FAILED`).
+
+**Optional, keep it on the card.** Run the same command with `--persist`.
+Then the log should also show `SD: --persist: wrote body.bin ...`. Power
+the Pi off and on and, after the even blink, look in the log for `boot
+flash check: the body runs build ..., the card's: no flash`: at every boot
+the Pi compares the card's firmware with Kilo's and flashes only when they
+differ.
+
+If it fails: note the laptop's last line and the log lines above. Power
+Kilo off and on; if the light then never gets to the even blink, Kilo's
+board is waiting in optiboot: flash it the way you do today, from Linux.
+
+### 12. Finish
 
 Power the Pi off. Way A: unplug the USB cable from the Pi before you switch
 Kilo off.

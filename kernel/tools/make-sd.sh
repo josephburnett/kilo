@@ -1,10 +1,14 @@
 #!/bin/sh
 # Copy the Pi boot files, config.txt and a kernel image onto a mounted FAT partition.
 #
-#   kernel/tools/make-sd.sh <mountpoint> [--netboot|--kernel]
+#   kernel/tools/make-sd.sh <mountpoint> [--netboot|--kernel] [--body DIR]
 #
 #   --netboot  (default) the network loader, build/netboot/kernel7.img: the bench card
 #   --kernel   the mind kernel, build/kernel7.img: the production card
+#   --body DIR also copy the body image DIR/body.bin and DIR/body.json (what
+#              `kilo flash` builds, ~/.cache/kilo-build by default): the mind
+#              kernel flashes it at boot if the body runs another build
+#              (kernel/README.md "Flashing the body"). Both files or neither.
 #
 # Never partitions or formats anything. Refuses unless <mountpoint> is the root
 # of a mounted vfat filesystem that is empty or holds only Pi boot files. A
@@ -18,19 +22,22 @@ here=$(cd "$(dirname "$0")" && pwd)
 kernel=$here/..
 fw=$kernel/circle/boot
 
-usage() { echo "usage: $0 <mountpoint> [--netboot|--kernel]" >&2; exit 2; }
+usage() { echo "usage: $0 <mountpoint> [--netboot|--kernel] [--body DIR]" >&2; exit 2; }
 
 dir=
 img=$kernel/build/netboot/kernel7.img
 force=0
-for a in "$@"; do
-	case $a in
+body=
+while [ $# -gt 0 ]; do
+	case $1 in
 	--netboot) img=$kernel/build/netboot/kernel7.img ;;
 	--kernel) img=$kernel/build/kernel7.img ;;
+	--body) [ $# -ge 2 ] || usage; body=$2; shift ;;
 	--force-dir) force=1 ;;
 	-*) usage ;;
-	*) [ -z "$dir" ] || usage; dir=$a ;;
+	*) [ -z "$dir" ] || usage; dir=$1 ;;
 	esac
+	shift
 done
 [ -n "$dir" ] || usage
 [ -d "$dir" ] || { echo "$dir: not a directory" >&2; exit 1; }
@@ -78,10 +85,35 @@ for f in bootcode.bin start_cd.elf fixup_cd.dat LICENCE.broadcom; do
 done
 [ -f "$img" ] || { echo "missing $img (run: make -C kernel)" >&2; exit 1; }
 
+# The body image: both files, and the manifest's size must be body.bin's
+# (the kernel checks size and CRC again before it flashes).
+if [ -n "$body" ]; then
+	[ -f "$body/body.bin" ] && [ -f "$body/body.json" ] || {
+		echo "--body $body: needs both body.bin and body.json there (kilo flash builds them)" >&2; exit 1; }
+	want=$(tr -d '\n' < "$body/body.json" | sed -n 's/.*"size": *\([0-9]*\).*/\1/p')
+	have=$(wc -c < "$body/body.bin")
+	if [ -z "$want" ] || [ "$want" -ne "$have" ]; then
+		echo "--body $body: body.json says size '${want}', body.bin has $have bytes" >&2; exit 1
+	fi
+	if [ "$have" -gt 32256 ]; then
+		echo "--body $body: body.bin is $have bytes, over 32256 (32 KB less optiboot)" >&2; exit 1
+	fi
+fi
+
 for f in bootcode.bin start_cd.elf fixup_cd.dat LICENCE.broadcom; do
 	cp "$fw/$f" "$dir/$f"
 done
 cp "$kernel/boot/config.txt" "$dir/config.txt"
 cp "$img" "$dir/kernel7.img"
+wrote="bootcode.bin start_cd.elf fixup_cd.dat LICENCE.broadcom config.txt kernel7.img (from ${img#$kernel/})"
+if [ -n "$body" ]; then
+	# Old manifest first, new one last: never a manifest beside half an image.
+	rm -f "$dir/body.json"
+	cp "$body/body.bin" "$dir/body.bin"
+	cp "$body/body.json" "$dir/body.json"
+	wrote="$wrote body.bin body.json (from $body)"
+elif [ -e "$dir/body.json" ] || [ -e "$dir/body.bin" ]; then
+	echo "note: $dir keeps the body.bin/body.json already there; the mind kernel flashes it at boot if the body runs another build" >&2
+fi
 sync
-echo "wrote to $dir: bootcode.bin start_cd.elf fixup_cd.dat LICENCE.broadcom config.txt kernel7.img (from ${img#$kernel/})"
+echo "wrote to $dir: $wrote"
