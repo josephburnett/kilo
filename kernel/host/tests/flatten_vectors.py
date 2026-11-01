@@ -43,6 +43,7 @@ def main() -> int:
         out.append(f"hframe {v['name']} {v['msg']} {v['type']} {v['seq']} {v['payload'] or '-'} {v['wire']}")
     out += [f"herror {v['name']} {v['wire']} {v['error']}" for v in host["errors"]]
     out += [f"hcheck {v['name']} {v['wire']} {v['status']}" for v in host["checks"]]
+    out += [f"crc32 {v['name']} {v['data'] or '-'} {v['crc']}" for v in host["crc32"]]
 
     spec = importlib.util.spec_from_file_location("kilo_protocol", repo / "protocol" / "gen" / "kilo_protocol.py")
     P = importlib.util.module_from_spec(spec)

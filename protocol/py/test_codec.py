@@ -297,7 +297,8 @@ HOST = json.loads((ROOT / "vectors" / "host_frames.json").read_text())
 
 def test_host_vectors_cover_every_host_message():
     assert {f["type"] for f in HOST["frames"]} == set(P.HOST_MESSAGES)
-    assert not set(P.HOST_MESSAGES) & (set(range(0x40, 0x50)) | set(range(0xC0, 0xD0)))  # flash: P4
+    flash_ids = set(range(0x40, 0x50)) | set(range(0xC0, 0xD0))  # the flash channel (P4): FLASH_* only
+    assert all((i in flash_ids) == m.NAME.startswith("FLASH_") for i, m in P.HOST_MESSAGES.items())
     assert P.HostStatus.MAX_LEN <= P.HOST_MAX_PAYLOAD and P.HOST_MAX_FRAME == P.HOST_MAX_PAYLOAD + 6
 
 
@@ -318,6 +319,12 @@ def test_host_error_vectors(v):
     with pytest.raises(C.HostFrameError) as ei:
         C.HostStreamDecoder().feed(bytes.fromhex(v["wire"]))
     assert ei.value.kind == v["error"]
+
+
+@pytest.mark.parametrize("v", HOST["crc32"], ids=lambda v: v["name"])
+def test_host_crc32_vectors(v):
+    import zlib
+    assert f"{zlib.crc32(bytes.fromhex(v['data'])):08x}" == v["crc"]
 
 
 def test_host_stream_split_anywhere():

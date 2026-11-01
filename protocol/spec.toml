@@ -1155,8 +1155,8 @@ not_held = -32768
 #                  seq: the message whose reply_to names it, else RESULT;
 #        stream  = one-way, never answered (KEEPALIVE, BRIDGE_TX, TELEM, ...);
 #        event   = mind -> client reply (RESULT, STATUS).
-# 0x40..0x4F and 0xC0..0xCF are reserved for the flash channel (P4, §6);
-# gen.py refuses messages there.
+# 0x40..0x4F and 0xC0..0xCF are the flash channel (P4, §6): only FLASH_*
+# messages may use them (gen.py checks).
 #
 # Rules: any number of clients up to host.max_clients; each may read STATUS
 # and subscribe to TELEM and LOG_LINE. One controller at a time: the first to
@@ -1173,6 +1173,18 @@ not_held = -32768
 # BridgeTransport under kilo.link). BRIDGE_CLOSE (or losing control) resumes
 # the link, which reconnects (HELLO_REQ). While bridged the body's watchdog
 # applies as usual.
+#
+# Flash (P4, docs/fast-boot.md §6): the controller sends FLASH_BEGIN (the
+# manifest: build, image_size, crc32, flags), the image in FLASH_DATA chunks in
+# order, then FLASH_COMMIT. The mind checks size and CRC-32 (zlib's) and
+# answers COMMIT with RESULT OK (flashing has started) or IMAGE_BAD; then it
+# pauses its link as the bridge does, resets the body into optiboot (GPIO4)
+# and programs it over STK500v1 at host.flash_baud, reporting FLASH_STATUS to
+# that client at each step and page, and last DONE (the body's HELLO after
+# the flash has fw_build == build) or FAILED with an error. Any failure puts
+# the link back at the link baud. While flashing, POSTURE, PARAM_SET, the
+# bridge and another FLASH_BEGIN get FLASHING. Losing control while
+# receiving drops the image; once flashing it runs to the end.
 #
 # Addressing (decided in P2): on a direct cable nothing serves DHCP. The mind
 # asks DHCP for host.dhcp_timeout_ms; with no lease it takes the fixed
@@ -1195,6 +1207,10 @@ bridge_chunk_max = 200         # BRIDGE_TX / BRIDGE_RX data bytes per frame
 dhcp_timeout_ms = 3000         # the mind's wait for a DHCP lease before the link-local fallback
 fallback_ip = [169, 254, 75, 73]
 fallback_prefix = 16
+flash_max_image = 32256        # B: the ATmega328P's 32 KB less optiboot's 512 B (FLASH_BEGIN.image_size)
+flash_page = 128               # B: the 328P's flash page (one STK500 PROG_PAGE / READ_PAGE)
+flash_chunk_max = 200          # FLASH_DATA data bytes per frame (as the bridge)
+flash_baud = 115200            # optiboot's UART rate (the link's is link.baud)
 
 [enums.host_result_code]       # RESULT.code
 OK = 0
@@ -1207,6 +1223,8 @@ NO_BODY = 6                    # the link is down, or the body speaks another pr
 BUSY = 7                       # CONTROL take=1 while another client has control
 BRIDGED = 8                    # refused while the raw bridge is open
 NOT_BRIDGED = 9                # BRIDGE_CLOSE without an open bridge
+IMAGE_BAD = 10                 # FLASH_COMMIT: the image does not check (FLASH_STATUS.error says why); FLASH_BEGIN: a bad manifest
+FLASHING = 11                  # refused while the body is being flashed
 
 [enums.host_controller]        # STATUS.controller, as seen by the asking client
 NONE = 0
@@ -1227,6 +1245,40 @@ HAS_TELEMETRY = 3
 CONTACT = 4                    # the body was heard on this connection: motion goals may go out
 BRIDGE = 5                     # the raw bridge is open (the link is paused)
 CONTROLLED = 6                 # some client has control
+FLASHING = 7                   # the body is being flashed (the link is paused until the body boots)
+
+[enums.flash_phase]            # FLASH_STATUS.phase
+IDLE = 0
+RECEIVING = 1                  # FLASH_BEGIN accepted, FLASH_DATA arriving
+RESETTING = 2                  # GPIO4 low (host.flash_baud set)
+SYNCING = 3                    # STK500 GET_SYNC until optiboot answers
+PROGRAMMING = 4                # LOAD_ADDRESS + PROG_PAGE, page of pages
+VERIFYING = 5                  # LOAD_ADDRESS + READ_PAGE, page of pages
+BOOTING = 6                    # LEAVE_PROGMODE done, link baud back: waiting for the new firmware's HELLO
+DONE = 7                       # HELLO.fw_build == build
+FAILED = 8                     # error says why; the link is back
+
+[enums.flash_error]            # FLASH_STATUS.error
+NONE = 0
+BAD_SIZE = 1                   # FLASH_BEGIN.image_size 0 or > host.flash_max_image
+BAD_BUILD = 2                  # FLASH_BEGIN.build 0
+BAD_OFFSET = 3                 # FLASH_DATA out of order or past size
+SHORT = 4                      # FLASH_COMMIT before image_size bytes arrived
+CRC_MISMATCH = 5               # the image's CRC-32 is not FLASH_BEGIN.crc32
+SYNC_TIMEOUT = 6               # optiboot never answered GET_SYNC (every attempt)
+NO_REPLY = 7                   # an STK500 command got no (complete) answer in time
+BAD_REPLY = 8                  # an answer that is not STK_INSYNC ... STK_OK
+BAD_SIGNATURE = 9              # READ_SIGN is not the ATmega328P's 1E 95 0F
+VERIFY_MISMATCH = 10           # READ_PAGE differs from what was programmed
+SERIAL = 11                    # the UART failed
+BAUD = 12                      # the UART cannot be set to host.flash_baud or back
+NO_HELLO = 13                  # no HELLO from the body after the flash
+WRONG_BUILD = 14               # HELLO.fw_build after the flash is not build
+BAD_RESET_CAUSE = 15           # HELLO.reset_cause after the flash is not FLASHED
+CONTROL_LOST = 16              # the controller let go while receiving: the image is dropped
+
+[flags.flash_flags]            # FLASH_BEGIN.flags
+PERSIST = 0                    # after DONE the platform writes body.bin + body.json to SD (kernel/mind/README.md "Flashing")
 
 [structs.host_link_stats]      # 80 B: the mind's link counters (kernel/mind/link/stats.h; kilo/body/state.py LinkStats)
 fields = [
@@ -1367,6 +1419,38 @@ doc = "Resume the mind's link (it reconnects: HELLO_REQ). Controller only."
 fields = []
 
 [[host_messages]]
+name = "FLASH_BEGIN"
+id = 0x40
+dir = "client_to_mind"
+kind = "command"
+doc = "Start receiving a body image (controller only): its manifest. Drops any image received before. RESULT IMAGE_BAD for an image_size of 0 or over host.flash_max_image, or build 0; FLASHING while a flash runs; BRIDGED while the bridge is open."
+fields = [
+  { name = "build", type = "u32", note = "the image's -DKILO_BUILD (commit hash, 8 hex digits): HELLO.fw_build after the flash" },
+  { name = "image_size", type = "u32", unit = "B", range = [1, 32256], note = "bytes of body.bin" },
+  { name = "crc32", type = "u32", note = "CRC-32 of the image (zlib.crc32)" },
+  { name = "flags", type = "u8", flags = "flash_flags" },
+]
+
+[[host_messages]]
+name = "FLASH_DATA"
+id = 0x41
+dir = "client_to_mind"
+kind = "stream"
+doc = "The next bytes of the image, in order from offset 0. Not answered; an offset that is not the bytes received so far (or data past image_size) fails the image, which FLASH_COMMIT then reports (BAD_OFFSET). Dropped unless from the client that sent FLASH_BEGIN."
+fields = [
+  { name = "offset", type = "u32", unit = "B" },
+  { name = "data", type = "bytes", min = 1, max = 200 },
+]
+
+[[host_messages]]
+name = "FLASH_COMMIT"
+id = 0x42
+dir = "client_to_mind"
+kind = "command"
+doc = "Check the received image (size, CRC-32) and flash it. RESULT OK: flashing has started, FLASH_STATUS follows to this client until DONE or FAILED; IMAGE_BAD: the image is dropped, a FLASH_STATUS FAILED says why."
+fields = []
+
+[[host_messages]]
 name = "RESULT"
 id = 0x80
 dir = "mind_to_client"
@@ -1441,4 +1525,23 @@ kind = "stream"
 doc = "Bytes the body's UART received, to the controller while the bridge is open."
 fields = [
   { name = "data", type = "bytes", min = 1, max = 200 },
+]
+
+[[host_messages]]
+name = "FLASH_STATUS"
+id = 0xC0
+dir = "mind_to_client"
+kind = "stream"
+doc = "Progress of a flash, to the client that committed it: on every phase change and page, last DONE or FAILED."
+fields = [
+  { name = "phase", type = "u8", enum = "flash_phase" },
+  { name = "error", type = "u8", enum = "flash_error" },
+  { name = "attempt", type = "u8", note = "1.., a fresh reset each" },
+  { name = "stk_cmd", type = "u8", note = "FAILED: the STK500 command that failed (0 none)" },
+  { name = "page", type = "u16", note = "pages done in PROGRAMMING / VERIFYING" },
+  { name = "pages", type = "u16" },
+  { name = "received", type = "u32", unit = "B", note = "image bytes received" },
+  { name = "build", type = "u32", note = "the image's build" },
+  { name = "fw_build", type = "u32", note = "HELLO.fw_build after the flash, 0 = none yet" },
+  { name = "reset_cause", type = "u8", enum = "reset_cause", note = "of that HELLO" },
 ]

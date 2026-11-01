@@ -202,7 +202,7 @@ def validate(spec: dict) -> None:
 
 HOST_DIRS = {"client_to_mind": (0x01, 0x7F, ("command", "stream")),
              "mind_to_client": (0x80, 0xFF, ("stream", "event"))}
-HOST_RESERVED = (range(0x40, 0x50), range(0xC0, 0xD0))  # the flash channel (P4)
+HOST_FLASH_IDS = (range(0x40, 0x50), range(0xC0, 0xD0))  # the flash channel (P4): FLASH_* only, and only there
 
 
 def validate_host(spec: dict) -> None:
@@ -224,11 +224,13 @@ def validate_host(spec: dict) -> None:
         lo, hi, kinds = HOST_DIRS[m["dir"]]
         if not lo <= i <= hi or m["kind"] not in kinds:
             raise SpecError(f"host {n}: {m['dir']} must be {lo:#x}..{hi:#x} and one of {kinds}")
-        if any(i in r for r in HOST_RESERVED):
-            raise SpecError(f"host {n}: {i:#x} is reserved for the flash channel")
+        if any(i in r for r in HOST_FLASH_IDS) != n.startswith("FLASH_"):
+            raise SpecError(f"host {n}: ids 0x40..0x4F and 0xC0..0xCF are the flash channel's, for FLASH_* only")
         for f in m["fields"]:
             if "count_field" in f:
                 raise SpecError(f"host {n}.{f['name']}: no count_field arrays (use bytes)")
+            if f["name"] == "size":  # its offset assert would reuse the struct's kilo_sa_host_*_size tag
+                raise SpecError(f"host {n}.size: name it something else (it collides with the size assert)")
             t = f["type"]
             if t not in SCALARS and t != "bytes" and t not in spec["structs"]:
                 bm = body_msg(spec, t)
@@ -256,6 +258,14 @@ def validate_host(spec: dict) -> None:
     lm = next(m for m in spec["host_messages"] if m["name"] == "LOG_LINE")
     if lm["fields"][-1]["max"] != h["log_text_max"]:
         raise SpecError("host: LOG_LINE text max != host.log_text_max")
+    fd = next(m for m in spec["host_messages"] if m["name"] == "FLASH_DATA")
+    if fd["fields"][-1]["max"] != h["flash_chunk_max"]:
+        raise SpecError("host: FLASH_DATA data max != host.flash_chunk_max")
+    fb = next(m for m in spec["host_messages"] if m["name"] == "FLASH_BEGIN")
+    if next(f for f in fb["fields"] if f["name"] == "image_size")["range"] != [1, h["flash_max_image"]]:
+        raise SpecError("host: FLASH_BEGIN image_size range != [1, host.flash_max_image]")
+    if h["flash_max_image"] % h["flash_page"]:
+        raise SpecError("host: flash_max_image must be whole pages")
 
 
 def field_range(spec: dict, msg: str, name: str) -> tuple[int, int]:

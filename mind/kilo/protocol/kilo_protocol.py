@@ -247,6 +247,8 @@ class HostResultCode(enum.IntEnum):
     BUSY = 7
     BRIDGED = 8
     NOT_BRIDGED = 9
+    IMAGE_BAD = 10
+    FLASHING = 11
 
 
 class HostController(enum.IntEnum):
@@ -260,6 +262,38 @@ class LogLevel(enum.IntEnum):
     INFO = 1
     WARN = 2
     ERROR = 3
+
+
+class FlashPhase(enum.IntEnum):
+    IDLE = 0
+    RECEIVING = 1
+    RESETTING = 2
+    SYNCING = 3
+    PROGRAMMING = 4
+    VERIFYING = 5
+    BOOTING = 6
+    DONE = 7
+    FAILED = 8
+
+
+class FlashError(enum.IntEnum):
+    NONE = 0
+    BAD_SIZE = 1
+    BAD_BUILD = 2
+    BAD_OFFSET = 3
+    SHORT = 4
+    CRC_MISMATCH = 5
+    SYNC_TIMEOUT = 6
+    NO_REPLY = 7
+    BAD_REPLY = 8
+    BAD_SIGNATURE = 9
+    VERIFY_MISMATCH = 10
+    SERIAL = 11
+    BAUD = 12
+    NO_HELLO = 13
+    WRONG_BUILD = 14
+    BAD_RESET_CAUSE = 15
+    CONTROL_LOST = 16
 
 
 class TelemetryFlags(enum.IntFlag):
@@ -327,6 +361,11 @@ class HostState(enum.IntFlag):
     CONTACT = 1 << 4
     BRIDGE = 1 << 5
     CONTROLLED = 1 << 6
+    FLASHING = 1 << 7
+
+
+class FlashFlags(enum.IntFlag):
+    PERSIST = 1 << 0
 
 
 LEN_OK = 0
@@ -2755,6 +2794,10 @@ HOST_BRIDGE_CHUNK_MAX = 200
 HOST_DHCP_TIMEOUT_MS = 3000
 HOST_FALLBACK_IP = (169, 254, 75, 73)
 HOST_FALLBACK_PREFIX = 16
+HOST_FLASH_MAX_IMAGE = 32256
+HOST_FLASH_PAGE = 128
+HOST_FLASH_CHUNK_MAX = 200
+HOST_FLASH_BAUD = 115200
 
 
 class HostMsgId(enum.IntEnum):
@@ -2769,11 +2812,15 @@ class HostMsgId(enum.IntEnum):
     BRIDGE_OPEN = 0x30
     BRIDGE_TX = 0x31
     BRIDGE_CLOSE = 0x32
+    FLASH_BEGIN = 0x40
+    FLASH_DATA = 0x41
+    FLASH_COMMIT = 0x42
     RESULT = 0x80
     STATUS = 0x81
     TELEM = 0x82
     LOG_LINE = 0x83
     BRIDGE_RX = 0x84
+    FLASH_STATUS = 0xC0
 
 
 @dataclass
@@ -3227,6 +3274,136 @@ class HostBridgeClose:
 
 
 @dataclass
+class HostFlashBegin:
+    """host 0x40 FLASH_BEGIN (command). Start receiving a body image (controller only): its manifest. Drops any image received before. RESULT IMAGE_BAD for an image_size of 0 or over host.flash_max_image, or build 0; FLASHING while a flash runs; BRIDGED while the bridge is open."""
+    ID: ClassVar[int] = 0x40
+    NAME: ClassVar[str] = 'FLASH_BEGIN'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 13
+    MAX_LEN: ClassVar[int] = 13
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<IIIB')
+    build: int = 0  # the image's -DKILO_BUILD (commit hash, 8 hex digits): HELLO.fw_build after the flash
+    image_size: int = 0  # B; range 1..32256; bytes of body.bin
+    crc32: int = 0  # CRC-32 of the image (zlib.crc32)
+    flags: int = 0  # flags flash_flags
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.build)
+        v.append(self.image_size)
+        v.append(self.crc32)
+        v.append(self.flags)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['build'] = v[0]
+        kw['image_size'] = v[1]
+        kw['crc32'] = v[2]
+        kw['flags'] = v[3]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostFlashData:
+    """host 0x41 FLASH_DATA (stream). The next bytes of the image, in order from offset 0. Not answered; an offset that is not the bytes received so far (or data past image_size) fails the image, which FLASH_COMMIT then reports (BAD_OFFSET). Dropped unless from the client that sent FLASH_BEGIN."""
+    ID: ClassVar[int] = 0x41
+    NAME: ClassVar[str] = 'FLASH_DATA'
+    KIND: ClassVar[Kind] = Kind.STREAM
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 5
+    MAX_LEN: ClassVar[int] = 204
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<I')
+    offset: int = 0  # B
+    data: bytes = b''  # 1..200 B
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.offset)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['offset'] = v[0]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        tail = bytes(self.data)
+        if not 1 <= len(tail) <= 200:
+            raise PayloadError('data: 1..200 bytes, got %d' % len(tail))
+        try:
+            return self._FMT.pack(*self._fixed_values()) + tail
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data[:4]), data=data[4:])
+
+
+@dataclass
+class HostFlashCommit:
+    """host 0x42 FLASH_COMMIT (command). Check the received image (size, CRC-32) and flash it. RESULT OK: flashing has started, FLASH_STATUS follows to this client until DONE or FAILED; IMAGE_BAD: the image is dropped, a FLASH_STATUS FAILED says why."""
+    ID: ClassVar[int] = 0x42
+    NAME: ClassVar[str] = 'FLASH_COMMIT'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 0
+    MAX_LEN: ClassVar[int] = 0
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<')
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
 class HostResult:
     """host 0x80 RESULT (event). The answer to a command without a reply message of its own, and to any refused command: its seq, its type, a code and a short reason."""
     ID: ClassVar[int] = 0x80
@@ -3507,6 +3684,73 @@ class HostBridgeRx:
         return cls._from_fixed(cls._FMT.unpack(data[:0]), data=data[0:])
 
 
+@dataclass
+class HostFlashStatus:
+    """host 0xC0 FLASH_STATUS (stream). Progress of a flash, to the client that committed it: on every phase change and page, last DONE or FAILED."""
+    ID: ClassVar[int] = 0xC0
+    NAME: ClassVar[str] = 'FLASH_STATUS'
+    KIND: ClassVar[Kind] = Kind.STREAM
+    DIR: ClassVar[str] = 'mind_to_client'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 21
+    MAX_LEN: ClassVar[int] = 21
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BBBBHHIIIB')
+    phase: int = 0  # enum flash_phase
+    error: int = 0  # enum flash_error
+    attempt: int = 0  # 1.., a fresh reset each
+    stk_cmd: int = 0  # FAILED: the STK500 command that failed (0 none)
+    page: int = 0  # pages done in PROGRAMMING / VERIFYING
+    pages: int = 0
+    received: int = 0  # B; image bytes received
+    build: int = 0  # the image's build
+    fw_build: int = 0  # HELLO.fw_build after the flash, 0 = none yet
+    reset_cause: int = 0  # enum reset_cause; of that HELLO
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.phase)
+        v.append(self.error)
+        v.append(self.attempt)
+        v.append(self.stk_cmd)
+        v.append(self.page)
+        v.append(self.pages)
+        v.append(self.received)
+        v.append(self.build)
+        v.append(self.fw_build)
+        v.append(self.reset_cause)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['phase'] = v[0]
+        kw['error'] = v[1]
+        kw['attempt'] = v[2]
+        kw['stk_cmd'] = v[3]
+        kw['page'] = v[4]
+        kw['pages'] = v[5]
+        kw['received'] = v[6]
+        kw['build'] = v[7]
+        kw['fw_build'] = v[8]
+        kw['reset_cause'] = v[9]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
 HOST_MESSAGES: dict[int, type] = {
     0x01: HostStatusReq,
     0x02: HostControl,
@@ -3519,11 +3763,15 @@ HOST_MESSAGES: dict[int, type] = {
     0x30: HostBridgeOpen,
     0x31: HostBridgeTx,
     0x32: HostBridgeClose,
+    0x40: HostFlashBegin,
+    0x41: HostFlashData,
+    0x42: HostFlashCommit,
     0x80: HostResult,
     0x81: HostStatus,
     0x82: HostTelem,
     0x83: HostLogLine,
     0x84: HostBridgeRx,
+    0xC0: HostFlashStatus,
 }
 
 
@@ -3552,6 +3800,12 @@ def host_payload_len_status(msg_type: int, payload: bytes) -> int:
         return LEN_OK if 1 <= n <= 200 else LEN_BAD
     if msg_type == 0x32:
         return LEN_OK if n == 0 else LEN_BAD
+    if msg_type == 0x40:
+        return LEN_OK if n == 13 else LEN_BAD
+    if msg_type == 0x41:
+        return LEN_OK if 5 <= n <= 204 else LEN_BAD
+    if msg_type == 0x42:
+        return LEN_OK if n == 0 else LEN_BAD
     if msg_type == 0x80:
         return LEN_OK if 2 <= n <= 62 else LEN_BAD
     if msg_type == 0x81:
@@ -3562,6 +3816,8 @@ def host_payload_len_status(msg_type: int, payload: bytes) -> int:
         return LEN_OK if 9 <= n <= 168 else LEN_BAD
     if msg_type == 0x84:
         return LEN_OK if 1 <= n <= 200 else LEN_BAD
+    if msg_type == 0xC0:
+        return LEN_OK if n == 21 else LEN_BAD
     return LEN_UNKNOWN_TYPE
 
 
