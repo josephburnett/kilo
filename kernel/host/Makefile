@@ -159,4 +159,4 @@ clean:
 
 # ---- P3 (docs/fast-boot.md): tricks, perception, behaviour, remote and the Mind --------
 # Their unit tests join `make check` (TESTS is read when check runs).
-TESTS += test_tricks
+TESTS += test_tricks test_perception

@@ -354,6 +354,9 @@ echo "   --sd: wrote the card; refused a directory without kernel7.img and an un
 # ---- P3 (docs/fast-boot.md): tricks, perception, behaviour, remote and the Mind ----------------
 echo "== P3: generated tables up to date (tricks)"
 "$PYTHON" "$REPO/kernel/mind/tricks/gen_library.py" --check  # (each generator imports this checkout's mind/)
+echo "== P3: golden vectors up to date with the Python mind (perception)"
+"$PYTHON" "$HERE/tests/gen_perception_vectors.py" | cmp -s - "$HERE/tests/perception_vectors.txt" ||
+    { echo "FAILED: stale; run: $PYTHON kernel/host/tests/gen_perception_vectors.py > kernel/host/tests/perception_vectors.txt"; exit 1; }
 # ---- end P3 ---------------------------------------------------------------------------------------
 
 echo "== all kernel host tests passed"

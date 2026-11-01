@@ -1,8 +1,10 @@
 // body_state: the mind's view of the body as the link sees it. Python
-// counterpart: BodyState in kilo/body/state.py, the part the link updates
+// counterpart: BodyState in kilo/body/state.py: the part the link updates
 // (latest TELEMETRY with the tick unwrapped, the epoch, the last HELLO and
-// protocol check, reboots, events). The derived percepts (distance median,
-// battery percent, upright) belong to perception (docs/fast-boot.md P3).
+// protocol check, reboots, events) and its derived values (distance median
+// and approach speed, battery percent, fallen, upright, moving), which the
+// behaviour runner reads. The detectors (near with hysteresis, tilt, tap...)
+// are perception/'s.
 #ifndef KILO_MIND_LINK_BODY_STATE_H
 #define KILO_MIND_LINK_BODY_STATE_H
 #include <stdint.h>
@@ -44,7 +46,33 @@ struct BodyState {
   void reset_session();
   // Connected, and a TELEMETRY less than lost_us old.
   bool alive(uint64_t now_us, uint32_t lost_us) const;
+
+  // ---- derived (state.py properties) ----------------------------------------------
+  // Median of the last 3 echoes (0 = no echo is skipped); false before any.
+  bool distance_mm(double* mm) const;
+  // Closing speed (mm/s, positive = closer) over the last 8 medians; false
+  // with fewer than 2 or no time between them.
+  bool approach_mm_s(double* v) const;
+  // The pack's charge from the resting 2S curve (est.); false without a
+  // battery (NO_BATTERY flag) or a voltage.
+  bool battery_pct(double* pct) const;
+  bool fallen() const;   // mode FALLEN or RECOVERING
+  bool moving() const;   // the gait/trick flags, or mode GAIT, TRICK, RECOVERING
+  // |pitch| and |roll| under 30 deg and not fallen; -1 before any TELEMETRY.
+  int upright() const;
+
+  struct DistPoint {
+    uint64_t at_us;
+    double median;
+  };
+  uint16_t dist_[3] = {};  // the last echoes (state.py _dist, maxlen 3)
+  uint8_t dist_n_ = 0;
+  DistPoint dist_hist_[8] = {};  // (arrival, median) (_dist_hist, maxlen 8)
+  uint8_t dist_hist_head_ = 0, dist_hist_n_ = 0;
 };
+
+// state.py battery_percent: pack mV on the resting 2S curve (est.).
+double battery_percent(uint16_t mv);
 
 }  // namespace kilo
 

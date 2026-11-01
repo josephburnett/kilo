@@ -34,4 +34,7 @@ MIND_SRCS += \
 	mind/tricks/model.cpp \
 	mind/tricks/library.cpp \
 	mind/tricks/library.gen.cpp \
-	mind/tricks/player.cpp
+	mind/tricks/player.cpp \
+	mind/perception/ultrasonic.cpp \
+	mind/perception/imu.cpp \
+	mind/perception/percepts.cpp
