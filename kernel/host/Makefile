@@ -48,6 +48,9 @@ $(B)/obj/host/main.o: $(B)/mind-build-id
 # STK500 flasher against a scripted optiboot, and the host channel's flash
 # messages (the core sources are in mind/sources.mk).
 TESTS += test_flash
+# P3: tricks, perception, behaviour, remote and the Mind (their block is at the end;
+# TESTS must be complete here, before `check:` reads it for its prerequisites).
+TESTS += test_tricks test_perception test_behaviour test_remote test_mind
 
 .PHONY: all check bench freestanding clean
 all: $(B)/kilo-mind-host $(B)/walk-demo
@@ -158,8 +161,6 @@ clean:
 -include $(shell find $(B) -name '*.d' 2>/dev/null)
 
 # ---- P3 (docs/fast-boot.md): tricks, perception, behaviour, remote and the Mind --------
-# Their unit tests join `make check` (TESTS is read when check runs).
-TESTS += test_tricks test_perception test_behaviour test_remote test_mind
 # Perception and behaviour compute in double as Python does (util/dmath.h):
 # the drives' arousal decay needs exp, their optional gaussian noise log, sin
 # and cos (GCC fuses the pair into sincos). Circle links libm, which has them.
