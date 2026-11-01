@@ -159,7 +159,7 @@ clean:
 
 # ---- P3 (docs/fast-boot.md): tricks, perception, behaviour, remote and the Mind --------
 # Their unit tests join `make check` (TESTS is read when check runs).
-TESTS += test_tricks test_perception test_behaviour
+TESTS += test_tricks test_perception test_behaviour test_remote
 # Perception and behaviour compute in double as Python does (util/dmath.h):
 # the drives' arousal decay needs exp, their optional gaussian noise log, sin
 # and cos (GCC fuses the pair into sincos). Circle links libm, which has them.

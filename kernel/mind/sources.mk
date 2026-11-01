@@ -44,4 +44,7 @@ MIND_SRCS += \
 	mind/behaviour/tree.cpp \
 	mind/behaviour/selector.cpp \
 	mind/behaviour/library.cpp \
-	mind/behaviour/runner.cpp
+	mind/behaviour/runner.cpp \
+	mind/remote/client.cpp \
+	mind/remote/keys.cpp \
+	mind/remote/remote.cpp

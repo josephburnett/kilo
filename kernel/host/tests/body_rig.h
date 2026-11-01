@@ -58,10 +58,17 @@ struct FakeBody {
     e.epoch = epoch;
     serial.feed_frame(KILO_MSG_EVENT, seq++, &e, sizeof e);
   }
-  // Read what the mind wrote; ACK its commands.
+  // Read what the mind wrote; ACK its commands. FEET enter GAIT; the
+  // STANCE posture ends it (EVENT GAIT_STOPPED), as the body does.
   void react() {
     for (const Sent& s : serial.take_sent()) {
       sent.push_back(s);
+      if (s.type == KILO_MSG_FEET && mode == KILO_MODE_IDLE) mode = KILO_MODE_GAIT;
+      if (s.type == KILO_MSG_SET_POSTURE && s.payload.size() == 4 && s.payload[1] == KILO_POSTURE_STANCE &&
+          mode == KILO_MODE_GAIT) {
+        mode = KILO_MODE_IDLE;
+        event(KILO_EVENT_GAIT_STOPPED, 0);
+      }
       if (s.type == 0xFF || kilo_msg_kind(s.type) != KILO_KIND_COMMAND) continue;
       if (s.type == KILO_MSG_HELLO_REQ) {
         hello();
