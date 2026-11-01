@@ -25,7 +25,7 @@ LDLIBS="$(kilo_sanitizer_ldlibs "$CXX" "$BUILD")"
 echo "== generator up to date"
 "$PYTHON" "$HERE/gen.py" --check
 
-echo "== vendored copies (body/src/proto, mind/kilo/protocol) up to date"
+echo "== vendored copies (body/src/proto, kernel/mind/proto, mind/kilo/protocol) up to date"
 "$PYTHON" "$HERE/vendor.py" --check
 
 echo "== docs' tables agree with the spec's shared defaults (doc_check.py)"

@@ -10,7 +10,7 @@ from it and committed, so consumers never need to run the generator.
 spec.toml              messages, enums, flags, link constants, live params, and the shared
                        defaults and limits (gait patterns, joint limits, balance, head)
 gen.py                 generator (stdlib only, Python 3.11+)
-vendor.py              copies gen/ + c/ into body/src/proto, gen/ + py/ codec into mind/kilo/protocol
+vendor.py              copies gen/ + c/ into body/src/proto and kernel/mind/proto, gen/ + py/ codec into mind/kilo/protocol
 doc_check.py           fails when docs/architecture.md §3b/§3d/§3f or mind/README.md quote other numbers
 vector_cases.py        the test-vector cases gen.py turns into vectors/*.json
 gen/kilo_protocol.h    C99/C++: ids, enums, packed payload structs, constants, length rules
@@ -30,7 +30,7 @@ test.sh                runs everything
 
 ```
 python3 protocol/gen.py          # rewrite gen/ and vectors/ from spec.toml
-python3 protocol/vendor.py       # copy the results into body/src/proto and mind/kilo/protocol
+python3 protocol/vendor.py       # copy the results into body/src/proto, kernel/mind/proto and mind/kilo/protocol
 python3 protocol/gen.py --check  # exit 1 if anything committed is stale
 python3 protocol/vendor.py --check
 ```
