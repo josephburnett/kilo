@@ -36,7 +36,21 @@ CIRCLE_LIBDIRS := lib lib/usb lib/input lib/fs lib/fs/fat lib/sched lib/net
 -include mind/sources.mk
 MIND_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(patsubst %.cpp,$(BUILD)/%.o,$(MIND_SRCS)))
 
-OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(MIND_OBJS)
+OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/src/bootprobe.o \
+	$(MIND_OBJS)
+
+# Build options (README "Body link", "Boot probe"):
+#   KILO_BODY_SERIAL=auto   a USB serial adapter if one enumerates, else the PL011 (default)
+#   KILO_BODY_SERIAL=pl011  the PL011 only, without the USB scan before the link
+#   KILO_BOOT_PROBE=1|0     GPIO21 (header pin 40) marks the boot for a scope (default 1)
+KILO_BODY_SERIAL ?= auto
+KILO_BOOT_PROBE ?= 1
+ifeq ($(KILO_BODY_SERIAL),pl011)
+KILO_DEFS := -DKILO_BODY_SERIAL_PL011
+else ifneq ($(KILO_BODY_SERIAL),auto)
+$(error KILO_BODY_SERIAL must be auto or pl011)
+endif
+KILO_DEFS += -DKILO_BOOT_PROBE=$(KILO_BOOT_PROBE)
 LIBS := $(CIRCLE_LIBS)
 
 NETBOOT_SRC  := $(CIRCLEHOME)/sample/38-bootloader
@@ -62,6 +76,12 @@ KILO_BUILD := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo 0)
 $(shell mkdir -p $(BUILD) && (echo $(KILO_BUILD) | cmp -s - $(BUILD)/build-id || echo $(KILO_BUILD) > $(BUILD)/build-id))
 $(BUILD)/src/kernel.o: CPPFLAGS += -DKILO_BUILD=0x$(KILO_BUILD)
 $(BUILD)/src/kernel.o: $(BUILD)/build-id
+
+# The options reach src/ only; build/options changes when they do, so
+# switching them rebuilds what reads them.
+$(shell mkdir -p $(BUILD) && (echo $(KILO_DEFS) | cmp -s - $(BUILD)/options || echo $(KILO_DEFS) > $(BUILD)/options))
+$(BUILD)/src/%.o: CPPFLAGS += $(KILO_DEFS)
+$(filter $(BUILD)/src/%,$(OBJS)): $(BUILD)/options
 
 # Relink when the object list changes (a mind source added or removed).
 $(shell mkdir -p $(BUILD) && (echo $(OBJS) | cmp -s - $(BUILD)/objs || echo $(OBJS) > $(BUILD)/objs))

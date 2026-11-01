@@ -9,7 +9,7 @@ heap, `std::`, `printf` or libm; the only libc functions are
 `-nostdlib`.
 
 ```
-platform.h        the seams: Serial (non-blocking bytes), Clock (us), Log (lines), Gpio (body RESET)
+platform.h        the seams: Serial (non-blocking bytes, tx_free), Clock (us), Log (lines), Gpio (body RESET)
 util/fmt, log     a small printf (%d %u %x %s %c %%, width, '0') and log lines through Log
 link/serial_link  the link state machine: a port of mind/kilo/link/serial_link.py
 link/body_state   what the link knows of the body (kilo/body/state.py's link part)
@@ -49,7 +49,8 @@ for (;;) {                             // the mind's loop, every few ms
   not go away), no silent/passive mode, no JSONL or `.kilolog` logging.
 - A body with another protocol major is refused in the link (`set_goal`,
   `send_stream` return false), where Python refuses in `BodyClient`.
-- The initial TX seq comes from the clock's low bits, not a random number.
+- The initial TX seq comes from the clock's low bits unless the platform
+  seeds it (`seed_seq()`; the Circle kernel uses the hardware RNG).
 - Enum names and the query -> reply map are listed by hand
   (`link/names.cpp`, `link/consts.cpp`) because the generated C header lacks
   them; `kernel/host/tests/test_names.cpp` checks them against

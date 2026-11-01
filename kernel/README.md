@@ -2,14 +2,15 @@
 
 The mind as a bare-metal kernel for the Raspberry Pi 2 B, built on
 [Circle](https://github.com/rsta2/circle) (docs/fast-boot.md). Everything is
-cross-compiled on the laptop; nothing is built on the Pi. Phase P0: the
-toolchain, Circle, a network boot loader and a hello-world kernel that blinks
-the ACT LED.
+cross-compiled on the laptop; nothing is built on the Pi. Phase P0 gave the
+toolchain, Circle, a network boot loader and a hello-world kernel; phase P1
+runs the mind core's body link on Circle (below, "The mind kernel"). Not yet
+run on a Pi: docs/fast-boot-first-boot.md is the procedure.
 
 | Path | What |
 |---|---|
 | `circle/` | Circle, a git submodule pinned to `Step51.1.1` |
-| `src/` | the mind kernel (`kernel7.img`); today hello world |
+| `src/` | the mind kernel (`kernel7.img`): the core's seams on Circle (`seams.*`), the main loop (`kernel.*`), the boot probe (`bootprobe.*`) |
 | `netboot/` | the network loader: Circle's `sample/38-bootloader` with our `kernel.cpp`, `kernel.h`, `main.cpp` (see below) |
 | `boot/config.txt` | the Pi's `config.txt` |
 | `tools/make-sd.sh` | writes a boot card |
@@ -48,7 +49,7 @@ submodule, then:
 
 | Output | What | Size |
 |---|---|---|
-| `build/kernel7.img` | the mind kernel | 69,668 bytes |
+| `build/kernel7.img` | the mind kernel | 247,956 bytes |
 | `build/netboot/kernel7.img` | the network loader | 305,420 bytes |
 
 The `.elf`, `.map` and `.lst` beside each image are for debugging. A second
@@ -105,8 +106,8 @@ kernel/tools/netboot.sh 192.168.88.X other.img       # any image
 
 Or open `http://192.168.88.X:8080/` in a browser. The loader copies the image
 over itself and jumps to it; nothing is written to the card. To load another
-image, power-cycle the Pi so the loader starts again. The hello-world kernel
-blinks the ACT LED (green, GPIO47) at 2 Hz once it is running.
+image, power-cycle the Pi so the loader starts again. The mind kernel shows
+its state on the ACT LED (green, GPIO47; "ACT LED" below).
 
 `netboot.sh` uses `tools/tftp_put.py` (Python standard library, RFC 1350,
 512-byte blocks, resends after 1 s, 5 tries), so no TFTP client is needed.
@@ -146,8 +147,8 @@ servers (compiled from the submodule as they are):
   therefore only visible in the router.
 - **DHCP hostname `kilo-netboot`** instead of `raspberrypi`.
 
-The hello-world kernel follows the same rules: no `CSerialDevice`, log to the
-screen if there is one, else to a null device.
+The mind kernel logs the same way: to the screen if there is one, else to a
+null device.
 
 ## Circle without a C library
 
@@ -176,14 +177,118 @@ The mind core has to live within that:
 brings its own copy of Circle. Moving to it later is possible but is a
 change of build, not of a flag.
 
+## The mind kernel
+
+`src/kernel.cpp`: initialise (screen or null log, interrupts, timer, the
+body link's serial device), then one loop, every 1 ms: `mark_alive()`,
+`link.poll()`, link statistics once a second, the ACT LED. The core is
+`mind/` (`mind/README.md`); `src/seams.*` implements its seams:
+
+| Seam | On Circle |
+|---|---|
+| `Serial` | `Pl011Serial` or `UsbSerial` (below) |
+| `Clock` | `CTimer::GetClockTicks64()`: 1 MHz, 64 bits, no wrap |
+| `Log` | `CLogger::WriteNoAlloc` (no heap), Info and above; Debug -> `LogDebug`, Info -> `LogNotice`, Warn -> `LogWarning`, Error -> `LogError`. The RAM ring for P2's log tail plugs in at `CircleLog::write`. |
+| `Gpio` | GPIO4 as an emulated open drain: released = input, no pull; asserted = latch low, then output. Never driven high. Released at boot; nothing pulses it until P4. |
+
+The link's first TX seq comes from the SoC's hardware RNG
+(`CBcmRandomNumberGenerator`, `SerialLink::seed_seq()`): the clock reads
+nearly the same at every boot, so the core's clock-based seed would repeat.
+
+The loop sleeps with `CScheduler::usSleep(1000)`, not `CTimer::usDelay`: a
+delay spins with nothing else running; a sleep hands the CPU to Circle's
+cooperative scheduler. Alone (P1) the scheduler spins until the wake tick,
+the same cost; from P2 the net task runs in that gap. A task that does not
+yield for more than a few ms delays the link (it tolerates about 10 ms).
+
+### Body link: two serial back ends
+
+**Selection rule** (`CKernel::ChooseSerial`): initialise Circle's USB host
+(`CUSBHCIDevice`, one scan, no plug-and-play) and use the USB serial device
+`utty1` if one enumerated; else the PL011. The log line `body link on ...`
+says which. A USB adapter plugged in after boot is not seen.
+
+`make -C kernel KILO_BODY_SERIAL=pl011` skips the USB scan and opens the
+PL011 at once: the production wiring, where USB enumeration (about a second
+or more, est.) must not come before the link (docs/fast-boot.md §3 rule 1).
+
+- **USB** (today's wiring): Kilo's CH343 adapter enumerates as CDC-ACM
+  (interface class 2-2-1), so Circle's `CUSBSerialCDCDevice` drives it and
+  names it `utty1` (any USB serial adapter Circle knows gets that name).
+  Baud is set with CDC `SET_LINE_CODING` (250000, 8N1), the same request
+  Linux's `cdc_acm` sends. Opening the adapter raises DTR, which on the
+  NyBoard may reset the body once at boot, as opening `/dev/ttyACM0` does
+  on Linux; the link sees an unsolicited HELLO. Circle's driver writes
+  synchronously (a bulk OUT transfer, no timeout: a frame is two
+  full-speed packets) and reads one USB packet (64 B) per completed IN
+  request: at a 1 ms loop that is up to 64 kB/s, against 25 kB/s line rate.
+  `tx_free()` is a constant 512: there is no queue on this side to measure.
+- **PL011** (GPIO14/15, header pins 8 and 10; `ttyS1`): Circle's
+  `CSerialDevice`, interrupt driven. Built only when chosen, because its
+  constructor takes over GPIO14/15. 250000 baud is exact: UARTCLK 48 MHz /
+  (16 x 250000) = 12, remainder 0, so IBRD 12, FBRD 0. The NL -> CR NL
+  translation that is on by default is switched off (it would break binary
+  frames). Line errors (break, overrun, framing, parity) come back from
+  `Read()` once, negative, with the data still queued: counted, logged with
+  the stats, and the read repeated. `tx_free()` is the TX ring's free space.
+  `set_baud()` only accepts the rate it was opened with: `CSerialDevice`
+  cannot be initialised twice; switching to 115200 for flashing is P4's.
+
+**Ring sizes** (PL011): Circle's `SERIAL_BUF_SIZE`, 2048 bytes each way,
+kept. Needs: RX is TELEMETRY (<= 66 B wire) at 25-50 Hz plus events and
+acks, about 4 kB/s; the worst case between two polls is the line rate for
+the ~10 ms the link tolerates, 250 B; 4x margin = 1 KB. TX is FEET at 50 Hz
+(<= 66 B), goal refreshes at 5 Hz and heartbeats, about 4.5 kB/s; the worst
+burst in one poll is about 300 B (every goal plus FEET, HELLO_REQ and a
+command); 4x = 1.2 KB. 2048 covers both (82 ms of line-rate input). Making
+it smaller would mean defining `SERIAL_BUF_SIZE` for Circle's library build
+too (it sets the class layout), for 2 KB of RAM.
+
+**TX backpressure**: `Serial::tx_free()` (mind/platform.h). The link writes
+a frame only when `tx_free()` covers all of it; otherwise it counts
+`tx_deferred` and retries at the next poll, so a frame is never cut.
+
+### ACT LED
+
+| Pattern | Meaning |
+|---|---|
+| steady on | starting up (the USB scan) |
+| 0.5 Hz (1 s on, 1 s off) | no body: no HELLO yet, or no TELEMETRY for 300 ms |
+| 2 Hz | the body is alive: TELEMETRY flowing |
+| 5 Hz | the body's HELLO has another protocol major: the kernel stays up and keeps the heartbeat, but sends no goals or FEET (kilo-mind-host exits 2 instead) |
+| steady on or off for more than ~20 s | stopped: `Initialize` failed or a crash (Circle halts, the LED freezes) |
+
+### Boot probe
+
+GPIO21, header pin 40 (pin 39 is ground), outside the NyBoard socket's pins
+1-10. High at the top of `main()`, low at the first HELLO, for a scope
+against the 5 V rail (docs/fast-boot.md P6). On by default;
+`make -C kernel KILO_BOOT_PROBE=0` leaves the pin alone.
+
+### Floating point
+
+`MIND_SRCS` are compiled with Circle's flags (`-mcpu=cortex-a7
+-mfpu=neon-vfpv4 -mfloat-abi=hard`; `readelf -A` on the objects: VFPv4,
+VFP-register arguments). The core has no floating point yet. A probe
+compiled with the same flags turns float arithmetic into VFP instructions
+(`vmul.f32`, `vfma.f32`, `vdiv.f32`) and calls `sqrtf`, which in the
+toolchain's hard-float `libm` (`thumb/v7ve+simd/hard`) is a wrapper around
+`vsqrt.f32` (the wrapper sets `errno` for negative inputs;
+`-fno-math-errno` would inline `vsqrt.f32`).
+
+### Not yet tested on hardware
+
+All of it: nothing here has run on a Pi. In particular: the netboot loader
+on the 2 B; Circle's USB host finding the CH343 behind the LAN9514 hub and
+its CDC driver at 250000 baud; whether opening it resets the body; how long
+the USB scan takes; USB write latency; the PL011 at 250000 against the
+328P; the LED codes; the boot probe; the screen with `gpu_mem=16`; the
+hardware RNG's warm-up time (Circle discards the first 0x40000 numbers).
+`kernel/host/test.sh` covers the core and the link (including `tx_free()`
+deferral) on Linux only.
+
 ## Open questions
 
-- **Body link wiring.** Today the body reaches the Pi through the USB CH343
-  adapter (`/dev/ttyACM0`, CDC-ACM). Under Circle that is
-  `CUSBSerialCDCDevice` (`lib/usb/usbserialcdc.cpp`), which depends on USB
-  enumeration and so comes up after the network stack's USB. The plan's
-  target is the PL011 on GPIO14/15 (`CSerialDevice`), up in microseconds and
-  free of USB. P1 decides; the PL011 needs the Pi on the robot.
 - **Finding the loader without a monitor.** DHCP address from the router's
   lease table today. A cable straight to the laptop has no DHCP server: a
   static or link-local address is P2's decision. The loader could also blink
