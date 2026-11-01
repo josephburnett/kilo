@@ -92,7 +92,7 @@ class Mind final : public LinkListener {
   bool behaviour_active() const { return cfg_.behaviour && !runner_.stopped(); }
   bool poweroff_requested() const { return runner_.poweroff_requested(); }
   // A laptop client holds control (or the raw bridge is open).
-  bool host_controls() const { return listener_ != nullptr && (host_.controller() >= 0 || host_.bridge_open()); }
+  bool host_controls() const { return listener_ != nullptr && (host_.controller() >= 0 || host_.link_paused()); }
   // Whether the last pass stamped the link's liveness.
   bool stamping() const { return stamping_; }
 
@@ -159,6 +159,7 @@ class Mind final : public LinkListener {
 
   uint64_t started_us_ = 0;
   bool stamping_ = true;
+  bool paused_ = false;  // the last pass found the UART taken (bridge or flasher)
   bool stats_asked_ = false;
   uint8_t stats_seq_ = 0;
   uint64_t next_stats_us_ = 0;

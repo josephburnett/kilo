@@ -1,18 +1,5 @@
 // kilo-mind-host: the portable mind core (mind/mind.h) on Linux, for the
 // virtual body (python -m kilo.vbody.core prints its pty) or a NyBoard on a
-// USB adapter. It does what the Circle kernel does in phase P1
-// (docs/fast-boot.md): exchange HELLO, keep the link fed (HEARTBEAT), and
-// log link statistics once a second, with a STATS_REQ to the body each
-// second to exercise the command path. With --listen it also serves the
-// laptop channel of phase P2 (mind/net/host_server.h) on a TCP port, for
-// `kilo --host 127.0.0.1:PORT`; it logs "listening on port N" (port 0 picks
-// a free one). The laptop channel includes flashing the body (P4,
-// mind/flash/flasher.h): the body's RESET line is the named pipe given by
-// --reset-fifo (posix.h FifoResetGpio), which the fake optiboot body of
-// kernel/host/tests/fake_optiboot.py reads.
-//
-//   kilo-mind-host --port /dev/pts/N [--listen [ADDR:]PORT] [--reset-fifo PATH] [--duration S] [--verbose]
-
 // USB adapter. It runs what the Circle kernel runs: the link (HELLO,
 // HEARTBEAT, goals), the walker, the trick player and perception, and with
 // --remote the IR remote, with --behaviour the behaviour runner; it logs
@@ -20,9 +7,12 @@
 // to exercise the command path. With --listen it also serves the laptop
 // channel of phase P2 (mind/net/host_server.h) on a TCP port, for
 // `kilo --host 127.0.0.1:PORT`; it logs "listening on port N" (port 0
-// picks a free one).
+// picks a free one). The laptop channel includes flashing the body (P4,
+// mind/flash/flasher.h): the body's RESET line is the named pipe given by
+// --reset-fifo (posix.h FifoResetGpio), which the fake optiboot body of
+// kernel/host/tests/fake_optiboot.py reads.
 //
-//   kilo-mind-host --port /dev/pts/N [--listen [ADDR:]PORT] [--duration S] [--verbose]
+//   kilo-mind-host --port /dev/pts/N [--listen [ADDR:]PORT] [--reset-fifo PATH] [--duration S] [--verbose]
 //                  [--remote] [--behaviour] [--seed N] [--balance KP]
 //
 // Exit status: 0 after --duration (or SIGINT/SIGTERM) with a HELLO seen;
@@ -110,11 +100,8 @@ void log_stats(Log& log, const SerialLink& link, const Window& w) {
 
 int usage() {
   fprintf(stderr,
-          "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--reset-fifo PATH] [--duration SECONDS] "
-          "[--verbose]\n");
-
-          "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--duration SECONDS] [--verbose]\n"
-          "                      [--remote] [--behaviour] [--seed N] [--balance KP]\n");
+          "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--reset-fifo PATH] [--duration SECONDS]\n"
+          "                      [--verbose] [--remote] [--behaviour] [--seed N] [--balance KP]\n");
   return 64;
 }
 
@@ -183,17 +170,10 @@ int main(int argc, char** argv) {
   logf(log, LogLevel::Info, "port %s at %u baud", port, (unsigned)KILO_BAUD);
 
   Window window(clock);
-  link.set_listener(&window);
-  link.connect();
-
-  PosixListener listener;
-  static HostServer host(listener, link, serial, clock, log, log, (uint32_t)KILO_MIND_BUILD);  // static: 18 KB of buffers
-  HostServer* server = nullptr;  // only with --listen
   FifoResetGpio gpio(reset_fifo, log);
   static FlashImage image;  // 32 KB
-  static Flasher flasher(serial, clock, gpio, link, log);
-  host.attach_flasher(flasher, image);
-
+  static Flasher flasher(serial, clock, gpio, mind.link(), log);
+  mind.host().attach_flasher(flasher, image);  // the Mind's poll() serves and polls it
   mind.set_tap(&window);
   if (listen != nullptr) {
     if (!listener.open(listen)) {
@@ -211,11 +191,6 @@ int main(int argc, char** argv) {
   int status = 0;
   SerialLink& link = mind.link();
   while (!g_stop && clock.now_us() < end) {
-    link.mark_alive();  // this loop is the whole mind: it is alive while it runs
-    if (server != nullptr) server->poll();
-    bool bridged = server != nullptr && server->link_paused();
-    if (!bridged) link.poll();  // paused while the bridge or the flasher has the UART
-
     mind.poll();
     if (!link.connected()) {
       logf(log, LogLevel::Error, "port %s failed", port);

@@ -73,7 +73,14 @@ void Mind::poll() {
   stamping_ = liveness(now);
   if (stamping_) link_.mark_alive();
   if (listener_ != nullptr) host_.poll();
-  if (host_.bridge_open()) return;  // the laptop speaks to the body: the link and everything on it pause
+  if (host_.link_paused()) {  // the bridge or the flasher has the UART: the link and everything on it pause
+    paused_ = true;
+    return;
+  }
+  if (paused_) {  // a walk cut off by the pause cannot resume: end it now that the UART is ours again
+    paused_ = false;
+    if (walker_.active()) walker_.abort();
+  }
   link_.poll();
   // the command slot's answer, to its owner, before anyone sends another
   player_.collect();
