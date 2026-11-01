@@ -1130,3 +1130,315 @@ limit_deg = 30
 speed_dps = 120
 max_deg = 180
 not_held = -32768
+
+# ---------------------------------------------------------------------------
+# Laptop interface: the host channel (docs/fast-boot.md §5, phase P2).
+#
+# The mind (the Circle kernel on the Pi, or kilo-mind-host on the laptop)
+# listens on one TCP port; the laptop's `kilo --host <ip>` (mind/kilo/hostlink.py)
+# connects to it. Nothing here goes over the body's UART: the body never sees
+# these messages, and they cost its firmware nothing (types, #defines and
+# inline functions it never uses).
+#
+# Framing (TCP is a reliable byte stream, so no COBS and no delimiter):
+#     len u16 LE | type u8 | seq u8 | payload (0..host.max_payload) | crc16 u16 LE
+#   len counts the bytes after itself (2 + payload + 2). crc16 is the body
+#   link's CRC-16/CCITT-FALSE (link.crc_*) over type, seq, payload. A length
+#   outside 4..host.max_frame - 2 or a bad CRC means the stream is out of
+#   step: the receiver closes the connection (there is no resync). A good CRC
+#   with a payload length wrong for its type, or an unknown type, is answered
+#   RESULT BAD_LEN / UNKNOWN_TYPE.
+#
+# Ids: client -> mind 0x01..0x7F, mind -> client 0x80..0xFF, as on the body
+# link but a separate namespace (C KILO_HOST_MSG_*, Python HostMsgId).
+# Kinds: command = client -> mind, answered by exactly one reply carrying its
+#                  seq: the message whose reply_to names it, else RESULT;
+#        stream  = one-way, never answered (KEEPALIVE, BRIDGE_TX, TELEM, ...);
+#        event   = mind -> client reply (RESULT, STATUS).
+# 0x40..0x4F and 0xC0..0xCF are reserved for the flash channel (P4, §6);
+# gen.py refuses messages there.
+#
+# Rules: any number of clients up to host.max_clients; each may read STATUS
+# and subscribe to TELEM and LOG_LINE. One controller at a time: the first to
+# send CONTROL take=1. POSTURE, PARAM_SET and the bridge need control
+# (others get NOT_CONTROLLER). When the controller lets go (CONTROL take=0),
+# closes its socket, or asked for keepalive and was silent for
+# host.keepalive_timeout_ms, the mind closes the bridge if it was open and
+# latches SET_POSTURE REST (Python counterpart: a client's hold ending in the
+# daemon, kilo/daemon/sessions.py).
+#
+# Raw bridge: BRIDGE_OPEN pauses the mind's link (no heartbeat, goal or
+# command goes out) and forwards UART bytes both ways in BRIDGE_TX/BRIDGE_RX,
+# so a laptop tool speaks the body protocol itself (kilo.hostlink's
+# BridgeTransport under kilo.link). BRIDGE_CLOSE (or losing control) resumes
+# the link, which reconnects (HELLO_REQ). While bridged the body's watchdog
+# applies as usual.
+#
+# Addressing (decided in P2): on a direct cable nothing serves DHCP. The mind
+# asks DHCP for host.dhcp_timeout_ms; with no lease it takes the fixed
+# link-local address host.fallback_ip/host.fallback_prefix (169.254.75.73,
+# "KI"). The laptop sets its cable interface to link-local
+# (NetworkManager "Link-Local Only", or `ip addr add 169.254.1.1/16 dev IF`)
+# and runs `kilo --host 169.254.75.73`. On a LAN with DHCP the lease wins.
+[host]
+version = 1                    # host channel protocol version (STATUS.host_version); bump on any layout change
+port = 5300                    # TCP
+max_payload = 240              # bytes
+max_frame = 246                # len (2) + type, seq (2) + max_payload + crc (2)
+max_clients = 4                # connections the mind serves at once; more are closed at accept
+keepalive_timeout_ms = 2000    # a controller that asked for keepalive and sent nothing for this long loses control
+keepalive_send_ms = 500        # how often the client sends KEEPALIVE (or anything)
+telem_max_hz = 50              # TELEM_SUB hz range: 1..this (0 = off)
+log_text_max = 159             # LOG_LINE text bytes (the mind's log line, 160 with its null)
+log_ring_lines = 64            # lines the mind's RAM log keeps (LOG_SUB tail)
+bridge_chunk_max = 200         # BRIDGE_TX / BRIDGE_RX data bytes per frame
+dhcp_timeout_ms = 3000         # the mind's wait for a DHCP lease before the link-local fallback
+fallback_ip = [169, 254, 75, 73]
+fallback_prefix = 16
+
+[enums.host_result_code]       # RESULT.code
+OK = 0
+UNSUPPORTED = 1                # known request, not implemented by this mind yet
+NOT_CONTROLLER = 2             # needs control (CONTROL take=1), which this client does not have
+BAD_ARG = 3
+BAD_LEN = 4                    # payload length wrong for the type (CRC good)
+UNKNOWN_TYPE = 5
+NO_BODY = 6                    # the link is down, or the body speaks another protocol major
+BUSY = 7                       # CONTROL take=1 while another client has control
+BRIDGED = 8                    # refused while the raw bridge is open
+NOT_BRIDGED = 9                # BRIDGE_CLOSE without an open bridge
+
+[enums.host_controller]        # STATUS.controller, as seen by the asking client
+NONE = 0
+YOU = 1
+OTHER = 2
+
+[enums.log_level]              # LOG_LINE.level, LOG_SUB.min_level (kernel/mind/platform.h LogLevel)
+DEBUG = 0
+INFO = 1
+WARN = 2
+ERROR = 3
+
+[flags.host_state]             # STATUS.state, TELEM.state
+LINK_CONNECTED = 0             # the mind's end of the body link is open
+BODY_ALIVE = 1                 # a TELEMETRY less than link.body_lost_ms old
+HAS_HELLO = 2
+HAS_TELEMETRY = 3
+CONTACT = 4                    # the body was heard on this connection: motion goals may go out
+BRIDGE = 5                     # the raw bridge is open (the link is paused)
+CONTROLLED = 6                 # some client has control
+
+[structs.host_link_stats]      # 80 B: the mind's link counters (kernel/mind/link/stats.h; kilo/body/state.py LinkStats)
+fields = [
+  { name = "frames_rx", type = "u32" },
+  { name = "frames_tx", type = "u32" },
+  { name = "bytes_rx", type = "u32" },
+  { name = "bytes_tx", type = "u32" },
+  { name = "decode_errors", type = "u32", note = "all kinds" },
+  { name = "crc_errors", type = "u32" },
+  { name = "heartbeats", type = "u32" },
+  { name = "goal_sends", type = "u32" },
+  { name = "commands", type = "u32" },
+  { name = "retries", type = "u32" },
+  { name = "timeouts", type = "u32" },
+  { name = "nacks", type = "u32" },
+  { name = "dup_acks", type = "u32" },
+  { name = "tx_dropped", type = "u32" },
+  { name = "tx_short", type = "u32" },
+  { name = "reconnects", type = "u32" },
+  { name = "disconnects", type = "u32" },
+  { name = "goals_refused", type = "u32" },
+  { name = "goals_cleared", type = "u32" },
+  { name = "hello_polls", type = "u32" },
+]
+
+# Host messages: as [[messages]], with dir client_to_mind or mind_to_client,
+# plus fixed fields whose type is a [structs.*] entry or a fixed-length body
+# message (HELLO, TELEMETRY, EVENT: its payload embedded whole).
+
+[[host_messages]]
+name = "STATUS_REQ"
+id = 0x01
+dir = "client_to_mind"
+kind = "command"
+query = true
+doc = "Answered by STATUS. Any client."
+fields = []
+
+[[host_messages]]
+name = "CONTROL"
+id = 0x02
+dir = "client_to_mind"
+kind = "command"
+doc = "Take (1) or give up (0) control. BUSY when another client has it. Giving it up latches REST. keepalive 1: lose control after host.keepalive_timeout_ms without any message from this client."
+fields = [
+  { name = "take", type = "u8", range = [0, 1] },
+  { name = "keepalive", type = "u8", range = [0, 1] },
+]
+
+[[host_messages]]
+name = "KEEPALIVE"
+id = 0x03
+dir = "client_to_mind"
+kind = "stream"
+doc = "Nothing but proof of life (any message counts). Not answered."
+fields = []
+
+[[host_messages]]
+name = "POSTURE"
+id = 0x10
+dir = "client_to_mind"
+kind = "command"
+doc = "Latch SET_POSTURE on the body link (controller only). OK means latched: the link sends it once the body is heard, and the body may still refuse it (EVENT GOAL_REFUSED in TELEM.last_event)."
+fields = [
+  { name = "posture", type = "u8", enum = "posture" },
+  { name = "transition_ticks", type = "u8", unit = "tick", note = "0 = 25" },
+  { name = "flags", type = "u8", flags = "posture_flags" },
+]
+
+[[host_messages]]
+name = "PARAM_GET"
+id = 0x11
+dir = "client_to_mind"
+kind = "command"
+doc = "Read a body param (PARAM_GET on the link). RESULT UNSUPPORTED until P3."
+fields = [
+  { name = "id", type = "u8" },
+]
+
+[[host_messages]]
+name = "PARAM_SET"
+id = 0x12
+dir = "client_to_mind"
+kind = "command"
+doc = "Set a body param (controller only). RESULT UNSUPPORTED until P3."
+fields = [
+  { name = "id", type = "u8" },
+  { name = "value", type = "i16" },
+  { name = "persist", type = "u8", range = [0, 1] },
+]
+
+[[host_messages]]
+name = "TELEM_SUB"
+id = 0x20
+dir = "client_to_mind"
+kind = "command"
+doc = "TELEM to this client at hz (1..host.telem_max_hz; 0 = off). Any client."
+fields = [
+  { name = "hz", type = "u8", unit = "Hz", range = [0, 50] },
+]
+
+[[host_messages]]
+name = "LOG_SUB"
+id = 0x21
+dir = "client_to_mind"
+kind = "command"
+doc = "LOG_LINE to this client: first up to `tail` lines still in the mind's ring (host.log_ring_lines), then every new line, at min_level and above. enable 0 stops. Any client."
+fields = [
+  { name = "enable", type = "u8", range = [0, 1] },
+  { name = "tail", type = "u8", note = "lines of history" },
+  { name = "min_level", type = "u8", enum = "log_level" },
+]
+
+[[host_messages]]
+name = "BRIDGE_OPEN"
+id = 0x30
+dir = "client_to_mind"
+kind = "command"
+doc = "Pause the mind's link and forward UART bytes both ways (controller only)."
+fields = []
+
+[[host_messages]]
+name = "BRIDGE_TX"
+id = 0x31
+dir = "client_to_mind"
+kind = "stream"
+doc = "Bytes for the body's UART, written as they are. Not answered; dropped when the bridge is closed or the sender is not the controller."
+fields = [
+  { name = "data", type = "bytes", min = 1, max = 200 },
+]
+
+[[host_messages]]
+name = "BRIDGE_CLOSE"
+id = 0x32
+dir = "client_to_mind"
+kind = "command"
+doc = "Resume the mind's link (it reconnects: HELLO_REQ). Controller only."
+fields = []
+
+[[host_messages]]
+name = "RESULT"
+id = 0x80
+dir = "mind_to_client"
+kind = "event"
+doc = "The answer to a command without a reply message of its own, and to any refused command: its seq, its type, a code and a short reason."
+fields = [
+  { name = "request", type = "u8", note = "the request's type" },
+  { name = "code", type = "u8", enum = "host_result_code" },
+  { name = "text", type = "bytes", min = 0, max = 60, note = "ASCII, may be empty" },
+]
+
+[[host_messages]]
+name = "STATUS"
+id = 0x81
+dir = "mind_to_client"
+kind = "event"
+reply_to = "STATUS_REQ"
+doc = "The mind and what its link knows of the body. hello, telemetry and last_event are zero until state HAS_HELLO, HAS_TELEMETRY and event_count say otherwise."
+fields = [
+  { name = "host_version", type = "u8", note = "host.version" },
+  { name = "mind_build", type = "u32", note = "the mind's build id (git hash, 8 hex digits; 0 = unknown)" },
+  { name = "uptime_ms", type = "u32", unit = "ms" },
+  { name = "state", type = "u8", flags = "host_state" },
+  { name = "controller", type = "u8", enum = "host_controller" },
+  { name = "clients", type = "u8", note = "connections open now, this one included" },
+  { name = "proto_ok", type = "i8", note = "-1 no HELLO yet, 1 the body's proto major matches, 0 it does not (the mind refuses to drive)" },
+  { name = "telemetry_age_ms", type = "u16", unit = "ms", note = "0xFFFF = none, or older than 65 s" },
+  { name = "reboots", type = "u32", note = "body reboots seen" },
+  { name = "telemetry_count", type = "u32" },
+  { name = "event_count", type = "u32" },
+  { name = "last_event", type = "EVENT" },
+  { name = "hello", type = "HELLO" },
+  { name = "link", type = "host_link_stats" },
+  { name = "telemetry", type = "TELEMETRY" },
+]
+
+[[host_messages]]
+name = "TELEM"
+id = 0x82
+dir = "mind_to_client"
+kind = "stream"
+doc = "The latest body telemetry and the link counters, at the rate TELEM_SUB asked; sent whether or not new TELEMETRY arrived."
+fields = [
+  { name = "uptime_ms", type = "u32", unit = "ms" },
+  { name = "state", type = "u8", flags = "host_state" },
+  { name = "telemetry_age_ms", type = "u16", unit = "ms", note = "0xFFFF = none, or older than 65 s" },
+  { name = "telemetry_count", type = "u32" },
+  { name = "event_count", type = "u32" },
+  { name = "last_event", type = "EVENT" },
+  { name = "link", type = "host_link_stats" },
+  { name = "telemetry", type = "TELEMETRY" },
+]
+
+[[host_messages]]
+name = "LOG_LINE"
+id = 0x83
+dir = "mind_to_client"
+kind = "stream"
+doc = "One line of the mind's log. seq counts every line the mind logged: a gap is lines this client lost (the ring overwrote them before they could be sent)."
+fields = [
+  { name = "seq", type = "u32" },
+  { name = "t_ms", type = "u32", unit = "ms", note = "mind uptime when logged" },
+  { name = "level", type = "u8", enum = "log_level" },
+  { name = "text", type = "bytes", min = 0, max = 159 },
+]
+
+[[host_messages]]
+name = "BRIDGE_RX"
+id = 0x84
+dir = "mind_to_client"
+kind = "stream"
+doc = "Bytes the body's UART received, to the controller while the bridge is open."
+fields = [
+  { name = "data", type = "bytes", min = 1, max = 200 },
+]

@@ -248,6 +248,32 @@ enum kilo_easing {
     KILO_EASING_SPLINE_RESERVED = 3,
 };
 
+enum kilo_host_result_code {
+    KILO_HOST_RESULT_CODE_OK = 0,
+    KILO_HOST_RESULT_CODE_UNSUPPORTED = 1,
+    KILO_HOST_RESULT_CODE_NOT_CONTROLLER = 2,
+    KILO_HOST_RESULT_CODE_BAD_ARG = 3,
+    KILO_HOST_RESULT_CODE_BAD_LEN = 4,
+    KILO_HOST_RESULT_CODE_UNKNOWN_TYPE = 5,
+    KILO_HOST_RESULT_CODE_NO_BODY = 6,
+    KILO_HOST_RESULT_CODE_BUSY = 7,
+    KILO_HOST_RESULT_CODE_BRIDGED = 8,
+    KILO_HOST_RESULT_CODE_NOT_BRIDGED = 9,
+};
+
+enum kilo_host_controller {
+    KILO_HOST_CONTROLLER_NONE = 0,
+    KILO_HOST_CONTROLLER_YOU = 1,
+    KILO_HOST_CONTROLLER_OTHER = 2,
+};
+
+enum kilo_log_level {
+    KILO_LOG_LEVEL_DEBUG = 0,
+    KILO_LOG_LEVEL_INFO = 1,
+    KILO_LOG_LEVEL_WARN = 2,
+    KILO_LOG_LEVEL_ERROR = 3,
+};
+
 /* ---- Bit flags (masks) ---- */
 #define KILO_TELEMETRY_FLAGS_BALANCE_ACTIVE (1u << 0)
 #define KILO_TELEMETRY_FLAGS_IMU_FAULT (1u << 1)
@@ -290,6 +316,14 @@ enum kilo_easing {
 #define KILO_EYES_MASK_L1 (1u << 4)
 #define KILO_EYES_MASK_L2 (1u << 5)
 
+#define KILO_HOST_STATE_LINK_CONNECTED (1u << 0)
+#define KILO_HOST_STATE_BODY_ALIVE (1u << 1)
+#define KILO_HOST_STATE_HAS_HELLO (1u << 2)
+#define KILO_HOST_STATE_HAS_TELEMETRY (1u << 3)
+#define KILO_HOST_STATE_CONTACT (1u << 4)
+#define KILO_HOST_STATE_BRIDGE (1u << 5)
+#define KILO_HOST_STATE_CONTROLLED (1u << 6)
+
 /* ---- Shared element structs ---- */
 typedef struct KILO_PACKED kilo_keyframe_s {
     uint8_t dur; /* tick; range 1..255; ticks from the previous frame */
@@ -312,6 +346,51 @@ typedef struct KILO_PACKED kilo_note_s {
 KILO_STATIC_ASSERT(sizeof(kilo_note_t) == 2, kilo_sa_note_size);
 KILO_STATIC_ASSERT(offsetof(kilo_note_t, note) == 0, kilo_sa_note_note);
 KILO_STATIC_ASSERT(offsetof(kilo_note_t, dur_10ms) == 1, kilo_sa_note_dur_10ms);
+
+typedef struct KILO_PACKED kilo_host_link_stats_s {
+    uint32_t frames_rx;
+    uint32_t frames_tx;
+    uint32_t bytes_rx;
+    uint32_t bytes_tx;
+    uint32_t decode_errors; /* all kinds */
+    uint32_t crc_errors;
+    uint32_t heartbeats;
+    uint32_t goal_sends;
+    uint32_t commands;
+    uint32_t retries;
+    uint32_t timeouts;
+    uint32_t nacks;
+    uint32_t dup_acks;
+    uint32_t tx_dropped;
+    uint32_t tx_short;
+    uint32_t reconnects;
+    uint32_t disconnects;
+    uint32_t goals_refused;
+    uint32_t goals_cleared;
+    uint32_t hello_polls;
+} kilo_host_link_stats_t;
+#define KILO_HOST_LINK_STATS_SIZE 80u
+KILO_STATIC_ASSERT(sizeof(kilo_host_link_stats_t) == 80, kilo_sa_host_link_stats_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, frames_rx) == 0, kilo_sa_host_link_stats_frames_rx);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, frames_tx) == 4, kilo_sa_host_link_stats_frames_tx);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, bytes_rx) == 8, kilo_sa_host_link_stats_bytes_rx);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, bytes_tx) == 12, kilo_sa_host_link_stats_bytes_tx);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, decode_errors) == 16, kilo_sa_host_link_stats_decode_errors);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, crc_errors) == 20, kilo_sa_host_link_stats_crc_errors);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, heartbeats) == 24, kilo_sa_host_link_stats_heartbeats);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, goal_sends) == 28, kilo_sa_host_link_stats_goal_sends);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, commands) == 32, kilo_sa_host_link_stats_commands);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, retries) == 36, kilo_sa_host_link_stats_retries);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, timeouts) == 40, kilo_sa_host_link_stats_timeouts);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, nacks) == 44, kilo_sa_host_link_stats_nacks);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, dup_acks) == 48, kilo_sa_host_link_stats_dup_acks);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, tx_dropped) == 52, kilo_sa_host_link_stats_tx_dropped);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, tx_short) == 56, kilo_sa_host_link_stats_tx_short);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, reconnects) == 60, kilo_sa_host_link_stats_reconnects);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, disconnects) == 64, kilo_sa_host_link_stats_disconnects);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, goals_refused) == 68, kilo_sa_host_link_stats_goals_refused);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, goals_cleared) == 72, kilo_sa_host_link_stats_goals_cleared);
+KILO_STATIC_ASSERT(offsetof(kilo_host_link_stats_t, hello_polls) == 76, kilo_sa_host_link_stats_hello_polls);
 
 /* ---- Payloads ---- */
 /* 0x01 HELLO_REQ: command. Ask for HELLO (query). */
@@ -1158,6 +1237,300 @@ enum kilo_param_id {
 #define KILO_HEAD_SPEED_DPS 120
 #define KILO_HEAD_MAX_DEG 180
 #define KILO_HEAD_NOT_HELD ((int16_t)(-32767 - 1))
+
+/* ---- Laptop interface: the host channel (spec [host], [[host_messages]]; docs/fast-boot.md §5) ----
+ * Frame on TCP: len u16 LE (bytes after it) | type | seq | payload | crc16 LE over type..payload. */
+#define KILO_HOST_VERSION 1u
+#define KILO_HOST_PORT 5300u
+#define KILO_HOST_MAX_PAYLOAD 240u
+#define KILO_HOST_MAX_FRAME 246u
+#define KILO_HOST_MAX_CLIENTS 4u
+#define KILO_HOST_KEEPALIVE_TIMEOUT_MS 2000u
+#define KILO_HOST_KEEPALIVE_SEND_MS 500u
+#define KILO_HOST_TELEM_MAX_HZ 50u
+#define KILO_HOST_LOG_TEXT_MAX 159u
+#define KILO_HOST_LOG_RING_LINES 64u
+#define KILO_HOST_BRIDGE_CHUNK_MAX 200u
+#define KILO_HOST_DHCP_TIMEOUT_MS 3000u
+#define KILO_HOST_FALLBACK_IP_INIT {169, 254, 75, 73}
+#define KILO_HOST_FALLBACK_PREFIX 16u
+
+enum kilo_host_msg_id {
+    KILO_HOST_MSG_STATUS_REQ = 0x01,
+    KILO_HOST_MSG_CONTROL = 0x02,
+    KILO_HOST_MSG_KEEPALIVE = 0x03,
+    KILO_HOST_MSG_POSTURE = 0x10,
+    KILO_HOST_MSG_PARAM_GET = 0x11,
+    KILO_HOST_MSG_PARAM_SET = 0x12,
+    KILO_HOST_MSG_TELEM_SUB = 0x20,
+    KILO_HOST_MSG_LOG_SUB = 0x21,
+    KILO_HOST_MSG_BRIDGE_OPEN = 0x30,
+    KILO_HOST_MSG_BRIDGE_TX = 0x31,
+    KILO_HOST_MSG_BRIDGE_CLOSE = 0x32,
+    KILO_HOST_MSG_RESULT = 0x80,
+    KILO_HOST_MSG_STATUS = 0x81,
+    KILO_HOST_MSG_TELEM = 0x82,
+    KILO_HOST_MSG_LOG_LINE = 0x83,
+    KILO_HOST_MSG_BRIDGE_RX = 0x84,
+};
+
+/* host 0x01 STATUS_REQ: command. Answered by STATUS. Any client. */
+#define KILO_HOST_STATUS_REQ_LEN 0u
+
+/* host 0x02 CONTROL: command. Take (1) or give up (0) control. BUSY when another client has it. Giving it up latches REST. keepalive 1: lose control after host.keepalive_timeout_ms without any message from this client. */
+#define KILO_HOST_CONTROL_LEN 2u
+typedef struct KILO_PACKED kilo_host_control_s {
+    uint8_t take; /* range 0..1 */
+    uint8_t keepalive; /* range 0..1 */
+} kilo_host_control_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_control_t) == 2, kilo_sa_host_control_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_control_t, take) == 0, kilo_sa_host_control_take);
+KILO_STATIC_ASSERT(offsetof(kilo_host_control_t, keepalive) == 1, kilo_sa_host_control_keepalive);
+
+/* host 0x03 KEEPALIVE: stream. Nothing but proof of life (any message counts). Not answered. */
+#define KILO_HOST_KEEPALIVE_LEN 0u
+
+/* host 0x10 POSTURE: command. Latch SET_POSTURE on the body link (controller only). OK means latched: the link sends it once the body is heard, and the body may still refuse it (EVENT GOAL_REFUSED in TELEM.last_event). */
+#define KILO_HOST_POSTURE_LEN 3u
+typedef struct KILO_PACKED kilo_host_posture_s {
+    uint8_t posture; /* enum posture */
+    uint8_t transition_ticks; /* tick; 0 = 25 */
+    uint8_t flags; /* flags posture_flags */
+} kilo_host_posture_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_posture_t) == 3, kilo_sa_host_posture_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_posture_t, posture) == 0, kilo_sa_host_posture_posture);
+KILO_STATIC_ASSERT(offsetof(kilo_host_posture_t, transition_ticks) == 1, kilo_sa_host_posture_transition_ticks);
+KILO_STATIC_ASSERT(offsetof(kilo_host_posture_t, flags) == 2, kilo_sa_host_posture_flags);
+
+/* host 0x11 PARAM_GET: command. Read a body param (PARAM_GET on the link). RESULT UNSUPPORTED until P3. */
+#define KILO_HOST_PARAM_GET_LEN 1u
+typedef struct KILO_PACKED kilo_host_param_get_s {
+    uint8_t id;
+} kilo_host_param_get_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_param_get_t) == 1, kilo_sa_host_param_get_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_param_get_t, id) == 0, kilo_sa_host_param_get_id);
+
+/* host 0x12 PARAM_SET: command. Set a body param (controller only). RESULT UNSUPPORTED until P3. */
+#define KILO_HOST_PARAM_SET_LEN 4u
+typedef struct KILO_PACKED kilo_host_param_set_s {
+    uint8_t id;
+    int16_t value;
+    uint8_t persist; /* range 0..1 */
+} kilo_host_param_set_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_param_set_t) == 4, kilo_sa_host_param_set_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_param_set_t, id) == 0, kilo_sa_host_param_set_id);
+KILO_STATIC_ASSERT(offsetof(kilo_host_param_set_t, value) == 1, kilo_sa_host_param_set_value);
+KILO_STATIC_ASSERT(offsetof(kilo_host_param_set_t, persist) == 3, kilo_sa_host_param_set_persist);
+
+/* host 0x20 TELEM_SUB: command. TELEM to this client at hz (1..host.telem_max_hz; 0 = off). Any client. */
+#define KILO_HOST_TELEM_SUB_LEN 1u
+typedef struct KILO_PACKED kilo_host_telem_sub_s {
+    uint8_t hz; /* Hz; range 0..50 */
+} kilo_host_telem_sub_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_telem_sub_t) == 1, kilo_sa_host_telem_sub_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_telem_sub_t, hz) == 0, kilo_sa_host_telem_sub_hz);
+
+/* host 0x21 LOG_SUB: command. LOG_LINE to this client: first up to `tail` lines still in the mind's ring (host.log_ring_lines), then every new line, at min_level and above. enable 0 stops. Any client. */
+#define KILO_HOST_LOG_SUB_LEN 3u
+typedef struct KILO_PACKED kilo_host_log_sub_s {
+    uint8_t enable; /* range 0..1 */
+    uint8_t tail; /* lines of history */
+    uint8_t min_level; /* enum log_level */
+} kilo_host_log_sub_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_log_sub_t) == 3, kilo_sa_host_log_sub_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_log_sub_t, enable) == 0, kilo_sa_host_log_sub_enable);
+KILO_STATIC_ASSERT(offsetof(kilo_host_log_sub_t, tail) == 1, kilo_sa_host_log_sub_tail);
+KILO_STATIC_ASSERT(offsetof(kilo_host_log_sub_t, min_level) == 2, kilo_sa_host_log_sub_min_level);
+
+/* host 0x30 BRIDGE_OPEN: command. Pause the mind's link and forward UART bytes both ways (controller only). */
+#define KILO_HOST_BRIDGE_OPEN_LEN 0u
+
+/* host 0x31 BRIDGE_TX: stream. Bytes for the body's UART, written as they are. Not answered; dropped when the bridge is closed or the sender is not the controller. */
+#define KILO_HOST_BRIDGE_TX_MIN_LEN 1u
+#define KILO_HOST_BRIDGE_TX_MAX_LEN 200u
+typedef struct KILO_PACKED kilo_host_bridge_tx_s {
+    uint8_t data[200]; /* 1..200 B, length implied */
+} kilo_host_bridge_tx_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_bridge_tx_t) == 200, kilo_sa_host_bridge_tx_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_bridge_tx_t, data) == 0, kilo_sa_host_bridge_tx_data);
+
+/* host 0x32 BRIDGE_CLOSE: command. Resume the mind's link (it reconnects: HELLO_REQ). Controller only. */
+#define KILO_HOST_BRIDGE_CLOSE_LEN 0u
+
+/* host 0x80 RESULT: event. The answer to a command without a reply message of its own, and to any refused command: its seq, its type, a code and a short reason. */
+#define KILO_HOST_RESULT_MIN_LEN 2u
+#define KILO_HOST_RESULT_MAX_LEN 62u
+typedef struct KILO_PACKED kilo_host_result_s {
+    uint8_t request; /* the request's type */
+    uint8_t code; /* enum host_result_code */
+    uint8_t text[60]; /* ASCII, may be empty */ /* 0..60 B, length implied */
+} kilo_host_result_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_result_t) == 62, kilo_sa_host_result_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_result_t, request) == 0, kilo_sa_host_result_request);
+KILO_STATIC_ASSERT(offsetof(kilo_host_result_t, code) == 1, kilo_sa_host_result_code);
+KILO_STATIC_ASSERT(offsetof(kilo_host_result_t, text) == 2, kilo_sa_host_result_text);
+
+/* host 0x81 STATUS: event, reply to STATUS_REQ. The mind and what its link knows of the body. hello, telemetry and last_event are zero until state HAS_HELLO, HAS_TELEMETRY and event_count say otherwise. */
+#define KILO_HOST_STATUS_LEN 164u
+typedef struct KILO_PACKED kilo_host_status_s {
+    uint8_t host_version; /* host.version */
+    uint32_t mind_build; /* the mind's build id (git hash, 8 hex digits; 0 = unknown) */
+    uint32_t uptime_ms; /* ms */
+    uint8_t state; /* flags host_state */
+    uint8_t controller; /* enum host_controller */
+    uint8_t clients; /* connections open now, this one included */
+    int8_t proto_ok; /* -1 no HELLO yet, 1 the body's proto major matches, 0 it does not (the mind refuses to drive) */
+    uint16_t telemetry_age_ms; /* ms; 0xFFFF = none, or older than 65 s */
+    uint32_t reboots; /* body reboots seen */
+    uint32_t telemetry_count;
+    uint32_t event_count;
+    kilo_event_t last_event;
+    kilo_hello_t hello;
+    kilo_host_link_stats_t link;
+    kilo_telemetry_t telemetry;
+} kilo_host_status_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_status_t) == 164, kilo_sa_host_status_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_status_t, host_version) == 0, kilo_sa_host_status_host_version);
+KILO_STATIC_ASSERT(offsetof(kilo_host_status_t, mind_build) == 1, kilo_sa_host_status_mind_build);
+KILO_STATIC_ASSERT(offsetof(kilo_host_status_t, uptime_ms) == 5, kilo_sa_host_status_uptime_ms);
+KILO_STATIC_ASSERT(offsetof(kilo_host_status_t, state) == 9, kilo_sa_host_status_state);
+KILO_STATIC_ASSERT(offsetof(kilo_host_status_t, controller) == 10, kilo_sa_host_status_controller);
+KILO_STATIC_ASSERT(offsetof(kilo_host_status_t, clients) == 11, kilo_sa_host_status_clients);
+KILO_STATIC_ASSERT(offsetof(kilo_host_status_t, proto_ok) == 12, kilo_sa_host_status_proto_ok);
+KILO_STATIC_ASSERT(offsetof(kilo_host_status_t, telemetry_age_ms) == 13, kilo_sa_host_status_telemetry_age_ms);
+KILO_STATIC_ASSERT(offsetof(kilo_host_status_t, reboots) == 15, kilo_sa_host_status_reboots);
+KILO_STATIC_ASSERT(offsetof(kilo_host_status_t, telemetry_count) == 19, kilo_sa_host_status_telemetry_count);
+KILO_STATIC_ASSERT(offsetof(kilo_host_status_t, event_count) == 23, kilo_sa_host_status_event_count);
+KILO_STATIC_ASSERT(offsetof(kilo_host_status_t, last_event) == 27, kilo_sa_host_status_last_event);
+KILO_STATIC_ASSERT(offsetof(kilo_host_status_t, hello) == 33, kilo_sa_host_status_hello);
+KILO_STATIC_ASSERT(offsetof(kilo_host_status_t, link) == 49, kilo_sa_host_status_link);
+KILO_STATIC_ASSERT(offsetof(kilo_host_status_t, telemetry) == 129, kilo_sa_host_status_telemetry);
+
+/* host 0x82 TELEM: stream. The latest body telemetry and the link counters, at the rate TELEM_SUB asked; sent whether or not new TELEMETRY arrived. */
+#define KILO_HOST_TELEM_LEN 136u
+typedef struct KILO_PACKED kilo_host_telem_s {
+    uint32_t uptime_ms; /* ms */
+    uint8_t state; /* flags host_state */
+    uint16_t telemetry_age_ms; /* ms; 0xFFFF = none, or older than 65 s */
+    uint32_t telemetry_count;
+    uint32_t event_count;
+    kilo_event_t last_event;
+    kilo_host_link_stats_t link;
+    kilo_telemetry_t telemetry;
+} kilo_host_telem_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_telem_t) == 136, kilo_sa_host_telem_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_telem_t, uptime_ms) == 0, kilo_sa_host_telem_uptime_ms);
+KILO_STATIC_ASSERT(offsetof(kilo_host_telem_t, state) == 4, kilo_sa_host_telem_state);
+KILO_STATIC_ASSERT(offsetof(kilo_host_telem_t, telemetry_age_ms) == 5, kilo_sa_host_telem_telemetry_age_ms);
+KILO_STATIC_ASSERT(offsetof(kilo_host_telem_t, telemetry_count) == 7, kilo_sa_host_telem_telemetry_count);
+KILO_STATIC_ASSERT(offsetof(kilo_host_telem_t, event_count) == 11, kilo_sa_host_telem_event_count);
+KILO_STATIC_ASSERT(offsetof(kilo_host_telem_t, last_event) == 15, kilo_sa_host_telem_last_event);
+KILO_STATIC_ASSERT(offsetof(kilo_host_telem_t, link) == 21, kilo_sa_host_telem_link);
+KILO_STATIC_ASSERT(offsetof(kilo_host_telem_t, telemetry) == 101, kilo_sa_host_telem_telemetry);
+
+/* host 0x83 LOG_LINE: stream. One line of the mind's log. seq counts every line the mind logged: a gap is lines this client lost (the ring overwrote them before they could be sent). */
+#define KILO_HOST_LOG_LINE_MIN_LEN 9u
+#define KILO_HOST_LOG_LINE_MAX_LEN 168u
+typedef struct KILO_PACKED kilo_host_log_line_s {
+    uint32_t seq;
+    uint32_t t_ms; /* ms; mind uptime when logged */
+    uint8_t level; /* enum log_level */
+    uint8_t text[159]; /* 0..159 B, length implied */
+} kilo_host_log_line_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_log_line_t) == 168, kilo_sa_host_log_line_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_log_line_t, seq) == 0, kilo_sa_host_log_line_seq);
+KILO_STATIC_ASSERT(offsetof(kilo_host_log_line_t, t_ms) == 4, kilo_sa_host_log_line_t_ms);
+KILO_STATIC_ASSERT(offsetof(kilo_host_log_line_t, level) == 8, kilo_sa_host_log_line_level);
+KILO_STATIC_ASSERT(offsetof(kilo_host_log_line_t, text) == 9, kilo_sa_host_log_line_text);
+
+/* host 0x84 BRIDGE_RX: stream. Bytes the body's UART received, to the controller while the bridge is open. */
+#define KILO_HOST_BRIDGE_RX_MIN_LEN 1u
+#define KILO_HOST_BRIDGE_RX_MAX_LEN 200u
+typedef struct KILO_PACKED kilo_host_bridge_rx_s {
+    uint8_t data[200]; /* 1..200 B, length implied */
+} kilo_host_bridge_rx_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_bridge_rx_t) == 200, kilo_sa_host_bridge_rx_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_bridge_rx_t, data) == 0, kilo_sa_host_bridge_rx_data);
+
+/* A host payload's length against its type: KILO_LEN_OK, KILO_LEN_BAD or KILO_LEN_UNKNOWN_TYPE. */
+static inline uint8_t kilo_host_payload_len_check(uint8_t type, uint16_t len)
+{
+    switch (type) {
+    case KILO_HOST_MSG_STATUS_REQ:
+        return len == 0u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_CONTROL:
+        return len == 2u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_KEEPALIVE:
+        return len == 0u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_POSTURE:
+        return len == 3u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_PARAM_GET:
+        return len == 1u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_PARAM_SET:
+        return len == 4u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_TELEM_SUB:
+        return len == 1u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_LOG_SUB:
+        return len == 3u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_BRIDGE_OPEN:
+        return len == 0u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_BRIDGE_TX:
+        return (len >= 1u && len <= 200u) ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_BRIDGE_CLOSE:
+        return len == 0u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_RESULT:
+        return (len >= 2u && len <= 62u) ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_STATUS:
+        return len == 164u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_TELEM:
+        return len == 136u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_LOG_LINE:
+        return (len >= 9u && len <= 168u) ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_BRIDGE_RX:
+        return (len >= 1u && len <= 200u) ? KILO_LEN_OK : KILO_LEN_BAD;
+    default:
+        return KILO_LEN_UNKNOWN_TYPE;
+    }
+}
+
+/* Kind of a host type (KILO_KIND_COMMAND, _STREAM, _EVENT), or KILO_KIND_UNKNOWN. */
+static inline uint8_t kilo_host_msg_kind(uint8_t type)
+{
+    switch (type) {
+    case KILO_HOST_MSG_STATUS_REQ:
+    case KILO_HOST_MSG_CONTROL:
+    case KILO_HOST_MSG_POSTURE:
+    case KILO_HOST_MSG_PARAM_GET:
+    case KILO_HOST_MSG_PARAM_SET:
+    case KILO_HOST_MSG_TELEM_SUB:
+    case KILO_HOST_MSG_LOG_SUB:
+    case KILO_HOST_MSG_BRIDGE_OPEN:
+    case KILO_HOST_MSG_BRIDGE_CLOSE:
+        return KILO_KIND_COMMAND;
+    case KILO_HOST_MSG_KEEPALIVE:
+    case KILO_HOST_MSG_BRIDGE_TX:
+    case KILO_HOST_MSG_TELEM:
+    case KILO_HOST_MSG_LOG_LINE:
+    case KILO_HOST_MSG_BRIDGE_RX:
+        return KILO_KIND_STREAM;
+    case KILO_HOST_MSG_RESULT:
+    case KILO_HOST_MSG_STATUS:
+        return KILO_KIND_EVENT;
+    default:
+        return KILO_KIND_UNKNOWN;
+    }
+}
+
+/* The reply message of a host query, 0 for any other type (answered by RESULT or not at all). */
+static inline uint8_t kilo_host_query_reply(uint8_t type)
+{
+    switch (type) {
+    case KILO_HOST_MSG_STATUS_REQ:
+        return KILO_HOST_MSG_STATUS;
+    default:
+        return 0u;
+    }
+}
 
 #ifdef KILO_PROTOCOL_FIELD_TABLE
 /* Scalar field layout, for host tests and tools. Not for the AVR build. */

@@ -236,6 +236,32 @@ class Easing(enum.IntEnum):
     SPLINE_RESERVED = 3
 
 
+class HostResultCode(enum.IntEnum):
+    OK = 0
+    UNSUPPORTED = 1
+    NOT_CONTROLLER = 2
+    BAD_ARG = 3
+    BAD_LEN = 4
+    UNKNOWN_TYPE = 5
+    NO_BODY = 6
+    BUSY = 7
+    BRIDGED = 8
+    NOT_BRIDGED = 9
+
+
+class HostController(enum.IntEnum):
+    NONE = 0
+    YOU = 1
+    OTHER = 2
+
+
+class LogLevel(enum.IntEnum):
+    DEBUG = 0
+    INFO = 1
+    WARN = 2
+    ERROR = 3
+
+
 class TelemetryFlags(enum.IntFlag):
     BALANCE_ACTIVE = 1 << 0
     IMU_FAULT = 1 << 1
@@ -291,6 +317,16 @@ class EyesMask(enum.IntFlag):
     L0 = 1 << 3
     L1 = 1 << 4
     L2 = 1 << 5
+
+
+class HostState(enum.IntFlag):
+    LINK_CONNECTED = 1 << 0
+    BODY_ALIVE = 1 << 1
+    HAS_HELLO = 1 << 2
+    HAS_TELEMETRY = 1 << 3
+    CONTACT = 1 << 4
+    BRIDGE = 1 << 5
+    CONTROLLED = 1 << 6
 
 
 LEN_OK = 0
@@ -358,6 +394,94 @@ class Note:
         kw: dict = {}
         kw['note'] = v[0]
         kw['dur_10ms'] = v[1]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        if len(data) != cls._FMT.size:
+            raise PayloadError(f'{cls.__name__}: length {len(data)} != {cls._FMT.size}')
+        return cls._from_fixed(cls._FMT.unpack(bytes(data)))
+
+
+@dataclass
+class HostLinkStats:
+    SIZE: ClassVar[int] = 80
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<IIIIIIIIIIIIIIIIIIII')
+    frames_rx: int = 0
+    frames_tx: int = 0
+    bytes_rx: int = 0
+    bytes_tx: int = 0
+    decode_errors: int = 0  # all kinds
+    crc_errors: int = 0
+    heartbeats: int = 0
+    goal_sends: int = 0
+    commands: int = 0
+    retries: int = 0
+    timeouts: int = 0
+    nacks: int = 0
+    dup_acks: int = 0
+    tx_dropped: int = 0
+    tx_short: int = 0
+    reconnects: int = 0
+    disconnects: int = 0
+    goals_refused: int = 0
+    goals_cleared: int = 0
+    hello_polls: int = 0
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.frames_rx)
+        v.append(self.frames_tx)
+        v.append(self.bytes_rx)
+        v.append(self.bytes_tx)
+        v.append(self.decode_errors)
+        v.append(self.crc_errors)
+        v.append(self.heartbeats)
+        v.append(self.goal_sends)
+        v.append(self.commands)
+        v.append(self.retries)
+        v.append(self.timeouts)
+        v.append(self.nacks)
+        v.append(self.dup_acks)
+        v.append(self.tx_dropped)
+        v.append(self.tx_short)
+        v.append(self.reconnects)
+        v.append(self.disconnects)
+        v.append(self.goals_refused)
+        v.append(self.goals_cleared)
+        v.append(self.hello_polls)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['frames_rx'] = v[0]
+        kw['frames_tx'] = v[1]
+        kw['bytes_rx'] = v[2]
+        kw['bytes_tx'] = v[3]
+        kw['decode_errors'] = v[4]
+        kw['crc_errors'] = v[5]
+        kw['heartbeats'] = v[6]
+        kw['goal_sends'] = v[7]
+        kw['commands'] = v[8]
+        kw['retries'] = v[9]
+        kw['timeouts'] = v[10]
+        kw['nacks'] = v[11]
+        kw['dup_acks'] = v[12]
+        kw['tx_dropped'] = v[13]
+        kw['tx_short'] = v[14]
+        kw['reconnects'] = v[15]
+        kw['disconnects'] = v[16]
+        kw['goals_refused'] = v[17]
+        kw['goals_cleared'] = v[18]
+        kw['hello_polls'] = v[19]
         kw.update(extra)
         return cls(**kw)
 
@@ -2612,3 +2736,835 @@ def from_dict(cls: type, d: dict) -> Any:
             v = [from_dict(ec, x) for x in v]
         kw[k] = v
     return cls(**kw)
+
+
+# ---- Laptop interface: the host channel (spec [host], [[host_messages]]; docs/fast-boot.md §5) ----
+# Frame on TCP: len u16 LE (bytes after it) | type | seq | payload | crc16 LE over type..payload
+# (kilo_link_codec.build_host_frame, HostStreamDecoder).
+HOST_VERSION = 1
+HOST_PORT = 5300
+HOST_MAX_PAYLOAD = 240
+HOST_MAX_FRAME = 246
+HOST_MAX_CLIENTS = 4
+HOST_KEEPALIVE_TIMEOUT_MS = 2000
+HOST_KEEPALIVE_SEND_MS = 500
+HOST_TELEM_MAX_HZ = 50
+HOST_LOG_TEXT_MAX = 159
+HOST_LOG_RING_LINES = 64
+HOST_BRIDGE_CHUNK_MAX = 200
+HOST_DHCP_TIMEOUT_MS = 3000
+HOST_FALLBACK_IP = (169, 254, 75, 73)
+HOST_FALLBACK_PREFIX = 16
+
+
+class HostMsgId(enum.IntEnum):
+    STATUS_REQ = 0x01
+    CONTROL = 0x02
+    KEEPALIVE = 0x03
+    POSTURE = 0x10
+    PARAM_GET = 0x11
+    PARAM_SET = 0x12
+    TELEM_SUB = 0x20
+    LOG_SUB = 0x21
+    BRIDGE_OPEN = 0x30
+    BRIDGE_TX = 0x31
+    BRIDGE_CLOSE = 0x32
+    RESULT = 0x80
+    STATUS = 0x81
+    TELEM = 0x82
+    LOG_LINE = 0x83
+    BRIDGE_RX = 0x84
+
+
+@dataclass
+class HostStatusReq:
+    """host 0x01 STATUS_REQ (command). Answered by STATUS. Any client."""
+    ID: ClassVar[int] = 0x01
+    NAME: ClassVar[str] = 'STATUS_REQ'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = True
+    REPLY: ClassVar[int | None] = 0x81
+    MIN_LEN: ClassVar[int] = 0
+    MAX_LEN: ClassVar[int] = 0
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<')
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostControl:
+    """host 0x02 CONTROL (command). Take (1) or give up (0) control. BUSY when another client has it. Giving it up latches REST. keepalive 1: lose control after host.keepalive_timeout_ms without any message from this client."""
+    ID: ClassVar[int] = 0x02
+    NAME: ClassVar[str] = 'CONTROL'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 2
+    MAX_LEN: ClassVar[int] = 2
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BB')
+    take: int = 0  # range 0..1
+    keepalive: int = 0  # range 0..1
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.take)
+        v.append(self.keepalive)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['take'] = v[0]
+        kw['keepalive'] = v[1]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostKeepalive:
+    """host 0x03 KEEPALIVE (stream). Nothing but proof of life (any message counts). Not answered."""
+    ID: ClassVar[int] = 0x03
+    NAME: ClassVar[str] = 'KEEPALIVE'
+    KIND: ClassVar[Kind] = Kind.STREAM
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 0
+    MAX_LEN: ClassVar[int] = 0
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<')
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostPosture:
+    """host 0x10 POSTURE (command). Latch SET_POSTURE on the body link (controller only). OK means latched: the link sends it once the body is heard, and the body may still refuse it (EVENT GOAL_REFUSED in TELEM.last_event)."""
+    ID: ClassVar[int] = 0x10
+    NAME: ClassVar[str] = 'POSTURE'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 3
+    MAX_LEN: ClassVar[int] = 3
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BBB')
+    posture: int = 0  # enum posture
+    transition_ticks: int = 0  # tick; 0 = 25
+    flags: int = 0  # flags posture_flags
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.posture)
+        v.append(self.transition_ticks)
+        v.append(self.flags)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['posture'] = v[0]
+        kw['transition_ticks'] = v[1]
+        kw['flags'] = v[2]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostParamGet:
+    """host 0x11 PARAM_GET (command). Read a body param (PARAM_GET on the link). RESULT UNSUPPORTED until P3."""
+    ID: ClassVar[int] = 0x11
+    NAME: ClassVar[str] = 'PARAM_GET'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 1
+    MAX_LEN: ClassVar[int] = 1
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<B')
+    id: int = 0
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.id)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['id'] = v[0]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostParamSet:
+    """host 0x12 PARAM_SET (command). Set a body param (controller only). RESULT UNSUPPORTED until P3."""
+    ID: ClassVar[int] = 0x12
+    NAME: ClassVar[str] = 'PARAM_SET'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 4
+    MAX_LEN: ClassVar[int] = 4
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BhB')
+    id: int = 0
+    value: int = 0
+    persist: int = 0  # range 0..1
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.id)
+        v.append(self.value)
+        v.append(self.persist)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['id'] = v[0]
+        kw['value'] = v[1]
+        kw['persist'] = v[2]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostTelemSub:
+    """host 0x20 TELEM_SUB (command). TELEM to this client at hz (1..host.telem_max_hz; 0 = off). Any client."""
+    ID: ClassVar[int] = 0x20
+    NAME: ClassVar[str] = 'TELEM_SUB'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 1
+    MAX_LEN: ClassVar[int] = 1
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<B')
+    hz: int = 0  # Hz; range 0..50
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.hz)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['hz'] = v[0]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostLogSub:
+    """host 0x21 LOG_SUB (command). LOG_LINE to this client: first up to `tail` lines still in the mind's ring (host.log_ring_lines), then every new line, at min_level and above. enable 0 stops. Any client."""
+    ID: ClassVar[int] = 0x21
+    NAME: ClassVar[str] = 'LOG_SUB'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 3
+    MAX_LEN: ClassVar[int] = 3
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BBB')
+    enable: int = 0  # range 0..1
+    tail: int = 0  # lines of history
+    min_level: int = 0  # enum log_level
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.enable)
+        v.append(self.tail)
+        v.append(self.min_level)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['enable'] = v[0]
+        kw['tail'] = v[1]
+        kw['min_level'] = v[2]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostBridgeOpen:
+    """host 0x30 BRIDGE_OPEN (command). Pause the mind's link and forward UART bytes both ways (controller only)."""
+    ID: ClassVar[int] = 0x30
+    NAME: ClassVar[str] = 'BRIDGE_OPEN'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 0
+    MAX_LEN: ClassVar[int] = 0
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<')
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostBridgeTx:
+    """host 0x31 BRIDGE_TX (stream). Bytes for the body's UART, written as they are. Not answered; dropped when the bridge is closed or the sender is not the controller."""
+    ID: ClassVar[int] = 0x31
+    NAME: ClassVar[str] = 'BRIDGE_TX'
+    KIND: ClassVar[Kind] = Kind.STREAM
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 1
+    MAX_LEN: ClassVar[int] = 200
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<')
+    data: bytes = b''  # 1..200 B
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        tail = bytes(self.data)
+        if not 1 <= len(tail) <= 200:
+            raise PayloadError('data: 1..200 bytes, got %d' % len(tail))
+        try:
+            return self._FMT.pack(*self._fixed_values()) + tail
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data[:0]), data=data[0:])
+
+
+@dataclass
+class HostBridgeClose:
+    """host 0x32 BRIDGE_CLOSE (command). Resume the mind's link (it reconnects: HELLO_REQ). Controller only."""
+    ID: ClassVar[int] = 0x32
+    NAME: ClassVar[str] = 'BRIDGE_CLOSE'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 0
+    MAX_LEN: ClassVar[int] = 0
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<')
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostResult:
+    """host 0x80 RESULT (event). The answer to a command without a reply message of its own, and to any refused command: its seq, its type, a code and a short reason."""
+    ID: ClassVar[int] = 0x80
+    NAME: ClassVar[str] = 'RESULT'
+    KIND: ClassVar[Kind] = Kind.EVENT
+    DIR: ClassVar[str] = 'mind_to_client'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 2
+    MAX_LEN: ClassVar[int] = 62
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BB')
+    request: int = 0  # the request's type
+    code: int = 0  # enum host_result_code
+    text: bytes = b''  # 0..60 B
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.request)
+        v.append(self.code)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['request'] = v[0]
+        kw['code'] = v[1]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        tail = bytes(self.text)
+        if not 0 <= len(tail) <= 60:
+            raise PayloadError('text: 0..60 bytes, got %d' % len(tail))
+        try:
+            return self._FMT.pack(*self._fixed_values()) + tail
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data[:2]), text=data[2:])
+
+
+@dataclass
+class HostStatus:
+    """host 0x81 STATUS (event). The mind and what its link knows of the body. hello, telemetry and last_event are zero until state HAS_HELLO, HAS_TELEMETRY and event_count say otherwise."""
+    ID: ClassVar[int] = 0x81
+    NAME: ClassVar[str] = 'STATUS'
+    KIND: ClassVar[Kind] = Kind.EVENT
+    DIR: ClassVar[str] = 'mind_to_client'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 164
+    MAX_LEN: ClassVar[int] = 164
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BIIBBBbHIIIBhHBBBIBHHBBBBBIIIIIIIIIIIIIIIIIIIIHhhhhhHHBBHBBhhhhBBBBB')
+    host_version: int = 0  # host.version
+    mind_build: int = 0  # the mind's build id (git hash, 8 hex digits; 0 = unknown)
+    uptime_ms: int = 0  # ms
+    state: int = 0  # flags host_state
+    controller: int = 0  # enum host_controller
+    clients: int = 0  # connections open now, this one included
+    proto_ok: int = 0  # -1 no HELLO yet, 1 the body's proto major matches, 0 it does not (the mind refuses to drive)
+    telemetry_age_ms: int = 0  # ms; 0xFFFF = none, or older than 65 s
+    reboots: int = 0  # body reboots seen
+    telemetry_count: int = 0
+    event_count: int = 0
+    last_event: Event = field(default_factory=Event)
+    hello: Hello = field(default_factory=Hello)
+    link: HostLinkStats = field(default_factory=HostLinkStats)
+    telemetry: Telemetry = field(default_factory=Telemetry)
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.host_version)
+        v.append(self.mind_build)
+        v.append(self.uptime_ms)
+        v.append(self.state)
+        v.append(self.controller)
+        v.append(self.clients)
+        v.append(self.proto_ok)
+        v.append(self.telemetry_age_ms)
+        v.append(self.reboots)
+        v.append(self.telemetry_count)
+        v.append(self.event_count)
+        v.extend(self.last_event._fixed_values())
+        v.extend(self.hello._fixed_values())
+        v.extend(self.link._fixed_values())
+        v.extend(self.telemetry._fixed_values())
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['host_version'] = v[0]
+        kw['mind_build'] = v[1]
+        kw['uptime_ms'] = v[2]
+        kw['state'] = v[3]
+        kw['controller'] = v[4]
+        kw['clients'] = v[5]
+        kw['proto_ok'] = v[6]
+        kw['telemetry_age_ms'] = v[7]
+        kw['reboots'] = v[8]
+        kw['telemetry_count'] = v[9]
+        kw['event_count'] = v[10]
+        kw['last_event'] = Event._from_fixed(v[11:15])
+        kw['hello'] = Hello._from_fixed(v[15:26])
+        kw['link'] = HostLinkStats._from_fixed(v[26:46])
+        kw['telemetry'] = Telemetry._from_fixed(v[46:68])
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostTelem:
+    """host 0x82 TELEM (stream). The latest body telemetry and the link counters, at the rate TELEM_SUB asked; sent whether or not new TELEMETRY arrived."""
+    ID: ClassVar[int] = 0x82
+    NAME: ClassVar[str] = 'TELEM'
+    KIND: ClassVar[Kind] = Kind.STREAM
+    DIR: ClassVar[str] = 'mind_to_client'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 136
+    MAX_LEN: ClassVar[int] = 136
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<IBHIIBhHBIIIIIIIIIIIIIIIIIIIIHhhhhhHHBBHBBhhhhBBBBB')
+    uptime_ms: int = 0  # ms
+    state: int = 0  # flags host_state
+    telemetry_age_ms: int = 0  # ms; 0xFFFF = none, or older than 65 s
+    telemetry_count: int = 0
+    event_count: int = 0
+    last_event: Event = field(default_factory=Event)
+    link: HostLinkStats = field(default_factory=HostLinkStats)
+    telemetry: Telemetry = field(default_factory=Telemetry)
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.uptime_ms)
+        v.append(self.state)
+        v.append(self.telemetry_age_ms)
+        v.append(self.telemetry_count)
+        v.append(self.event_count)
+        v.extend(self.last_event._fixed_values())
+        v.extend(self.link._fixed_values())
+        v.extend(self.telemetry._fixed_values())
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['uptime_ms'] = v[0]
+        kw['state'] = v[1]
+        kw['telemetry_age_ms'] = v[2]
+        kw['telemetry_count'] = v[3]
+        kw['event_count'] = v[4]
+        kw['last_event'] = Event._from_fixed(v[5:9])
+        kw['link'] = HostLinkStats._from_fixed(v[9:29])
+        kw['telemetry'] = Telemetry._from_fixed(v[29:51])
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostLogLine:
+    """host 0x83 LOG_LINE (stream). One line of the mind's log. seq counts every line the mind logged: a gap is lines this client lost (the ring overwrote them before they could be sent)."""
+    ID: ClassVar[int] = 0x83
+    NAME: ClassVar[str] = 'LOG_LINE'
+    KIND: ClassVar[Kind] = Kind.STREAM
+    DIR: ClassVar[str] = 'mind_to_client'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 9
+    MAX_LEN: ClassVar[int] = 168
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<IIB')
+    seq: int = 0
+    t_ms: int = 0  # ms; mind uptime when logged
+    level: int = 0  # enum log_level
+    text: bytes = b''  # 0..159 B
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.seq)
+        v.append(self.t_ms)
+        v.append(self.level)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['seq'] = v[0]
+        kw['t_ms'] = v[1]
+        kw['level'] = v[2]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        tail = bytes(self.text)
+        if not 0 <= len(tail) <= 159:
+            raise PayloadError('text: 0..159 bytes, got %d' % len(tail))
+        try:
+            return self._FMT.pack(*self._fixed_values()) + tail
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data[:9]), text=data[9:])
+
+
+@dataclass
+class HostBridgeRx:
+    """host 0x84 BRIDGE_RX (stream). Bytes the body's UART received, to the controller while the bridge is open."""
+    ID: ClassVar[int] = 0x84
+    NAME: ClassVar[str] = 'BRIDGE_RX'
+    KIND: ClassVar[Kind] = Kind.STREAM
+    DIR: ClassVar[str] = 'mind_to_client'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 1
+    MAX_LEN: ClassVar[int] = 200
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<')
+    data: bytes = b''  # 1..200 B
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        tail = bytes(self.data)
+        if not 1 <= len(tail) <= 200:
+            raise PayloadError('data: 1..200 bytes, got %d' % len(tail))
+        try:
+            return self._FMT.pack(*self._fixed_values()) + tail
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data[:0]), data=data[0:])
+
+
+HOST_MESSAGES: dict[int, type] = {
+    0x01: HostStatusReq,
+    0x02: HostControl,
+    0x03: HostKeepalive,
+    0x10: HostPosture,
+    0x11: HostParamGet,
+    0x12: HostParamSet,
+    0x20: HostTelemSub,
+    0x21: HostLogSub,
+    0x30: HostBridgeOpen,
+    0x31: HostBridgeTx,
+    0x32: HostBridgeClose,
+    0x80: HostResult,
+    0x81: HostStatus,
+    0x82: HostTelem,
+    0x83: HostLogLine,
+    0x84: HostBridgeRx,
+}
+
+
+def host_payload_len_status(msg_type: int, payload: bytes) -> int:
+    """LEN_OK, LEN_BAD or LEN_UNKNOWN_TYPE, exactly as kilo_host_payload_len_check() in C."""
+    n = len(payload)
+    if msg_type == 0x01:
+        return LEN_OK if n == 0 else LEN_BAD
+    if msg_type == 0x02:
+        return LEN_OK if n == 2 else LEN_BAD
+    if msg_type == 0x03:
+        return LEN_OK if n == 0 else LEN_BAD
+    if msg_type == 0x10:
+        return LEN_OK if n == 3 else LEN_BAD
+    if msg_type == 0x11:
+        return LEN_OK if n == 1 else LEN_BAD
+    if msg_type == 0x12:
+        return LEN_OK if n == 4 else LEN_BAD
+    if msg_type == 0x20:
+        return LEN_OK if n == 1 else LEN_BAD
+    if msg_type == 0x21:
+        return LEN_OK if n == 3 else LEN_BAD
+    if msg_type == 0x30:
+        return LEN_OK if n == 0 else LEN_BAD
+    if msg_type == 0x31:
+        return LEN_OK if 1 <= n <= 200 else LEN_BAD
+    if msg_type == 0x32:
+        return LEN_OK if n == 0 else LEN_BAD
+    if msg_type == 0x80:
+        return LEN_OK if 2 <= n <= 62 else LEN_BAD
+    if msg_type == 0x81:
+        return LEN_OK if n == 164 else LEN_BAD
+    if msg_type == 0x82:
+        return LEN_OK if n == 136 else LEN_BAD
+    if msg_type == 0x83:
+        return LEN_OK if 9 <= n <= 168 else LEN_BAD
+    if msg_type == 0x84:
+        return LEN_OK if 1 <= n <= 200 else LEN_BAD
+    return LEN_UNKNOWN_TYPE
+
+
+def decode_host_payload(msg_type: int, payload: bytes) -> Any:
+    """Unpack a host payload into its Host* dataclass. Raises KeyError (unknown type) or PayloadError."""
+    return HOST_MESSAGES[msg_type].unpack(payload)

@@ -288,3 +288,40 @@ def test_python_encodes_c_decodes(tmp_path):
     r = subprocess.run([_c_bin(), "--check", str(p)], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "checked 5000" in r.stdout
+
+
+# --- the host channel (laptop <-> mind, spec [host_messages]) ----------------------
+
+HOST = json.loads((ROOT / "vectors" / "host_frames.json").read_text())
+
+
+def test_host_vectors_cover_every_host_message():
+    assert {f["type"] for f in HOST["frames"]} == set(P.HOST_MESSAGES)
+    assert not set(P.HOST_MESSAGES) & (set(range(0x40, 0x50)) | set(range(0xC0, 0xD0)))  # flash: P4
+    assert P.HostStatus.MAX_LEN <= P.HOST_MAX_PAYLOAD and P.HOST_MAX_FRAME == P.HOST_MAX_PAYLOAD + 6
+
+
+@pytest.mark.parametrize("v", HOST["frames"], ids=lambda v: v["name"])
+def test_host_frame_vectors(v):
+    cls = P.HOST_MESSAGES[v["type"]]
+    payload = bytes.fromhex(v["payload"])
+    obj = cls.unpack(payload)
+    assert obj.pack() == payload and P.to_dict(obj) == v["fields"]
+    wire = bytes.fromhex(v["wire"])
+    assert C.build_host_frame(v["type"], v["seq"], payload) == wire == C.encode_host_message(obj, v["seq"])
+    (f,) = C.HostStreamDecoder().feed(wire)
+    assert (f.type, f.seq, f.payload) == (v["type"], v["seq"], payload)
+
+
+@pytest.mark.parametrize("v", HOST["errors"], ids=lambda v: v["name"])
+def test_host_error_vectors(v):
+    with pytest.raises(C.HostFrameError) as ei:
+        C.HostStreamDecoder().feed(bytes.fromhex(v["wire"]))
+    assert ei.value.kind == v["error"]
+
+
+def test_host_stream_split_anywhere():
+    data = b"".join(bytes.fromhex(f["wire"]) for f in HOST["frames"])
+    dec = C.HostStreamDecoder()
+    got = [f for b in data for f in dec.feed(bytes([b]))]
+    assert [(f.type, f.seq) for f in got] == [(v["type"], v["seq"]) for v in HOST["frames"]]

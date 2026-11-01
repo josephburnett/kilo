@@ -23,6 +23,7 @@ py/kilo_link_codec.py  Python COBS, CRC, frame build/parse, stream decoder
 py/test_codec.py       pytest suite
 vectors/frames.json    frames (every type, both directions), corrupt frames, streams
 vectors/cobs.json      COBS-only vectors
+vectors/host_frames.json  the laptop channel's frames, errors and length checks
 test.sh                runs everything
 ```
 
@@ -126,6 +127,20 @@ Generated helpers: C `kilo_msg_is_goal()`, `kilo_msg_is_query()`,
 `kilo_msg_has_epoch()`, `kilo_msg_kind()`, `kilo_payload_len_check()` (a
 flash-resident table on AVR); Python `IS_QUERY`/`HAS_EPOCH`/`KIND` class
 attributes and `QUERY_REPLY`.
+
+## The laptop channel
+
+`[host]` and `[[host_messages]]` define a second, separate protocol: the
+laptop's `kilo --host` to the C++ mind over TCP (docs/fast-boot.md §5;
+`kernel/mind/net/host_server.h`, `mind/kilo/hostlink.py`). Same CRC, no
+COBS: `len u16 LE | type | seq | payload | crc16`. Its own id space
+(`KILO_HOST_MSG_*`, `HostMsgId`), kinds (command, stream, event) and
+`[host]` version (`KILO_HOST_VERSION`, in STATUS); a host message may embed
+a `[structs.*]` entry or a fixed-length body payload (HELLO, TELEMETRY,
+EVENT) as a field. The body never sees it: its copy of the header only
+gains types and inline functions it does not call. C framing is in
+`kernel/mind/net/host_frame`, Python in `kilo_link_codec.py`
+(`build_host_frame`, `HostStreamDecoder`).
 
 ## Params
 

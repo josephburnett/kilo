@@ -277,3 +277,105 @@ def build(P, C):
 
 def _cls(P, msg):
     return P.MESSAGES[P.MsgId[msg].value]
+
+
+def host_frame_cases():
+    """The laptop channel (spec [host_messages]): (name, msg, seq, fields, note).
+    Every host message at least once; nested payloads as dicts."""
+    tel = {"tick": 51234, "pitch": -35, "roll": 12, "batt_mv": 7820, "mode": 2, "flags": 0x0084, "epoch": 3}
+    hello = {"proto_major": 2, "proto_minor": 0, "fw_build": 0x45524F43, "reset_cause": 0,
+             "max_payload": 60, "joint_count": 11, "epoch": 3}
+    link = {"frames_rx": 1200, "frames_tx": 340, "bytes_rx": 52000, "bytes_tx": 4100, "heartbeats": 30}
+    event = {"code": 13, "arg": 0x100A, "tick": 51000, "epoch": 3}
+    return [
+        ("status_req", "STATUS_REQ", 0, {}, ""),
+        ("control_take_keepalive", "CONTROL", 1, {"take": 1, "keepalive": 1}, ""),
+        ("keepalive", "KEEPALIVE", 2, {}, ""),
+        ("posture_stand", "POSTURE", 3, {"posture": 3, "transition_ticks": 0, "flags": 0}, ""),
+        ("param_get", "PARAM_GET", 4, {"id": 5}, ""),
+        ("param_set", "PARAM_SET", 5, {"id": 5, "value": -300, "persist": 1}, ""),
+        ("telem_sub_10hz", "TELEM_SUB", 6, {"hz": 10}, ""),
+        ("log_sub_tail", "LOG_SUB", 7, {"enable": 1, "tail": 20, "min_level": 1}, ""),
+        ("bridge_open", "BRIDGE_OPEN", 8, {}, ""),
+        ("bridge_tx_hello_req", "BRIDGE_TX", 9, {"data": "0201033e2e00"}, "a body HELLO_REQ frame, raw"),
+        ("bridge_close", "BRIDGE_CLOSE", 10, {}, ""),
+        ("result_ok", "RESULT", 3, {"request": 0x10, "code": 0, "text": ""}, "empty tail"),
+        ("result_not_controller", "RESULT", 5, {"request": 0x12, "code": 2, "text": b"no control".hex()}, ""),
+        ("status", "STATUS", 0,
+         {"host_version": 1, "mind_build": 0x1E1405F0, "uptime_ms": 123456, "state": 0x1F, "controller": 1,
+          "clients": 2, "proto_ok": 1, "telemetry_age_ms": 12, "reboots": 0, "telemetry_count": 3086,
+          "event_count": 2, "last_event": event, "hello": hello, "link": link, "telemetry": tel},
+         "nested HELLO, EVENT, TELEMETRY and link stats"),
+        ("telem", "TELEM", 0,
+         {"uptime_ms": 99, "state": 0x0B, "telemetry_age_ms": 0xFFFF, "telemetry_count": 0, "event_count": 0,
+          "last_event": {}, "link": {}, "telemetry": {}}, "no telemetry yet: zeros"),
+        ("log_line", "LOG_LINE", 0,
+         {"seq": 41, "t_ms": 2500, "level": 1, "text": b"link connected".hex()}, ""),
+        ("log_line_max", "LOG_LINE", 0,
+         {"seq": 0xFFFFFFFF, "t_ms": 1, "level": 3, "text": (b"x" * 159).hex()}, "max text"),
+        ("bridge_rx", "BRIDGE_RX", 0, {"data": "00" * 200}, "max chunk, zero bytes"),
+    ]
+
+
+def _host_from_dict(P, cls, d):
+    """from_dict for Host* classes: nested dataclass fields from dicts."""
+    import dataclasses
+    kw = {}
+    for f in dataclasses.fields(cls):
+        if f.name not in d:
+            continue
+        v = d[f.name]
+        if str(f.type) == "bytes":
+            v = bytes.fromhex(v)
+        elif isinstance(v, dict):
+            v = P.from_dict(getattr(P, str(f.type)), v)
+        kw[f.name] = v
+    return cls(**kw)
+
+
+def build_host(P, C):
+    frames = []
+    for name, msg, seq, fields, note in host_frame_cases():
+        cls = P.HOST_MESSAGES[P.HostMsgId[msg].value]
+        obj = _host_from_dict(P, cls, fields)
+        payload = obj.pack()
+        assert cls.unpack(payload) == obj, name
+        frames.append({"name": name, "msg": msg, "type": cls.ID, "dir": cls.DIR, "kind": cls.KIND.value,
+                       "seq": seq, "fields": P.to_dict(obj), "payload": payload.hex(),
+                       "wire": C.build_host_frame(cls.ID, seq, payload).hex(), "note": note})
+    for m in P.HOST_MESSAGES.values():
+        assert any(f["type"] == m.ID for f in frames), f"no host vector for {m.NAME}"
+    # Worked example, by hand: STATUS_REQ seq 0 = len 4, type 01, seq 00, CRC of 01 00 (0x2E3E, as HELLO_REQ).
+    assert next(f for f in frames if f["name"] == "status_req")["wire"] == "040001003e2e"
+    good = bytes.fromhex(next(f for f in frames if f["name"] == "posture_stand")["wire"])
+    errors = [
+        {"name": "crc_flipped", "wire": (good[:-1] + bytes([good[-1] ^ 0x01])).hex(), "error": "bad_crc"},
+        {"name": "length_too_short", "wire": "0300010000", "error": "bad_length"},
+        {"name": "length_too_long", "wire": (P.HOST_MAX_FRAME - 1).to_bytes(2, "little").hex(), "error": "bad_length"},
+    ]
+    for e in errors:
+        try:
+            C.HostStreamDecoder().feed(bytes.fromhex(e["wire"]))
+        except C.HostFrameError as ex:
+            assert ex.kind == e["error"], e["name"]
+        else:
+            raise AssertionError(f"host {e['name']}: parsed OK")
+    # Payload-length / type checks on CRC-good frames (answered with RESULT, not fatal).
+    checks = [
+        {"name": "posture_short", "wire": C.build_host_frame(0x10, 11, b"\x03\x00").hex(), "status": "bad_len"},
+        {"name": "unknown_type", "wire": C.build_host_frame(0x7D, 12, b"").hex(), "status": "unknown_type"},
+        {"name": "flash_reserved", "wire": C.build_host_frame(0x40, 13, b"").hex(), "status": "unknown_type"},
+    ]
+    for c in checks:
+        (f,) = C.HostStreamDecoder().feed(bytes.fromhex(c["wire"]))
+        st = P.host_payload_len_status(f.type, f.payload)
+        assert st == {"bad_len": P.LEN_BAD, "unknown_type": P.LEN_UNKNOWN_TYPE}[c["status"]], c["name"]
+    return {
+        "comment": "GENERATED by protocol/gen.py (cases in protocol/vector_cases.py). The laptop channel: "
+                   "wire = len u16 LE | type | seq | payload | crc16 LE. errors: the stream is out of step "
+                   "(close it); checks: a CRC-good frame whose payload length or type is wrong (RESULT "
+                   "BAD_LEN / UNKNOWN_TYPE).",
+        "frames": frames,
+        "errors": errors,
+        "checks": checks,
+    }

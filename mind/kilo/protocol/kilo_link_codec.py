@@ -224,3 +224,68 @@ class StreamDecoder:
                 yield parse_frame(seg, self.check_type)
             except FrameError as e:
                 yield e
+
+
+# ---------------------------------------------------------------------------
+# Host channel framing (the laptop <-> mind TCP link; spec [host], docs/fast-boot.md §5)
+#
+#     len u16 LE | type u8 | seq u8 | payload (0..HOST_MAX_PAYLOAD) | crc16 u16 LE
+#
+# len counts the bytes after itself; crc16 is the body link's CRC over type,
+# seq, payload. TCP needs no COBS. A bad length or CRC means the stream is out
+# of step: there is no resync, the connection is dropped. C counterpart:
+# kernel/mind/net/host_frame.h.
+
+HOST_MAX_PAYLOAD = _P.HOST_MAX_PAYLOAD
+HOST_MAX_FRAME = _P.HOST_MAX_FRAME
+
+
+class HostFrameError(ValueError):
+    """The host stream is out of step (kind BAD_LENGTH or BAD_CRC): close it."""
+
+    def __init__(self, kind: str, msg: str = ""):
+        super().__init__(f"{kind}: {msg}" if msg else kind)
+        self.kind = kind
+
+
+def build_host_frame(msg_type: int, seq: int, payload: bytes = b"") -> bytes:
+    """One host frame: len | type | seq | payload | crc16."""
+    if not 0 <= msg_type <= 0xFF or not 0 <= seq <= 0xFF:
+        raise ValueError("type and seq must be u8")
+    if len(payload) > HOST_MAX_PAYLOAD:
+        raise ValueError(f"payload {len(payload)} B > {HOST_MAX_PAYLOAD}")
+    body = bytes([msg_type, seq]) + bytes(payload)
+    c = crc16(body)
+    n = len(body) + 2
+    return bytes([n & 0xFF, n >> 8]) + body + bytes([c & 0xFF, c >> 8])
+
+
+def encode_host_message(msg, seq: int) -> bytes:
+    """A host frame for a generated Host* dataclass instance."""
+    return build_host_frame(msg.ID, seq, msg.pack())
+
+
+class HostStreamDecoder:
+    """Incremental host-frame receiver. feed(bytes) returns the complete frames
+    (type and payload length unchecked: kilo_protocol.host_payload_len_status
+    does that) and raises HostFrameError when the stream is out of step."""
+
+    def __init__(self) -> None:
+        self._buf = bytearray()
+
+    def feed(self, data: bytes) -> list[Frame]:
+        self._buf += data
+        out: list[Frame] = []
+        while len(self._buf) >= 2:
+            n = self._buf[0] | (self._buf[1] << 8)
+            if not 4 <= n <= HOST_MAX_FRAME - 2:
+                raise HostFrameError(BAD_LENGTH, f"length {n}")
+            if len(self._buf) < 2 + n:
+                break
+            body, rx = bytes(self._buf[2:n]), self._buf[n] | (self._buf[n + 1] << 8)
+            del self._buf[:2 + n]
+            calc = crc16(body)
+            if calc != rx:
+                raise HostFrameError(BAD_CRC, f"crc {rx:#06x} != {calc:#06x}")
+            out.append(Frame(body[0], body[1], body[2:]))
+        return out

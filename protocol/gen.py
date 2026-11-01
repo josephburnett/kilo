@@ -6,6 +6,7 @@ Outputs (all committed):
   protocol/gen/kilo_protocol.py   Python dataclasses with pack/unpack, enums, constants
   protocol/vectors/frames.json    framed test vectors (cases in vector_cases.py)
   protocol/vectors/cobs.json      COBS-only vectors
+  protocol/vectors/host_frames.json  the laptop channel's frames (spec [host_messages])
 
 Usage:
   python3 protocol/gen.py           regenerate in place
@@ -29,6 +30,7 @@ OUT_H = HERE / "gen" / "kilo_protocol.h"
 OUT_PY = HERE / "gen" / "kilo_protocol.py"
 OUT_FRAMES = HERE / "vectors" / "frames.json"
 OUT_COBS = HERE / "vectors" / "cobs.json"
+OUT_HOST = HERE / "vectors" / "host_frames.json"
 
 SCALARS = {
     # name: (size, signed, struct char, C type)
@@ -80,7 +82,20 @@ def field_size(spec: dict, f: dict) -> int:
         return SCALARS[t][0] * f.get("count", 1)
     if t in spec.get("structs", {}):
         return struct_size(spec, t) * f.get("count", 1)
+    m = body_msg(spec, t)
+    if m is not None:  # a host message field embedding a fixed-length body payload
+        return layout(spec, m)["fixed"] * f.get("count", 1)
     raise SpecError(f"unknown type {t!r} in field {f['name']!r}")
+
+
+def body_msg(spec: dict, name: str) -> dict | None:
+    return next((m for m in spec["messages"] if m["name"] == name), None)
+
+
+def scalar_count(spec: dict, t: str) -> int:
+    """Scalar values a struct or body message type packs into (its Python struct items)."""
+    fields = spec["structs"][t]["fields"] if t in spec.get("structs", {}) else body_msg(spec, t)["fields"]
+    return sum(f.get("count", 1) for f in fields)
 
 
 def is_tail(f: dict) -> bool:
@@ -182,6 +197,65 @@ def validate(spec: dict) -> None:
     if sorted(pids) != list(range(len(pids))):
         raise SpecError("param ids must be dense from 0")
     validate_shared(spec)
+    validate_host(spec)
+
+
+HOST_DIRS = {"client_to_mind": (0x01, 0x7F, ("command", "stream")),
+             "mind_to_client": (0x80, 0xFF, ("stream", "event"))}
+HOST_RESERVED = (range(0x40, 0x50), range(0xC0, 0xD0))  # the flash channel (P4)
+
+
+def validate_host(spec: dict) -> None:
+    """[host] and [[host_messages]]: the laptop channel (docs/fast-boot.md §5)."""
+    h = spec["host"]
+    if h["max_frame"] != 2 + 2 + h["max_payload"] + 2:
+        raise SpecError("host: max_frame != 2 + 2 + max_payload + 2")
+    if h["max_frame"] > 0xFFFF + 2:
+        raise SpecError("host: max_frame must fit the u16 length")
+    ids, names = set(), set()
+    for m in spec["host_messages"]:
+        n, i = m["name"], m["id"]
+        if i in ids or n in names:
+            raise SpecError(f"host: duplicate message {n} / {i:#x}")
+        ids.add(i)
+        names.add(n)
+        if m["dir"] not in HOST_DIRS:
+            raise SpecError(f"host {n}: bad dir {m['dir']}")
+        lo, hi, kinds = HOST_DIRS[m["dir"]]
+        if not lo <= i <= hi or m["kind"] not in kinds:
+            raise SpecError(f"host {n}: {m['dir']} must be {lo:#x}..{hi:#x} and one of {kinds}")
+        if any(i in r for r in HOST_RESERVED):
+            raise SpecError(f"host {n}: {i:#x} is reserved for the flash channel")
+        for f in m["fields"]:
+            if "count_field" in f:
+                raise SpecError(f"host {n}.{f['name']}: no count_field arrays (use bytes)")
+            t = f["type"]
+            if t not in SCALARS and t != "bytes" and t not in spec["structs"]:
+                bm = body_msg(spec, t)
+                if bm is None or layout(spec, bm)["tail"] is not None:
+                    raise SpecError(f"host {n}.{f['name']}: {t} is not a scalar, struct or fixed-length body message")
+            if "enum" in f and f["enum"] not in spec["enums"]:
+                raise SpecError(f"host {n}.{f['name']}: unknown enum {f['enum']}")
+            if "flags" in f and f["flags"] not in spec["flags"]:
+                raise SpecError(f"host {n}.{f['name']}: unknown flags {f['flags']}")
+        if layout(spec, m)["max"] > h["max_payload"]:
+            raise SpecError(f"host {n}: max payload {layout(spec, m)['max']} > host.max_payload")
+    replied = {m["reply_to"] for m in spec["host_messages"] if "reply_to" in m}
+    for m in spec["host_messages"]:
+        if "reply_to" in m and (m["reply_to"] not in names or m["kind"] != "event"):
+            raise SpecError(f"host {m['name']}: reply_to must name a host message, from an event")
+        if m.get("query") and (m["kind"] != "command" or m["name"] not in replied):
+            raise SpecError(f"host {m['name']}: a query is a command with a reply message")
+    tm = next(m for m in spec["host_messages"] if m["name"] == "TELEM_SUB")
+    if tm["fields"][0]["range"][1] != h["telem_max_hz"]:
+        raise SpecError("host: TELEM_SUB hz range max != host.telem_max_hz")
+    for mn in ("BRIDGE_TX", "BRIDGE_RX"):
+        bm = next(m for m in spec["host_messages"] if m["name"] == mn)
+        if bm["fields"][-1]["max"] != h["bridge_chunk_max"]:
+            raise SpecError(f"host: {mn} data max != host.bridge_chunk_max")
+    lm = next(m for m in spec["host_messages"] if m["name"] == "LOG_LINE")
+    if lm["fields"][-1]["max"] != h["log_text_max"]:
+        raise SpecError("host: LOG_LINE text max != host.log_text_max")
 
 
 def field_range(spec: dict, msg: str, name: str) -> tuple[int, int]:
@@ -493,6 +567,7 @@ def gen_c(spec: dict) -> str:
     w("#define KILO_PARAM_DEFAULTS_INIT { " + ", ".join(str(p["default"]) for p in params) + " }")
     w("")
     gen_c_shared(spec, w)
+    gen_c_host(spec, w)
     # field table for tests / tools (opt-in, costs flash)
     w("#ifdef KILO_PROTOCOL_FIELD_TABLE")
     w("/* Scalar field layout, for host tests and tools. Not for the AVR build. */")
@@ -575,6 +650,102 @@ def gen_c_shared(spec: dict, w) -> None:
     w(f"#define KILO_HEAD_SPEED_DPS {h['speed_dps']}")
     w(f"#define KILO_HEAD_MAX_DEG {h['max_deg']}")
     w(f"#define KILO_HEAD_NOT_HELD ((int16_t)({h['not_held'] + 1} - 1))")
+    w("")
+
+
+def c_type_of(spec: dict, t: str) -> str:
+    """The C type of a host message's fixed non-scalar field."""
+    return f"kilo_{t}_t" if t in spec["structs"] else f"kilo_{t.lower()}_t"
+
+
+def gen_c_host(spec: dict, w) -> None:
+    """The laptop channel: constants, ids, payload structs and per-type helpers.
+    Host-only (the body never calls them), so the helpers are plain switches."""
+    h = spec["host"]
+    w("/* ---- Laptop interface: the host channel (spec [host], [[host_messages]]; docs/fast-boot.md §5) ----")
+    w(" * Frame on TCP: len u16 LE (bytes after it) | type | seq | payload | crc16 LE over type..payload. */")
+    for k, v in h.items():
+        if isinstance(v, list):
+            w(f"#define KILO_HOST_{k.upper()}_INIT {{{', '.join(str(x) for x in v)}}}")
+        else:
+            w(f"#define KILO_HOST_{k.upper()} {v}{'UL' if v > 0xFFFF else 'u'}")
+    w("")
+    w("enum kilo_host_msg_id {")
+    for m in spec["host_messages"]:
+        w(f"    KILO_HOST_MSG_{m['name']} = 0x{m['id']:02X},")
+    w("};")
+    w("")
+    for m in spec["host_messages"]:
+        lay = layout(spec, m)
+        lname = m["name"].lower()
+        w(f"/* host 0x{m['id']:02X} {m['name']}: {m['kind']}"
+          f"{', reply to ' + m['reply_to'] if 'reply_to' in m else ''}. {m['doc']} */")
+        if lay["tail"]:
+            w(f"#define KILO_HOST_{m['name']}_MIN_LEN {lay['min']}u")
+            w(f"#define KILO_HOST_{m['name']}_MAX_LEN {lay['max']}u")
+        else:
+            w(f"#define KILO_HOST_{m['name']}_LEN {lay['fixed']}u")
+        if not m["fields"]:
+            w("")
+            continue
+        w(f"typedef struct KILO_PACKED kilo_host_{lname}_s {{")
+        for f in m["fields"]:
+            if f["type"] == "bytes":
+                w(f"    uint8_t {c_ident(f['name'])}[{f['max']}];{c_comment(f)} /* {f['min']}..{f['max']} B, length implied */")
+            elif f["type"] in SCALARS:
+                w(f"    {c_scalar_decl(f)}{c_comment(f)}")
+            else:
+                w(f"    {c_type_of(spec, f['type'])} {c_ident(f['name'])};{c_comment(f)}")
+        w(f"}} kilo_host_{lname}_t;")
+        w(f"KILO_STATIC_ASSERT(sizeof(kilo_host_{lname}_t) == {lay['max']}, kilo_sa_host_{lname}_size);")
+        for f in m["fields"]:
+            w(f"KILO_STATIC_ASSERT(offsetof(kilo_host_{lname}_t, {c_ident(f['name'])}) == {lay['offsets'][f['name']]}, kilo_sa_host_{lname}_{f['name']});")
+        w("")
+    w("/* A host payload's length against its type: KILO_LEN_OK, KILO_LEN_BAD or KILO_LEN_UNKNOWN_TYPE. */")
+    w("static inline uint8_t kilo_host_payload_len_check(uint8_t type, uint16_t len)")
+    w("{")
+    w("    switch (type) {")
+    for m in spec["host_messages"]:
+        lay = layout(spec, m)
+        w(f"    case KILO_HOST_MSG_{m['name']}:")
+        if lay["tail"]:
+            w(f"        return (len >= {lay['min']}u && len <= {lay['max']}u) ? KILO_LEN_OK : KILO_LEN_BAD;")
+        else:
+            w(f"        return len == {lay['fixed']}u ? KILO_LEN_OK : KILO_LEN_BAD;")
+    w("    default:")
+    w("        return KILO_LEN_UNKNOWN_TYPE;")
+    w("    }")
+    w("}")
+    w("")
+    w("/* Kind of a host type (KILO_KIND_COMMAND, _STREAM, _EVENT), or KILO_KIND_UNKNOWN. */")
+    w("static inline uint8_t kilo_host_msg_kind(uint8_t type)")
+    w("{")
+    w("    switch (type) {")
+    for k in KINDS:
+        ms = [m for m in spec["host_messages"] if m["kind"] == k]
+        if not ms:
+            continue
+        for m in ms:
+            w(f"    case KILO_HOST_MSG_{m['name']}:")
+        w(f"        return KILO_KIND_{k.upper()};")
+    w("    default:")
+    w("        return KILO_KIND_UNKNOWN;")
+    w("    }")
+    w("}")
+    w("")
+    by_name = {m["name"]: m for m in spec["host_messages"]}
+    w("/* The reply message of a host query, 0 for any other type (answered by RESULT or not at all). */")
+    w("static inline uint8_t kilo_host_query_reply(uint8_t type)")
+    w("{")
+    w("    switch (type) {")
+    for m in spec["host_messages"]:
+        if "reply_to" in m:
+            w(f"    case KILO_HOST_MSG_{by_name[m['reply_to']]['name']}:")
+            w(f"        return KILO_HOST_MSG_{m['name']};")
+    w("    default:")
+    w("        return 0u;")
+    w("    }")
+    w("}")
     w("")
 
 
@@ -882,7 +1053,145 @@ def gen_py(spec: dict) -> str:
     w("            v = [from_dict(ec, x) for x in v]")
     w("        kw[k] = v")
     w("    return cls(**kw)")
+    gen_py_host(spec, L)
     return "\n".join(L) + "\n"
+
+
+def py_host_class_name(m: dict) -> str:
+    return "Host" + camel(m["name"])
+
+
+def py_type_class(spec: dict, t: str) -> str:
+    """The Python class of a host message's fixed non-scalar field."""
+    return camel(t)
+
+
+def gen_py_host(spec: dict, L: list) -> None:
+    """The laptop channel (spec [host], [[host_messages]]): constants, HostMsgId,
+    one Host* dataclass per message (pack/unpack as the body's), registries."""
+    w = L.append
+    h = spec["host"]
+    w("")
+    w("")
+    w("# ---- Laptop interface: the host channel (spec [host], [[host_messages]]; docs/fast-boot.md §5) ----")
+    w("# Frame on TCP: len u16 LE (bytes after it) | type | seq | payload | crc16 LE over type..payload")
+    w("# (kilo_link_codec.build_host_frame, HostStreamDecoder).")
+    for k, v in h.items():
+        w(f"HOST_{k.upper()} = {tuple(v)!r}" if isinstance(v, list) else f"HOST_{k.upper()} = {v}")
+    w("")
+    w("")
+    w("class HostMsgId(enum.IntEnum):")
+    for m in spec["host_messages"]:
+        w(f"    {m['name']} = 0x{m['id']:02X}")
+    w("")
+    w("")
+    for m in spec["host_messages"]:
+        lay = layout(spec, m)
+        tail = lay["tail"]
+        cname = py_host_class_name(m)
+        fixed = [f for f in m["fields"] if not is_tail(f)]
+        fmt = ""
+        for f in fixed:
+            if f["type"] in SCALARS:
+                fmt += SCALARS[f["type"]][2] * f.get("count", 1)
+            else:
+                sub = spec["structs"][f["type"]]["fields"] if f["type"] in spec["structs"] else body_msg(spec, f["type"])["fields"]
+                fmt += py_fmt(spec, sub)
+        reply = next((x for x in spec["host_messages"] if x.get("reply_to") == m["name"]), None)
+        w("@dataclass")
+        w(f"class {cname}:")
+        w(f'    """host 0x{m["id"]:02X} {m["name"]} ({m["kind"]}). {m["doc"]}"""')
+        w(f"    ID: ClassVar[int] = 0x{m['id']:02X}")
+        w(f"    NAME: ClassVar[str] = '{m['name']}'")
+        w(f"    KIND: ClassVar[Kind] = Kind.{m['kind'].upper()}")
+        w(f"    DIR: ClassVar[str] = '{m['dir']}'")
+        w(f"    IS_QUERY: ClassVar[bool] = {bool(m.get('query'))}")
+        w(f"    REPLY: ClassVar[int | None] = {('0x%02X' % reply['id']) if reply else None}")
+        w(f"    MIN_LEN: ClassVar[int] = {lay['min']}")
+        w(f"    MAX_LEN: ClassVar[int] = {lay['max']}")
+        w(f"    _FMT: ClassVar[struct.Struct] = struct.Struct('<{fmt}')")
+        for f in m["fields"]:
+            if f["type"] == "bytes":
+                w(f"    {f['name']}: bytes = b''  # {f['min']}..{f['max']} B")
+            elif f["type"] in SCALARS:
+                w(f"    {py_field_decl(f)}")
+            else:
+                c = py_type_class(spec, f["type"])
+                w(f"    {f['name']}: {c} = field(default_factory={c})")
+        w("")
+        w("    def _fixed_values(self) -> list:")
+        w("        v: list = []")
+        for f in fixed:
+            if f["type"] in SCALARS:
+                if "count" in f:
+                    w(f"        if len(self.{f['name']}) != {f['count']}:")
+                    w(f"            raise PayloadError('{f['name']}: expected {f['count']} elements')")
+                    w(f"        v.extend(self.{f['name']})")
+                else:
+                    w(f"        v.append(self.{f['name']})")
+            else:
+                w(f"        v.extend(self.{f['name']}._fixed_values())")
+        w("        return v")
+        w("")
+        w("    @classmethod")
+        w("    def _from_fixed(cls, v: tuple, **extra):")
+        w("        kw: dict = {}")
+        i = 0
+        for f in fixed:
+            if f["type"] in SCALARS:
+                n = f.get("count", 1)
+                w(f"        kw['{f['name']}'] = " + (f"list(v[{i}:{i + n}])" if "count" in f else f"v[{i}]"))
+            else:
+                n = scalar_count(spec, f["type"])
+                w(f"        kw['{f['name']}'] = {py_type_class(spec, f['type'])}._from_fixed(v[{i}:{i + n}])")
+            i += n
+        w("        kw.update(extra)")
+        w("        return cls(**kw)")
+        w("")
+        w("    def pack(self) -> bytes:")
+        if tail:
+            tf = tail["field"]
+            w(f"        tail = bytes(self.{tf['name']})")
+            w(f"        if not {tail['min']} <= len(tail) <= {tail['max']}:")
+            w(f"            raise PayloadError('{tf['name']}: {tail['min']}..{tail['max']} bytes, got %d' % len(tail))")
+        w("        try:")
+        w("            return self._FMT.pack(*self._fixed_values())" + (" + tail" if tail else ""))
+        w("        except struct.error as e:")
+        w("            raise PayloadError(f'{type(self).__name__}: {e}') from None")
+        w("")
+        w("    @classmethod")
+        w("    def unpack(cls, data: bytes):")
+        w("        data = bytes(data)")
+        w("        if host_payload_len_status(cls.ID, data) != LEN_OK:")
+        w("            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')")
+        if tail:
+            w(f"        return cls._from_fixed(cls._FMT.unpack(data[:{lay['fixed']}]), {tail['field']['name']}=data[{lay['fixed']}:])")
+        else:
+            w("        return cls._from_fixed(cls._FMT.unpack(data))")
+        w("")
+        w("")
+    w("HOST_MESSAGES: dict[int, type] = {")
+    for m in spec["host_messages"]:
+        w(f"    0x{m['id']:02X}: {py_host_class_name(m)},")
+    w("}")
+    w("")
+    w("")
+    w("def host_payload_len_status(msg_type: int, payload: bytes) -> int:")
+    w('    """LEN_OK, LEN_BAD or LEN_UNKNOWN_TYPE, exactly as kilo_host_payload_len_check() in C."""')
+    w("    n = len(payload)")
+    for m in spec["host_messages"]:
+        lay = layout(spec, m)
+        w(f"    if msg_type == 0x{m['id']:02X}:")
+        if lay["tail"]:
+            w(f"        return LEN_OK if {lay['min']} <= n <= {lay['max']} else LEN_BAD")
+        else:
+            w(f"        return LEN_OK if n == {lay['fixed']} else LEN_BAD")
+    w("    return LEN_UNKNOWN_TYPE")
+    w("")
+    w("")
+    w("def decode_host_payload(msg_type: int, payload: bytes) -> Any:")
+    w('    """Unpack a host payload into its Host* dataclass. Raises KeyError (unknown type) or PayloadError."""')
+    w("    return HOST_MESSAGES[msg_type].unpack(payload)")
 
 
 def gen_py_shared(spec: dict, w) -> None:
@@ -933,7 +1242,7 @@ def _load_file_module(name: str, path: Path) -> types.ModuleType:
     return mod
 
 
-def gen_vectors(py_src: str) -> tuple[str, str]:
+def gen_vectors(py_src: str) -> tuple[str, str, str]:
     """Build vectors with the freshly generated bindings and the Python codec.
     Uses private module objects so callers' imports are not disturbed."""
     P = types.ModuleType("kilo_protocol")
@@ -950,7 +1259,8 @@ def gen_vectors(py_src: str) -> tuple[str, str]:
         else:
             sys.modules["kilo_protocol"] = saved
     frames, cobs = cases.build(P, codec)
-    return (json.dumps(frames, indent=1) + "\n", json.dumps(cobs, indent=1) + "\n")
+    host = cases.build_host(P, codec)
+    return tuple(json.dumps(d, indent=1) + "\n" for d in (frames, cobs, host))
 
 
 # ---------------------------------------------------------------------------
@@ -959,8 +1269,8 @@ def render() -> dict[Path, str]:
     spec = load_spec()
     h = gen_c(spec)
     py = gen_py(spec)
-    frames, cobs = gen_vectors(py)
-    return {OUT_H: h, OUT_PY: py, OUT_FRAMES: frames, OUT_COBS: cobs}
+    frames, cobs, host = gen_vectors(py)
+    return {OUT_H: h, OUT_PY: py, OUT_FRAMES: frames, OUT_COBS: cobs, OUT_HOST: host}
 
 
 def main(argv: list[str] | None = None) -> int:
