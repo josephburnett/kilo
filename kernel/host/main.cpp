@@ -1,4 +1,4 @@
-// kilo-mind-host: the portable mind core's body link on Linux, for the
+// kilo-mind-host: the portable mind core (mind/mind.h) on Linux, for the
 // virtual body (python -m kilo.vbody.core prints its pty) or a NyBoard on a
 // USB adapter. It does what the Circle kernel does in phase P1
 // (docs/fast-boot.md): exchange HELLO, keep the link fed (HEARTBEAT), and
@@ -12,6 +12,18 @@
 // kernel/host/tests/fake_optiboot.py reads.
 //
 //   kilo-mind-host --port /dev/pts/N [--listen [ADDR:]PORT] [--reset-fifo PATH] [--duration S] [--verbose]
+
+// USB adapter. It runs what the Circle kernel runs: the link (HELLO,
+// HEARTBEAT, goals), the walker, the trick player and perception, and with
+// --remote the IR remote, with --behaviour the behaviour runner; it logs
+// link statistics once a second, with a STATS_REQ to the body each second
+// to exercise the command path. With --listen it also serves the laptop
+// channel of phase P2 (mind/net/host_server.h) on a TCP port, for
+// `kilo --host 127.0.0.1:PORT`; it logs "listening on port N" (port 0
+// picks a free one).
+//
+//   kilo-mind-host --port /dev/pts/N [--listen [ADDR:]PORT] [--duration S] [--verbose]
+//                  [--remote] [--behaviour] [--seed N] [--balance KP]
 //
 // Exit status: 0 after --duration (or SIGINT/SIGTERM) with a HELLO seen;
 // 1 no HELLO, or the port failed; 2 the body speaks another protocol major
@@ -21,16 +33,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "link/names.h"
 #include "flash/flasher.h"
 #include "flash/image.h"
 #include "link/serial_link.h"
 #include "net/host_server.h"
+
+#include "mind.h"
 #include "net_posix.h"
 #include "posix.h"
 #include "util/log.h"
-#include "util/logring.h"
-#include "util/mem.h"
 
 #ifndef KILO_MIND_BUILD
 #define KILO_MIND_BUILD 0
@@ -95,21 +108,13 @@ void log_stats(Log& log, const SerialLink& link, const Window& w) {
        s.commands, s.retries, s.timeouts, s.nacks, s.dup_acks, s.unmatched_acks, s.tx_short);
 }
 
-void log_body_stats(Log& log, const Request& r) {
-  if (r.reply_len != sizeof(kilo_stats_t)) return;
-  kilo_stats_t st;
-  mem_copy(&st, r.reply, sizeof st);
-  logf(log, LogLevel::Info,
-       "body STATS: uptime %u s overruns %u max tick %u us rx_crc_err %u rx_overflow %u feet_late %u "
-       "feet_underruns %u",
-       (unsigned)st.uptime_s, st.overruns, st.max_tick_us, st.rx_crc_err, st.rx_overflow, st.feet_late,
-       st.feet_underruns);
-}
-
 int usage() {
   fprintf(stderr,
           "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--reset-fifo PATH] [--duration SECONDS] "
           "[--verbose]\n");
+
+          "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--duration SECONDS] [--verbose]\n"
+          "                      [--remote] [--behaviour] [--seed N] [--balance KP]\n");
   return 64;
 }
 
@@ -121,7 +126,12 @@ int main(int argc, char** argv) {
   const char* reset_fifo = nullptr;
   double duration_s = -1;
   bool verbose = false;
+  MindConfig cfg;
+  cfg.mind_build = (uint32_t)KILO_MIND_BUILD;
+  cfg.stats_period_ms = 1000;
+  bool seeded = false;
   for (int i = 1; i < argc; i++) {
+    char* end;
     if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
       port = argv[++i];
     } else if (strcmp(argv[i], "--listen") == 0 && i + 1 < argc) {
@@ -129,11 +139,21 @@ int main(int argc, char** argv) {
     } else if (strcmp(argv[i], "--reset-fifo") == 0 && i + 1 < argc) {
       reset_fifo = argv[++i];
     } else if (strcmp(argv[i], "--duration") == 0 && i + 1 < argc) {
-      char* end;
       duration_s = strtod(argv[++i], &end);
       if (*end != '\0' || duration_s < 0) return usage();
     } else if (strcmp(argv[i], "--verbose") == 0) {
       verbose = true;
+    } else if (strcmp(argv[i], "--remote") == 0) {
+      cfg.remote = true;
+    } else if (strcmp(argv[i], "--behaviour") == 0) {
+      cfg.behaviour = true;
+    } else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
+      cfg.seed = strtoull(argv[++i], &end, 10);
+      if (*end != '\0') return usage();
+      seeded = true;
+    } else if (strcmp(argv[i], "--balance") == 0 && i + 1 < argc) {
+      cfg.balance_kp = strtod(argv[++i], &end);
+      if (*end != '\0' || cfg.balance_kp < 0 || cfg.balance_kp > 0.996) return usage();
     } else {
       return usage();
     }
@@ -149,8 +169,12 @@ int main(int argc, char** argv) {
 
   MonotonicClock clock;
   StderrLog stderr_log(clock, verbose ? LogLevel::Debug : LogLevel::Info);
-  LogRing log(clock, &stderr_log);  // every line: the RAM ring (`kilo log --host`), then stderr
+  if (!seeded) cfg.seed = clock.now_us() ^ ((uint64_t)getpid() << 20);  // Python: a random seed, logged
   PosixSerial serial;
+  PosixListener listener;
+  // static: the Mind holds ~60 KB of buffers (the laptop channel's, perception's windows)
+  static Mind mind(serial, clock, stderr_log, listen != nullptr ? &listener : nullptr, cfg);
+  Log& log = mind.log();  // every line: the RAM ring (`kilo log --host`), then stderr
   if (!serial.open(port)) {
     logf(log, LogLevel::Error, "%s", serial.error());
     return 1;
@@ -158,7 +182,6 @@ int main(int argc, char** argv) {
   if (!serial.set_baud(KILO_BAUD)) logf(log, LogLevel::Warn, "cannot set %u baud on %s", (unsigned)KILO_BAUD, port);
   logf(log, LogLevel::Info, "port %s at %u baud", port, (unsigned)KILO_BAUD);
 
-  SerialLink link(serial, clock, log);
   Window window(clock);
   link.set_listener(&window);
   link.connect();
@@ -170,26 +193,30 @@ int main(int argc, char** argv) {
   static FlashImage image;  // 32 KB
   static Flasher flasher(serial, clock, gpio, link, log);
   host.attach_flasher(flasher, image);
+
+  mind.set_tap(&window);
   if (listen != nullptr) {
     if (!listener.open(listen)) {
       logf(log, LogLevel::Error, "%s", listener.error());
       return 1;
     }
-    server = &host;
     logf(log, LogLevel::Info, "listening on port %u (--listen %s; mind build %08x)", (unsigned)listener.port(),
          listen, (unsigned)KILO_MIND_BUILD);
   }
+  mind.start();
 
   const uint64_t start = clock.now_us();
   const uint64_t end = duration_s >= 0 ? start + (uint64_t)(duration_s * 1e6) : UINT64_MAX;
   uint64_t next_report = start + 1000000u;
   int status = 0;
-  bool stats_asked = false;
+  SerialLink& link = mind.link();
   while (!g_stop && clock.now_us() < end) {
     link.mark_alive();  // this loop is the whole mind: it is alive while it runs
     if (server != nullptr) server->poll();
     bool bridged = server != nullptr && server->link_paused();
     if (!bridged) link.poll();  // paused while the bridge or the flasher has the UART
+
+    mind.poll();
     if (!link.connected()) {
       logf(log, LogLevel::Error, "port %s failed", port);
       status = 1;
@@ -199,23 +226,16 @@ int main(int argc, char** argv) {
       status = 2;
       break;
     }
-    const Request& r = link.req();
-    if (stats_asked && r.state != RequestState::Waiting) {
-      stats_asked = false;
-      if (r.state == RequestState::Done) log_body_stats(log, r);
-    }
     uint64_t now = clock.now_us();
     if (now >= next_report) {
       next_report += 1000000u;
       log_stats(log, link, window);
       window.reset();
-      if (link.state().has_hello && !stats_asked && !bridged)
-        stats_asked = link.request(KILO_MSG_STATS_REQ, nullptr, 0);
     }
     struct pollfd p[2 + PosixListener::kSlots];
     nfds_t np = 0;
     p[np++] = {serial.fd(), POLLIN, 0};
-    if (server != nullptr) {
+    if (listen != nullptr) {
       p[np++] = {listener.fd(), POLLIN, 0};
       for (uint32_t s = 0; s < PosixListener::kSlots; s++) {
         PosixConn* c = static_cast<PosixConn*>(listener.conn(s));
@@ -229,6 +249,9 @@ int main(int argc, char** argv) {
     status = 1;
   }
   log_stats(log, link, window);
+  if (cfg.behaviour)
+    logf(log, LogLevel::Info, "behaviour: %u ticks, %u overruns%s", (unsigned)mind.runner().ticks(),
+         (unsigned)mind.runner().overruns(), mind.poweroff_requested() ? ", poweroff requested" : "");
   listener.close();
   serial.close();
   return status;

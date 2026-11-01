@@ -327,6 +327,52 @@ class CoreBody:
         assert status in ("fresh", "none", "err")
         self._cmd(f"imu {status}")
 
+    def ir_key(self, command: int, repeat: bool = False) -> None:
+        """EVENT IR_KEY (command | 0x100 for a held-key repeat), as the body's
+        NEC decoder relays a key. The harness has no IR decoder (it is
+        host-tested in body/test/test_ir.cpp), so the frame is made here,
+        with the epoch and tick of the core's last TELEMETRY."""
+        with self._hlock:
+            tel = next((m for _, n, m in reversed(self.sent) if n == "TELEMETRY"), None)
+            ev = P.Event(code=P.EventCode.IR_KEY, arg=(int(command) & 0xFF) | (0x100 if repeat else 0),
+                         tick=tel.tick if tel is not None else 0, epoch=tel.epoch if tel is not None else 0)
+            self._ir_seq = (getattr(self, "_ir_seq", 0x40) + 1) & 0xFF
+            self._deliver(default_codec().encode(P.MsgId.EVENT, self._ir_seq, ev.pack()))
+
+    def serve_control(self, path: str) -> None:
+        """Read commands, one per line, from the FIFO at ``path`` (made here)
+        in a thread, so a test can provoke what the harness simulates:
+
+            ir CODE [repeat]       EVENT IR_KEY (CODE: 0x18 or 24)
+            att P R [RP RR RY]     the IMU's attitude (degrees) and rates (deg/s) from the next tick on
+            batt MV | batt none    the pack voltage the ADC samples
+            imu fresh|none|err     the IMU read result
+
+        ``python -m kilo.vbody.core --control PATH``; kernel/host/test.sh uses it."""
+        if not os.path.exists(path):
+            os.mkfifo(path)
+
+        def run() -> None:
+            while self._running:
+                with open(path) as f:  # blocks until a writer opens it; EOF when it closes
+                    for line in f:
+                        w = line.split()
+                        try:
+                            if w[:1] == ["ir"]:
+                                self.ir_key(int(w[1], 0), repeat=w[2:3] == ["repeat"])
+                            elif w[:1] == ["att"]:
+                                self.set_attitude(*(float(x) for x in w[1:6]))
+                            elif w[:1] == ["batt"]:
+                                self.set_battery(None if w[1] == "none" else float(w[1]))
+                            elif w[:1] == ["imu"]:
+                                self.set_imu(w[1])
+                            elif w:
+                                print(f"control: unknown command {line.strip()!r}", flush=True)
+                        except (IndexError, ValueError, RuntimeError, AssertionError) as e:
+                            print(f"control: {line.strip()!r}: {e}", flush=True)
+
+        threading.Thread(target=run, name="corebody-control", daemon=True).start()
+
     def set_battery(self, mv: float | None = None, *, counts: int | None = None) -> None:
         """The pack voltage the ADC samples at 10 Hz (or raw counts); mv=None
         and counts=None: no samples at all."""
@@ -453,10 +499,15 @@ def main(argv: list[str] | None = None) -> int:
 
     ap = argparse.ArgumentParser(prog="python -m kilo.vbody.core", description=main.__doc__)
     ap.add_argument("--config-state", type=int, default=0, help="HELLO config_state (2 = DEFAULTED)")
+    ap.add_argument("--control", metavar="FIFO",
+                    help="read test commands from this FIFO (made if missing): ir CODE [repeat], att P R [RP RR RY], "
+                         "batt MV|none, imu fresh|none|err (CoreBody.serve_control)")
     args = ap.parse_args(argv)
     body = CoreBody(clock=time.monotonic, config_state=args.config_state)
     path = body.open_pty()
     body.start_realtime()
+    if args.control:
+        body.serve_control(args.control)
     print(f"real body core on {path}  (kilo --port {path} ...); Ctrl-C to stop", flush=True)
     try:
         while True:

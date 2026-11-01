@@ -47,4 +47,5 @@ MIND_SRCS += \
 	mind/behaviour/runner.cpp \
 	mind/remote/client.cpp \
 	mind/remote/keys.cpp \
-	mind/remote/remote.cpp
+	mind/remote/remote.cpp \
+	mind/mind.cpp

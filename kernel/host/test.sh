@@ -360,6 +360,93 @@ for v in perception behaviour; do
     "$PYTHON" "$HERE/tests/gen_${v}_vectors.py" | cmp -s - "$HERE/tests/${v}_vectors.txt" ||
         { echo "FAILED: stale; run: $PYTHON kernel/host/tests/gen_${v}_vectors.py > kernel/host/tests/${v}_vectors.txt"; exit 1; }
 done
+
+# The virtual body from this checkout's mind/ with its control FIFO (CoreBody.serve_control):
+# `ctl ir 0x10` sends EVENT IR_KEY, `ctl att 40 0` tilts the scripted IMU.
+FIFO="$OUT/control.fifo"
+start_ctl_body() {  # start_ctl_body <log>
+    rm -f "$FIFO"
+    start_body "$1" env PYTHONPATH="$REPO/mind" "$PYTHON" -u -m kilo.vbody.core --control "$FIFO"
+    for _ in $(seq 1 50); do [ -p "$FIFO" ] && return 0; sleep 0.1; done
+    echo "FAILED: no control FIFO"; cat "$1"; exit 1
+}
+ctl() { timeout 5 bash -c "echo '$*' > '$FIFO'" || { echo "FAILED: the control FIFO did not take '$*'"; exit 1; }; }
+run_mind() {  # run_mind <log> <args...>: kilo-mind-host in the background, MIND_PID
+    local log="$1"; shift
+    "$HOST" --port "$PTY" "$@" 2> "$log" &
+    MIND_PID=$!
+}
+wait_mind() {  # wait_mind <log>: it must exit 0
+    wait "$MIND_PID" || { echo "FAILED: kilo-mind-host exit status $?"; cat "$1"; exit 1; }
+}
+
+echo "== P3 integration: IR keys from the virtual body -> trick, trot, turn, stand, rest (--remote)"
+start_ctl_body "$OUT/vbody_ir.log"
+trap stop_body EXIT
+run_mind "$OUT/host_ir.log" --remote --duration 14
+sleep 1
+ctl ir 0x10                   # A2: hi (from LIMP: STAND, 1 s, then the trick)
+sleep 3.5
+ctl ir 0x30; ctl ir 0x62      # A3: trot; B7: forward
+sleep 2
+ctl ir 0x22                   # A6: turn left
+sleep 1
+ctl ir 0x02                   # B6: stand (the planned stop, then the posture)
+sleep 4
+ctl ir 0xA2                   # A7: rest
+wait_mind "$OUT/host_ir.log"
+stop_body
+trap - EXIT
+grep -E "remote|trick|walk" "$OUT/host_ir.log"
+expect "$OUT/host_ir.log" "trick hi: uploaded \(id [0-9]+, 6 frames" "the trick uploaded"
+expect "$OUT/host_ir.log" "remote A2 \(0x10, hi\): trick hi" "A2 started hi"
+expect "$OUT/host_ir.log" "trick hi: TRICK_DONE DONE after [0-9]+ ms \(expected 111 ticks\)" "hi played to TRICK_DONE"
+expect "$OUT/host_ir.log" "remote A3 \(0x30, trot\): pattern trot" "A3 selected trot"
+expect "$OUT/host_ir.log" "remote B7 \(0x62, forward\): walk forward \(trot\)" "B7 walked"
+expect "$OUT/host_ir.log" "walk trot forward at 55\.6 mm/s" "the trot started"
+expect "$OUT/host_ir.log" "remote A6 \(0x22, left\): walk left \(trot\)" "A6 turned"
+expect "$OUT/host_ir.log" "walk ended: stopped" "the planned stop"
+expect "$OUT/host_ir.log" "remote B6 \(0x02, stand\): posture stand" "B6 stood after the stop"
+expect "$OUT/host_ir.log" "remote A7 \(0xA2, rest\): posture rest" "A7 rested"
+if grep -Eq "decode errors [1-9]|remote .*failed" "$OUT/host_ir.log"; then echo "FAILED: errors"; exit 1; fi
+
+echo "== P3 integration: the behaviour runner idles for 5 s (--behaviour)"
+start_body "$OUT/vbody_bh.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u -m kilo.vbody.core
+trap stop_body EXIT
+"$HOST" --port "$PTY" --behaviour --seed 3 --duration 5 2> "$OUT/host_bh.log" ||
+    { echo "FAILED: kilo-mind-host exit status $?"; cat "$OUT/host_bh.log"; exit 1; }
+stop_body
+trap - EXIT
+grep -E "behaviour" "$OUT/host_bh.log"
+expect "$OUT/host_bh.log" "behaviour runner: seed 3, personality kilo" "the runner started"
+expect "$OUT/host_bh.log" "behaviour: idle \(free\)" "idle chosen"
+expect "$OUT/host_bh.log" "behaviour: posture sit" "idle sat down through the link"
+ticks="$(grep -o 'behaviour: [0-9]* ticks' "$OUT/host_bh.log" | grep -o '[0-9]*')"
+[ -n "$ticks" ] && [ "$ticks" -ge 45 ] && [ "$ticks" -le 52 ] || { echo "FAILED: $ticks ticks in 5 s, want 10 Hz"; exit 1; }
+if grep -Eq "fallen|low_battery|wind_down|refused|no longer stamping" "$OUT/host_bh.log"; then
+    echo "FAILED: the idle run did not stay idle"; exit 1
+fi
+
+echo "== P3 integration: perception and the behaviour runner react to the virtual body's IMU (tilt, fall)"
+start_ctl_body "$OUT/vbody_pc.log"
+trap stop_body EXIT
+run_mind "$OUT/host_pc.log" --behaviour --seed 3 --duration 9
+sleep 2
+ctl att 40 0                  # nose down 40 deg: tilted (> 25 for 0.5 s)
+sleep 1.5
+ctl att 0 0                   # level again
+sleep 2
+ctl att 85 0                  # past the body's 75 deg: its fall reflex (EVENT FELL)
+sleep 1.5
+ctl att 0 0
+wait_mind "$OUT/host_pc.log"
+stop_body
+trap - EXIT
+grep -E "percept|FELL|behaviour: [a-z_]+ \(" "$OUT/host_pc.log"
+expect "$OUT/host_pc.log" "percept tilted nose_down" "the tilt seen"
+expect "$OUT/host_pc.log" "percept level" "level again"
+expect "$OUT/host_pc.log" "event FELL arg=2" "the body's fall reflex"
+expect "$OUT/host_pc.log" "behaviour: fallen \(safety\)" "the fallen safety branch"
 # ---- end P3 ---------------------------------------------------------------------------------------
 
 echo "== all kernel host tests passed"

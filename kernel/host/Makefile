@@ -159,8 +159,13 @@ clean:
 
 # ---- P3 (docs/fast-boot.md): tricks, perception, behaviour, remote and the Mind --------
 # Their unit tests join `make check` (TESTS is read when check runs).
-TESTS += test_tricks test_perception test_behaviour test_remote
+TESTS += test_tricks test_perception test_behaviour test_remote test_mind
 # Perception and behaviour compute in double as Python does (util/dmath.h):
 # the drives' arousal decay needs exp, their optional gaussian noise log, sin
 # and cos (GCC fuses the pair into sincos). Circle links libm, which has them.
 ALLOWED += exp log sin cos sincos
+# The remote and the Mind use the planner's float types: the double-planner
+# builds (the vector test's twin, the bench) leave them out (their recipes
+# expand these at run time).
+DBL_OBJS := $(filter-out $(B)/san/mind/remote/% $(B)/san/mind/mind.o,$(DBL_OBJS))
+BENCH_DBL_OBJS := $(filter-out $(B)/obj/mind/remote/% $(B)/obj/mind/mind.o,$(BENCH_DBL_OBJS))
