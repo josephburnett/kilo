@@ -2,6 +2,7 @@
 #
 #   make -C kernel               Circle libraries, build/kernel7.img, build/netboot/kernel7.img
 #   make -C kernel boot          download the Raspberry Pi firmware into circle/boot (network)
+#   make -C kernel card          stage both cards' files in build/card/{netboot,kernel}/ for copying by hand
 #   make -C kernel clean         remove build/
 #   make -C kernel circle-clean  remove the objects Circle built inside the submodule
 
@@ -71,7 +72,7 @@ NETBOOT_OBJS := $(BUILD)/netboot/main.o $(BUILD)/netboot/kernel.o \
 NETBOOT_GEN  := $(BUILD)/netboot/index.h $(BUILD)/netboot/style.h $(BUILD)/netboot/favicon.h
 
 .DEFAULT_GOAL := all
-.PHONY: all toolchain circle-config circle circle-clean boot
+.PHONY: all toolchain circle-config circle circle-clean boot card
 
 all: $(TARGET).img $(BUILD)/netboot/kernel7.img
 
@@ -141,6 +142,17 @@ circle-clean:
 
 boot: circle-config
 	$(MAKE) -C $(CIRCLEHOME)/boot
+
+# The two cards' contents as plain folders, for a computer that has the card
+# reader but not this checkout (rtb has no reader): copy a folder's files onto
+# an empty FAT card. tools/make-sd.sh does the same with its checks when the
+# card is mounted here.
+card: all
+	@for mode in netboot kernel; do \
+		d=$(BUILD)/card/$$mode; rm -rf $$d; mkdir -p $$d; \
+		tools/make-sd.sh --force-dir $$d --$$mode >/dev/null || exit 1; \
+		echo "  CARD  $$d: $$(ls $$d | tr '\n' ' ')"; \
+	done
 
 $(OBJS) $(NETBOOT_OBJS): | circle-config
 

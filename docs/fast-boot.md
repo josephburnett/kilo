@@ -1,9 +1,13 @@
 # Fast boot: the mind as a Circle bare-metal kernel
 
-Written 2026-11-01. A plan, not yet started. It replaces the mind's Linux +
-Python stack on the Raspberry Pi 2 B with a single bare-metal C++ kernel built
-on [Circle](https://github.com/rsta2/circle), cross-compiled on the laptop.
-Numbers marked **(est.)** are estimates, not measurements.
+Written 2026-11-01. It replaces the mind's Linux + Python stack on the
+Raspberry Pi 2 B with a single bare-metal C++ kernel built on
+[Circle](https://github.com/rsta2/circle), cross-compiled on the build
+machine (the plan says "laptop"; today that is the home server). Numbers
+marked **(est.)** are estimates, not measurements. What exists lives in
+`kernel/` (`kernel/README.md`, `kernel/mind/README.md`); the first run on the
+Pi follows `docs/fast-boot-first-boot.md`, results in
+`docs/fast-boot-first-boot-results.md`.
 
 ## 1. Why
 

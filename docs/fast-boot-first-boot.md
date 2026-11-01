@@ -102,6 +102,20 @@ kernel/tools/make-sd.sh /media/$USER/BOOT --netboot
 The script refuses a card that holds anything else, for example a Raspberry
 Pi OS card. Eject the card and put it in the Pi.
 
+**No card reader on the build machine?** Then stage the files and copy them
+with any computer that has one:
+
+```
+make -C kernel card
+```
+
+makes the folder `kernel/build/card/netboot/` with the six files
+(`bootcode.bin`, `start_cd.elf`, `fixup_cd.dat`, `LICENCE.broadcom`,
+`config.txt`, `kernel7.img`). Copy that folder's files onto an empty,
+FAT-formatted card with the other computer (a file manager is fine; the card
+needs no partitioning when it came formatted). Nothing else may be on the
+card. `kernel/build/card/kernel/` is the same for the production card.
+
 ### 2. Cable the Pi
 
 - Ethernet cable from the Pi to the router.
