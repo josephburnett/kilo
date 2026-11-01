@@ -7,7 +7,8 @@ The body interface (``ctx.body``) the behaviours call:
 - ``set_balance(enable)``: BodyClient has it.
 - ``look(pan_deg, tilt_deg)``: head target. Not in the body yet (P2).
 - ``play(trick, mirror=False)``: returns an awaitable that resolves on
-  TRICK_DONE. Not in the body yet (P2).
+  TRICK_DONE (through the adapter: SUCCESS if the trick ended DONE, else
+  FAILURE). Not in the body yet (P2).
 - ``beep(notes)``: ``[(midi_note, ms), ...]``. Not in the body yet.
 
 ``adapter.BodyAdapter`` wraps a real BodyClient and stubs the missing ones.

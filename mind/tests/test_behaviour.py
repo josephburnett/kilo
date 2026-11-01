@@ -8,6 +8,7 @@ import asyncio
 import copy
 import json
 import random
+import time
 
 import pytest
 
@@ -257,6 +258,46 @@ def test_action_coroutine_runs_until_done_and_halt_cancels():
         assert tick_root(b, ctx) is FAILURE and ctx.errors[-1][0] == "bad"
 
     asyncio.run(main())
+
+
+def test_adapter_play_maps_how_the_trick_ended():
+    """BodyClient.play resolves to a TrickResult: DONE is SUCCESS, any other
+    end FAILURE (regression: Action rejected the TrickResult, so every real
+    trick FAILed). RemoteBody's TrickResult-shaped namespace maps the same,
+    and a play resolving to None (the fakes) stays SUCCESS."""
+    from types import SimpleNamespace
+
+    from kilo.behaviour.library import play
+    from kilo.body.client import TrickResult
+
+    class Client:
+        def __init__(self, result):
+            self.result = result
+
+        async def play(self, trick, mirror=False):
+            await asyncio.sleep(0)
+            return self.result
+
+    def run(result):
+        async def main():
+            ctx = make_ctx(body=BodyAdapter(Client(result)))
+            a = play("sniff")
+            assert tick_root(a, ctx) is RUNNING
+            for _ in range(10):
+                await asyncio.sleep(0)
+                st = tick_root(a, ctx)
+                if st is not RUNNING:
+                    return st, ctx.errors
+            raise AssertionError("still running")
+        return asyncio.run(main())
+
+    assert run(TrickResult("DONE", 7, 1.0, 50, 0)) == (SUCCESS, [])
+    for reason in ("STOPPED", "PREEMPTED", "FELL"):
+        assert run(TrickResult(reason, 7, 0.3, 50, 0)) == (FAILURE, []), reason
+    assert run(SimpleNamespace(reason="DONE", trick_id=7, stopped_by_us=False)) == (SUCCESS, [])
+    assert run(SimpleNamespace(reason="STOPPED", trick_id=7, stopped_by_us=True)) == (FAILURE, [])
+    assert run(None) == (SUCCESS, [])
+    assert run(False) == (FAILURE, [])
 
 
 def test_active_path_is_the_running_leaf():
@@ -784,6 +825,56 @@ def test_runner_against_vbody():
         assert set(adapter.unsupported) <= {"look", "play", "beep"}
         assert ("posture", ("sit", None)) in adapter.calls
         assert not any("errors" in r for r in hist), [r["errors"] for r in hist if "errors" in r]
+    finally:
+        link.stop()
+        vb.stop()
+
+
+def test_play_action_against_vbody():
+    """A play Action through the adapter and a real BodyClient: SUCCESS when
+    the trick plays to the end, FAILURE when it is stopped."""
+    from kilo.body.client import BodyClient
+    from kilo.link.serial_link import LinkConfig, SerialLink
+    from kilo.link.transport import loopback_pair
+    from kilo.tricks.model import Keyframe, Trick
+    from kilo.vbody.sim import VirtualBody
+
+    from conftest import FAST
+
+    stand = {"lf_shoulder": 30, "rf_shoulder": 30, "rb_shoulder": -30, "lb_shoulder": -30, "lf_knee": 30,
+             "rf_knee": 30, "rb_knee": -30, "lb_knee": -30, "head_pan": 0, "head_tilt": 0, "tail": 0}
+
+    def trick(repeats):
+        f = [Keyframe.from_joints({**stand, "head_pan": a}, dur=3, hold=0) for a in (20, -20, 0)]
+        return Trick(name="nod", frames=tuple(f), loop_start=0, loop_end=1, repeats=repeats)
+
+    a, b = loopback_pair()
+    vb = VirtualBody(b).start()
+    link = SerialLink(lambda: a, config=LinkConfig(**FAST), port_name="loopback")
+    link.mark_alive()
+    link.start()
+    try:
+        client = BodyClient(link)
+        client.wait_ready(2)
+        client.posture("stand")
+        client.spin(0.3)
+        ctx = make_ctx(body=BodyAdapter(client))
+
+        async def drive(t, stop_after=None):
+            act = Action("play", lambda c: c.body.play(t))
+            t0 = time.monotonic()
+            while (st := tick_root(act, ctx)) is RUNNING:
+                link.mark_alive()
+                if stop_after is not None and time.monotonic() - t0 > stop_after:
+                    client.stop_trick()
+                    stop_after = None
+                assert time.monotonic() - t0 < 5, "trick never ended"
+                await asyncio.sleep(0.02)
+            return st
+
+        assert asyncio.run(drive(trick(1))) is SUCCESS
+        assert asyncio.run(drive(trick(255), stop_after=0.3)) is FAILURE
+        assert not ctx.errors, ctx.errors
     finally:
         link.stop()
         vb.stop()

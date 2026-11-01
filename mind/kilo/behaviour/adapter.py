@@ -3,8 +3,10 @@
 BodyClient has postures and balance. ``look``, ``play``, ``beep``, ``walk``
 and ``stop_walk`` call the client's method when it has one (BodyClient has
 all but ``beep``) and otherwise record the call in ``unsupported``
-(``play`` then resolves at once). No behaviour walks yet: the owner decides
-when autonomous walking is allowed.
+(``play`` then resolves at once). ``play`` resolves to SUCCESS when the
+trick ended DONE and FAILURE for any other end (STOPPED, PREEMPTED, FELL).
+No behaviour walks yet: the owner decides when autonomous walking is
+allowed.
 
 The adapter also gives the runner ``snapshot()`` (BodyState.snapshot()) and
 ``on_tick()``, which stamps the link's liveness from the asyncio loop: the
@@ -23,6 +25,8 @@ import asyncio
 import inspect
 from collections import Counter, deque
 from typing import Any
+
+from .tree import FAILURE, SUCCESS
 
 
 POSTURE_MOVE_S = 0.5  # the body's default posture transition: 25 ticks of 20 ms
@@ -86,7 +90,7 @@ class BodyAdapter:
             self._self_motion(TRICK_MOVE_S)
         r = self._maybe("play", trick, mirror=mirror)
         if inspect.isawaitable(r):
-            return r
+            return _trick_status(r)
         return _done()
 
     def _maybe(self, name: str, *args: Any, **kw: Any) -> Any:
@@ -100,3 +104,17 @@ class BodyAdapter:
 
 async def _done() -> None:
     await asyncio.sleep(0)
+
+
+async def _trick_status(play: Any) -> Any:
+    """Await a client's play() and turn how the trick ended into the tree's
+    vocabulary: a result with a ``reason`` (BodyClient's TrickResult, or
+    RemoteBody's TrickResult-shaped namespace) is SUCCESS when it is DONE
+    (played to the end) and FAILURE for any other end (STOPPED, PREEMPTED,
+    FELL): the trick did not do what the behaviour asked. Anything else
+    (None, a Status, a bool) passes through for Action to read as before."""
+    r = await play
+    reason = getattr(r, "reason", None)
+    if reason is None:
+        return r
+    return SUCCESS if reason == "DONE" else FAILURE
