@@ -11,6 +11,7 @@
 #define KILO_SRC_SEAMS_H
 
 #include "platform.h"		// the core's seams (mind/platform.h, -I mind)
+#include "util/logring.h"
 #include <circle/gpiopin.h>
 #include <circle/interrupt.h>
 #include <circle/logger.h>
@@ -91,6 +92,25 @@ public:
 private:
 	CLogger *m_pLogger;
 	kilo::LogLevel m_Min;
+};
+
+// The kernel's log: every line into the RAM ring (`kilo log --host`, P2),
+// then to CircleLog. The ring has no sink of its own, so Circle's own log
+// events can be copied into it alone (CKernel::DrainCircleLog) without
+// printing them twice.
+class KernelLog final : public kilo::Log
+{
+public:
+	KernelLog (kilo::LogRing *pRing, kilo::Log *pNext) : m_pRing (pRing), m_pNext (pNext) {}
+	void write (kilo::LogLevel Level, const char *pLine) override
+	{
+		m_pRing->write (Level, pLine);
+		m_pNext->write (Level, pLine);
+	}
+
+private:
+	kilo::LogRing *m_pRing;
+	kilo::Log *m_pNext;
 };
 
 // GPIO4, the body's RESET, as an emulated open drain (mind/kilo/tools/gpio.py):

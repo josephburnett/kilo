@@ -37,20 +37,22 @@ CIRCLE_LIBDIRS := lib lib/usb lib/input lib/fs lib/fs/fat lib/sched lib/net
 MIND_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(patsubst %.cpp,$(BUILD)/%.o,$(MIND_SRCS)))
 
 OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/src/bootprobe.o \
-	$(MIND_OBJS)
+	$(BUILD)/src/net.o $(BUILD)/src/plannerbench.o $(MIND_OBJS)
 
-# Build options (README "Body link", "Boot probe"):
+# Build options (README "Body link", "Boot probe", "Planner bench"):
 #   KILO_BODY_SERIAL=auto   a USB serial adapter if one enumerates, else the PL011 (default)
 #   KILO_BODY_SERIAL=pl011  the PL011 only, without the USB scan before the link
 #   KILO_BOOT_PROBE=1|0     GPIO21 (header pin 40) marks the boot for a scope (default 1)
+#   KILO_PLANNER_BENCH=1|0  time the walking planner once at boot, no body involved (default 1)
 KILO_BODY_SERIAL ?= auto
 KILO_BOOT_PROBE ?= 1
+KILO_PLANNER_BENCH ?= 1
 ifeq ($(KILO_BODY_SERIAL),pl011)
 KILO_DEFS := -DKILO_BODY_SERIAL_PL011
 else ifneq ($(KILO_BODY_SERIAL),auto)
 $(error KILO_BODY_SERIAL must be auto or pl011)
 endif
-KILO_DEFS += -DKILO_BOOT_PROBE=$(KILO_BOOT_PROBE)
+KILO_DEFS += -DKILO_BOOT_PROBE=$(KILO_BOOT_PROBE) -DKILO_PLANNER_BENCH=$(KILO_PLANNER_BENCH)
 LIBS := $(CIRCLE_LIBS)
 
 NETBOOT_SRC  := $(CIRCLEHOME)/sample/38-bootloader
@@ -75,8 +77,10 @@ INCLUDE += -I mind
 $(BUILD)/mind/planner/%.o: CPPFLAGS += -ffp-contract=off -fno-math-errno
 
 # Build id: the first 8 hex digits of the commit, as for the body
-# (-DKILO_BUILD=0x<hash>, mind/kilo/tools/flash.py). build/build-id changes
-# only when the hash does, so kernel.o is rebuilt only then.
+# (-DKILO_BUILD=0x<hash>, mind/kilo/tools/flash.py); the kernel logs it and
+# serves it as STATUS.mind_build (kernel/host's KILO_MIND_BUILD, same hash).
+# build/build-id changes only when the hash does, so kernel.o is rebuilt
+# only then.
 KILO_BUILD := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo 0)
 $(shell mkdir -p $(BUILD) && (echo $(KILO_BUILD) | cmp -s - $(BUILD)/build-id || echo $(KILO_BUILD) > $(BUILD)/build-id))
 $(BUILD)/src/kernel.o: CPPFLAGS += -DKILO_BUILD=0x$(KILO_BUILD)

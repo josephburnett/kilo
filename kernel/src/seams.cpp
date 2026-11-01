@@ -128,8 +128,7 @@ void CircleLog::write (kilo::LogLevel Level, const char *pLine)
 		return;
 	}
 
-	// The RAM log ring for the laptop's log tail (docs/fast-boot.md §5, P2)
-	// takes the line here, before CLogger.
+	// KernelLog has already put the line in the RAM ring (`kilo log --host`).
 
 	static const TLogSeverity Severity[] = {LogDebug, LogNotice, LogWarning, LogError};
 
