@@ -27,6 +27,16 @@ CORE_C := $(filter %.c,$(MIND_SRCS))
 HOST_SRCS := main.cpp posix.cpp baud.cpp
 TESTS := test_fmt test_frames test_link test_names
 
+# The laptop interface (docs/fast-boot.md P2): POSIX sockets for --listen, its
+# unit tests, and the build id STATUS reports (the commit's first 8 hex digits,
+# as kernel/Makefile's KILO_BUILD; build/mind-build-id changes only with it).
+HOST_SRCS += net_posix.cpp
+TESTS += test_host
+MIND_BUILD := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo 0)
+$(shell mkdir -p $(B) && (echo $(MIND_BUILD) | cmp -s - $(B)/mind-build-id || echo $(MIND_BUILD) > $(B)/mind-build-id))
+$(B)/obj/host/main.o: CXXFLAGS += -DKILO_MIND_BUILD=0x$(MIND_BUILD)
+$(B)/obj/host/main.o: $(B)/mind-build-id
+
 .PHONY: all check freestanding clean
 all: $(B)/kilo-mind-host
 

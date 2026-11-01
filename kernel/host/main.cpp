@@ -3,9 +3,12 @@
 // USB adapter. It does what the Circle kernel does in phase P1
 // (docs/fast-boot.md): exchange HELLO, keep the link fed (HEARTBEAT), and
 // log link statistics once a second, with a STATS_REQ to the body each
-// second to exercise the command path.
+// second to exercise the command path. With --listen it also serves the
+// laptop channel of phase P2 (mind/net/host_server.h) on a TCP port, for
+// `kilo --host 127.0.0.1:PORT`; it logs "listening on port N" (port 0 picks
+// a free one).
 //
-//   kilo-mind-host --port /dev/pts/N [--duration S] [--verbose]
+//   kilo-mind-host --port /dev/pts/N [--listen [ADDR:]PORT] [--duration S] [--verbose]
 //
 // Exit status: 0 after --duration (or SIGINT/SIGTERM) with a HELLO seen;
 // 1 no HELLO, or the port failed; 2 the body speaks another protocol major
@@ -17,9 +20,16 @@
 #include <string.h>
 #include "link/names.h"
 #include "link/serial_link.h"
+#include "net/host_server.h"
+#include "net_posix.h"
 #include "posix.h"
 #include "util/log.h"
+#include "util/logring.h"
 #include "util/mem.h"
+
+#ifndef KILO_MIND_BUILD
+#define KILO_MIND_BUILD 0
+#endif
 
 using namespace kilo;
 
@@ -92,7 +102,7 @@ void log_body_stats(Log& log, const Request& r) {
 }
 
 int usage() {
-  fprintf(stderr, "usage: kilo-mind-host --port PATH [--duration SECONDS] [--verbose]\n");
+  fprintf(stderr, "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--duration SECONDS] [--verbose]\n");
   return 64;
 }
 
@@ -100,11 +110,14 @@ int usage() {
 
 int main(int argc, char** argv) {
   const char* port = nullptr;
+  const char* listen = nullptr;
   double duration_s = -1;
   bool verbose = false;
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
       port = argv[++i];
+    } else if (strcmp(argv[i], "--listen") == 0 && i + 1 < argc) {
+      listen = argv[++i];
     } else if (strcmp(argv[i], "--duration") == 0 && i + 1 < argc) {
       char* end;
       duration_s = strtod(argv[++i], &end);
@@ -124,7 +137,8 @@ int main(int argc, char** argv) {
   sigaction(SIGTERM, &sa, nullptr);
 
   MonotonicClock clock;
-  StderrLog log(clock, verbose ? LogLevel::Debug : LogLevel::Info);
+  StderrLog stderr_log(clock, verbose ? LogLevel::Debug : LogLevel::Info);
+  LogRing log(clock, &stderr_log);  // every line: the RAM ring (`kilo log --host`), then stderr
   PosixSerial serial;
   if (!serial.open(port)) {
     logf(log, LogLevel::Error, "%s", serial.error());
@@ -138,6 +152,19 @@ int main(int argc, char** argv) {
   link.set_listener(&window);
   link.connect();
 
+  PosixListener listener;
+  static HostServer host(listener, link, serial, clock, log, log, (uint32_t)KILO_MIND_BUILD);  // static: 18 KB of buffers
+  HostServer* server = nullptr;  // only with --listen
+  if (listen != nullptr) {
+    if (!listener.open(listen)) {
+      logf(log, LogLevel::Error, "%s", listener.error());
+      return 1;
+    }
+    server = &host;
+    logf(log, LogLevel::Info, "listening on port %u (--listen %s; mind build %08x)", (unsigned)listener.port(),
+         listen, (unsigned)KILO_MIND_BUILD);
+  }
+
   const uint64_t start = clock.now_us();
   const uint64_t end = duration_s >= 0 ? start + (uint64_t)(duration_s * 1e6) : UINT64_MAX;
   uint64_t next_report = start + 1000000u;
@@ -145,7 +172,9 @@ int main(int argc, char** argv) {
   bool stats_asked = false;
   while (!g_stop && clock.now_us() < end) {
     link.mark_alive();  // this loop is the whole mind: it is alive while it runs
-    link.poll();
+    if (server != nullptr) server->poll();
+    bool bridged = server != nullptr && server->bridge_open();
+    if (!bridged) link.poll();  // paused while the laptop speaks to the body through the bridge
     if (!link.connected()) {
       logf(log, LogLevel::Error, "port %s failed", port);
       status = 1;
@@ -165,16 +194,27 @@ int main(int argc, char** argv) {
       next_report += 1000000u;
       log_stats(log, link, window);
       window.reset();
-      if (link.state().has_hello && !stats_asked) stats_asked = link.request(KILO_MSG_STATS_REQ, nullptr, 0);
+      if (link.state().has_hello && !stats_asked && !bridged)
+        stats_asked = link.request(KILO_MSG_STATS_REQ, nullptr, 0);
     }
-    struct pollfd p = {serial.fd(), POLLIN, 0};
-    poll(&p, 1, 2);  // wake on input, else every 2 ms for the timers
+    struct pollfd p[2 + PosixListener::kSlots];
+    nfds_t np = 0;
+    p[np++] = {serial.fd(), POLLIN, 0};
+    if (server != nullptr) {
+      p[np++] = {listener.fd(), POLLIN, 0};
+      for (uint32_t s = 0; s < PosixListener::kSlots; s++) {
+        PosixConn* c = static_cast<PosixConn*>(listener.conn(s));
+        if (c->is_open()) p[np++] = {c->fd(), POLLIN, 0};
+      }
+    }
+    poll(p, np, 2);  // wake on input, else every 2 ms for the timers
   }
   if (status == 0 && !link.state().has_hello) {
     logf(log, LogLevel::Error, "no HELLO from the body");
     status = 1;
   }
   log_stats(log, link, window);
+  listener.close();
   serial.close();
   return status;
 }

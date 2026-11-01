@@ -141,6 +141,8 @@ kilo run [--behaviour] [--remote] [--balance [KP]] [--kilolog]   # the daemon: o
 kilo daemon [status] | daemon stop   # status: port/link state, holds, behaviour, percepts, logs
 kilo log summary|replay|plot FILE ...   # log tools (same as python -m kilo.logs; see Logs)
 kilo --kilolog status        # any command: raw wire frames to ~/kilo-logs/kilo-<time>.kilolog.gz
+kilo --host 169.254.75.73 status   # a C++ mind (the Circle kernel) over Ethernet: see below
+kilo log --host 169.254.75.73      # its RAM log: the last 20 lines, then live (--lines N, --level, --duration)
 ```
 
 Global options: `--port`, `--baud`, `--log` / `--log-file FILE` (JSON-lines
@@ -154,6 +156,21 @@ Every command first tries the daemon's socket and, when no daemon listens,
 opens the port itself (the "direct" path, which the hardware-test docs use with
 the daemon stopped). Output is the same either way. `--direct` skips the
 daemon; `--port P` naming another port than the daemon's opens P directly.
+
+`--host IP[:PORT]` (before or after the command; port 5300 by default)
+talks to a C++ mind instead (the Circle kernel on the Pi, or
+`kernel/host/build/kilo-mind-host --port PTY --listen 127.0.0.1:0` on the
+laptop) over its host channel (docs/fast-boot.md §5, `kilo.hostlink`,
+`kilo.cli_host`). It serves `status`, `posture NAME [--transition T] [--for
+S]`, `monitor [--rate HZ] [--duration S] [--json]` and `kilo log --host`;
+every other command says it is not available over --host yet. `posture`
+takes control of the mind (one controller at a time; other clients only
+watch) and gives it back at the end, and the mind then latches REST, as the
+daemon does when a hold ends; it does the same if the client dies (socket
+closed, or no keepalive for 2 s). On a direct cable the Pi is at
+169.254.75.73 when no DHCP answers: set the laptop's port to link-local
+(NetworkManager "Link-Local Only", or `sudo ip addr add 169.254.1.1/16 dev
+IF`).
 
 Goals are only held while the mind is alive. Direct: when `kilo posture`
 exits, heartbeats stop and the body's watchdog stops motion at 0.5 s and moves
@@ -1150,6 +1167,8 @@ kilo/cli_head.py            `kilo look` (registered by one line in cli.py)
 kilo/cli_walk.py            `kilo walk`, `kilo pose` (registered by one line in cli.py)
 kilo/cli.py                 the `kilo` command
 kilo/cli_tools.py           `kilo log`, `--kilolog`, `monitor --percepts`, `kilo daemon` link lines
+kilo/cli_host.py            `kilo --host`: status, posture, monitor, log against a C++ mind
+kilo/hostlink.py            the host channel client (TCP to the C++ mind) and BridgeTransport (kilo.link over the raw bridge)
 kilo/daemon/                `kilo run`: owns the port, serves the socket, holds, port release (map in __init__.py)
 kilo/remote.py              socket path resolver, JSON-lines client, RemoteBody (BodyClient over the socket)
 kilo/tools/flash.py         build + flash; kilo/tools/gpio.py GPIO4 reset

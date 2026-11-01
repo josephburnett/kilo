@@ -108,4 +108,83 @@ trap - EXIT
 [ "$status" -eq 2 ] || { cat "$OUT/host_proto1.log"; echo "FAILED: exit status $status, want 2"; exit 1; }
 expect "$OUT/host_proto1.log" "protocol major 1 != expected 2: refusing to drive; flash the body" "the refusal"
 
+# ---- the laptop interface (docs/fast-boot.md P2): kilo --host against kilo-mind-host --listen ----
+# The CLI and vbody come from this checkout's mind/ (PYTHONPATH), not the venv's editable install.
+echo "== integration: kilo --host against kilo-mind-host --listen and the virtual body"
+KPY() { PYTHONPATH="$REPO/mind${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON" "$@"; }
+start_body "$OUT/vbody_host.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u -m kilo.vbody.core
+"$HOST" --port "$PTY" --listen 127.0.0.1:0 2> "$OUT/host_listen.log" &
+MIND_PID=$!
+stop_all() { kill "$MIND_PID" 2>/dev/null || true; wait "$MIND_PID" 2>/dev/null || true; stop_body; }
+trap stop_all EXIT
+HPORT=""
+for _ in $(seq 1 50); do
+    HPORT="$(grep -o 'listening on port [0-9]*' "$OUT/host_listen.log" | grep -o '[0-9]*$' || true)"
+    [ -n "$HPORT" ] && break
+    sleep 0.1
+done
+[ -n "$HPORT" ] || { echo "FAILED: kilo-mind-host did not listen"; cat "$OUT/host_listen.log"; exit 1; }
+H="127.0.0.1:$HPORT"
+echo "   mind on $H"
+sleep 1  # HELLO and the first telemetry
+
+KPY -m kilo.cli --host "$H" status > "$OUT/cli_status.txt"
+cat "$OUT/cli_status.txt"
+expect "$OUT/cli_status.txt" "firmware +proto 2\.[0-9]+ +build 45524f43" "status: the body's HELLO over --host"
+expect "$OUT/cli_status.txt" "link +connected=True alive=True" "status: the link alive"
+KPY -m kilo.cli status --host "$H" --json > "$OUT/cli_status.json"
+expect "$OUT/cli_status.json" '"mind_build": "[0-9a-f]{8}"' "status --json: the mind build"
+
+KPY -m kilo.cli --host "$H" monitor --json --rate 10 --duration 2 > "$OUT/cli_monitor.jsonl"
+n="$(grep -c '"mode": "' "$OUT/cli_monitor.jsonl" || true)"
+echo "   monitor: $n telemetry records in 2 s at 10 Hz"
+[ "$n" -ge 15 ] || { echo "FAILED: monitor over --host: $n records"; cat "$OUT/cli_monitor.jsonl"; exit 1; }
+
+KPY -m kilo.cli --host "$H" posture stand --for 1 > "$OUT/cli_posture.txt"
+expect "$OUT/cli_posture.txt" "holding stand" "posture stand over --host"
+expect "$OUT/cli_posture.txt" "released" "posture: control released at the end"
+expect "$OUT/host_listen.log" "host: client [0-9]+: posture 3" "the mind latched STAND"
+
+KPY -m kilo.cli log --host "$H" --lines 30 --duration 1 > "$OUT/cli_log.txt"
+expect "$OUT/cli_log.txt" "[0-9]+\.[0-9]{3} I host: client [0-9]+ gave up control \(released\): REST latched" \
+    "log tail over --host: the history"
+expect "$OUT/cli_log.txt" "I link: telemetry [1-9]" "log tail over --host: a live stats line"
+
+# Controller loss -> REST, seen in the body's telemetry by an observer: hold LIMP
+# (mode LIMP), kill -9 the holder (its socket closes), and the mind latches REST
+# (mode IDLE, servos powered).
+KPY -m kilo.cli --host "$H" monitor --json --rate 20 --duration 4 > "$OUT/cli_watch.jsonl" &
+WATCH_PID=$!
+sleep 0.3
+# (env, not KPY: $! must be python itself, not a subshell running it)
+env PYTHONPATH="$REPO/mind" "$PYTHON" -m kilo.cli --host "$H" posture limp > "$OUT/cli_limp.txt" 2>&1 &
+LIMP_PID=$!
+sleep 1.5
+kill -9 "$LIMP_PID"
+wait "$LIMP_PID" 2>/dev/null || true
+wait "$WATCH_PID"
+KPY - "$OUT/cli_watch.jsonl" <<'EOF'
+import json, sys
+modes = [json.loads(x)["mode"] for x in open(sys.argv[1])]
+first_limp = modes.index("LIMP") if "LIMP" in modes else None
+assert first_limp is not None, f"never LIMP: {modes}"
+after = modes[first_limp:]
+assert "IDLE" in after, f"no REST (IDLE) after the controller died: {modes}"
+print(f"   controller killed: modes {modes[0]} -> LIMP x{after.count('LIMP')} -> IDLE (REST)")
+EOF
+expect "$OUT/host_listen.log" "host: client [0-9]+ gave up control \(closed\): REST latched" "REST on the controller's loss"
+
+echo "== integration: the raw bridge (kilo.link through BridgeTransport)"
+KPY "$HERE/tests/bridge_client.py" "$H" | tee "$OUT/bridge.txt"
+expect "$OUT/bridge.txt" "bridge: HELLO proto 2\.[0-9]+ build 45524f43" "HELLO through the bridge"
+expect "$OUT/bridge.txt" "bridge: STATS uptime" "STATS through the bridge"
+expect "$OUT/bridge.txt" "bridge closed: the mind's link has the body again" "the link resumed"
+expect "$OUT/host_listen.log" "host: bridge closed \(BRIDGE_CLOSE\); link resumed" "the mind's bridge log"
+
+kill -INT "$MIND_PID"
+wait "$MIND_PID" || { echo "FAILED: kilo-mind-host exit status $?"; cat "$OUT/host_listen.log"; exit 1; }
+stop_body
+trap - EXIT
+if grep -Eq "decode errors [1-9]" "$OUT/host_listen.log"; then echo "FAILED: decode errors"; exit 1; fi
+
 echo "== all kernel host tests passed"

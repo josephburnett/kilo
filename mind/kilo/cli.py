@@ -15,6 +15,7 @@
     kilo log summary|replay|plot FILE ...
     kilo --kilolog [FILE] COMMAND ...    (also: kilo monitor --percepts; kilo.cli_tools)
     kilo --override posture|balance|trick ...   (through a daemon whose behaviour runner is active)
+    kilo --host IP[:PORT] status|posture|monitor ...; kilo log --host IP   (a C++ mind's host channel: kilo.cli_host)
 
 Every command first tries the daemon socket (``kilo run``, kilo.daemon; path
 from kilo.remote.socket_path()); when no daemon listens, or ``--direct`` is
@@ -78,6 +79,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="daemon socket (default $KILO_SOCKET, $XDG_RUNTIME_DIR/kilo/kilo.sock, "
                         "/run/kilo/kilo.sock as root, else ~/.kilo/kilo.sock)")
     p.add_argument("--direct", action="store_true", help="never use the daemon: open the port directly")
+    p.add_argument("--host", metavar="IP[:PORT]",
+                   help=f"talk to a C++ mind over its host channel (port {P.HOST_PORT}; kilo.cli_host): "
+                        "status, posture, monitor, log")
     p.add_argument("--override", action="store_true",
                    help="through a daemon running the behaviour runner: pause it while this command holds "
                         "the body (posture, balance, trick, walk, pose) instead of being refused")
@@ -214,12 +218,22 @@ def build_parser() -> argparse.ArgumentParser:
     __import__("kilo.cli_head").cli_head.add_parser(sub, LINK_COMMANDS)  # kilo look (cli_head.py)
     __import__("kilo.cli_walk").cli_walk.add_parser(sub, LINK_COMMANDS)  # kilo walk, kilo pose (cli_walk.py)
     add_log_parser(sub)
+    for name, sp in sub.choices.items():  # `kilo status --host IP` too (`kilo log --host`: kilo.cli_host)
+        if name != "log":
+            sp.add_argument("--host", default=argparse.SUPPRESS, metavar="IP[:PORT]", help=argparse.SUPPRESS)
     return p
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = build_parser()
     argv = fix_kilolog_argv(sys.argv[1:] if argv is None else argv, {*LINK_COMMANDS, *PORT_COMMANDS})
+    if "log" in argv and "--host" in argv:
+        # `kilo log --host IP ...`, `kilo --host IP log -n 5`: argparse's REMAINDER
+        # will not start with an option, so the tail goes to kilo.cli_host as it is.
+        i = argv.index("log")
+        args = parser.parse_args(argv[:i + 1])
+        args.log_argv = list(argv[i + 1:])
+        return args
     args = parser.parse_args(argv)
     if args.cmd == "cal" and args.cal_cmd is None:
         args.cal_cmd = "show"
@@ -865,6 +879,10 @@ def _silent_mode(args: argparse.Namespace) -> str | None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     _setup_logging(args.verbose, daemon=args.cmd == "run")
+    from kilo.cli_host import run_host, wants_host
+
+    if wants_host(args):
+        return run_host(args)
     if args.cmd in PORT_COMMANDS:
         return PORT_COMMANDS[args.cmd](args)
     conn = _daemon_for(args)

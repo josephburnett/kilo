@@ -10,3 +10,9 @@ MIND_SRCS = \
 	mind/link/serial_link.cpp \
 	mind/proto/crc16.c \
 	mind/proto/kilo_frame.c
+
+# The laptop interface (docs/fast-boot.md §5, P2): RAM log ring and host server.
+MIND_SRCS += \
+	mind/util/logring.cpp \
+	mind/net/host_frame.cpp \
+	mind/net/host_server.cpp

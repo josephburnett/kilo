@@ -8,6 +8,9 @@ into lines the C++ unit tests read without a JSON parser (stdout):
   stream <name> <bytes-hex> <expect>...           expect: ok:<type>:<seq> or err:<kind>
   enum <which> <value> <NAME>                     event, ack_status, mode, reset_cause, config_state
   reply <query-type> <reply-type>                 kilo_protocol.QUERY_REPLY
+  hframe <name> <MSG> <type> <seq> <payload-hex|-> <wire-hex>   host_frames.json (the laptop channel)
+  herror <name> <wire-hex> <kind>
+  hcheck <name> <wire-hex> <status>               a CRC-good host frame: bad_len or unknown_type
 
 Usage: flatten_vectors.py <repo root>
 """
@@ -34,6 +37,12 @@ def main() -> int:
     for v in frames["streams"]:
         exp = " ".join(f"ok:{e['ok']}:{e['seq']}" if "ok" in e else f"err:{e['error']}" for e in v["expect"])
         out.append(f"stream {v['name']} {v['bytes']} {exp}".rstrip())
+
+    host = json.loads((vec / "host_frames.json").read_text())
+    for v in host["frames"]:
+        out.append(f"hframe {v['name']} {v['msg']} {v['type']} {v['seq']} {v['payload'] or '-'} {v['wire']}")
+    out += [f"herror {v['name']} {v['wire']} {v['error']}" for v in host["errors"]]
+    out += [f"hcheck {v['name']} {v['wire']} {v['status']}" for v in host["checks"]]
 
     spec = importlib.util.spec_from_file_location("kilo_protocol", repo / "protocol" / "gen" / "kilo_protocol.py")
     P = importlib.util.module_from_spec(spec)
