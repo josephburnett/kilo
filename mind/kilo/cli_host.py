@@ -8,6 +8,7 @@ today, and so what works here:
     kilo --host IP posture NAME [--transition T] [--for S]   hold a posture; REST when it ends
     kilo --host IP monitor [--rate HZ] [--duration S] [--json]   live telemetry
     kilo log --host IP [--lines N] [--level L] [--duration S]    the mind's log: the last N lines, then live
+    kilo --host IP flash [--persist] [--image body.bin [--manifest body.json]]   build and flash the body (P4)
 
 ``--host`` may also follow the command (``kilo status --host IP``). Every
 other command prints that it is not available over --host yet.
@@ -179,12 +180,67 @@ def _run_for(duration: float | None, hl: HostLink) -> int:
 
 
 def _unavailable(what: str) -> int:
-    print(f"kilo {what}: not available over --host yet (the C++ mind serves status, posture, monitor, log)",
+    print(f"kilo {what}: not available over --host yet (the C++ mind serves status, posture, monitor, log, flash)",
           file=sys.stderr)
     return EXIT_ERR
 
 
-HOST_COMMANDS = {"status": cmd_status, "posture": cmd_posture, "monitor": cmd_monitor, "log": cmd_log}
+def cmd_flash(args: argparse.Namespace, hl: HostLink) -> int:
+    """`kilo flash --host IP`: build (or --image), send, flash through the
+    mind, then check the body's HELLO in STATUS. The image is prepared in
+    run_host before connecting (a build takes minutes; the mind would drop
+    a silent connection's keepalive)."""
+    from kilo.tools.flash import FlashError, describe_flash_status, flash_host
+
+    data, m = args.flash_image
+    try:
+        st = flash_host(hl, data, m, persist=args.persist, timeout=args.flash_timeout)
+    except FlashError as e:
+        print(f"kilo flash: {e}", file=sys.stderr)
+        return EXIT_ERR
+    if st.phase != P.FlashPhase.DONE:
+        print(f"kilo flash: FAILED: {describe_flash_status(st)}", file=sys.stderr)
+        _release(hl)
+        return EXIT_ERR
+    # The end check: what the mind's link now knows of the body.
+    s = hl.status()
+    ok = bool(s.state & P.HostState.HAS_HELLO) and s.hello.fw_build == m.build
+    seen = (f"build {s.hello.fw_build:08x} reset {_name(P.ResetCause, s.hello.reset_cause)}"
+            if s.state & P.HostState.HAS_HELLO else "no HELLO")
+    _release(hl)
+    if not ok:
+        print(f"kilo flash: verify FAILED: the mind's link reports {seen}, want build {m.build:08x}", file=sys.stderr)
+        return EXIT_ERR
+    print(f"verified: HELLO {seen}" + ("; the mind keeps the image on SD" if args.persist else ""))
+    return EXIT_OK
+
+
+def _release(hl: HostLink) -> None:
+    try:
+        hl.release_control()  # the mind latches REST
+    except HostError:
+        pass
+
+
+def _prepare_flash(args: argparse.Namespace) -> int | None:
+    """Build or read the image for `kilo flash --host` (args.flash_image); an exit code on failure."""
+    from kilo.cli import flash_image_options
+    from kilo.tools.flash import FlashError, prepare_image
+
+    if args.legacy or args.hex or args.sd is not None or args.rollback:
+        print("kilo flash --host: not with --legacy, --hex, --sd or --rollback (use --image/--manifest)",
+              file=sys.stderr)
+        return EXIT_ERR
+    try:
+        args.flash_image = prepare_image(flash_image_options(args))
+    except FlashError as e:
+        print(f"kilo flash: {e}", file=sys.stderr)
+        return EXIT_ERR
+    return None
+
+
+HOST_COMMANDS = {"status": cmd_status, "posture": cmd_posture, "monitor": cmd_monitor, "log": cmd_log,
+                 "flash": cmd_flash}
 
 
 def parse_log_argv(argv: list[str], host: str | None) -> argparse.Namespace:
@@ -211,6 +267,10 @@ def run_host(args: argparse.Namespace) -> int:
     fn = HOST_COMMANDS.get(args.cmd)
     if fn is None:
         return _unavailable(args.cmd)
+    if args.cmd == "flash":
+        err = _prepare_flash(args)
+        if err is not None:
+            return err
     try:
         hl = HostLink.connect(args.host, timeout=args.timeout)
     except (HostError, ValueError) as e:

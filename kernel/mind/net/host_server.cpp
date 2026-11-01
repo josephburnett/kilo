@@ -1,4 +1,5 @@
 #include "net/host_server.h"
+#include "util/fmt.h"
 #include "util/log.h"
 #include "util/mem.h"
 
@@ -23,6 +24,8 @@ const char* name_of(uint8_t type) {
     case KILO_HOST_MSG_LOG_SUB: return "LOG_SUB";
     case KILO_HOST_MSG_BRIDGE_OPEN: return "BRIDGE_OPEN";
     case KILO_HOST_MSG_BRIDGE_CLOSE: return "BRIDGE_CLOSE";
+    case KILO_HOST_MSG_FLASH_BEGIN: return "FLASH_BEGIN";
+    case KILO_HOST_MSG_FLASH_COMMIT: return "FLASH_COMMIT";
     default: return "?";
   }
 }
@@ -39,6 +42,12 @@ HostServer::HostServer(Listener& listener, SerialLink& link, Serial& serial, Clo
       ring_(ring),
       mind_build_(mind_build),
       start_us_(clock.now_us()) {}
+
+void HostServer::attach_flasher(Flasher& flasher, FlashImage& image) {
+  flasher_ = &flasher;
+  image_ = &image;
+  flash_sent_ = flasher.changes();
+}
 
 uint32_t HostServer::clients() const {
   uint32_t n = 0;
@@ -62,6 +71,10 @@ void HostServer::poll() {
     }
   }
   if (bridge_) pump_bridge();
+  if (flasher_ != nullptr) {
+    flasher_->poll();
+    flash_status();
+  }
   streams(now);
   for (uint32_t i = 0; i < kMaxClients; i++)
     if (clients_[i].open) flush(i);
@@ -121,6 +134,7 @@ void HostServer::drop(uint32_t i, const char* why) {
   stats_.closed++;
   logf(log_, LogLevel::Info, "host: client %d %s", (int)i, why);
   if (controller_ == (int32_t)i) lose_control(why);
+  if (flash_client_ == (int32_t)i) flash_client_ = -1;  // a flash runs on; its status has nowhere to go
 }
 
 void HostServer::lose_control(const char* why) {
@@ -128,6 +142,7 @@ void HostServer::lose_control(const char* why) {
   int32_t was = controller_;
   controller_ = -1;
   if (bridge_) close_bridge("the controller let go");
+  if (receiving_) drop_image("the controller let go");
   stats_.control_lost++;
   // Python: the daemon ends a client's hold with REST (kilo/daemon/sessions.py).
   kilo_set_posture_t rest = {0, KILO_POSTURE_REST, 0, 0};  // the link fills the epoch
@@ -213,6 +228,7 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
       mem_copy(&q, p, sizeof q);
       if (!is_controller) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
       if (bridge_) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_BRIDGED, "the bridge is open");
+      if (flashing()) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_FLASHING, "the body is being flashed");
       if (q.posture > KILO_POSTURE_ZERO) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_BAD_ARG, "no such posture");
       if (!link_.connected() || link_.state().proto_ok == 0)
         return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_NO_BODY, "no body to drive");
@@ -226,6 +242,7 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
       return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "params: not yet (P3)");
     case KILO_HOST_MSG_PARAM_SET:
       if (!is_controller) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
+      if (flashing()) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_FLASHING, "the body is being flashed");
       return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "params: not yet (P3)");
     case KILO_HOST_MSG_TELEM_SUB: {
       uint8_t hz = p[0];
@@ -247,6 +264,8 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
     case KILO_HOST_MSG_BRIDGE_OPEN:
       if (!is_controller) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
       if (!link_.connected()) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_NO_BODY, "the UART is closed");
+      if (flashing()) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_FLASHING, "the body is being flashed");
+      if (receiving_) drop_image("the bridge opened");
       if (!bridge_) {
         bridge_ = true;
         logf(log_, LogLevel::Info, "host: bridge open for client %d: link paused", (int)i);
@@ -268,9 +287,120 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
       if (!bridge_) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_NOT_BRIDGED, "no bridge open");
       close_bridge("BRIDGE_CLOSE");
       return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_OK);
+    case KILO_HOST_MSG_FLASH_BEGIN:
+      return flash_begin(i, f.seq, p);
+    case KILO_HOST_MSG_FLASH_DATA: {
+      // A stream: never answered. An error sticks in the image until COMMIT reports it.
+      if (!receiving_ || flash_client_ != (int32_t)i) return;
+      uint32_t offset;
+      mem_copy(&offset, p, sizeof offset);
+      if (image_->write(offset, p + 4, f.len - 4u) == KILO_FLASH_ERROR_NONE) stats_.flash_bytes_rx += f.len - 4u;
+      return;
+    }
+    case KILO_HOST_MSG_FLASH_COMMIT:
+      return flash_commit(i, f.seq);
     default:
       return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UNSUPPORTED, name_of(f.type));
   }
+}
+
+// ---- flash --------------------------------------------------------------------------
+
+void HostServer::flash_begin(uint32_t i, uint8_t seq, const uint8_t* p) {
+  const uint8_t type = KILO_HOST_MSG_FLASH_BEGIN;
+  if (flasher_ == nullptr) return result(i, seq, type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no flasher on this mind");
+  if (controller_ != (int32_t)i) return result(i, seq, type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
+  if (bridge_) return result(i, seq, type, KILO_HOST_RESULT_CODE_BRIDGED, "the bridge is open");
+  if (flashing()) return result(i, seq, type, KILO_HOST_RESULT_CODE_FLASHING, "a flash is running");
+  // The last image is still to be written to SD (PERSIST): it must not change under the platform.
+  if (flasher_->persist_pending())
+    return result(i, seq, type, KILO_HOST_RESULT_CODE_FLASHING, "the last image is not on SD yet");
+  kilo_host_flash_begin_t b;
+  mem_copy(&b, p, sizeof b);
+  receiving_ = false;
+  uint8_t e = image_->begin(Manifest{b.build, b.image_size, b.crc32});
+  if (e != KILO_FLASH_ERROR_NONE) {
+    char why[48];
+    format(why, sizeof why, "%s (size %u, max %u)", flash_error_name(e), (unsigned)b.image_size,
+           (unsigned)FlashImage::kMaxSize);
+    return result(i, seq, type, KILO_HOST_RESULT_CODE_IMAGE_BAD, why);
+  }
+  receiving_ = true;
+  persist_ = (b.flags & KILO_FLASH_FLAGS_PERSIST) != 0;
+  flash_client_ = (int32_t)i;
+  logf(log_, LogLevel::Info, "host: client %d sends a body image: build %08x, %u bytes, crc32 %08x%s", (int)i,
+       (unsigned)b.build, (unsigned)b.image_size, (unsigned)b.crc32, persist_ ? ", persist" : "");
+  result(i, seq, type, KILO_HOST_RESULT_CODE_OK);
+}
+
+void HostServer::flash_commit(uint32_t i, uint8_t seq) {
+  const uint8_t type = KILO_HOST_MSG_FLASH_COMMIT;
+  if (flasher_ == nullptr) return result(i, seq, type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no flasher on this mind");
+  if (controller_ != (int32_t)i) return result(i, seq, type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
+  if (flashing()) return result(i, seq, type, KILO_HOST_RESULT_CODE_FLASHING, "a flash is running");
+  if (!receiving_ || flash_client_ != (int32_t)i)
+    return result(i, seq, type, KILO_HOST_RESULT_CODE_BAD_ARG, "no FLASH_BEGIN from this client");
+  receiving_ = false;
+  uint32_t got = image_->received(), crc = image_->crc();
+  Manifest m = image_->manifest();  // finish() clears a bad image
+  uint8_t e = image_->finish();
+  if (e != KILO_FLASH_ERROR_NONE) {
+    logf(log_, LogLevel::Warn, "host: body image refused: %s (%u of %u bytes, crc32 %08x, manifest %08x)",
+         flash_error_name(e), (unsigned)got, (unsigned)m.size, (unsigned)crc, (unsigned)m.crc32);
+    // FLASH_STATUS FAILED first, so the client has the error when RESULT arrives.
+    kilo_host_flash_status_t st;
+    mem_zero(&st, sizeof st);
+    st.phase = KILO_FLASH_PHASE_FAILED;
+    st.error = e;
+    st.received = got;
+    Client& c = clients_[i];
+    if (enqueue(i, KILO_HOST_MSG_FLASH_STATUS, c.out_seq, &st, sizeof st)) c.out_seq++;
+    char why[56];
+    format(why, sizeof why, "%s: %u bytes, crc32 %08x", flash_error_name(e), (unsigned)got, (unsigned)crc);
+    return result(i, seq, type, KILO_HOST_RESULT_CODE_IMAGE_BAD, why);
+  }
+  if (!flasher_->start(*image_, persist_)) return result(i, seq, type, KILO_HOST_RESULT_CODE_FLASHING, "a flash is running");
+  logf(log_, LogLevel::Info, "host: client %d: flashing the body (link paused)", (int)i);
+  result(i, seq, type, KILO_HOST_RESULT_CODE_OK);
+  flash_status();  // RESETTING, right behind the RESULT
+}
+
+void HostServer::drop_image(const char* why) {
+  receiving_ = false;
+  image_->clear();
+  logf(log_, LogLevel::Info, "host: body image dropped (%s)", why);
+}
+
+// FLASH_STATUS to the flash's client when the flasher's status moved. A
+// full ring skips a progress update; the last one (DONE, FAILED) waits for
+// room.
+void HostServer::flash_status() {
+  if (flasher_->changes() == flash_sent_) return;
+  if (flash_client_ < 0 || !clients_[flash_client_].open) {
+    flash_sent_ = flasher_->changes();
+    return;
+  }
+  const Flasher::Status& f = flasher_->status();
+  kilo_host_flash_status_t st;
+  st.phase = f.phase;
+  st.error = f.error;
+  st.attempt = f.attempt;
+  st.stk_cmd = f.stk_cmd;
+  st.page = f.page;
+  st.pages = f.pages;
+  st.received = image_->received();
+  st.build = f.build;
+  st.fw_build = f.fw_build;
+  st.reset_cause = f.reset_cause;
+  Client& c = clients_[flash_client_];
+  bool last = f.phase == KILO_FLASH_PHASE_DONE || f.phase == KILO_FLASH_PHASE_FAILED;
+  if (enqueue((uint32_t)flash_client_, KILO_HOST_MSG_FLASH_STATUS, c.out_seq, &st, sizeof st)) {
+    c.out_seq++;
+    stats_.flash_status_sent++;
+  } else if (last) {
+    return;  // try again next pass
+  }
+  flash_sent_ = flasher_->changes();
 }
 
 // ---- streams --------------------------------------------------------------------
@@ -401,6 +531,7 @@ uint8_t HostServer::state_flags(uint64_t now) const {
   if (b.has_telemetry) s |= KILO_HOST_STATE_HAS_TELEMETRY;
   if (link_.contact()) s |= KILO_HOST_STATE_CONTACT;
   if (bridge_) s |= KILO_HOST_STATE_BRIDGE;
+  if (flashing()) s |= KILO_HOST_STATE_FLASHING;
   if (controller_ >= 0) s |= KILO_HOST_STATE_CONTROLLED;
   return s;
 }

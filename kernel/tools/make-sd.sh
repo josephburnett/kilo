@@ -60,6 +60,7 @@ while IFS= read -r name; do
 	case $name in
 	bootcode.bin|start*.elf|fixup*.dat|config.txt|kernel*.img|armstub*.bin|*.dtb) ;;
 	LICENCE.broadcom|COPYING.linux) ;;
+	body.bin|body.json) ;;  # the body image, `kilo flash --sd` (kernel/mind/README.md "Flashing")
 	"System Volume Information"|.Trashes|.fseventsd|.Spotlight-V100) ;;
 	*) bad="$bad '$name'" ;;
 	esac

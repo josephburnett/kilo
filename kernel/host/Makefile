@@ -44,6 +44,11 @@ $(shell mkdir -p $(B) && (echo $(MIND_BUILD) | cmp -s - $(B)/mind-build-id || ec
 $(B)/obj/host/main.o: CXXFLAGS += -DKILO_MIND_BUILD=0x$(MIND_BUILD)
 $(B)/obj/host/main.o: $(B)/mind-build-id
 
+# Body flashing (docs/fast-boot.md P4): the image, CRC-32, manifest and the
+# STK500 flasher against a scripted optiboot, and the host channel's flash
+# messages (the core sources are in mind/sources.mk).
+TESTS += test_flash
+
 .PHONY: all check bench freestanding clean
 all: $(B)/kilo-mind-host $(B)/walk-demo
 

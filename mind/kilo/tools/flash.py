@@ -44,6 +44,20 @@ verify on its link.
 
 ``--legacy`` flashes ``mind/firmware/opencat-legacy.hex`` (token protocol at
 115200), skipping the build and the HELLO check.
+
+Through a C++ mind (docs/fast-boot.md §6, phase P4), where no avrdude runs:
+
+- ``kilo flash --host IP [--persist]`` (``flash_host``): the same build and
+  size harness on the laptop, then ``body.bin`` + ``body.json``
+  (kilo.tools.body_image) into the build dir, streamed over the host
+  channel (``HostLink.flash``: FLASH_BEGIN, FLASH_DATA, FLASH_COMMIT); the
+  mind resets the body into optiboot and programs it over STK500v1
+  (kernel/mind/flash/flasher.h), reporting FLASH_STATUS, and ends with the
+  new firmware's HELLO.fw_build. ``--persist`` asks the mind to keep the
+  image on its SD card afterwards.
+- ``kilo flash --sd MOUNT`` (``flash_sd``): the same two files onto the boot
+  card's FAT partition, which the mind compares with HELLO.fw_build at boot.
+- ``--image body.bin [--manifest body.json]`` skips the build for either.
 """
 
 from __future__ import annotations
@@ -133,6 +147,26 @@ def compile_cmd(sketch: Path, out_dir: Path, build_hash: str | None) -> list[str
             "--build-property", f"compiler.c.extra_flags={CFLAGS}",
             "--build-property", f"compiler.c.elf.extra_flags={LDFLAGS}",
             str(sketch)]
+
+
+def build_body(sketch: Path, build_dir: Path, size_check: bool, sh: Callable[[Sequence[str], str], None],
+               say: Callable[[str], None], dry_run: bool = False) -> int | None:
+    """Step 1: arduino-cli compile with the build hash, then the size/symbol
+    harness on that ELF. Returns the build hash (HELLO.fw_build to expect),
+    None when git cannot say."""
+    if not (sketch / f"{sketch.name}.ino").exists() and not dry_run:
+        raise FlashError(f"no sketch at {sketch} (use --sketch or --no-build --hex)")
+    build_dir.mkdir(parents=True, exist_ok=True)
+    build_hash = git_hash()
+    sh(compile_cmd(sketch, build_dir, build_hash), "arduino-cli compile")
+    size_sh = REPO_DIR / "body" / "tools" / "size_check.sh"
+    if size_check:
+        if size_sh.exists():
+            # Check the ELF that was just built (no second compile on the Pi).
+            sh([str(size_sh), "--elf", str(build_dir / f"{sketch.name}.ino.elf")], "size/symbol harness")
+        else:
+            say(f"warning: {size_sh} not found, size/symbol harness skipped")
+    return int(build_hash, 16) if build_hash else None
 
 
 def find_avrdude() -> tuple[str, str | None]:
@@ -246,21 +280,7 @@ def flash(
 
     # 1. build + size harness (link still running)
     if build:
-        if not (opts.sketch / f"{opts.sketch.name}.ino").exists() and not opts.dry_run:
-            raise FlashError(f"no sketch at {opts.sketch} (use --sketch or --no-build --hex)")
-        opts.build_dir.mkdir(parents=True, exist_ok=True)
-        build_hash = git_hash()
-        if build_hash:
-            res.expected_build = int(build_hash, 16)
-        sh(compile_cmd(opts.sketch, opts.build_dir, build_hash), "arduino-cli compile")
-        size_sh = REPO_DIR / "body" / "tools" / "size_check.sh"
-        if opts.size_check:
-            if size_sh.exists():
-                # Check the ELF that was just built (no second compile on the Pi).
-                sh([str(size_sh), "--elf", str(opts.build_dir / f"{opts.sketch.name}.ino.elf")],
-                   "size/symbol harness")
-            else:
-                say(f"warning: {size_sh} not found, size/symbol harness skipped")
+        res.expected_build = build_body(opts.sketch, opts.build_dir, opts.size_check, sh, say, opts.dry_run)
     if not hex_path.exists() and not opts.dry_run:
         raise FlashError(f"hex file not found: {hex_path}")
 
@@ -411,3 +431,169 @@ def verify_hello(link: Any, since: float, expected_build: int | None = None,
                 pass
     h = fresh()
     return VerifyResult(good, None if h is None else fields_of(h))
+
+
+# ---- through a C++ mind (P4) --------------------------------------------------------------
+
+@dataclass
+class ImageOptions:
+    """Where the image comes from: a build (default) or --image/--manifest."""
+    image: Path | None = None
+    manifest: Path | None = None
+    sketch: Path = DEFAULT_SKETCH
+    build_dir: Path = DEFAULT_BUILD_DIR
+    size_check: bool = True
+
+
+def prepare_image(opts: ImageOptions, say: Callable[[str], None] = print,
+                  run: Callable[..., Any] = subprocess.run) -> tuple[bytes, Any]:
+    """body.bin and its manifest, checked: the given files, or a fresh build
+    (compile, size harness, HEX -> body.bin, body.json in the build dir)."""
+    from kilo.tools import body_image as BI
+
+    try:
+        if opts.image is not None:
+            data, m = BI.read_image(opts.image, opts.manifest)
+            say(f"image {opts.image}: {m.size} bytes, build {m.build:08x}, crc32 {m.crc32:08x}")
+            return data, m
+
+        def sh(cmd: Sequence[str], what: str) -> None:
+            say("$ " + " ".join(cmd))
+            try:
+                run(list(cmd), check=True)
+            except subprocess.CalledProcessError as e:
+                raise FlashError(f"{what} failed (exit {e.returncode})") from None
+            except OSError as e:
+                raise FlashError(f"{what}: {e}") from None
+
+        build = build_body(opts.sketch, opts.build_dir, opts.size_check, sh, say)
+        if build is None:
+            raise FlashError("no build hash (git rev-parse failed): the mind could not check the HELLO; "
+                             "use --image/--manifest")
+        hex_path = opts.build_dir / f"{opts.sketch.name}.ino.hex"
+        data = BI.hex_to_bin(hex_path.read_text())
+        m = BI.make_manifest(data, build, commit=_git_full())
+        BI.check_image(data, m)
+        bin_path, man_path = BI.write_image(opts.build_dir, data, m)
+        say(f"image {bin_path}: {m.size} bytes, build {m.build:08x}, crc32 {m.crc32:08x} ({man_path.name})")
+        return data, m
+    except (BI.ImageError, OSError) as e:
+        raise FlashError(str(e)) from None
+
+
+def _git_full(repo: Path = REPO_DIR) -> str | None:
+    try:
+        out = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                             capture_output=True, text=True, check=True, timeout=10)
+        return out.stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def describe_flash_status(st: Any) -> str:
+    from kilo.protocol import kilo_protocol as P
+
+    def name(cls: Any, v: int) -> str:
+        try:
+            return cls(v).name
+        except ValueError:
+            return str(v)
+
+    phase = name(P.FlashPhase, st.phase)
+    out = f"{phase.lower()}"
+    if st.phase in (P.FlashPhase.PROGRAMMING, P.FlashPhase.VERIFYING):
+        out += f" {st.page}/{st.pages}"
+    if st.attempt > 1:
+        out += f" (attempt {st.attempt})"
+    if st.phase == P.FlashPhase.FAILED:
+        out += f": {name(P.FlashError, st.error)}" + (f" (STK500 command {st.stk_cmd:02x})" if st.stk_cmd else "")
+    if st.fw_build:
+        out += f"; HELLO build {st.fw_build:08x} reset {name(P.ResetCause, st.reset_cause)}"
+    return out
+
+
+def flash_host(hl: Any, data: bytes, manifest: Any, persist: bool = False,
+               say: Callable[[str], None] = print, timeout: float | None = None) -> Any:
+    """Flash through the mind's host channel; prints progress (phase
+    changes, every ~10% of pages). Returns the final P.HostFlashStatus.
+    Raises FlashError for a refusal or a lost connection."""
+    from kilo.hostlink import FLASH_TIMEOUT_S, HostError, HostRefused
+    from kilo.protocol import kilo_protocol as P
+
+    shown: dict[str, int] = {"phase": -1, "tenth": -1}
+
+    paged = (P.FlashPhase.PROGRAMMING, P.FlashPhase.VERIFYING)
+
+    def on_status(st: Any) -> None:
+        tenth = st.page * 10 // st.pages if st.pages else 0
+        if st.phase != shown["phase"] and shown["phase"] in paged and st.phase > shown["phase"]:
+            # The flasher moves on only once every page is done; the last
+            # page's status may have been merged into the next phase's.
+            say(f"flash: {P.FlashPhase(shown['phase']).name.lower()} done, {st.pages} pages")
+        if st.phase != shown["phase"] or (st.phase in paged and tenth != shown["tenth"]):
+            shown["phase"], shown["tenth"] = st.phase, tenth
+            say("flash: " + describe_flash_status(st))
+
+    say(f"sending {manifest.size} bytes to the mind at {hl.address}" + (" (persist to SD)" if persist else ""))
+    t0 = time.monotonic()
+    try:
+        st = hl.flash(data, manifest.build, manifest.crc32, persist=persist, on_status=on_status,
+                      timeout=timeout or FLASH_TIMEOUT_S)
+    except HostRefused as e:
+        raise FlashError(f"the mind refused: {e}") from None
+    except HostError as e:
+        raise FlashError(str(e)) from None
+    if st.phase != shown["phase"]:
+        say("flash: " + describe_flash_status(st))
+    say(f"flash ended in {time.monotonic() - t0:.1f} s")
+    return st
+
+
+def looks_like_boot_card(path: Path, force_dir: bool = False) -> str | None:
+    """Why ``path`` is not the mind's boot card, or None. It must hold
+    kernel7.img and config.txt (kernel/tools/make-sd.sh writes both) and,
+    unless ``force_dir`` (tests, as make-sd.sh --force-dir), be the root of
+    a mounted FAT filesystem."""
+    if not path.is_dir():
+        return f"{path}: not a directory"
+    if not force_dir:
+        real = path.resolve()
+        fstype = None
+        try:
+            for line in Path("/proc/mounts").read_text().splitlines():
+                parts = line.split()
+                if len(parts) >= 3 and Path(parts[1].replace("\\040", " ")) == real:
+                    fstype = parts[2]
+        except OSError:
+            pass
+        if fstype is None:
+            return f"{path} is not a mount point"
+        if fstype not in ("vfat", "msdos"):
+            return f"{path} is {fstype}, not FAT"
+    missing = [n for n in ("kernel7.img", "config.txt") if not (path / n).is_file()]
+    if missing:
+        return (f"{path} has no {' or '.join(missing)}: not a Kilo boot card "
+                "(write one with kernel/tools/make-sd.sh)")
+    return None
+
+
+def flash_sd(mount: Path, data: bytes, manifest: Any, force_dir: bool = False,
+             say: Callable[[str], None] = print) -> tuple[Path, Path]:
+    """Copy body.bin and body.json onto the boot card. At boot the mind
+    compares the manifest's build with HELLO.fw_build and flashes only if
+    they differ (kernel/mind/README.md "Flashing")."""
+    from kilo.tools import body_image as BI
+
+    why = looks_like_boot_card(mount, force_dir)
+    if why is not None:
+        raise FlashError(why + "; refusing")
+    try:
+        bin_path, man_path = BI.write_image(mount, data, manifest)
+        os.sync()
+    except OSError as e:
+        raise FlashError(f"writing to {mount}: {e}") from None
+    say(f"wrote {bin_path} ({manifest.size} bytes) and {man_path.name} (build {manifest.build:08x}, crc32 "
+        f"{manifest.crc32:08x}); at its next boot the mind flashes the body unless HELLO.fw_build is already "
+        f"{manifest.build:08x}")
+    return bin_path, man_path
+

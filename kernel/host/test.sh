@@ -6,7 +6,9 @@
 #   3. the freestanding build (no libc or libstdc++ beyond memcpy/memset/memcmp, libm's
 #      float sinf cosf sincosf tanf atanf atan2f);
 #   4. kilo-mind-host against the virtual body (the real body core on a pty), and
-#      against a silent pty and a protocol-1 fake body; walk-demo trotting the virtual body.
+#      against a silent pty and a protocol-1 fake body; walk-demo trotting the virtual body;
+#   5. body flashing (P4): kilo flash --host through kilo-mind-host to a fake optiboot
+#      (tests/fake_optiboot.py), a refused CRC, a sync timeout, and kilo flash --sd.
 #
 #   kernel/host/test.sh
 #   PYTHON=/path/to/python   interpreter with the mind's kilo package (default ~/OpenCat/.venv/bin/python)
@@ -206,5 +208,147 @@ cat "$OUT/walk.log"
 [ "$status" -eq 0 ] || { echo "FAILED: walk-demo exit status $status"; exit 1; }
 expect "$OUT/walk.log" "walk trot forward at 55\.6 mm/s" "the walk started"
 expect "$OUT/walk.log" "walked: .* ended: stopped$" "the planned stop"
+
+# ---- body flashing (docs/fast-boot.md P4): kilo flash --host / --sd against kilo-mind-host --reset-fifo ----
+# The body is kernel/host/tests/fake_optiboot.py: the virtual body until RESET,
+# then optiboot's STK500v1, then the virtual body again reporting --new-build.
+FL="$OUT/flash"
+rm -rf "$FL"; mkdir -p "$FL"
+FLASH_BUILD=3d441ec0
+KPY - "$FL" "$FLASH_BUILD" <<'EOF'
+import random, sys
+from pathlib import Path
+from kilo.tools import body_image as BI
+out, build = Path(sys.argv[1]), int(sys.argv[2], 16)
+data = random.Random(4).randbytes(31234)        # 245 pages, the last one partial
+m = BI.make_manifest(data, build)
+BI.write_image(out, data, m)
+bad = BI.Manifest(build=build, size=m.size, crc32=m.crc32 ^ 0x80)
+(out / "bad").mkdir()
+BI.write_image(out / "bad", data, bad)
+print(f"   image: {m.size} bytes, build {m.build:08x}, crc32 {m.crc32:08x}")
+EOF
+
+# Start the fake body (sets BODY_PID, PTY) and a mind on it with --listen and --reset-fifo (MIND_PID, H).
+start_flash_rig() {  # start_flash_rig <name> <fake_optiboot args...>
+    local name="$1"; shift
+    start_body "$FL/$name.body.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u "$HERE/tests/fake_optiboot.py" \
+        --reset-fifo "$FL/$name.fifo" "$@"
+    "$HOST" --port "$PTY" --listen 127.0.0.1:0 --reset-fifo "$FL/$name.fifo" 2> "$FL/$name.mind.log" &
+    MIND_PID=$!
+    HPORT=""
+    for _ in $(seq 1 50); do
+        HPORT="$(grep -o 'listening on port [0-9]*' "$FL/$name.mind.log" | grep -o '[0-9]*$' || true)"
+        [ -n "$HPORT" ] && break
+        sleep 0.1
+    done
+    [ -n "$HPORT" ] || { echo "FAILED: kilo-mind-host did not listen"; cat "$FL/$name.mind.log"; exit 1; }
+    H="127.0.0.1:$HPORT"
+    sleep 1  # HELLO
+}
+
+echo "== integration: kilo flash --host (STK500 through the mind to a fake optiboot)"
+start_flash_rig ok --new-build "$FLASH_BUILD" --image-out "$FL/programmed.bin"
+trap stop_all EXIT
+KPY -m kilo.cli --host "$H" status > "$FL/status_before.txt"
+expect "$FL/status_before.txt" "firmware +proto 2\.[0-9]+ +build 56424f44" "the virtual body's build before"
+set +e
+KPY -m kilo.cli flash --host "$H" --image "$FL/body.bin" > "$FL/flash_ok.txt" 2>&1
+status=$?
+set -e
+cat "$FL/flash_ok.txt"
+[ "$status" -eq 0 ] || { echo "FAILED: kilo flash --host exit $status"; cat "$FL/ok.mind.log" "$FL/ok.body.log"; exit 1; }
+expect "$FL/flash_ok.txt" "flash: programming done, 245 pages" "progress: every page programmed"
+expect "$FL/flash_ok.txt" "flash: verifying done, 245 pages" "progress: every page verified"
+expect "$FL/flash_ok.txt" "flash: done; HELLO build $FLASH_BUILD reset FLASHED" "FLASH_STATUS DONE"
+expect "$FL/flash_ok.txt" "verified: HELLO build $FLASH_BUILD reset FLASHED" "the end check: HELLO.fw_build"
+expect "$FL/ok.body.log" "optiboot: LEAVE_PROGMODE, 245 pages programmed" "the fake was programmed"
+expect "$FL/ok.mind.log" "flash: done in [0-9]+ ms: HELLO build $FLASH_BUILD reset FLASHED" "the mind's log"
+KPY - "$FL/body.bin" "$FL/programmed.bin" <<'EOF'
+import sys
+img, prog = open(sys.argv[1], "rb").read(), open(sys.argv[2], "rb").read()
+assert prog[:len(img)] == img and set(prog[len(img):]) <= {0xFF} and len(prog) % 128 == 0, "flash != body.bin"
+print(f"   the fake's flash holds body.bin ({len(img)} bytes, padded to {len(prog)})")
+EOF
+KPY -m kilo.cli --host "$H" status > "$FL/status_after.txt"
+expect "$FL/status_after.txt" "build $FLASH_BUILD +reset FLASHED" "status after: the new firmware"
+expect "$FL/status_after.txt" "link +connected=True alive=True" "status after: the link alive"
+
+echo "== integration: a CRC that does not match is refused (locally, and by the mind)"
+set +e
+KPY -m kilo.cli flash --host "$H" --image "$FL/bad/body.bin" > "$FL/flash_bad.txt" 2>&1
+status=$?
+set -e
+cat "$FL/flash_bad.txt"
+[ "$status" -eq 1 ] || { echo "FAILED: a bad CRC: exit $status, want 1"; exit 1; }
+expect "$FL/flash_bad.txt" "crc32 mismatch" "the CLI's own check"
+KPY - "$H" "$FL/body.bin" "$FLASH_BUILD" <<'EOF' | tee "$FL/flash_bad_mind.txt"
+import sys, zlib
+from kilo.hostlink import HostLink, HostRefused
+from kilo.protocol import kilo_protocol as P
+data = open(sys.argv[2], "rb").read()
+seen = []
+with HostLink.connect(sys.argv[1]) as hl:
+    try:
+        hl.flash(data, int(sys.argv[3], 16), zlib.crc32(data) ^ 1, on_status=seen.append)
+        raise SystemExit("the mind flashed an image with a wrong CRC")
+    except HostRefused as e:
+        print(f"   refused: {e}")
+        assert e.code == P.HostResultCode.IMAGE_BAD, e
+    assert seen and seen[-1].phase == P.FlashPhase.FAILED and seen[-1].error == P.FlashError.CRC_MISMATCH, seen
+    print(f"   FLASH_STATUS FAILED {P.FlashError(seen[-1].error).name}, {seen[-1].received} bytes received")
+    st = hl.status()
+    assert not st.state & P.HostState.FLASHING and st.state & P.HostState.BODY_ALIVE, st.state
+    hl.release_control()
+EOF
+expect "$FL/flash_bad_mind.txt" "refused: FLASH_COMMIT: IMAGE_BAD \(CRC_MISMATCH" "RESULT IMAGE_BAD"
+expect "$FL/ok.mind.log" "body image refused: CRC_MISMATCH" "the mind's log"
+kill -INT "$MIND_PID"
+wait "$MIND_PID" || { echo "FAILED: kilo-mind-host exit status $?"; cat "$FL/ok.mind.log"; exit 1; }
+stop_body
+trap - EXIT
+
+echo "== integration: no bootloader answers: SYNC_TIMEOUT, and the link works again"
+start_flash_rig nosync --no-bootloader
+trap stop_all EXIT
+set +e
+KPY -m kilo.cli flash --host "$H" --image "$FL/body.bin" > "$FL/flash_nosync.txt" 2>&1
+status=$?
+set -e
+cat "$FL/flash_nosync.txt"
+[ "$status" -eq 1 ] || { echo "FAILED: no bootloader: exit $status, want 1"; cat "$FL/nosync.mind.log"; exit 1; }
+expect "$FL/flash_nosync.txt" "FAILED: failed \(attempt 2\): SYNC_TIMEOUT \(STK500 command 30\)" "SYNC_TIMEOUT after 2 attempts"
+expect "$FL/nosync.mind.log" "flash: FAILED: SYNC_TIMEOUT after 2 attempt\(s\)" "the mind's log"
+sleep 1
+KPY -m kilo.cli --host "$H" status > "$FL/status_nosync.txt"
+cat "$FL/status_nosync.txt"
+expect "$FL/status_nosync.txt" "build 56424f44 +reset WARM_UNEXPECTED" "the old firmware after the resets"
+expect "$FL/status_nosync.txt" "link +connected=True alive=True" "the link works again"
+KPY -m kilo.cli --host "$H" posture stand --for 0.5 > "$FL/posture_nosync.txt"
+expect "$FL/posture_nosync.txt" "holding stand" "the body can be driven again"
+kill -INT "$MIND_PID"
+wait "$MIND_PID" || { echo "FAILED: kilo-mind-host exit status $?"; cat "$FL/nosync.mind.log"; exit 1; }
+stop_body
+trap - EXIT
+if grep -Eq "decode errors [1-9]" "$FL/ok.mind.log" "$FL/nosync.mind.log"; then echo "FAILED: decode errors"; exit 1; fi
+
+echo "== kilo flash --sd: onto a directory that looks like the boot card (--force-dir, as make-sd.sh)"
+mkdir -p "$FL/card" "$FL/notcard"
+touch "$FL/card/kernel7.img" "$FL/card/config.txt" "$FL/notcard/config.txt"
+KPY -m kilo.cli flash --sd "$FL/card" --force-dir --image "$FL/body.bin" | tee "$FL/sd.txt"
+cmp "$FL/body.bin" "$FL/card/body.bin" && cmp "$FL/body.json" "$FL/card/body.json" \
+    || { echo "FAILED: the card's files differ"; exit 1; }
+expect "$FL/sd.txt" "build $FLASH_BUILD" "--sd: the manifest's build"
+set +e
+KPY -m kilo.cli flash --sd "$FL/notcard" --force-dir --image "$FL/body.bin" > "$FL/sd_refused.txt" 2>&1
+s1=$?
+KPY -m kilo.cli flash --sd "$FL/card" --image "$FL/body.bin" > "$FL/sd_refused_mount.txt" 2>&1
+s2=$?
+set -e
+[ "$s1" -eq 1 ] && [ "$s2" -eq 1 ] || { echo "FAILED: --sd refusals: exit $s1, $s2"; exit 1; }
+expect "$FL/sd_refused.txt" "has no kernel7.img: not a Kilo boot card" "--sd: not our card"
+expect "$FL/sd_refused_mount.txt" "is not a mount point" "--sd: not a mount"
+[ ! -e "$FL/notcard/body.bin" ] || { echo "FAILED: wrote to a card it refused"; exit 1; }
+echo "   --sd: wrote the card; refused a directory without kernel7.img and an unmounted one"
 
 echo "== all kernel host tests passed"

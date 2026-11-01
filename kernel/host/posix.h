@@ -50,6 +50,27 @@ class StderrLog final : public Log {
   bool started_ = false;
 };
 
+// The body's RESET line on the laptop (docs/fast-boot.md P4). There is no
+// GPIO4 here: with a path (kilo-mind-host --reset-fifo PATH) each edge is
+// one byte written to that named pipe, 'L' for reset_assert() and 'H' for
+// reset_release(), which a fake body reads
+// (kernel/host/tests/fake_optiboot.py). Without one, or when nothing reads
+// the pipe, the edge is only logged. The pipe is opened non-blocking at
+// each edge until it opens, so the reader may start after the mind.
+class FifoResetGpio final : public Gpio {
+ public:
+  FifoResetGpio(const char* path, Log& log) : path_(path), log_(log) {}
+  ~FifoResetGpio();
+  void reset_assert() override { edge('L'); }
+  void reset_release() override { edge('H'); }
+
+ private:
+  void edge(char level);
+  const char* path_;
+  Log& log_;
+  int fd_ = -1;
+};
+
 }  // namespace kilo
 
 #endif

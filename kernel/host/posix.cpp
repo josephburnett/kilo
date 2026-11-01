@@ -1,4 +1,5 @@
 #include "posix.h"
+#include "util/log.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -86,6 +87,26 @@ void StderrLog::write(LogLevel level, const char* line) {
   static const char kTag[] = {'D', 'I', 'W', 'E'};
   fprintf(stderr, "%4u.%03u %c %s\n", (unsigned)(t / 1000000u), (unsigned)(t / 1000u % 1000u),
           kTag[(int)level], line);
+}
+
+FifoResetGpio::~FifoResetGpio() {
+  if (fd_ >= 0) ::close(fd_);
+}
+
+void FifoResetGpio::edge(char level) {
+  const char* what = level == 'L' ? "RESET low" : "RESET released";
+  if (path_ == nullptr) {
+    logf(log_, LogLevel::Warn, "gpio: %s (no --reset-fifo: nothing to pulse)", what);
+    return;
+  }
+  if (fd_ < 0) fd_ = ::open(path_, O_WRONLY | O_NONBLOCK);  // ENXIO while no reader
+  if (fd_ < 0 || ::write(fd_, &level, 1) != 1) {
+    logf(log_, LogLevel::Warn, "gpio: %s: %s: %s", what, path_, strerror(errno));
+    if (fd_ >= 0) ::close(fd_);
+    fd_ = -1;
+    return;
+  }
+  logf(log_, LogLevel::Debug, "gpio: %s (%s)", what, path_);
 }
 
 }  // namespace kilo

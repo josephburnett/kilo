@@ -12,7 +12,12 @@
 // - TELEM: the link's latest TELEMETRY and counters, at each client's rate;
 // - LOG_LINE: the RAM log (util/logring.h), the last lines then live;
 // - the raw bridge: BRIDGE_OPEN pauses the link (bridge_open(): the main
-//   loop stops calling link.poll()) and forwards the UART both ways.
+//   loop stops calling link.poll()) and forwards the UART both ways;
+// - flashing the body (P4, docs/fast-boot.md §6), with a Flasher and a
+//   FlashImage attached (attach_flasher()): FLASH_BEGIN, FLASH_DATA and
+//   FLASH_COMMIT fill the image and start the flasher, which this server
+//   then polls; FLASH_STATUS goes to the client that committed. While the
+//   flasher has the UART, link_paused() is true as for the bridge.
 //
 // Control: one controller, the first client to send CONTROL take=1; the
 // others are observers (STATUS, TELEM, LOG_LINE) and get NOT_CONTROLLER for
@@ -29,6 +34,8 @@
 #ifndef KILO_MIND_NET_HOST_SERVER_H
 #define KILO_MIND_NET_HOST_SERVER_H
 #include <stdint.h>
+#include "flash/flasher.h"
+#include "flash/image.h"
 #include "link/serial_link.h"
 #include "net/host_frame.h"
 #include "platform.h"
@@ -55,6 +62,8 @@ class HostServer {
     uint32_t bridge_tx_bytes;
     uint32_t bridge_tx_short;  // UART bytes from the laptop the Serial did not take
     uint32_t control_lost;     // ends of control that latched REST
+    uint32_t flash_status_sent;
+    uint32_t flash_bytes_rx;   // FLASH_DATA bytes taken into the image
   };
 
   // mind_build: STATUS.mind_build (the git hash, 0 = unknown). The link and
@@ -67,8 +76,19 @@ class HostServer {
   // Never blocks; call it every pass of the main loop (a few ms apart).
   void poll();
 
+  // Serve the flash channel with this flasher and image (both outlive the
+  // server). Without them FLASH_* are answered UNSUPPORTED. poll() then
+  // polls the flasher: do not poll it yourself as well.
+  void attach_flasher(Flasher& flasher, FlashImage& image);
+
   // The bridge is open: the link is paused, do not poll() or request() it.
   bool bridge_open() const { return bridge_; }
+  // The bridge is open or the flasher has the UART: do not poll() the link,
+  // request(), set goals that must go out, or stream FEET. The main loop
+  // tests this instead of bridge_open().
+  bool link_paused() const { return bridge_ || (flasher_ != nullptr && flasher_->owns_uart()); }
+  // A flash is running (from FLASH_COMMIT until DONE or FAILED).
+  bool flashing() const { return flasher_ != nullptr && flasher_->busy(); }
   // The controlling client's slot, -1 for none.
   int32_t controller() const { return controller_; }
   uint32_t clients() const;
@@ -100,6 +120,10 @@ class HostServer {
   void close_bridge(const char* why);
   void pump_bridge();
   void streams(uint64_t now);
+  void flash_begin(uint32_t i, uint8_t seq, const uint8_t* p);
+  void flash_commit(uint32_t i, uint8_t seq);
+  void drop_image(const char* why);
+  void flash_status();
   void flush(uint32_t i);
 
   bool enqueue(uint32_t i, uint8_t type, uint8_t seq, const void* payload, uint32_t len);
@@ -124,6 +148,14 @@ class HostServer {
   int32_t controller_ = -1;
   bool bridge_ = false;
   Stats stats_ = {};
+
+  // The flash channel (attach_flasher()).
+  Flasher* flasher_ = nullptr;
+  FlashImage* image_ = nullptr;
+  int32_t flash_client_ = -1;    // the client receiving into the image, then the one FLASH_STATUS goes to
+  bool receiving_ = false;       // FLASH_BEGIN accepted, no COMMIT yet
+  bool persist_ = false;         // FLASH_BEGIN.flags PERSIST
+  uint32_t flash_sent_ = 0;      // the flasher's changes() last sent
 };
 
 }  // namespace kilo

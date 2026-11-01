@@ -6,9 +6,12 @@
 // second to exercise the command path. With --listen it also serves the
 // laptop channel of phase P2 (mind/net/host_server.h) on a TCP port, for
 // `kilo --host 127.0.0.1:PORT`; it logs "listening on port N" (port 0 picks
-// a free one).
+// a free one). The laptop channel includes flashing the body (P4,
+// mind/flash/flasher.h): the body's RESET line is the named pipe given by
+// --reset-fifo (posix.h FifoResetGpio), which the fake optiboot body of
+// kernel/host/tests/fake_optiboot.py reads.
 //
-//   kilo-mind-host --port /dev/pts/N [--listen [ADDR:]PORT] [--duration S] [--verbose]
+//   kilo-mind-host --port /dev/pts/N [--listen [ADDR:]PORT] [--reset-fifo PATH] [--duration S] [--verbose]
 //
 // Exit status: 0 after --duration (or SIGINT/SIGTERM) with a HELLO seen;
 // 1 no HELLO, or the port failed; 2 the body speaks another protocol major
@@ -19,6 +22,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "link/names.h"
+#include "flash/flasher.h"
+#include "flash/image.h"
 #include "link/serial_link.h"
 #include "net/host_server.h"
 #include "net_posix.h"
@@ -102,7 +107,9 @@ void log_body_stats(Log& log, const Request& r) {
 }
 
 int usage() {
-  fprintf(stderr, "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--duration SECONDS] [--verbose]\n");
+  fprintf(stderr,
+          "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--reset-fifo PATH] [--duration SECONDS] "
+          "[--verbose]\n");
   return 64;
 }
 
@@ -111,6 +118,7 @@ int usage() {
 int main(int argc, char** argv) {
   const char* port = nullptr;
   const char* listen = nullptr;
+  const char* reset_fifo = nullptr;
   double duration_s = -1;
   bool verbose = false;
   for (int i = 1; i < argc; i++) {
@@ -118,6 +126,8 @@ int main(int argc, char** argv) {
       port = argv[++i];
     } else if (strcmp(argv[i], "--listen") == 0 && i + 1 < argc) {
       listen = argv[++i];
+    } else if (strcmp(argv[i], "--reset-fifo") == 0 && i + 1 < argc) {
+      reset_fifo = argv[++i];
     } else if (strcmp(argv[i], "--duration") == 0 && i + 1 < argc) {
       char* end;
       duration_s = strtod(argv[++i], &end);
@@ -135,6 +145,7 @@ int main(int argc, char** argv) {
   sa.sa_handler = on_signal;
   sigaction(SIGINT, &sa, nullptr);
   sigaction(SIGTERM, &sa, nullptr);
+  signal(SIGPIPE, SIG_IGN);  // a --reset-fifo reader that went away: write() fails with EPIPE instead
 
   MonotonicClock clock;
   StderrLog stderr_log(clock, verbose ? LogLevel::Debug : LogLevel::Info);
@@ -155,6 +166,10 @@ int main(int argc, char** argv) {
   PosixListener listener;
   static HostServer host(listener, link, serial, clock, log, log, (uint32_t)KILO_MIND_BUILD);  // static: 18 KB of buffers
   HostServer* server = nullptr;  // only with --listen
+  FifoResetGpio gpio(reset_fifo, log);
+  static FlashImage image;  // 32 KB
+  static Flasher flasher(serial, clock, gpio, link, log);
+  host.attach_flasher(flasher, image);
   if (listen != nullptr) {
     if (!listener.open(listen)) {
       logf(log, LogLevel::Error, "%s", listener.error());
@@ -173,8 +188,8 @@ int main(int argc, char** argv) {
   while (!g_stop && clock.now_us() < end) {
     link.mark_alive();  // this loop is the whole mind: it is alive while it runs
     if (server != nullptr) server->poll();
-    bool bridged = server != nullptr && server->bridge_open();
-    if (!bridged) link.poll();  // paused while the laptop speaks to the body through the bridge
+    bool bridged = server != nullptr && server->link_paused();
+    if (!bridged) link.poll();  // paused while the bridge or the flasher has the UART
     if (!link.connected()) {
       logf(log, LogLevel::Error, "port %s failed", port);
       status = 1;

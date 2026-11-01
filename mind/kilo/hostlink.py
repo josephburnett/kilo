@@ -13,12 +13,13 @@ in protocol/spec.toml ``[host]`` and ``[[host_messages]]``; the dataclasses
     hl.command(P.HostPosture(posture=P.Posture.STAND))
     hl.subscribe_telem(10, on_telem)            # P.HostTelem at 10 Hz
     hl.subscribe_log(on_line, tail=20)          # P.HostLogLine: the last 20, then live
+    hl.flash(image, manifest, on_status)        # P4: flash the body through the mind (controller)
     hl.close()                                  # the mind latches REST if this was the controller
 
 Every command gets exactly one reply carrying its seq (STATUS for
 STATUS_REQ, RESULT otherwise); ``command()`` raises ``HostRefused`` for a
-RESULT whose code is not OK. TELEM, LOG_LINE and BRIDGE_RX arrive on the
-reader thread and go to the handlers.
+RESULT whose code is not OK. TELEM, LOG_LINE, BRIDGE_RX and FLASH_STATUS
+arrive on the reader thread and go to the handlers.
 
 ``BridgeTransport`` is a kilo.link transport over the raw bridge, so the
 whole Python link stack (``SerialLink``, ``BodyClient``) can talk to the body
@@ -29,6 +30,7 @@ from __future__ import annotations
 
 import socket
 import threading
+import time
 from typing import Any, Callable
 
 from kilo.protocol import kilo_link_codec as C
@@ -37,6 +39,10 @@ from kilo.protocol import kilo_protocol as P
 DEFAULT_PORT = P.HOST_PORT
 CONNECT_TIMEOUT_S = 3.0
 REPLY_TIMEOUT_S = 3.0
+# A whole flash: two attempts of reset, sync and 252 pages programmed and
+# read back at 115200 (about 10 s each on a real 328P), then up to 8 s for
+# the new firmware's HELLO. Far more than that is a mind that stopped.
+FLASH_TIMEOUT_S = 60.0
 
 
 class HostError(Exception):
@@ -94,6 +100,9 @@ class HostLink:
         self.on_telem: Callable[[Any], None] | None = None
         self.on_log: Callable[[Any], None] | None = None
         self.on_bridge: Callable[[bytes], None] | None = None
+        self.on_flash: Callable[[Any], None] | None = None
+        self._flash_last: Any = None
+        self._flash_cond = threading.Condition()
         self._keepalive: threading.Thread | None = None
         self._reader = threading.Thread(target=self._read_loop, name="kilo-hostlink", daemon=True)
         self._reader.start()
@@ -166,6 +175,39 @@ class HostLink:
             self.on_log = handler
         self.command(P.HostLogSub(enable=1, tail=max(0, min(255, tail)), min_level=int(min_level)))
 
+    def flash(self, image: bytes, build: int, crc32: int, persist: bool = False,
+              on_status: Callable[[Any], None] | None = None, timeout: float = FLASH_TIMEOUT_S) -> Any:
+        """Flash the body through the mind (docs/fast-boot.md §6): take
+        control (keepalive), FLASH_BEGIN, the image in FLASH_DATA chunks,
+        FLASH_COMMIT, then wait for FLASH_STATUS DONE or FAILED and return
+        that P.HostFlashStatus. ``on_status`` sees every FLASH_STATUS. Raises
+        HostRefused if the mind refuses (IMAGE_BAD: the mind's own size or
+        CRC check failed; the FAILED status that says why went to
+        ``on_status`` first), HostError on a lost connection or no end in
+        ``timeout``. Control stays taken: the caller releases it."""
+        with self._flash_cond:
+            self._flash_last = None
+        self.on_flash = on_status
+        self.take_control(keepalive=True)
+        flags = int(P.FlashFlags.PERSIST) if persist else 0
+        self.command(P.HostFlashBegin(build=build, image_size=len(image), crc32=crc32, flags=flags))
+        step = P.HOST_FLASH_CHUNK_MAX
+        for off in range(0, len(image), step):
+            self.send_stream(P.HostFlashData(offset=off, data=bytes(image[off:off + step])))
+        self.command(P.HostFlashCommit())  # OK: flashing has started
+        end = time.monotonic() + timeout
+        with self._flash_cond:
+            while True:
+                last = self._flash_last
+                if last is not None and last.phase in (P.FlashPhase.DONE, P.FlashPhase.FAILED):
+                    return last
+                if self._closed.is_set():
+                    raise HostError(self.error or "connection closed while flashing")
+                left = end - time.monotonic()
+                if left <= 0:
+                    raise HostError(f"no end of the flash within {timeout:g} s")
+                self._flash_cond.wait(min(left, 0.2))
+
     # ---- plumbing --------------------------------------------------------------------
     def _send(self, msg: Any, seq: int) -> None:
         data = C.encode_host_message(msg, seq)
@@ -204,6 +246,8 @@ class HostLink:
             with self._lock:
                 for p in self._pending.values():
                     p.done.set()
+            with self._flash_cond:
+                self._flash_cond.notify_all()
 
     def _dispatch(self, f: Any) -> None:
         try:
@@ -225,6 +269,12 @@ class HostLink:
         elif isinstance(msg, P.HostBridgeRx):
             if self.on_bridge is not None:
                 self.on_bridge(msg.data)
+        elif isinstance(msg, P.HostFlashStatus):
+            if self.on_flash is not None:
+                self.on_flash(msg)
+            with self._flash_cond:
+                self._flash_last = msg
+                self._flash_cond.notify_all()
 
     @property
     def closed(self) -> bool:

@@ -679,6 +679,28 @@ verify, 2 usage.
 
 `--dry-run` prints the commands without running them.
 
+Through a C++ mind (docs/fast-boot.md §6, P4; no avrdude on the robot):
+
+- `kilo flash --host IP[:PORT] [--persist]`: the same build and size
+  harness on the laptop, then `body.bin` (the HEX as raw flash bytes) and
+  `body.json` (its manifest: build hash, size, CRC-32; kilo/tools/body_image.py)
+  in the build dir, sent over the host channel. The mind resets the body
+  into optiboot, programs and verifies it over STK500v1, prints progress
+  (`flash: programming 120/245`, ...), and the command ends with the new
+  firmware's HELLO from STATUS: `verified: HELLO build 3d441ec0 reset
+  FLASHED`. `--persist` asks the mind to keep the image on its SD card
+  (written by the kernel after a good flash). `--flash-timeout S` (60).
+- `kilo flash --sd MOUNT`: the same two files onto the mind's boot card,
+  mounted at MOUNT (refused unless it is a mounted FAT partition holding
+  `kernel7.img` and `config.txt`). At boot the mind flashes the body only if
+  the manifest's build differs from HELLO.fw_build.
+- `--image body.bin [--manifest body.json]` skips the build for either
+  (the manifest defaults to body.json next to the image).
+- `--rollback` is not implemented yet.
+
+The mind's side, the messages and the timings are in kernel/mind/README.md
+"Flashing".
+
 ### Virtual body
 
 ```sh

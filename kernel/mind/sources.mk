@@ -21,3 +21,10 @@ MIND_SRCS += \
 	mind/util/logring.cpp \
 	mind/net/host_frame.cpp \
 	mind/net/host_server.cpp
+
+# Body flashing (docs/fast-boot.md §6, P4): the image, its CRC-32 and
+# manifest, and the STK500v1 flasher.
+MIND_SRCS += \
+	mind/flash/crc32.cpp \
+	mind/flash/image.cpp \
+	mind/flash/flasher.cpp

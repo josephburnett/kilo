@@ -2,7 +2,8 @@
 
 The part of the mind that runs both in the Circle kernel on the Pi 2 B and
 on the laptop (`kernel/host/`), against the virtual body. Phase P1 of
-`docs/fast-boot.md`: the body link; P3: the walking planner. Platform-free
+`docs/fast-boot.md`: the body link; P3: the walking planner; P4: flashing
+the body. Platform-free
 C++17: no exceptions, RTTI, heap, `std::` or `printf`; the only libc
 functions are `memcpy` and `memset`, through the compiler's builtins
 (`util/mem.h`), and the only libm functions the planner's `sinf`, `cosf`,
@@ -24,6 +25,9 @@ link/consts       message classes and timings (kilo/link/consts.py, LinkConfig)
 link/names        names of message types and enums, for logs
 link/stats.h      link counters (kilo/body/state.py LinkStats)
 planner/          the walking planner: a port of mind/kilo/planner (model, patterns, plan, errors, walker)
+flash/image       the body image in RAM (32 KB) and its manifest (body.json parse and write)
+flash/crc32       the image's CRC-32, as zlib.crc32
+flash/flasher     the STK500v1 flasher: RESET, optiboot, pages, verify, the HELLO after
 proto/            vendored by protocol/vendor.py: never edit; run python3 protocol/vendor.py
 sources.mk        MIND_SRCS, for the Circle Makefile and kernel/host/Makefile
 ```
@@ -80,7 +84,7 @@ HostServer host(listener, link, serial, clock, log, log, build_id);
 for (;;) {
   link.mark_alive();
   host.poll();                                // accept, answer, stream, flush; never blocks
-  if (!host.bridge_open()) link.poll();       // the raw bridge pauses the link
+  if (!host.link_paused()) link.poll();       // the raw bridge and the flasher pause the link
 }
 ```
 
@@ -90,7 +94,7 @@ for (;;) {
 | Telemetry | `TELEM` at 1-50 Hz: the latest TELEMETRY, last EVENT, link counters | any client |
 | Log | `LOG_LINE`: the last N lines of the ring, then live; seq gaps are lost lines | any client |
 | Raw bridge | `BRIDGE_TX`/`BRIDGE_RX`: UART bytes, the link paused | the controller |
-| Flash (P4) | ids 0x40-0x4F and 0xC0-0xCF reserved, nothing defined | |
+| Flash (P4) | `FLASH_BEGIN`, `FLASH_DATA`, `FLASH_COMMIT` -> `RESULT`; `FLASH_STATUS` until DONE or FAILED (ids 0x40-0x4F, 0xC0-0xCF) | the controller; see "Flashing" |
 
 Control: the first client to send `CONTROL take=1` is the controller, the
 rest observe. When the controller gives control up, closes, goes out of
@@ -157,3 +161,106 @@ Python planner. After changing either planner, regenerate it:
 
 `make -C kernel/host bench` prints the cost per tick; `build/walk-demo`
 trots the virtual body (`kernel/host/test.sh` runs both).
+
+## Flashing
+
+Phase P4 of `docs/fast-boot.md` (§6): the mind programs the body's
+ATmega328P itself, through optiboot on the body link's UART, as `kilo flash`
+does on Linux with avrdude (mind/kilo/tools/flash.py). The laptop's side is
+`kilo flash --host IP [--persist]` and `kilo flash --sd MOUNT`
+(mind/README.md "Flashing").
+
+```cpp
+static FlashImage image;                              // 32 KB: the image and its manifest
+static Flasher flasher(serial, clock, gpio, link, log);
+host.attach_flasher(flasher, image);                  // FLASH_*: the server fills image, starts and polls flasher
+for (;;) {
+  link.mark_alive();
+  host.poll();
+  if (!host.link_paused()) { link.poll(); walker.poll(); }   // nothing on the link while the flasher has the UART
+}
+```
+
+### The image
+
+`body.bin` is the firmware's flash from address 0 (what `avr-objcopy -O
+binary` makes of the build; the laptop converts arduino-cli's Intel HEX), at
+most `KILO_HOST_FLASH_MAX_IMAGE` = 32256 bytes (32 KB less optiboot's 512),
+programmed in 128-byte pages, the last one padded with 0xFF. Its manifest
+`body.json` is one flat JSON object:
+
+```json
+{"format": 1, "build": "3d441ec0", "size": 31234, "crc32": "cbf43926", "commit": "..."}
+```
+
+`build` is the `-DKILO_BUILD` hash (8 hex digits: the body's `HELLO.fw_build`
+once it runs the image), `size` the bytes of body.bin, `crc32` its CRC-32 as
+`zlib.crc32` computes it (`flash/crc32.h`). Other keys are skipped.
+`parse_manifest()` reads it, `format_manifest()` writes it; JSON because
+Python writes it from its standard library and one flat object needs a
+small parser only.
+
+### The flash channel
+
+`FLASH_BEGIN` (the manifest, flags `PERSIST`) -> `FLASH_DATA` (offset +
+up to 200 bytes, in order, not answered) -> `FLASH_COMMIT`. The mind checks
+size and CRC at COMMIT and answers `RESULT OK` (flashing has started) or
+`IMAGE_BAD` (a `FLASH_STATUS FAILED` with the error goes first). Then
+`FLASH_STATUS` goes to that client at every phase change and page:
+RESETTING, SYNCING, PROGRAMMING n/N, VERIFYING n/N, BOOTING, and last DONE
+(with the new HELLO's fw_build and reset cause) or FAILED (error, STK500
+command, attempt). While a flash runs, `POSTURE`, `PARAM_SET`, the bridge
+and another `FLASH_BEGIN` are refused `FLASHING`, and STATUS has the
+`FLASHING` state bit. Losing control while receiving drops the image; a
+flash that has started runs to its end.
+
+### The sequence (`flash/flasher.cpp`)
+
+| Step | What | Time | From |
+|---|---|---|---|
+| take the UART | `owns_uart()`: the main loop stops polling the link; no REST first (the body is reset anyway; its watchdog covers the gap) | | docs/fast-boot.md §6 |
+| baud | `Serial::set_baud(115200)` (`KILO_HOST_FLASH_BAUD`) | | optiboot, avrdude `-b 115200` |
+| RESET | `Gpio::reset_assert()`, then `reset_release()` | 100 ms low | spec `reset_pulse_ms`, `mind/kilo/tools/gpio.py` |
+| first GET_SYNC | after release; it waits in the 328P's 2-byte RX FIFO while optiboot blinks | +100 ms | Uno fuses' start-up delay (65 ms) |
+| its answer | `STK_INSYNC STK_OK` | up to 600 ms | 3 LED flashes of 125 ms in the Uno build |
+| later GET_SYNCs | one at a time (a third byte in the FIFO desyncs optiboot, which then starts the firmware) | 200 ms each, none after 1.3 s | optiboot's 1 s watchdog after the blink |
+| drain | drop late answers to earlier GET_SYNCs | 20 ms | |
+| ENTER_PROGMODE, READ_SIGN | the signature must be `1E 95 0F` (ATmega328P), else BAD_SIGNATURE, not retried | 200 ms per answer | avrdude's sequence |
+| per page | `LOAD_ADDRESS` (word address) + `PROG_PAGE` (128 B, `'F'`) | 200 ms per answer | 133 B at 115200 = 11.5 ms, erase + write <= 9 ms |
+| verify | per page `LOAD_ADDRESS` + `READ_PAGE`, compared byte for byte | 200 ms per answer | optiboot implements READ_PAGE for flash |
+| LEAVE_PROGMODE | optiboot resets into the firmware 16 ms later | | |
+| back | `set_baud(250000)` after 50 ms, a 0x00 frame delimiter (the firmware may hold STK500 bytes), the link restarted (as after the bridge) | | |
+| HELLO | `fw_build` == build, `reset_cause` FLASHED (WARM_UNEXPECTED is taken when the body already ran this build: an identical image leaves its reset record as it was, docs/architecture.md §3a) | up to 8 s | `kilo flash --verify-timeout` |
+
+A failure in sync, a missing or bad answer, or a verify mismatch ends the
+attempt; a second attempt starts from a fresh reset (as `kilo flash` retries
+avrdude once; optiboot survives an interrupted flash). Any failure ends
+with RESET released, the UART at the link baud and the link restarted. On
+the bench (kernel/host/test.sh, against `tests/fake_optiboot.py`) a 31 KB
+image takes about 3 s; on the 328P expect about 10 s **(est.)**, as avrdude.
+
+On the laptop `kilo-mind-host --reset-fifo PATH` makes the RESET line a
+named pipe ('L' low, 'H' released; `posix.h` FifoResetGpio), which the fake
+optiboot body reads. Without it the edges are only logged.
+
+### Left to the Circle kernel (`kernel/src/`)
+
+- The `Gpio` on GPIO4 (`CircleResetGpio` exists: low = output driven low,
+  released = input, no pull) and `Serial::set_baud(115200)` and back on the
+  PL011 (today it only accepts the rate it has).
+- Wiring: `host.attach_flasher(flasher, image)`, and `link_paused()` instead
+  of `bridge_open()` in the main loop, with the walker stopped too.
+- Boot-time flash from SD (Path B): read `body.json` and `body.bin` from the
+  FAT partition's root (next to `kernel7.img`; `kManifestFile`,
+  `kImageFile` in `flash/image.h`), `parse_manifest()`, then
+  `image.load_from(manifest, data, size)` (checks size and CRC). Once the
+  link has a HELLO (or none came within a few seconds: an empty or broken
+  firmware), `image.needs_flash(hello)` (or `needs_flash(nullptr)`) says
+  whether to `flasher.start(image, false)` and poll it until `!busy()`. A
+  matching build costs nothing at boot.
+- `--persist` (FLASH_BEGIN flag PERSIST): after DONE, `flasher.persist_pending()`
+  is true; write `image()`'s bytes as `body.bin` and `format_manifest()` as
+  `body.json` (manifest last), then `persist_done()`.
+- `kilo flash --rollback` (keep the last good image on SD) is not designed
+  yet.
+

@@ -9,6 +9,7 @@
     kilo cal show | set JOINT DEGREES | save | revert
     kilo param list | get ID | set ID VALUE [--persist]
     kilo flash [--legacy] [--no-build] [--hex FILE] [--reset auto|gpio|dtr|none] [--verify-timeout S] [--force]
+    kilo flash --host IP [--persist] | --sd MOUNT   [--image body.bin [--manifest body.json]]   (a C++ mind, P4)
     kilo vbody [--fall-after S] [--no-keys]
     kilo run [--port P] [--socket PATH] [--log] [--kilolog [FILE]] [--behaviour] [--remote] [--balance [KP]]
     kilo daemon [status|stop]
@@ -81,7 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--direct", action="store_true", help="never use the daemon: open the port directly")
     p.add_argument("--host", metavar="IP[:PORT]",
                    help=f"talk to a C++ mind over its host channel (port {P.HOST_PORT}; kilo.cli_host): "
-                        "status, posture, monitor, log")
+                        "status, posture, monitor, log, flash")
     p.add_argument("--override", action="store_true",
                    help="through a daemon running the behaviour runner: pause it while this command holds "
                         "the body (posture, balance, trick, walk, pose) instead of being refused")
@@ -179,6 +180,21 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--force", action="store_true",
                    help="flash even if another process holds the port (warns; avrdude and that process "
                         "will fight over it)")
+    # Through a C++ mind (docs/fast-boot.md §6): `kilo flash --host IP` (kilo.cli_host), `--sd MOUNT`.
+    s.add_argument("--sd", type=Path, metavar="MOUNT",
+                   help="copy body.bin + body.json to the mind's boot card (its FAT partition, mounted here): "
+                        "the mind flashes the body at boot if HELLO.fw_build differs")
+    s.add_argument("--image", type=Path, metavar="BIN",
+                   help="with --host/--sd: flash this body.bin instead of building (manifest: --manifest, "
+                        "default body.json next to it)")
+    s.add_argument("--manifest", type=Path, metavar="JSON", help="the manifest of --image")
+    s.add_argument("--persist", action="store_true",
+                   help="with --host: the mind also keeps the image on its SD card after a good flash")
+    s.add_argument("--flash-timeout", type=float, default=None, metavar="S",
+                   help="with --host: seconds to wait for the flash to end (default 60)")
+    s.add_argument("--force-dir", action="store_true", help=argparse.SUPPRESS)  # --sd: tests, a plain dir
+    s.add_argument("--rollback", action="store_true",
+                   help="flash the last good image kept on the mind's SD (not yet: docs/fast-boot.md §6)")
 
     s = sub.add_parser("vbody", help="run a virtual body on a pty")
     s.add_argument("--fall-after", type=float, default=None, metavar="S",
@@ -660,6 +676,15 @@ def cmd_flash(args: argparse.Namespace) -> int:
     from kilo.tools.flash import (DEFAULT_BUILD_DIR, DEFAULT_SKETCH, FlashError, FlashOptions, VerifyResult,
                                   describe_hello, flash, is_usb_port, port_busy, verify_hello)
 
+    if getattr(args, "rollback", False):
+        print("kilo flash --rollback: not yet (the mind keeps no last good image on SD yet; "
+              "docs/fast-boot.md §6)", file=sys.stderr)
+        return EXIT_ERR
+    if getattr(args, "sd", None) is not None:
+        return cmd_flash_sd(args)
+    if any(getattr(args, a, None) for a in ("image", "manifest", "persist")):
+        print("kilo flash: --image, --manifest and --persist are for --host or --sd", file=sys.stderr)
+        return EXIT_ERR
     conn = None if args.dry_run else _daemon_for(args)
     # A daemon that has not found a port yet still gets asked to release (it
     # would open one mid-flash otherwise); the port is then resolved here.
@@ -720,6 +745,29 @@ def cmd_flash(args: argparse.Namespace) -> int:
         seen = describe_hello(res.hello)
         print("kilo flash: verify FAILED: the body did not report the new firmware"
               + (f" (last HELLO seen: {seen})" if seen else " (no HELLO seen at all)"), file=sys.stderr)
+        return EXIT_ERR
+    return EXIT_OK
+
+
+def flash_image_options(args: argparse.Namespace) -> Any:
+    from kilo.tools.flash import DEFAULT_BUILD_DIR, DEFAULT_SKETCH, ImageOptions
+
+    return ImageOptions(image=args.image, manifest=args.manifest, sketch=args.sketch or DEFAULT_SKETCH,
+                        build_dir=args.build_dir or DEFAULT_BUILD_DIR, size_check=not args.no_size_check)
+
+
+def cmd_flash_sd(args: argparse.Namespace) -> int:
+    """`kilo flash --sd MOUNT`: body.bin + body.json onto the mind's boot card."""
+    from kilo.tools.flash import FlashError, flash_sd, prepare_image
+
+    if args.legacy or args.hex or getattr(args, "host", None):
+        print("kilo flash --sd: not with --legacy, --hex or --host", file=sys.stderr)
+        return EXIT_ERR
+    try:
+        data, m = prepare_image(flash_image_options(args))
+        flash_sd(args.sd, data, m, force_dir=args.force_dir)
+    except FlashError as e:
+        print(f"kilo flash: {e}", file=sys.stderr)
         return EXIT_ERR
     return EXIT_OK
 
