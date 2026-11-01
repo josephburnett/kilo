@@ -14,6 +14,7 @@ in protocol/spec.toml ``[host]`` and ``[[host_messages]]``; the dataclasses
     hl.subscribe_telem(10, on_telem)            # P.HostTelem at 10 Hz
     hl.subscribe_log(on_line, tail=20)          # P.HostLogLine: the last 20, then live
     hl.flash(image, manifest, on_status)        # P4: flash the body through the mind (controller)
+    hl.reboot()                                 # restart the mind (controller): OK, then it goes away
     hl.close()                                  # the mind latches REST if this was the controller
 
 Every command gets exactly one reply carrying its seq (STATUS for
@@ -43,6 +44,8 @@ REPLY_TIMEOUT_S = 3.0
 # read back at 115200 (about 10 s each on a real 328P), then up to 8 s for
 # the new firmware's HELLO. Far more than that is a mind that stopped.
 FLASH_TIMEOUT_S = 60.0
+# After REBOOT's OK: how long `kilo reboot` waits for the connection to drop (wait_closed()).
+REBOOT_CLOSE_WAIT_S = 2.0
 
 
 class HostError(Exception):
@@ -207,6 +210,17 @@ class HostLink:
                 if left <= 0:
                     raise HostError(f"no end of the flash within {timeout:g} s")
                 self._flash_cond.wait(min(left, 0.2))
+
+    def reboot(self) -> Any:
+        """REBOOT (controller only: take control first): the RESULT OK, or
+        HostRefused. The mind then restarts; see wait_closed()."""
+        return self.command(P.HostReboot())
+
+    def wait_closed(self, timeout: float = REBOOT_CLOSE_WAIT_S) -> bool:
+        """Wait up to ``timeout`` for the connection to drop; whether it did.
+        After REBOOT, kilo-mind-host closes it as it exits, while a Pi that
+        reboots just goes silent (no FIN): no close is no error there."""
+        return self._closed.wait(timeout)
 
     # ---- plumbing --------------------------------------------------------------------
     def _send(self, msg: Any, seq: int) -> None:

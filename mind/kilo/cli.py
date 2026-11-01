@@ -10,13 +10,14 @@
     kilo param list | get ID | set ID VALUE [--persist]
     kilo flash [--legacy] [--no-build] [--hex FILE] [--reset auto|gpio|dtr|none] [--verify-timeout S] [--force]
     kilo flash --host IP [--persist] | --sd MOUNT   [--image body.bin [--manifest body.json]]   (a C++ mind, P4)
+    kilo reboot --host IP[:PORT]   restart a C++ mind (the Pi: back to its SD card's boot, e.g. the netboot loader)
     kilo vbody [--fall-after S] [--no-keys]
     kilo run [--port P] [--socket PATH] [--log] [--kilolog [FILE]] [--behaviour] [--remote] [--balance [KP]]
     kilo daemon [status|stop]
     kilo log summary|replay|plot FILE ...
     kilo --kilolog [FILE] COMMAND ...    (also: kilo monitor --percepts; kilo.cli_tools)
     kilo --override posture|balance|trick ...   (through a daemon whose behaviour runner is active)
-    kilo --host IP[:PORT] status|posture|monitor ...; kilo log --host IP   (a C++ mind's host channel: kilo.cli_host)
+    kilo --host IP[:PORT] status|posture|monitor|flash|reboot ...; kilo log --host IP   (a C++ mind: kilo.cli_host)
 
 Every command first tries the daemon socket (``kilo run``, kilo.daemon; path
 from kilo.remote.socket_path()); when no daemon listens, or ``--direct`` is
@@ -82,7 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--direct", action="store_true", help="never use the daemon: open the port directly")
     p.add_argument("--host", metavar="IP[:PORT]",
                    help=f"talk to a C++ mind over its host channel (port {P.HOST_PORT}; kilo.cli_host): "
-                        "status, posture, monitor, log, flash")
+                        "status, posture, monitor, log, flash, reboot")
     p.add_argument("--override", action="store_true",
                    help="through a daemon running the behaviour runner: pause it while this command holds "
                         "the body (posture, balance, trick, walk, pose) instead of being refused")
@@ -154,6 +155,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--persist", action="store_true", help="also write to EEPROM")
 
     s = sub.add_parser("pca", help="read back the 16 PCA9685 OFF counts (PCA_READ)")
+
+    s = sub.add_parser("reboot", help="restart a C++ mind over --host: the body gets REST, then the Pi reboots "
+                                      "(on the netboot card: the loader waits for the next kernel)")
 
     s = sub.add_parser("eeprom", help="read the body's EEPROM (EEPROM_READ)")
     es = s.add_subparsers(dest="eeprom_cmd", required=True, metavar="ACTION")
@@ -749,6 +753,13 @@ def cmd_flash(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_reboot(args: argparse.Namespace) -> int:
+    """`kilo reboot` without --host: only a C++ mind reboots on request (kilo.cli_host)."""
+    print("kilo reboot: needs --host IP[:PORT] (it restarts a C++ mind: the Circle kernel or kilo-mind-host)",
+          file=sys.stderr)
+    return EXIT_ERR
+
+
 def flash_image_options(args: argparse.Namespace) -> Any:
     from kilo.tools.flash import DEFAULT_BUILD_DIR, DEFAULT_SKETCH, ImageOptions
 
@@ -913,7 +924,7 @@ LINK_COMMANDS = {"status": cmd_status, "monitor": cmd_monitor, "posture": cmd_po
                  "cal": cmd_cal, "param": cmd_param, "pca": cmd_pca, "eeprom": cmd_eeprom}
 # Commands that manage the port (or the daemon) themselves: cmd(args).
 PORT_COMMANDS = {"flash": cmd_flash, "vbody": cmd_vbody, "run": cmd_run, "daemon": cmd_daemon,
-                 "log": cmd_log}
+                 "log": cmd_log, "reboot": cmd_reboot}
 # Link-command modes that must send nothing, so they cannot share the daemon's port.
 SILENT_MODES = {"monitor": ("passive", "--passive"), "posture": ("then_watch", "--then-watch"),
                 "trick": ("then_watch", "--then-watch")}

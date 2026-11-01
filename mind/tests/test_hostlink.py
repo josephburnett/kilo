@@ -33,6 +33,7 @@ class FakeMind:
         self.bridge_tx = bytearray()
         self.controller = False
         self.garbage_on: int | None = None  # reply to this type with bytes out of step
+        self.reboot_closes = True  # after REBOOT's OK, close the connection (kilo-mind-host exiting)
         self._conns: list[socket.socket] = []
         threading.Thread(target=self._accept, daemon=True).start()
 
@@ -95,6 +96,13 @@ class FakeMind:
                 self._send(c, P.HostLogLine(seq=i, t_ms=1000 * i + 5, level=1, text=f"line {i}".encode()), i)
         elif isinstance(m, P.HostBridgeOpen) or isinstance(m, P.HostBridgeClose):
             self._ok(c, seq, m)
+        elif isinstance(m, P.HostReboot):
+            if not self.controller:
+                self._ok(c, seq, m, int(P.HostResultCode.NOT_CONTROLLER), b"take control first")
+                return
+            self._ok(c, seq, m, 0, b"rebooting")
+            if self.reboot_closes:
+                c.shutdown(socket.SHUT_RDWR)
         elif isinstance(m, P.HostBridgeTx):
             self.bridge_tx += m.data
             self._send(c, P.HostBridgeRx(data=m.data.upper()), 0)
@@ -245,6 +253,40 @@ def test_cli_monitor_and_log(mind, capsys):
     assert out == ["     0.005 I line 0", "     1.005 I line 1"]
     assert cli.main(["--host", mind.addr, "log", "-n", "1", "--duration", "0.2"]) == 0
     assert capsys.readouterr().out.splitlines() == ["     0.005 I line 0"]
+
+
+def test_reboot(mind):
+    with HostLink.connect(mind.addr) as hl:
+        with pytest.raises(HostRefused, match="REBOOT: NOT_CONTROLLER"):
+            hl.reboot()
+        assert not hl.closed
+        hl.take_control(keepalive=False)
+        assert hl.reboot().code == P.HostResultCode.OK
+        assert hl.wait_closed(2.0) and hl.closed
+
+
+def test_cli_reboot(mind, capsys):
+    assert cli.main(["reboot", "--host", mind.addr]) == 0
+    out = capsys.readouterr().out
+    assert "REBOOT: OK (rebooting)" in out and "the mind closed the connection" in out
+    ctl = next(m for m in mind.got if isinstance(m, P.HostControl))
+    assert (ctl.take, ctl.keepalive) == (1, 0) and mind.names() == ["CONTROL", "REBOOT"]
+    assert cli.main(["--host", mind.addr, "reboot"]) == 0  # --host before the command too
+
+
+def test_cli_reboot_without_a_close_is_still_done(mind, capsys, monkeypatch):
+    # A Pi that reboots sends no FIN: the OK is the answer.
+    from kilo import cli_host
+
+    monkeypatch.setattr(cli_host, "REBOOT_CLOSE_WAIT_S", 0.1)
+    mind.reboot_closes = False
+    assert cli.main(["reboot", "--host", mind.addr]) == 0
+    assert "no close within 0.1 s" in capsys.readouterr().out
+
+
+def test_cli_reboot_needs_host(capsys):
+    assert cli.main(["reboot"]) == 1
+    assert "needs --host" in capsys.readouterr().err
 
 
 def test_cli_host_unreachable(capsys):

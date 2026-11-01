@@ -6,7 +6,8 @@
 #   3. the freestanding build (no libc or libstdc++ beyond memcpy/memset/memcmp, libm's
 #      float sinf cosf sincosf tanf atanf atan2f);
 #   4. kilo-mind-host against the virtual body (the real body core on a pty), and
-#      against a silent pty and a protocol-1 fake body; walk-demo trotting the virtual body;
+#      against a silent pty and a protocol-1 fake body; kilo --host (status, monitor, posture,
+#      log, the bridge, kilo reboot: exit 3); walk-demo trotting the virtual body;
 #   5. body flashing (P4): kilo flash --host through kilo-mind-host to a fake optiboot
 #      (tests/fake_optiboot.py), a refused CRC, a sync timeout, and kilo flash --sd.
 
@@ -198,6 +199,36 @@ wait "$MIND_PID" || { echo "FAILED: kilo-mind-host exit status $?"; cat "$OUT/ho
 stop_body
 trap - EXIT
 if grep -Eq "decode errors [1-9]" "$OUT/host_listen.log"; then echo "FAILED: decode errors"; exit 1; fi
+
+# REBOOT: kilo reboot --host takes control, the mind answers OK, latches REST
+# and kilo-mind-host exits with status 3 (the Circle kernel reboots the Pi there).
+echo "== integration: kilo reboot --host (kilo-mind-host exits 3)"
+start_body "$OUT/vbody_reboot.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u -m kilo.vbody.core
+"$HOST" --port "$PTY" --listen 127.0.0.1:0 2> "$OUT/host_reboot.log" &
+MIND_PID=$!
+trap stop_all EXIT
+HPORT=""
+for _ in $(seq 1 50); do
+    HPORT="$(grep -o 'listening on port [0-9]*' "$OUT/host_reboot.log" | grep -o '[0-9]*$' || true)"
+    [ -n "$HPORT" ] && break
+    sleep 0.1
+done
+[ -n "$HPORT" ] || { echo "FAILED: kilo-mind-host did not listen"; cat "$OUT/host_reboot.log"; exit 1; }
+sleep 1  # HELLO
+KPY -m kilo.cli reboot --host "127.0.0.1:$HPORT" > "$OUT/cli_reboot.txt" 2>&1 \
+    || { echo "FAILED: kilo reboot --host exit $?"; cat "$OUT/cli_reboot.txt" "$OUT/host_reboot.log"; exit 1; }
+cat "$OUT/cli_reboot.txt"
+set +e
+wait "$MIND_PID"
+status=$?
+set -e
+stop_body
+trap - EXIT
+[ "$status" -eq 3 ] || { echo "FAILED: kilo-mind-host exit status $status, not 3"; cat "$OUT/host_reboot.log"; exit 1; }
+echo "   kilo-mind-host exit status $status"
+expect "$OUT/cli_reboot.txt" "rebooting" "the CLI: OK, then the connection closed"
+expect "$OUT/host_reboot.log" "host: client [0-9]+ asked for a reboot \(REST latched\)" "REST before the reboot"
+expect "$OUT/host_reboot.log" "REBOOT from the laptop: exiting with status 3" "the host program's line"
 
 echo "== integration: walk-demo trots the virtual body for 3 s and stops"
 start_body "$OUT/vbody_walk.log" "$PYTHON" -u -m kilo.vbody.core

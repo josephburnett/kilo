@@ -9,6 +9,8 @@ today, and so what works here:
     kilo --host IP monitor [--rate HZ] [--duration S] [--json]   live telemetry
     kilo log --host IP [--lines N] [--level L] [--duration S]    the mind's log: the last N lines, then live
     kilo --host IP flash [--persist] [--image body.bin [--manifest body.json]]   build and flash the body (P4)
+    kilo reboot --host IP                          restart the mind (on the Pi: back to the SD card's boot,
+                                                   e.g. the netboot loader); the body gets REST first
 
 ``--host`` may also follow the command (``kilo status --host IP``). Every
 other command prints that it is not available over --host yet.
@@ -27,7 +29,7 @@ import sys
 import time
 from typing import Any
 
-from kilo.hostlink import HostError, HostLink, HostRefused
+from kilo.hostlink import REBOOT_CLOSE_WAIT_S, HostError, HostLink, HostRefused
 from kilo.protocol import kilo_protocol as P
 
 EXIT_OK, EXIT_ERR = 0, 1
@@ -180,7 +182,8 @@ def _run_for(duration: float | None, hl: HostLink) -> int:
 
 
 def _unavailable(what: str) -> int:
-    print(f"kilo {what}: not available over --host yet (the C++ mind serves status, posture, monitor, log, flash)",
+    print(f"kilo {what}: not available over --host yet (the C++ mind serves status, posture, monitor, log, flash, "
+          "reboot)",
           file=sys.stderr)
     return EXIT_ERR
 
@@ -215,6 +218,20 @@ def cmd_flash(args: argparse.Namespace, hl: HostLink) -> int:
     return EXIT_OK
 
 
+def cmd_reboot(args: argparse.Namespace, hl: HostLink) -> int:
+    """`kilo reboot --host IP`: take control, REBOOT, print the answer. The
+    connection dropping afterwards is the reboot, not an error."""
+    hl.take_control(keepalive=False)
+    r = hl.reboot()
+    text = r.text.decode("ascii", "replace")
+    print(f"REBOOT: {_name(P.HostResultCode, r.code)}" + (f" ({text})" if text else ""), flush=True)
+    if hl.wait_closed(REBOOT_CLOSE_WAIT_S):
+        print("the mind closed the connection: it is restarting")
+    else:
+        print(f"no close within {REBOOT_CLOSE_WAIT_S:g} s (a rebooting Pi goes silent): it is restarting")
+    return EXIT_OK
+
+
 def _release(hl: HostLink) -> None:
     try:
         hl.release_control()  # the mind latches REST
@@ -240,7 +257,7 @@ def _prepare_flash(args: argparse.Namespace) -> int | None:
 
 
 HOST_COMMANDS = {"status": cmd_status, "posture": cmd_posture, "monitor": cmd_monitor, "log": cmd_log,
-                 "flash": cmd_flash}
+                 "flash": cmd_flash, "reboot": cmd_reboot}
 
 
 def parse_log_argv(argv: list[str], host: str | None) -> argparse.Namespace:
