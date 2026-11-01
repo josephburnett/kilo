@@ -21,6 +21,8 @@
 //   a planner bench step: once, after the first laptop client
 //   Circle's log events into the ring
 //   the stats lines once a second, the ACT LED
+//   a laptop's REBOOT: 200 ms on (the OK leaves, REST goes out), then
+//                      Run() returns ShutdownReboot (main.cpp: reboot())
 //   CScheduler::usSleep(1000): the net task and Circle's run here
 //
 // Logs go into the Mind's RAM ring, which `kilo log --host` reads, and to
@@ -83,6 +85,12 @@ static const uint32_t BodyLostUs = KILO_BODY_LOST_MS * 1000u;
 // ring holds about 15 s of log (four stats lines a second), and nobody
 // reads the screen.
 static const uint64_t BenchDelayUs = 1000000;
+
+// After a laptop's REBOOT the loop runs on this long before Run() returns
+// ShutdownReboot: the net task sends the RESULT OK (and the link the REST)
+// in the passes' sleeps. Bounded: a client that stopped reading does not
+// hold the reboot.
+static const uint64_t RebootFlushUs = 200000;
 
 // Circle's own log events copied into the ring per pass, at most.
 static const unsigned CircleEventsPerPass = 4;
@@ -286,6 +294,7 @@ TShutdownMode CKernel::Run (void)
 	uint64_t nNextStats = nStart + 1000000;
 	uint64_t nNextReconnect = 0;
 	uint64_t nBenchAt = 0;			// 0: no laptop client yet
+	uint64_t nRebootAt = 0;			// 0: no REBOOT asked
 	unsigned nLastPass = CTimer::GetClockTicks ();
 
 	for (;;)
@@ -347,6 +356,24 @@ TShutdownMode CKernel::Run (void)
 			m_bPoweroffLogged = TRUE;
 			logf (*m_pLog, LogLevel::Warn, "behaviour runner asked for poweroff: the kernel cannot switch "
 			      "the Pi off; the runner has stopped, the link stays up");
+		}
+
+		// A laptop's REBOOT (HostServer): the answer is queued; give the
+		// net task RebootFlushUs of passes to send it, then restart. The
+		// firmware boots the SD card again (on the netboot card: the loader,
+		// which waits for the next kernel).
+		if (m_pMind->reboot_requested ())
+		{
+			if (nRebootAt == 0)
+			{
+				nRebootAt = nNow + RebootFlushUs;
+			}
+			else if (nNow >= nRebootAt)
+			{
+				logf (*m_pLog, LogLevel::Warn, "rebooting (REBOOT from the laptop)");
+
+				return ShutdownReboot;
+			}
 		}
 
 		DrainCircleLog ();

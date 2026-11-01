@@ -8,11 +8,14 @@
 // What it serves:
 // - commands, one reply each (RESULT, or STATUS for STATUS_REQ): STATUS_REQ,
 //   CONTROL, POSTURE, PARAM_GET/PARAM_SET (UNSUPPORTED until P3), TELEM_SUB,
-//   LOG_SUB, BRIDGE_OPEN, BRIDGE_CLOSE;
+//   LOG_SUB, BRIDGE_OPEN, BRIDGE_CLOSE, REBOOT;
 // - TELEM: the link's latest TELEMETRY and counters, at each client's rate;
 // - LOG_LINE: the RAM log (util/logring.h), the last lines then live;
 // - the raw bridge: BRIDGE_OPEN pauses the link (bridge_open(): the main
 //   loop stops calling link.poll()) and forwards the UART both ways;
+// - REBOOT (controller only): REST latched on the link, RESULT OK sent,
+//   then reboot_requested() is true; the platform restarts (the Circle
+//   kernel returns ShutdownReboot once the answer had time to leave).
 // - flashing the body (P4, docs/fast-boot.md §6), with a Flasher and a
 //   FlashImage attached (attach_flasher()): FLASH_BEGIN, FLASH_DATA and
 //   FLASH_COMMIT fill the image and start the flasher, which this server
@@ -21,8 +24,8 @@
 //
 // Control: one controller, the first client to send CONTROL take=1; the
 // others are observers (STATUS, TELEM, LOG_LINE) and get NOT_CONTROLLER for
-// POSTURE, PARAM_SET and the bridge. When the controller gives up control,
-// closes, goes out of step, or asked for keepalive and was silent for
+// POSTURE, PARAM_SET, REBOOT and the bridge. When the controller gives up
+// control, closes, goes out of step, or asked for keepalive and was silent for
 // KILO_HOST_KEEPALIVE_TIMEOUT_MS, the bridge closes (if open) and the mind
 // latches SET_POSTURE REST (the daemon's end of a hold, kilo/daemon/sessions.py).
 //
@@ -89,6 +92,9 @@ class HostServer {
   bool link_paused() const { return bridge_ || (flasher_ != nullptr && flasher_->owns_uart()); }
   // A flash is running (from FLASH_COMMIT until DONE or FAILED).
   bool flashing() const { return flasher_ != nullptr && flasher_->busy(); }
+  // A controller sent REBOOT and has its OK: the platform should restart
+  // (after a few passes, so the answer leaves). Stays set.
+  bool reboot_requested() const { return reboot_; }
   // The controlling client's slot, -1 for none.
   int32_t controller() const { return controller_; }
   uint32_t clients() const;
@@ -120,6 +126,7 @@ class HostServer {
   void close_bridge(const char* why);
   void pump_bridge();
   void streams(uint64_t now);
+  void reboot(uint32_t i, uint8_t seq);
   void flash_begin(uint32_t i, uint8_t seq, const uint8_t* p);
   void flash_commit(uint32_t i, uint8_t seq);
   void drop_image(const char* why);
@@ -147,6 +154,7 @@ class HostServer {
   Client clients_[kMaxClients] = {};
   int32_t controller_ = -1;
   bool bridge_ = false;
+  bool reboot_ = false;
   Stats stats_ = {};
 
   // The flash channel (attach_flasher()).

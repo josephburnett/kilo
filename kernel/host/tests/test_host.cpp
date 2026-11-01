@@ -533,6 +533,35 @@ void test_bridge() {
   CHECK(!r.server.bridge_open() && r.server.controller() == -1 && posture_goal(r.link)->payload[1] == KILO_POSTURE_REST);
 }
 
+void test_reboot() {
+  Rig r;
+  kilo_telemetry_t t = {};
+  t.epoch = 2;  // epoch goals wait for the body's first epoch
+  r.serial.feed_frame(KILO_MSG_TELEMETRY, 0, &t, sizeof t);
+  FakeConn& a = r.listener.connect(0);
+  FakeConn& b = r.listener.connect(1);
+  r.pass();
+  b.send(KILO_HOST_MSG_REBOOT, 1);  // an observer may not
+  r.pass();
+  CHECK(result_code(b.take(), 1) == KILO_HOST_RESULT_CODE_NOT_CONTROLLER && !r.server.reboot_requested());
+  // The controller: STAND latched, then REBOOT -> REST latched, OK written, the flag set.
+  uint8_t take[2] = {1, 0};
+  a.send(KILO_HOST_MSG_CONTROL, 1, take, 2);
+  r.pass();
+  kilo_host_posture_t stand = {KILO_POSTURE_STAND, 0, 0};
+  a.send(KILO_HOST_MSG_POSTURE, 2, &stand, sizeof stand);
+  r.pass();
+  CHECK(posture_goal(r.link) != nullptr && posture_goal(r.link)->payload[1] == KILO_POSTURE_STAND);
+  a.take();
+  a.send(KILO_HOST_MSG_REBOOT, 3);
+  r.link.mark_alive();
+  r.server.poll();
+  CHECK(r.server.reboot_requested());
+  CHECK(result_code(a.take(), 3) == KILO_HOST_RESULT_CODE_OK);  // written to the socket by that poll
+  CHECK(posture_goal(r.link)->payload[1] == KILO_POSTURE_REST);
+  CHECK(r.capture.has("asked for a reboot (REST latched)"));
+}
+
 void test_slow_client_dropped() {
   Rig r;
   FakeConn& a = r.listener.connect(0);
@@ -559,6 +588,7 @@ int main(int argc, char** argv) {
   test_telem_rate();
   test_log_tail();
   test_bridge();
+  test_reboot();
   test_slow_client_dropped();
   std::printf("  %d host vectors\n", g_vectors);
   return report("host");

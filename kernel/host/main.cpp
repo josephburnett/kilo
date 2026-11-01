@@ -17,7 +17,8 @@
 //
 // Exit status: 0 after --duration (or SIGINT/SIGTERM) with a HELLO seen;
 // 1 no HELLO, or the port failed; 2 the body speaks another protocol major
-// (refusing to drive); 64 bad usage.
+// (refusing to drive); 3 a laptop's controller sent REBOOT (the Circle
+// kernel restarts the Pi there; this program stops); 64 bad usage.
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
@@ -44,6 +45,9 @@ using namespace kilo;
 namespace {
 
 volatile sig_atomic_t g_stop = 0;
+
+// The exit status after a laptop's REBOOT (the usage text lists it).
+constexpr int kExitReboot = 3;
 
 void on_signal(int) { g_stop = 1; }
 
@@ -101,7 +105,9 @@ void log_stats(Log& log, const SerialLink& link, const Window& w) {
 int usage() {
   fprintf(stderr,
           "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--reset-fifo PATH] [--duration SECONDS]\n"
-          "                      [--verbose] [--remote] [--behaviour] [--seed N] [--balance KP]\n");
+          "                      [--verbose] [--remote] [--behaviour] [--seed N] [--balance KP]\n"
+          "exit status: 0 done (a HELLO seen), 1 no HELLO or the port failed, 2 the body speaks another\n"
+          "             protocol major, 3 REBOOT from a laptop client (kilo reboot --host), 64 bad usage\n");
   return 64;
 }
 
@@ -199,6 +205,11 @@ int main(int argc, char** argv) {
     }
     if (link.state().proto_ok == 0) {
       status = 2;
+      break;
+    }
+    if (mind.reboot_requested()) {  // its OK is sent (HostServer flushed it); closing tells the client the rest
+      logf(log, LogLevel::Warn, "REBOOT from the laptop: exiting with status %d", kExitReboot);
+      status = kExitReboot;
       break;
     }
     uint64_t now = clock.now_us();

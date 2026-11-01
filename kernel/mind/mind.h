@@ -91,6 +91,8 @@ class Mind final : public LinkListener {
   behaviour::Runner& runner() { return runner_; }
   bool behaviour_active() const { return cfg_.behaviour && !runner_.stopped(); }
   bool poweroff_requested() const { return runner_.poweroff_requested(); }
+  // A laptop's controller sent REBOOT (and has its OK): restart the platform.
+  bool reboot_requested() const { return host_.reboot_requested(); }
   // A laptop client holds control (or the raw bridge is open).
   bool host_controls() const { return listener_ != nullptr && (host_.controller() >= 0 || host_.link_paused()); }
   // Whether the last pass stamped the link's liveness.

@@ -20,6 +20,7 @@ const char* name_of(uint8_t type) {
     case KILO_HOST_MSG_POSTURE: return "POSTURE";
     case KILO_HOST_MSG_PARAM_GET: return "PARAM_GET";
     case KILO_HOST_MSG_PARAM_SET: return "PARAM_SET";
+    case KILO_HOST_MSG_REBOOT: return "REBOOT";
     case KILO_HOST_MSG_TELEM_SUB: return "TELEM_SUB";
     case KILO_HOST_MSG_LOG_SUB: return "LOG_SUB";
     case KILO_HOST_MSG_BRIDGE_OPEN: return "BRIDGE_OPEN";
@@ -244,6 +245,8 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
       if (!is_controller) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
       if (flashing()) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_FLASHING, "the body is being flashed");
       return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "params: not yet (P3)");
+    case KILO_HOST_MSG_REBOOT:
+      return reboot(i, f.seq);
     case KILO_HOST_MSG_TELEM_SUB: {
       uint8_t hz = p[0];
       if (hz > KILO_HOST_TELEM_MAX_HZ) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_BAD_ARG, "hz: 0..50");
@@ -302,6 +305,29 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
     default:
       return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UNSUPPORTED, name_of(f.type));
   }
+}
+
+// ---- reboot -------------------------------------------------------------------------
+
+// REST to the body (as when the controller lets go), OK to the client, sent
+// now, then the flag the platform polls. A flash is not cut off: the body
+// would be left half written.
+void HostServer::reboot(uint32_t i, uint8_t seq) {
+  const uint8_t type = KILO_HOST_MSG_REBOOT;
+  if (controller_ != (int32_t)i) return result(i, seq, type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
+  if (flashing()) return result(i, seq, type, KILO_HOST_RESULT_CODE_FLASHING, "the body is being flashed");
+  if (bridge_) close_bridge("REBOOT");
+  if (receiving_) drop_image("REBOOT");
+  bool rest = false;
+  if (link_.connected()) {
+    kilo_set_posture_t g = {0, KILO_POSTURE_REST, 0, 0};  // the link fills the epoch
+    rest = link_.set_goal(KILO_MSG_SET_POSTURE, (const uint8_t*)&g, sizeof g);
+  }
+  logf(log_, LogLevel::Warn, "host: client %d asked for a reboot (%s)", (int)i,
+       rest ? "REST latched" : "no link: no REST");
+  result(i, seq, type, KILO_HOST_RESULT_CODE_OK, "rebooting");
+  flush(i);
+  reboot_ = true;
 }
 
 // ---- flash --------------------------------------------------------------------------
