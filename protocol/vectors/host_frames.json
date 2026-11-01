@@ -87,6 +87,18 @@
    "note": ""
   },
   {
+   "name": "reboot",
+   "msg": "REBOOT",
+   "type": 19,
+   "dir": "client_to_mind",
+   "kind": "command",
+   "seq": 13,
+   "fields": {},
+   "payload": "",
+   "wire": "0400130d829a",
+   "note": ""
+  },
+  {
    "name": "telem_sub_10hz",
    "msg": "TELEM_SUB",
    "type": 32,

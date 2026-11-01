@@ -1160,7 +1160,7 @@ not_held = -32768
 #
 # Rules: any number of clients up to host.max_clients; each may read STATUS
 # and subscribe to TELEM and LOG_LINE. One controller at a time: the first to
-# send CONTROL take=1. POSTURE, PARAM_SET and the bridge need control
+# send CONTROL take=1. POSTURE, PARAM_SET, REBOOT and the bridge need control
 # (others get NOT_CONTROLLER). When the controller lets go (CONTROL take=0),
 # closes its socket, or asked for keepalive and was silent for
 # host.keepalive_timeout_ms, the mind closes the bridge if it was open and
@@ -1173,6 +1173,12 @@ not_held = -32768
 # BridgeTransport under kilo.link). BRIDGE_CLOSE (or losing control) resumes
 # the link, which reconnects (HELLO_REQ). While bridged the body's watchdog
 # applies as usual.
+#
+# Reboot: REBOOT restarts the mind, so a developer gets the SD card's
+# netboot loader back without pulling the Pi's power. The mind latches REST
+# on the link (as when the controller lets go), answers RESULT OK, sends it,
+# then reboots (the Circle kernel: within about 200 ms; kilo-mind-host exits
+# with its own status instead). The client sees OK, then the connection drop.
 #
 # Flash (P4, docs/fast-boot.md §6): the controller sends FLASH_BEGIN (the
 # manifest: build, image_size, crc32, flags), the image in FLASH_DATA chunks in
@@ -1369,6 +1375,14 @@ fields = [
   { name = "value", type = "i16" },
   { name = "persist", type = "u8", range = [0, 1] },
 ]
+
+[[host_messages]]
+name = "REBOOT"
+id = 0x13
+dir = "client_to_mind"
+kind = "command"
+doc = "Reboot the mind (controller only): latch REST on the link, answer RESULT OK, then restart (the Pi re-enters the SD card's boot, e.g. the netboot loader; kilo-mind-host exits). FLASHING while a flash runs. The connection then drops."
+fields = []
 
 [[host_messages]]
 name = "TELEM_SUB"

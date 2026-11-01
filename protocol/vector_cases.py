@@ -294,6 +294,7 @@ def host_frame_cases():
         ("posture_stand", "POSTURE", 3, {"posture": 3, "transition_ticks": 0, "flags": 0}, ""),
         ("param_get", "PARAM_GET", 4, {"id": 5}, ""),
         ("param_set", "PARAM_SET", 5, {"id": 5, "value": -300, "persist": 1}, ""),
+        ("reboot", "REBOOT", 13, {}, ""),
         ("telem_sub_10hz", "TELEM_SUB", 6, {"hz": 10}, ""),
         ("log_sub_tail", "LOG_SUB", 7, {"enable": 1, "tail": 20, "min_level": 1}, ""),
         ("bridge_open", "BRIDGE_OPEN", 8, {}, ""),

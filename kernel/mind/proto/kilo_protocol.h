@@ -1303,6 +1303,7 @@ enum kilo_host_msg_id {
     KILO_HOST_MSG_POSTURE = 0x10,
     KILO_HOST_MSG_PARAM_GET = 0x11,
     KILO_HOST_MSG_PARAM_SET = 0x12,
+    KILO_HOST_MSG_REBOOT = 0x13,
     KILO_HOST_MSG_TELEM_SUB = 0x20,
     KILO_HOST_MSG_LOG_SUB = 0x21,
     KILO_HOST_MSG_BRIDGE_OPEN = 0x30,
@@ -1366,6 +1367,9 @@ KILO_STATIC_ASSERT(sizeof(kilo_host_param_set_t) == 4, kilo_sa_host_param_set_si
 KILO_STATIC_ASSERT(offsetof(kilo_host_param_set_t, id) == 0, kilo_sa_host_param_set_id);
 KILO_STATIC_ASSERT(offsetof(kilo_host_param_set_t, value) == 1, kilo_sa_host_param_set_value);
 KILO_STATIC_ASSERT(offsetof(kilo_host_param_set_t, persist) == 3, kilo_sa_host_param_set_persist);
+
+/* host 0x13 REBOOT: command. Reboot the mind (controller only): latch REST on the link, answer RESULT OK, then restart (the Pi re-enters the SD card's boot, e.g. the netboot loader; kilo-mind-host exits). FLASHING while a flash runs. The connection then drops. */
+#define KILO_HOST_REBOOT_LEN 0u
 
 /* host 0x20 TELEM_SUB: command. TELEM to this client at hz (1..host.telem_max_hz; 0 = off). Any client. */
 #define KILO_HOST_TELEM_SUB_LEN 1u
@@ -1567,6 +1571,8 @@ static inline uint8_t kilo_host_payload_len_check(uint8_t type, uint16_t len)
         return len == 1u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_PARAM_SET:
         return len == 4u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_REBOOT:
+        return len == 0u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_TELEM_SUB:
         return len == 1u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_LOG_SUB:
@@ -1609,6 +1615,7 @@ static inline uint8_t kilo_host_msg_kind(uint8_t type)
     case KILO_HOST_MSG_POSTURE:
     case KILO_HOST_MSG_PARAM_GET:
     case KILO_HOST_MSG_PARAM_SET:
+    case KILO_HOST_MSG_REBOOT:
     case KILO_HOST_MSG_TELEM_SUB:
     case KILO_HOST_MSG_LOG_SUB:
     case KILO_HOST_MSG_BRIDGE_OPEN:

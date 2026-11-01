@@ -2807,6 +2807,7 @@ class HostMsgId(enum.IntEnum):
     POSTURE = 0x10
     PARAM_GET = 0x11
     PARAM_SET = 0x12
+    REBOOT = 0x13
     TELEM_SUB = 0x20
     LOG_SUB = 0x21
     BRIDGE_OPEN = 0x30
@@ -3055,6 +3056,43 @@ class HostParamSet:
         kw['id'] = v[0]
         kw['value'] = v[1]
         kw['persist'] = v[2]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostReboot:
+    """host 0x13 REBOOT (command). Reboot the mind (controller only): latch REST on the link, answer RESULT OK, then restart (the Pi re-enters the SD card's boot, e.g. the netboot loader; kilo-mind-host exits). FLASHING while a flash runs. The connection then drops."""
+    ID: ClassVar[int] = 0x13
+    NAME: ClassVar[str] = 'REBOOT'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 0
+    MAX_LEN: ClassVar[int] = 0
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<')
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
         kw.update(extra)
         return cls(**kw)
 
@@ -3758,6 +3796,7 @@ HOST_MESSAGES: dict[int, type] = {
     0x10: HostPosture,
     0x11: HostParamGet,
     0x12: HostParamSet,
+    0x13: HostReboot,
     0x20: HostTelemSub,
     0x21: HostLogSub,
     0x30: HostBridgeOpen,
@@ -3790,6 +3829,8 @@ def host_payload_len_status(msg_type: int, payload: bytes) -> int:
         return LEN_OK if n == 1 else LEN_BAD
     if msg_type == 0x12:
         return LEN_OK if n == 4 else LEN_BAD
+    if msg_type == 0x13:
+        return LEN_OK if n == 0 else LEN_BAD
     if msg_type == 0x20:
         return LEN_OK if n == 1 else LEN_BAD
     if msg_type == 0x21:
