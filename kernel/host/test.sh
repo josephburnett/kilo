@@ -351,4 +351,9 @@ expect "$FL/sd_refused_mount.txt" "is not a mount point" "--sd: not a mount"
 [ ! -e "$FL/notcard/body.bin" ] || { echo "FAILED: wrote to a card it refused"; exit 1; }
 echo "   --sd: wrote the card; refused a directory without kernel7.img and an unmounted one"
 
+# ---- P3 (docs/fast-boot.md): tricks, perception, behaviour, remote and the Mind ----------------
+echo "== P3: generated tables up to date (tricks)"
+"$PYTHON" "$REPO/kernel/mind/tricks/gen_library.py" --check  # (each generator imports this checkout's mind/)
+# ---- end P3 ---------------------------------------------------------------------------------------
+
 echo "== all kernel host tests passed"

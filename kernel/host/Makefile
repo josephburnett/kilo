@@ -156,3 +156,7 @@ clean:
 	rm -rf $(B)
 
 -include $(shell find $(B) -name '*.d' 2>/dev/null)
+
+# ---- P3 (docs/fast-boot.md): tricks, perception, behaviour, remote and the Mind --------
+# Their unit tests join `make check` (TESTS is read when check runs).
+TESTS += test_tricks

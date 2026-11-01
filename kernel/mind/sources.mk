@@ -28,3 +28,10 @@ MIND_SRCS += \
 	mind/flash/crc32.cpp \
 	mind/flash/image.cpp \
 	mind/flash/flasher.cpp
+
+# ---- P3 (docs/fast-boot.md): tricks, perception, behaviour, remote and the Mind --------
+MIND_SRCS += \
+	mind/tricks/model.cpp \
+	mind/tricks/library.cpp \
+	mind/tricks/library.gen.cpp \
+	mind/tricks/player.cpp
