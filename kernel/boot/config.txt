@@ -1,0 +1,15 @@
+# Kilo: Raspberry Pi 2 B, Circle kernel, AArch32.
+# circle/boot/config32.txt without its Pi 4 sections, plus fast boot (docs/fast-boot.md P5).
+
+arm_64bit=0
+initial_turbo=0
+
+boot_delay=0
+disable_splash=1
+gpu_mem=16
+start_file=start_cd.elf
+fixup_file=fixup_cd.dat
+kernel=kernel7.img
+
+# No device tree: Circle reads it only on the Pi 4 and later.
+device_tree=

@@ -24,6 +24,8 @@ that share the work:
   command line.
 - `protocol/`: the single definition of the messages between the two; the C
   and Python sides are generated from it.
+- `kernel/`: the mind as a bare-metal C++ kernel for the Pi, in progress
+  (`docs/fast-boot.md`, `kernel/README.md`).
 
 Where to read more: `docs/architecture.md` is the design, `docs/setup.md`
 sets up a dev host and the Pi, `mind/README.md` lists the commands, and

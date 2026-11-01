@@ -1,0 +1,4 @@
+[submodule "kernel/circle"]
+	path = kernel/circle
+	url = https://github.com/rsta2/circle
+	shallow = true
