@@ -430,14 +430,38 @@ void test_serial_trouble() {
   Rig r;
   uint16_t tick = 0;
   r.up(1, &tick);
-  r.serial.write_room = 3;  // TX buffer nearly full
+  r.serial.write_room = 3;     // TX buffer nearly full,
+  r.serial.free_room = 4096;   // and a device whose tx_free() does not know it
   r.step(150);
   CHECK(r.link.stats().tx_short >= 1);
   r.serial.write_room = -1;
+  r.serial.free_room = -1;
   r.serial.failed = true;
   r.step();
   CHECK(!r.link.connected() && r.link.stats().disconnects == 1 && r.log.has("read failed"));
   CHECK(!r.link.request(KILO_MSG_STATS_REQ, nullptr, 0));
+}
+
+// tx_free() too small for a frame: nothing is cut, nothing is lost; the
+// goal, HELLO_REQ and HEARTBEAT go out whole once there is room.
+void test_tx_deferred() {
+  Rig r;
+  r.serial.free_room = 3;
+  r.link.connect();
+  CHECK(set_posture(r, KILO_POSTURE_REST));
+  r.hello(2, KILO_RESET_CAUSE_COLD, 0, 1);
+  r.step();
+  r.step(150);
+  CHECK(r.serial.out.empty());  // not a byte of a frame
+  CHECK(r.link.stats().tx_deferred >= 3 && r.link.stats().tx_short == 0);
+  CHECK(r.link.stats().hello_polls == 0);
+  r.serial.free_room = -1;
+  r.step();
+  std::vector<Sent> s = r.serial.take_sent();
+  CHECK(count_type(s, 0xFF) == 0);  // every frame whole
+  CHECK(count_type(s, KILO_MSG_SET_POSTURE) == 1 && count_type(s, KILO_MSG_HELLO_REQ) == 1);
+  CHECK(count_type(s, KILO_MSG_HEARTBEAT) == 0);  // the goal and HELLO_REQ were traffic enough
+  CHECK(r.link.stats().hello_polls == 1);
 }
 
 }  // namespace
@@ -457,5 +481,6 @@ int main() {
   test_query_and_commands();
   test_trick_play_needs_contact();
   test_serial_trouble();
+  test_tx_deferred();
   return report("link");
 }

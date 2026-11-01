@@ -23,6 +23,11 @@ class Serial {
   // Queue up to n bytes: the count taken (short when the TX buffer is full;
   // the link counts that), -1 when the device failed.
   virtual int32_t write(const uint8_t* buf, uint32_t n) = 0;
+  // Bytes write() takes whole right now. The link writes a frame only when
+  // this covers all of it, so a full buffer defers the frame instead of
+  // cutting it. A device that cannot see its buffer returns an estimate;
+  // write() coming up short anyway is still counted (tx_short).
+  virtual uint32_t tx_free() = 0;
   // Line rate in baud, 8N1. False if the device cannot do it.
   virtual bool set_baud(uint32_t baud) = 0;
 

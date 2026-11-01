@@ -131,6 +131,7 @@ void SerialLink::housekeeping(uint64_t now) {
     g.dirty = false;
     g.sends++;
     if (send_frame(g.type, next_seq(), payload, g.len, now)) stats_.goal_sends++;
+    else if (deferred_) g.dirty = true;  // no room: it goes at the next poll
   }
 
   if (!mind_ok) return;  // a stalled mind sends nothing on its own: let the body's watchdog trip
@@ -142,6 +143,10 @@ void SerialLink::housekeeping(uint64_t now) {
     hello_solicited_at_ = now;
     stats_.hello_polls++;
     send_frame(KILO_MSG_HELLO_REQ, next_seq(), nullptr, 0, now);
+    if (deferred_) {  // no room: ask again at the next poll
+      hello_on_connect_ = true;
+      stats_.hello_polls--;
+    }
   }
   if (!ever_tx_ || now - last_tx_at_ >= cfg_.heartbeat_idle_us) {
     if (send_frame(KILO_MSG_HEARTBEAT, next_seq(), nullptr, 0, now)) stats_.heartbeats++;
@@ -153,9 +158,17 @@ bool SerialLink::send_frame(uint8_t type, uint8_t seq, const uint8_t* payload, u
     stats_.tx_dropped++;
     return false;
   }
+  deferred_ = false;
   uint8_t wire[KILO_MAX_WIRE];
   uint8_t n = kilo_frame_encode(type, seq, payload, len, wire);
   if (n == 0) return false;  // len > KILO_MAX_PAYLOAD: callers check lengths first
+  if (serial_.tx_free() < n) {
+    // Whole frames or nothing: a cut frame costs the body a CRC error and
+    // feeds no watchdog. Housekeeping retries at the next poll.
+    deferred_ = true;
+    stats_.tx_deferred++;
+    return false;
+  }
   int32_t w = serial_.write(wire, n);
   if (w < 0) {
     logf(log_, LogLevel::Warn, "write failed");

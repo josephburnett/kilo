@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
@@ -54,6 +55,18 @@ int32_t PosixSerial::write(const uint8_t* buf, uint32_t n) {
   if (w >= 0) return (int32_t)w;
   if (errno == EAGAIN || errno == EINTR) return 0;  // TX buffer full: dropped, like a UART nobody drains
   return -1;
+}
+
+uint32_t PosixSerial::tx_free() {
+  // Linux does not say how much a tty's write() takes now, only what is
+  // still queued (TIOCOUTQ). Assume a 4 KiB buffer (n_tty's and most USB
+  // serial drivers' order of size) less what is queued. A pty reports 0
+  // queued, so this never holds a frame back there; a short write() stays
+  // the backstop (tx_short).
+  constexpr int kAssumedBuffer = 4096;
+  int queued = 0;
+  if (ioctl(fd_, TIOCOUTQ, &queued) != 0 || queued < 0) return (uint32_t)kAssumedBuffer;
+  return queued >= kAssumedBuffer ? 0u : (uint32_t)(kAssumedBuffer - queued);
 }
 
 uint64_t MonotonicClock::now_us() {

@@ -27,6 +27,8 @@ struct LinkStats {
   uint32_t tx_dropped;      // frames not written: disconnected, or the device failed
   uint32_t tx_short;        // frames the device took only part of (TX buffer full); the body
                             // drops the damaged frame at the next delimiter
+  uint32_t tx_deferred;     // frames not written because tx_free() could not take them whole;
+                            // goals, HELLO_REQ and HEARTBEAT go out at a later poll
   uint32_t reconnects;
   uint32_t disconnects;
   uint32_t goals_refused;   // EVENT GOAL_REFUSED (Python counts them per goal:reason)

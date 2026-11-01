@@ -22,6 +22,8 @@ class PosixSerial final : public Serial {
 
   int32_t read(uint8_t* buf, uint32_t n) override;
   int32_t write(const uint8_t* buf, uint32_t n) override;
+  // 4 KiB less what TIOCOUTQ says is queued: an estimate (see posix.cpp).
+  uint32_t tx_free() override;
   // termios2 BOTHER: 250000 is no Bxxx constant. A pty takes the setting and ignores it.
   bool set_baud(uint32_t baud) override;
 

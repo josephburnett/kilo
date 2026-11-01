@@ -106,6 +106,11 @@ class SerialLink {
   // Read, handle, retry, housekeeping. Never blocks.
   void poll();
 
+  // The first TX seq. The constructor takes it from the clock's low bits;
+  // a platform with a better source (the Pi's hardware RNG: its clock reads
+  // nearly the same at every boot) sets it before connect().
+  void seed_seq(uint8_t seq) { seq_ = seq; }
+
   // Stamped by the mind's main loop on every pass (>= 1 Hz).
   void mark_alive();
   bool mind_alive() const;
@@ -180,6 +185,7 @@ class SerialLink {
   uint64_t last_hello_poll_ = 0;
   bool hello_solicited_ = false;  // a HELLO_REQ went out at hello_solicited_at_
   uint64_t hello_solicited_at_ = 0;
+  bool deferred_ = false;  // the last send_frame() was held back by tx_free()
   bool ever_reboot_ = false;
   uint64_t last_reboot_at_ = 0;
   bool was_alive_ = false;

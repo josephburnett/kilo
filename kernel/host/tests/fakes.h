@@ -27,6 +27,7 @@ class FakeSerial final : public Serial {
   std::vector<uint8_t> out;  // bytes the link wrote
   bool failed = false;
   int32_t write_room = -1;   // >= 0: take at most this many bytes per write
+  int32_t free_room = -1;    // >= 0: what tx_free() reports (else write_room, else plenty)
 
   int32_t read(uint8_t* buf, uint32_t n) override {
     if (failed) return -1;
@@ -40,6 +41,10 @@ class FakeSerial final : public Serial {
     uint32_t k = write_room >= 0 && (uint32_t)write_room < n ? (uint32_t)write_room : n;
     out.insert(out.end(), buf, buf + k);
     return (int32_t)k;
+  }
+  uint32_t tx_free() override {
+    if (free_room >= 0) return (uint32_t)free_room;
+    return write_room >= 0 ? (uint32_t)write_room : 4096u;
   }
   bool set_baud(uint32_t) override { return true; }
 
