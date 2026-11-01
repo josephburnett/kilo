@@ -352,11 +352,14 @@ expect "$FL/sd_refused_mount.txt" "is not a mount point" "--sd: not a mount"
 echo "   --sd: wrote the card; refused a directory without kernel7.img and an unmounted one"
 
 # ---- P3 (docs/fast-boot.md): tricks, perception, behaviour, remote and the Mind ----------------
-echo "== P3: generated tables up to date (tricks)"
+echo "== P3: generated tables up to date (tricks, personality)"
 "$PYTHON" "$REPO/kernel/mind/tricks/gen_library.py" --check  # (each generator imports this checkout's mind/)
-echo "== P3: golden vectors up to date with the Python mind (perception)"
-"$PYTHON" "$HERE/tests/gen_perception_vectors.py" | cmp -s - "$HERE/tests/perception_vectors.txt" ||
-    { echo "FAILED: stale; run: $PYTHON kernel/host/tests/gen_perception_vectors.py > kernel/host/tests/perception_vectors.txt"; exit 1; }
+"$PYTHON" "$REPO/kernel/mind/behaviour/gen_personality.py" --check
+echo "== P3: golden vectors up to date with the Python mind (perception, behaviour)"
+for v in perception behaviour; do
+    "$PYTHON" "$HERE/tests/gen_${v}_vectors.py" | cmp -s - "$HERE/tests/${v}_vectors.txt" ||
+        { echo "FAILED: stale; run: $PYTHON kernel/host/tests/gen_${v}_vectors.py > kernel/host/tests/${v}_vectors.txt"; exit 1; }
+done
 # ---- end P3 ---------------------------------------------------------------------------------------
 
 echo "== all kernel host tests passed"

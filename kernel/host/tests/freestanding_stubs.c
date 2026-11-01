@@ -44,6 +44,22 @@ float atanf(float x) { return x; }
 float atan2f(float y, float x);
 float atan2f(float y, float x) { return y + x; }
 
+/* P3: perception and behaviour compute in double (mind/util/dmath.h). */
+double exp(double x);
+double exp(double x) { return x; }
+double log(double x);
+double log(double x) { return x; }
+double sin(double x);
+double sin(double x) { return x; }
+double cos(double x);
+double cos(double x) { return x; }
+void sincos(double x, double *s, double *c);
+void sincos(double x, double *s, double *c)
+{
+    *s = x;
+    *c = x;
+}
+
 void kilo_freestanding_entry(void);
 void kilo_freestanding_entry(void)
 {

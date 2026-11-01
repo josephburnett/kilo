@@ -37,4 +37,11 @@ MIND_SRCS += \
 	mind/tricks/player.cpp \
 	mind/perception/ultrasonic.cpp \
 	mind/perception/imu.cpp \
-	mind/perception/percepts.cpp
+	mind/perception/percepts.cpp \
+	mind/behaviour/random.cpp \
+	mind/behaviour/drives.cpp \
+	mind/behaviour/personality.gen.cpp \
+	mind/behaviour/tree.cpp \
+	mind/behaviour/selector.cpp \
+	mind/behaviour/library.cpp \
+	mind/behaviour/runner.cpp
