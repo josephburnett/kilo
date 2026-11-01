@@ -2,11 +2,11 @@
 
 What you need to do to start the new mind kernel on the Pi 2 B for the
 first time, and what you should see. It is the hardware check for phases
-P1, P2 and P4 of docs/fast-boot.md: the Pi says hello to Kilo's board and
+P1 to P4 of docs/fast-boot.md: the Pi says hello to Kilo's board and
 keeps the link alive, with no Linux, the laptop talks to the Pi over the
-network cable (`kilo status`, `kilo log`, `kilo posture`), and, as an
-optional last step, the Pi rewrites Kilo's board firmware itself
-(`kilo flash --host`, step 11).
+network cable (`kilo status`, `kilo log`, `kilo posture`), Kilo answers
+the IR remote (step 9), and, as an optional last step, the Pi rewrites
+Kilo's board firmware itself (`kilo flash --host`, step 12).
 
 Nothing here is timed. Every step waits for you, and you can stop at any
 step and carry on later. Write what you see in
@@ -39,7 +39,11 @@ Words used below:
 - An Ethernet cable from the Pi to the house router.
 - On the laptop, the `kilo` program in `~/OpenCat/.venv` (it is there if
   `~/OpenCat/.venv/bin/kilo --help` prints its help).
-- A clear patch of floor where Kilo can stand up (step 8).
+- A clear patch of floor where Kilo can stand up and walk a few steps
+  (steps 8 and 9).
+- Kilo's IR remote. Keys are named by where they sit: columns A, B, C from
+  left to right, rows 1 to 7 from the bottom to the top. So B7 is the middle
+  key of the top row.
 - Kilo, charged, and **one** of these two ways to connect it:
   - **A. The USB cable** (today's wiring): Kilo's USB adapter cable into one
     of the Pi's USB ports.
@@ -70,6 +74,12 @@ So, with the USB cable (way A):
 
 The three header wires (way B) carry no 5 V, so they do not have this
 problem.
+
+## Before you start: the remote
+
+The kernel listens to the IR remote from the moment it starts, as the Pi
+did under Linux. Keep the remote out of reach until step 9, so that a
+stray key press does not make Kilo move on the desk.
 
 ## Steps
 
@@ -135,8 +145,8 @@ the mind kernel.
 | Steady on, for a second or a few | The kernel is starting; it is looking for USB devices. |
 | Slow blink: 1 s on, 1 s off | The kernel runs but hears no Kilo yet. Normal for a few seconds: with the USB cable, the kernel opening the adapter may restart Kilo's board, which then takes a second or two to start. |
 | Even blink, twice a second | **Success**: Kilo's board is talking to the Pi. |
-| Fast blink, five times a second | Kilo's board runs firmware with another protocol version. The Pi keeps the link alive but will not drive Kilo. Flash the body firmware (step 11, or the way you do today, from Linux). |
-| Two short flashes, then a pause, once a second | The Pi is flashing Kilo's board (step 11, or a `body.bin` on the card). Leave it alone until the pattern changes, about 10 to 20 s. |
+| Fast blink, five times a second | Kilo's board runs firmware with another protocol version. The Pi keeps the link alive but will not drive Kilo. Flash the body firmware (step 12, or the way you do today, from Linux). |
+| Two short flashes, then a pause, once a second | The Pi is flashing Kilo's board (step 12, or a `body.bin` on the card). Leave it alone until the pattern changes, about 10 to 20 s. |
 | Steady on or steady off for more than 20 s | The kernel stopped (it could not start, or it crashed). |
 
 Leave it running for a minute. The light should keep its even blink.
@@ -197,7 +207,7 @@ link stats  frames_rx=1100 frames_tx=60 heartbeats=40
 What matters:
 
 - `mind build`: the first 8 characters of the commit the kernel was built
-  from (the same number the screen shows in step 9).
+  from (the same number the screen shows in step 10).
 - `alive=True`: Kilo's board is talking to the Pi.
 - `firmware ... build`: the body firmware's build number.
 - `mode` and `battery` are filled in: the Pi gets Kilo's reports.
@@ -216,7 +226,7 @@ for about 5 seconds, without moving Kilo. Copy into the results:
 
 - the three lines starting `planner bench` (trot, walk, crawl): how long
   the walking planner takes on this Pi. The mind keeps only its last 64
-  log lines, about 20 seconds' worth, so if these are missing, the status
+  log lines, about 15 seconds' worth, so if these are missing, the status
   command was too long ago: power-cycle the Pi, send the kernel again
   (step 6) and run this log command first;
 - one line starting `loop`: how regularly the mind's loop runs while the
@@ -234,7 +244,38 @@ Kilo should stand up, hold for 5 seconds, then lie down again (REST). The
 laptop prints `holding stand for 5 s`, then `released: the mind latched
 REST`. If Kilo does something else, switch it off and note what it did.
 
-### 9. Optional: watch with a screen
+### 9. The remote
+
+**Kilo must be on the floor for this step, never on the desk**: the desk
+slopes and there is no stand to hold him.
+
+First start the log on the laptop, so you see the mind's lines as you
+press keys (it stops by itself after 2 minutes):
+
+```
+~/OpenCat/.venv/bin/kilo log --host 192.168.88.Y --lines 5 --duration 120
+```
+
+Then point the remote at Kilo and press one key at a time, waiting for
+Kilo to finish moving before the next:
+
+1. **B6** (column B, row 6). Kilo stands up. The log shows
+   `remote B6 (0x02, stand): posture stand`.
+2. **A7** (column A, top row). Kilo lies down. The log shows
+   `remote A7 (0xA2, rest): posture rest`.
+3. Get ready to catch Kilo. Press **B7** (column B, top row): Kilo walks
+   forward. The log shows `remote B7 (0x62, forward): walk forward (trot)`.
+4. After about two seconds, press **B6**. Kilo stops and stands. The log
+   shows `remote B6 (0x02, stand): posture stand`.
+5. Press **A7** to let him lie down again.
+
+If a key does nothing and no `remote` line appears, the key did not reach
+the mind: note which key. If the line says `ignored (a laptop client holds
+the body)`, a `kilo posture` command is still running: stop it (Ctrl-C)
+and press the key again. Copy the `remote` lines into the results, and
+anything Kilo did that you did not expect.
+
+### 10. Optional: watch with a screen
 
 With an HDMI monitor plugged in **before** step 3, the kernel prints its log
 on the screen: the build number, which serial connection it chose
@@ -244,7 +285,7 @@ link counts (`telemetry 25/s`, decode errors). This may not work: the card
 gives the graphics chip very little memory (`gpu_mem=16`). Without a
 screen, the light is all there is to see in this phase.
 
-### 10. Optional: time the boot with a scope
+### 11. Optional: time the boot with a scope
 
 The kernel raises Pi header pin 40 (GPIO21) the moment it starts and drops
 it when the first HELLO arrives. Pin 39 next to it is ground. With a scope
@@ -255,7 +296,7 @@ on pin 40 and the Pi's 5 V, from a cold power-on with the production card
 - rising to falling edge: our start-up (USB scan included) plus Kilo's
   board starting.
 
-### 11. Optional: flash Kilo's board from the laptop, through the Pi
+### 12. Optional: flash Kilo's board from the laptop, through the Pi
 
 This rewrites Kilo's board firmware with the build on the laptop, the way
 `kilo flash` does today from Linux, but done by the Pi's new kernel. If it
@@ -317,7 +358,7 @@ If it fails: note the laptop's last line and the log lines above. Power
 Kilo off and on; if the light then never gets to the even blink, Kilo's
 board is waiting in optiboot: flash it the way you do today, from Linux.
 
-### 12. Finish
+### 13. Finish
 
 Power the Pi off. Way A: unplug the USB cable from the Pi before you switch
 Kilo off.
