@@ -1,0 +1,101 @@
+# The mind core on the Linux host: the kilo-mind-host program, the unit
+# tests, and a freestanding build that proves the core needs nothing from
+# libc, libm or libstdc++ beyond memcpy/memset/memcmp (what Circle gives).
+#
+#   make              build/kilo-mind-host
+#   make check        unit tests (sanitizers)
+#   make freestanding the core built and linked with -ffreestanding -nostdlib
+#
+# kernel/host/test.sh runs all three and the integration run against vbody.
+
+KERNEL := ..
+REPO := ../..
+include $(KERNEL)/mind/sources.mk
+
+CXX ?= g++
+CC ?= gcc
+PYTHON ?= python3
+B := build
+
+WARN := -Wall -Wextra -Werror
+CXXFLAGS := -std=c++17 $(WARN) -O2 -fno-exceptions -fno-rtti -I$(KERNEL)/mind -I.
+CFLAGS := -std=c99 $(WARN) -O2
+SAN := -fsanitize=address,undefined -fno-sanitize-recover=all -g
+
+CORE_CXX := $(filter %.cpp,$(MIND_SRCS))
+CORE_C := $(filter %.c,$(MIND_SRCS))
+HOST_SRCS := main.cpp posix.cpp baud.cpp
+TESTS := test_fmt test_frames test_link test_names
+
+.PHONY: all check freestanding clean
+all: $(B)/kilo-mind-host
+
+# ---- the program ----------------------------------------------------------
+CORE_OBJS := $(CORE_CXX:%.cpp=$(B)/obj/%.o) $(CORE_C:%.c=$(B)/obj/%.o)
+HOST_OBJS := $(HOST_SRCS:%.cpp=$(B)/obj/host/%.o)
+
+$(B)/obj/%.o: $(KERNEL)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -MMD -c $< -o $@
+$(B)/obj/%.o: $(KERNEL)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -MMD -c $< -o $@
+$(B)/obj/host/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -MMD -c $< -o $@
+
+$(B)/kilo-mind-host: $(CORE_OBJS) $(HOST_OBJS)
+	$(CXX) $^ -o $@
+
+# ---- unit tests (sanitizers, own objects) ----------------------------------
+SAN_OBJS := $(CORE_CXX:%.cpp=$(B)/san/%.o) $(CORE_C:%.c=$(B)/san/%.o)
+
+$(B)/san/%.o: $(KERNEL)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(SAN) -O1 -MMD -c $< -o $@
+$(B)/san/%.o: $(KERNEL)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(SAN) -O1 -MMD -c $< -o $@
+$(B)/%: tests/%.cpp $(SAN_OBJS)
+	$(CXX) $(CXXFLAGS) $(SAN) -O1 -MMD $< $(SAN_OBJS) -o $@
+
+# The JSON vectors flattened to lines a C++ test reads without a JSON parser.
+$(B)/vectors.txt: tests/flatten_vectors.py $(wildcard $(REPO)/protocol/vectors/*.json) $(REPO)/protocol/gen/kilo_protocol.py
+	@mkdir -p $(B)
+	$(PYTHON) tests/flatten_vectors.py $(REPO) > $@
+
+check: $(TESTS:%=$(B)/%) $(B)/vectors.txt
+	@fail=0; for t in $(TESTS); do $(B)/$$t $(B)/vectors.txt || fail=1; done; exit $$fail
+
+# ---- freestanding check -----------------------------------------------------
+# Only the compiler's own headers (stdint.h, stddef.h, stdarg.h), no libc's;
+# then a static link with -nostdlib against stubs of the allowed functions:
+# any other undefined symbol (printf, sqrt, operator new, __cxa_*) fails it.
+FREE := -ffreestanding -nostdinc -isystem $(shell $(CXX) -print-file-name=include) \
+        -fno-stack-protector -fno-pie -fno-asynchronous-unwind-tables -O2 $(WARN)
+FREE_OBJS := $(CORE_CXX:%.cpp=$(B)/free/%.o) $(CORE_C:%.c=$(B)/free/%.o)
+ALLOWED := memcpy memset memcmp
+
+$(B)/free/%.o: $(KERNEL)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++17 $(FREE) -fno-exceptions -fno-rtti -fno-threadsafe-statics -I$(KERNEL)/mind -c $< -o $@
+$(B)/free/%.o: $(KERNEL)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c99 $(FREE) -c $< -o $@
+$(B)/free/stubs.o: tests/freestanding_stubs.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c99 $(FREE) -c $< -o $@
+
+freestanding: $(FREE_OBJS) $(B)/free/stubs.o
+	ld -r -o $(B)/free/core.o $(FREE_OBJS)
+	@undef=$$(nm -u $(B)/free/core.o | awk '{print $$2}' | sort -u | tr '\n' ' '); \
+	echo "core's undefined symbols: $${undef:-none}"; \
+	for s in $$undef; do case " $(ALLOWED) " in *" $$s "*) ;; *) echo "not allowed: $$s"; exit 1;; esac; done
+	$(CC) -nostdlib -static -no-pie -Wl,-e,kilo_freestanding_entry $(B)/free/core.o $(B)/free/stubs.o \
+	    -o $(B)/free/core.elf
+	@echo "freestanding link ok: $(B)/free/core.elf"
+
+clean:
+	rm -rf $(B)
+
+-include $(shell find $(B) -name '*.d' 2>/dev/null)
