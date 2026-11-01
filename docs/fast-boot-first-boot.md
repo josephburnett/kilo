@@ -73,11 +73,11 @@ Words used below:
 
 **On the NyBoard's socket (way B)**, pins 2 and 4 bring the NyBoard's 5 V to
 the Pi: the NyBoard makes it from Kilo's battery (docs/raspberry-pi.md,
-"Power"), so the Pi may start as soon as Kilo is switched on. Plugging the
-Pi's own power supply in as well joins two 5 V supplies; nothing here has
-checked whether that is safe. If you have not settled it, stop here and
-note it. The three header wires carry no 5 V, so they do not have this
-question.
+"Power"; that is what Petoi's socket is for), so the Pi starts as soon as
+Kilo is switched on. **Do not plug the Pi's own power supply in as well**:
+that would join two 5 V supplies, and nothing here has checked whether that
+is safe. The Pi then runs only while Kilo is on, from Kilo's battery. The
+three bench wires carry no 5 V, so with them the Pi keeps its own supply.
 
 **With the USB cable (way A)**: the cable joins Kilo's 5 V and the Pi's 5 V
 (see docs/pi-outages-2026-10-13.md). With Kilo switched off, the Pi powers Kilo's
