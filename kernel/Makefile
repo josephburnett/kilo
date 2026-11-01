@@ -21,15 +21,19 @@ TARGET := $(BUILD)/kernel7
 # Rules.mk's "clean" runs "rm -f *.o ... $(EXTRACLEAN)" in this directory.
 EXTRACLEAN := -r $(BUILD)
 
+# The SD card (body.bin, body.json): Circle's FatFs addon (long names, read
+# and write) over its SD driver addon. lib/fs/fat, Circle's own FAT driver,
+# reads 8.3 names only; lib/fs has the partition manager the SD driver uses.
 CIRCLE_LIBS := \
+	$(CIRCLEHOME)/addon/fatfs/libfatfs.a \
+	$(CIRCLEHOME)/addon/SDCard/libsdcard.a \
 	$(CIRCLEHOME)/lib/usb/libusb.a \
 	$(CIRCLEHOME)/lib/input/libinput.a \
-	$(CIRCLEHOME)/lib/fs/fat/libfatfs.a \
 	$(CIRCLEHOME)/lib/fs/libfs.a \
 	$(CIRCLEHOME)/lib/net/libnet.a \
 	$(CIRCLEHOME)/lib/sched/libsched.a \
 	$(CIRCLEHOME)/lib/libcircle.a
-CIRCLE_LIBDIRS := lib lib/usb lib/input lib/fs lib/fs/fat lib/sched lib/net
+CIRCLE_LIBDIRS := lib lib/usb lib/input lib/fs lib/sched lib/net addon/fatfs addon/SDCard
 
 # The portable mind core lists its sources in mind/sources.mk as MIND_SRCS,
 # paths relative to this directory (.cpp or .c).
@@ -37,22 +41,24 @@ CIRCLE_LIBDIRS := lib lib/usb lib/input lib/fs lib/fs/fat lib/sched lib/net
 MIND_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(patsubst %.cpp,$(BUILD)/%.o,$(MIND_SRCS)))
 
 OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/src/bootprobe.o \
-	$(BUILD)/src/net.o $(BUILD)/src/plannerbench.o $(MIND_OBJS)
+	$(BUILD)/src/net.o $(BUILD)/src/plannerbench.o $(BUILD)/src/bootcard.o $(MIND_OBJS)
 
-# Build options (README "Body link", "Boot probe", "Planner bench"):
+# Build options (README "Body link", "Boot probe", "Planner bench", "mDNS"):
 #   KILO_BODY_SERIAL=auto   a USB serial adapter if one enumerates, else the PL011 (default)
 #   KILO_BODY_SERIAL=pl011  the PL011 only, without the USB scan before the link
 #   KILO_BOOT_PROBE=1|0     GPIO21 (header pin 40) marks the boot for a scope (default 1)
 #   KILO_PLANNER_BENCH=1|0  time the walking planner once at boot, no body involved (default 1)
+#   KILO_MDNS=1|0           answer for kilo.local and announce _kilo._tcp (default 1)
 KILO_BODY_SERIAL ?= auto
 KILO_BOOT_PROBE ?= 1
 KILO_PLANNER_BENCH ?= 1
+KILO_MDNS ?= 1
 ifeq ($(KILO_BODY_SERIAL),pl011)
 KILO_DEFS := -DKILO_BODY_SERIAL_PL011
 else ifneq ($(KILO_BODY_SERIAL),auto)
 $(error KILO_BODY_SERIAL must be auto or pl011)
 endif
-KILO_DEFS += -DKILO_BOOT_PROBE=$(KILO_BOOT_PROBE) -DKILO_PLANNER_BENCH=$(KILO_PLANNER_BENCH)
+KILO_DEFS += -DKILO_BOOT_PROBE=$(KILO_BOOT_PROBE) -DKILO_PLANNER_BENCH=$(KILO_PLANNER_BENCH) -DKILO_MDNS=$(KILO_MDNS)
 LIBS := $(CIRCLE_LIBS)
 
 NETBOOT_SRC  := $(CIRCLEHOME)/sample/38-bootloader
@@ -122,6 +128,7 @@ $(CIRCLE_LIBS): circle
 
 circle-clean:
 	@cd $(CIRCLEHOME) && ./makeall --nosample clean >/dev/null
+	@for d in addon/fatfs addon/SDCard; do $(MAKE) --no-print-directory -s -C $(CIRCLEHOME)/$$d clean >/dev/null; done
 
 boot: circle-config
 	$(MAKE) -C $(CIRCLEHOME)/boot

@@ -1,11 +1,14 @@
 //
 // kernel.cpp: the Kilo mind kernel (docs/fast-boot.md): the body link (P1),
-// the laptop interface over Ethernet (P2) and the walking planner (P3).
+// the laptop interface over Ethernet (P2), the walking planner (P3) and
+// flashing the body (P4).
 //
 // It exchanges HELLO with the body, keeps the link fed (HEARTBEAT, HELLO_REQ
-// while the body is lost), serves `kilo --host` on TCP port 5300 from a net
-// task in the background, polls the walker, logs statistics once a second
-// and shows the link's state on the ACT LED.
+// while the body is lost), flashes the body from the SD card at boot when
+// the card holds another build, serves `kilo --host` on TCP port 5300 from a
+// net task in the background (`kilo flash --host` included), polls the
+// walker, logs statistics once a second and shows the link's state on the
+// ACT LED.
 //
 // Logs go into a RAM ring that `kilo log --host` reads, and to the HDMI
 // screen if the firmware gives us a frame buffer, else nowhere (Kilo has no
@@ -15,6 +18,7 @@
 //   0.5 Hz blink   no body: no HELLO yet, or no TELEMETRY for 300 ms
 //   2 Hz blink     the body is alive: TELEMETRY flowing
 //   5 Hz blink     the body speaks another protocol major: not driven (flash it)
+//   double flash   flashing the body (two 100 ms flashes a second)
 //
 #include "kernel.h"
 #include "bootprobe.h"
@@ -53,6 +57,11 @@ static const uint64_t BenchDelayUs = 1000000;
 
 // Circle's own log events copied into the ring per pass, at most.
 static const unsigned CircleEventsPerPass = 4;
+
+// The boot-time flash check waits this long after link.connect() for the
+// body's first HELLO; with none, the SD card's image counts as another build
+// (an empty or broken firmware sends no HELLO).
+static const uint64_t BootHelloWaitUs = 3000000;
 
 void CLinkWatch::on_hello (const kilo_hello_t &rHello, bool bSolicited)
 {
@@ -101,7 +110,15 @@ CKernel::CKernel (void)
 	m_pNetTask (0),
 	m_pHost (0),
 	m_pWalker (0),
-	m_pBench (0)
+	m_pBench (0),
+	m_pFlasher (0),
+	m_pBootCard (0),
+	m_pHostImage (0),
+	m_pCardImage (0),
+	m_BootFlash (BootFlashWait),
+	m_nLinkUpUs (0),
+	m_bGoAhead (FALSE),
+	m_bWasFlashing (FALSE)
 {
 	m_ActLED.On ();		// first sign of life, before anything can fail
 	m_Watch.m_pClock = &m_Clock;
@@ -146,12 +163,27 @@ boolean CKernel::Initialize (void)
 	// window after a quick reboot of the mind. The hardware RNG does not.
 	m_pLink->seed_seq ((uint8_t) m_Random.GetNumber ());
 	m_pLink->connect ();
+	m_nLinkUpUs = m_Clock.now_us ();
 
 	// The laptop interface. Nothing on the network is up yet: the net task
 	// brings it up once the main loop runs (docs/fast-boot.md §3 rule 1).
 	m_pListener = new CircleListener;
 	m_pHost = new HostServer (*m_pListener, *m_pLink, *m_pSerial, m_Clock, *m_pLog, *m_pRing,
 				  (uint32_t) KILO_BUILD);
+
+	// Flashing the body: the flasher takes the link's Serial (115200 for
+	// optiboot, then back) and GPIO4 (the body's RESET). The host server
+	// fills the laptop's image from FLASH_*, starts the flasher and polls
+	// it, for the boot-time flash from SD too (BootFlash). Two images of
+	// 32 KB on the heap (static, their initialisers would put 64 KB into the
+	// kernel image): a laptop sending one while the boot check reads the
+	// card cannot have it overwritten. The card is touched only once the
+	// link has its HELLO (BootFlash): reading it spins.
+	m_pHostImage = new FlashImage;
+	m_pCardImage = new FlashImage;
+	m_pFlasher = new Flasher (*m_pSerial, m_Clock, m_ResetGpio, *m_pLink, *m_pLog);
+	m_pHost->attach_flasher (*m_pFlasher, *m_pHostImage);
+	m_pBootCard = new CBootCard (&m_Interrupt, &m_Timer, m_pLog);
 
 #if KILO_PLANNER_BENCH
 	m_pBench = new CPlannerBench (m_pLog);
@@ -165,7 +197,7 @@ boolean CKernel::Initialize (void)
 #else
 	CUSBHCIDevice *pUSB = 0;
 #endif
-	m_pNetTask = new CKiloNet (&m_Net, pUSB, &m_Watch.m_bFirstHello, m_pLog, m_pListener);
+	m_pNetTask = new CKiloNet (&m_Net, pUSB, &m_bGoAhead, m_pLog, m_pListener, (u32) KILO_BUILD);
 
 	return TRUE;
 }
@@ -225,7 +257,7 @@ TShutdownMode CKernel::Run (void)
 	uint64_t nNextReconnect = 0;
 	uint64_t nBenchAt = 0;			// 0: no laptop client yet
 	unsigned nLastPass = CTimer::GetClockTicks ();
-	boolean bWasBridged = FALSE;
+	boolean bWasPaused = FALSE;
 
 	for (;;)
 	{
@@ -236,29 +268,37 @@ TShutdownMode CKernel::Run (void)
 
 		// This loop is the mind: it is alive while it runs.
 		m_pLink->mark_alive ();
-		m_pHost->poll ();			// accept, answer, stream; never blocks
-		boolean bBridged = m_pHost->bridge_open ();
-		if (!bBridged)
+		m_pHost->poll ();			// accept, answer, stream, flash; never blocks
+		// Paused: the raw bridge is open, or the flasher has the UART (from
+		// FLASH_COMMIT or the boot check until optiboot hands over to the
+		// new firmware). Nothing may go out on the link, FEET included.
+		boolean bPaused = m_pHost->link_paused ();
+		if (!bPaused)
 		{
-			if (bWasBridged && m_pWalker->active ())
+			if (bWasPaused && m_pWalker->active ())
 			{
-				// A walk the bridge cut off: the body stopped streaming
-				// (FEET underrun) while the laptop had the UART. End it
-				// now that the link may send again (abort() can send
-				// SET_STREAM, which must not go out during the bridge).
-				// Nothing starts a walk on the kernel yet (P3's Mind will).
+				// A walk the bridge or a flash cut off: the body stopped
+				// streaming (FEET underrun) or was reset while the link was
+				// paused. End it now that the link may send again (abort()
+				// can send SET_STREAM, which must not go out while paused,
+				// and HostServer starts a flash inside poll(), so there is
+				// no pass to abort in before it). Nothing starts a walk on
+				// the kernel yet (P3's Mind will).
 				m_pWalker->abort ();
 			}
 
-			m_pLink->poll ();		// the raw bridge pauses the link
+			m_pLink->poll ();
 
 			unsigned t0 = CTimer::GetClockTicks ();
 			m_pWalker->poll ();
 			m_WalkerPoll.Add (CTimer::GetClockTicks () - t0);
 		}
-		bWasBridged = bBridged;
+		bWasPaused = bPaused;
 
 		uint64_t nNow = m_Clock.now_us ();
+
+		WatchFlash ();			// first: it names a boot flash that just ended
+		BootFlash (nNow);
 
 		if (!m_pLink->connected ())
 		{
@@ -280,7 +320,8 @@ TShutdownMode CKernel::Run (void)
 		if (   m_pBench != 0
 		    && nBenchAt != 0
 		    && nNow >= nBenchAt
-		    && !bBridged
+		    && !bPaused
+		    && !m_pFlasher->busy ()
 		    && !m_pWalker->active ())
 		{
 			if (!m_pBench->Step ())
@@ -312,6 +353,128 @@ TShutdownMode CKernel::Run (void)
 	}
 
 	return ShutdownHalt;
+}
+
+// The boot-time flash from the SD card (docs/fast-boot.md §6 path B,
+// `kilo flash --sd`): once the body's first HELLO arrived (or none came
+// BootHelloWaitUs after link.connect()), read body.json and body.bin and
+// flash them if the body runs another build. Then the go-ahead for the net
+// task's USB scan (KILO_BODY_SERIAL=pl011), which stalls the main loop and
+// so must not cut into a flash. A missing or bad file is no error.
+//
+// The card is read only here, after the HELLO, so neither the link nor the
+// boot probe (GPIO21 falls at the first HELLO) waits for it; the read
+// itself stalls the loop (SD driver busy-waits), logged in ms.
+void CKernel::BootFlash (uint64_t nNowUs)
+{
+	switch (m_BootFlash)
+	{
+	case BootFlashWait:
+		if (   !m_Watch.m_bFirstHello
+		    && nNowUs - m_nLinkUpUs < BootHelloWaitUs)
+		{
+			return;
+		}
+		if (m_pHost->link_paused () || m_pFlasher->busy ())
+		{
+			return;			// a bridge or a laptop's flash first
+		}
+		break;
+
+	case BootFlashRunning:
+		if (m_pFlasher->busy ())
+		{
+			return;			// WatchFlash logs the end
+		}
+		m_BootFlash = BootFlashDone;
+		m_bGoAhead = TRUE;
+		return;
+
+	case BootFlashDone:
+		return;
+	}
+
+	m_BootFlash = BootFlashDone;
+	const BodyState &b = m_pLink->state ();
+	const kilo_hello_t *pHello = b.has_hello ? &b.hello : 0;
+	if (pHello == 0)
+	{
+		logf (*m_pLog, LogLevel::Warn, "boot flash check: no HELLO %u ms after the link came up "
+		      "(no firmware, a broken one, or the body is off)", (unsigned) (BootHelloWaitUs / 1000));
+	}
+
+	if (!m_pBootCard->LoadBodyImage (*m_pCardImage))
+	{
+		m_bGoAhead = TRUE;
+		return;
+	}
+
+	uint32_t nCard = m_pCardImage->manifest ().build;
+	if (!m_pCardImage->needs_flash (pHello))
+	{
+		logf (*m_pLog, LogLevel::Info, "boot flash check: the body runs build %08x, the card's: no flash",
+		      (unsigned) nCard);
+		m_pCardImage->clear ();
+		m_bGoAhead = TRUE;
+		return;
+	}
+
+	if (pHello != 0)
+	{
+		logf (*m_pLog, LogLevel::Info, "boot flash check: the body runs build %08x, the card has %08x: flashing",
+		      (unsigned) pHello->fw_build, (unsigned) nCard);
+	}
+	else
+	{
+		logf (*m_pLog, LogLevel::Info, "boot flash check: no HELLO, the card has %08x: flashing",
+		      (unsigned) nCard);
+	}
+
+	// Nothing walks at boot; the walker ends before the flasher takes the UART.
+	m_pWalker->abort ();
+	if (!m_pFlasher->start (*m_pCardImage, false))	// the host server polls it
+	{
+		logf (*m_pLog, LogLevel::Warn, "boot flash check: the flasher is busy: not flashing");
+		m_bGoAhead = TRUE;
+		return;
+	}
+	m_BootFlash = BootFlashRunning;
+}
+
+// The end of a flash, whoever started it, and --persist: after a DONE from
+// a FLASH_BEGIN with PERSIST, write the image to the SD card (body.bin, then
+// body.json), then persist_done() whatever the outcome, so the host server
+// takes FLASH_BEGIN again (it refuses one while a persist is pending).
+void CKernel::WatchFlash (void)
+{
+	boolean bFlashing = m_pFlasher->busy ();
+	if (m_bWasFlashing && !bFlashing)
+	{
+		const Flasher::Status &s = m_pFlasher->status ();
+		const char *pFrom = m_BootFlash == BootFlashRunning ? "the SD card (boot)" : "the laptop";
+		if (s.phase == KILO_FLASH_PHASE_DONE)
+		{
+			logf (*m_pLog, LogLevel::Info, "body flashed from %s: build %08x, HELLO build %08x reset %s",
+			      pFrom, (unsigned) s.build, (unsigned) s.fw_build, reset_cause_name (s.reset_cause));
+		}
+		else
+		{
+			logf (*m_pLog, LogLevel::Error, "body flash from %s FAILED: %s (STK500 command %02x, attempt %u); "
+			      "the link is back", pFrom, flash_error_name (s.error), (unsigned) s.stk_cmd,
+			      (unsigned) s.attempt);
+		}
+	}
+	m_bWasFlashing = bFlashing;
+
+	if (m_pFlasher->persist_pending ())
+	{
+		const FlashImage *pImage = m_pFlasher->image ();
+		if (pImage == 0 || !m_pBootCard->PersistBodyImage (*pImage))
+		{
+			logf (*m_pLog, LogLevel::Warn, "--persist: the image is NOT on the SD card; the body runs it anyway");
+		}
+		m_pFlasher->persist_done ();
+	}
 }
 
 // Circle's own log lines (USB, Ethernet, DHCP, TCP) into the RAM ring, so
@@ -362,10 +525,10 @@ void CKernel::LogStats (void)
 	if (m_pPl011 != 0)
 	{
 		const unsigned *e = m_pPl011->m_nLineErrors;
-		if (e[1] + e[2] + e[3] + e[4] + e[0] != 0)
+		if (e[1] + e[2] + e[3] + e[4] + e[0] + m_pPl011->m_nDrainTimeouts != 0)
 		{
-			logf (*m_pLog, LogLevel::Warn, "PL011 line errors: break %u overrun %u framing %u parity %u",
-			      e[1], e[2], e[3], e[4]);
+			logf (*m_pLog, LogLevel::Warn, "PL011 line errors: break %u overrun %u framing %u parity %u; "
+			      "baud switches with bytes still queued %u", e[1], e[2], e[3], e[4], m_pPl011->m_nDrainTimeouts);
 		}
 	}
 	if (b.has_telemetry)
@@ -395,6 +558,22 @@ void CKernel::LogStats (void)
 void CKernel::UpdateLED (uint64_t nNowUs)
 {
 	const BodyState &b = m_pLink->state ();
+
+	// Flashing: two 100 ms flashes a second, a pattern no link state uses.
+	if (m_pFlasher->busy ())
+	{
+		unsigned nMs = (unsigned) (nNowUs / 1000 % 1000);
+		if (nMs < 100 || (nMs >= 200 && nMs < 300))
+		{
+			m_ActLED.On ();
+		}
+		else
+		{
+			m_ActLED.Off ();
+		}
+
+		return;
+	}
 
 	// Half period of the blink, in ms: 5 Hz on a protocol mismatch, 2 Hz
 	// while the body is alive, 0.5 Hz while there is no body. The kernel

@@ -32,6 +32,12 @@
 #include <circle/types.h>
 #include <circle/usb/usbhcidevice.h>
 
+// Announce kilo.local and the laptop service over mDNS (CKiloMdns below).
+// make -C kernel KILO_MDNS=0 leaves it out.
+#ifndef KILO_MDNS
+#define KILO_MDNS 1
+#endif
+
 // A byte ring of fixed size, one producer and one consumer.
 template <unsigned N>
 struct CByteRing
@@ -151,11 +157,14 @@ class CKiloNet : public CTask
 {
 public:
 	// pUSB: the USB host to initialise first (its scan finds the LAN9514), or
-	// 0 when the kernel already did (the USB serial scan). pBodyUp: the scan
-	// waits for it (the body's first HELLO) or UsbWaitUs, so that it does not
-	// stall the main loop while the link says hello. pLog: the kernel's log.
-	CKiloNet (CNetSubSystem *pNet, CUSBHCIDevice *pUSB, const boolean *pBodyUp,
-		  kilo::Log *pLog, CircleListener *pListener);
+	// 0 when the kernel already did (the USB serial scan). pGoAhead: the scan
+	// waits for it (the main loop sets it once the body's first HELLO and
+	// the boot-time flash from SD are over) or UsbWaitUs, so that the scan,
+	// which stalls the main loop, neither delays the HELLO nor cuts into a
+	// flash (optiboot gives up after 1 s of silence). pLog: the kernel's
+	// log. nBuild: the mind's build, in the mDNS TXT record.
+	CKiloNet (CNetSubSystem *pNet, CUSBHCIDevice *pUSB, const boolean *pGoAhead,
+		  kilo::Log *pLog, CircleListener *pListener, u32 nBuild);
 
 	void Run (void) override;
 
@@ -165,8 +174,10 @@ public:
 	boolean IsFallback (void) const		{ return m_bFallback; }
 	unsigned GetRefused (void) const	{ return m_nRefused; }
 
-	// How long the USB scan waits for the body's first HELLO.
-	static const unsigned UsbWaitUs = 1000000;
+	// How long the USB scan waits for the main loop's go-ahead: the longest
+	// boot is no HELLO for 3 s, the SD card, and a flash that fails twice or
+	// succeeds and waits up to 8 s for the new firmware's HELLO.
+	static const unsigned UsbWaitUs = 30000000;
 
 private:
 	void BringUp (void);
@@ -178,7 +189,7 @@ private:
 private:
 	CNetSubSystem *m_pNet;
 	CUSBHCIDevice *m_pUSB;
-	const boolean *m_pBodyUp;
+	const boolean *m_pGoAhead;
 	kilo::Log *m_pLog;
 	CircleListener *m_pListener;
 	CircleClock m_Clock;
@@ -192,8 +203,35 @@ private:
 	boolean m_bNoLinkLogged;
 	u64 m_nStartUs;
 	unsigned m_nRefused;		// connections closed because every slot was busy
+	u32 m_nBuild;
+	CTask *m_pMdns;			// started with the first address (KILO_MDNS)
 
 	u8 m_RxBuffer[FRAME_BUFFER_SIZE];	// one TCP segment
+};
+
+// mDNS (KILO_MDNS=1, the default): kilo.local answers with the kernel's
+// address, and the laptop service is announced as "kilo" of type _kilo._tcp
+// on KILO_HOST_PORT, so the owner needs no lease table. Circle's responder
+// (CmDNSDaemon) answers A queries for the DHCP hostname ("kilo"; "kilo-2"
+// if another host answers for it at start) with the address of the moment;
+// its publisher (CmDNSPublisher) announces the service unsolicited 3 times
+// at start and every 110 s, and does not answer service queries itself.
+// This task starts both once the net task has an address (the responder
+// probes the name from it, about 1 s of sleeping), and announces again when
+// the address changes (the link-local fallback, then a lease).
+class CKiloMdns : public CTask
+{
+public:
+	CKiloMdns (CNetSubSystem *pNet, kilo::Log *pLog, u32 nBuild);
+
+	void Run (void) override;
+
+	static const unsigned PeriodMs = 500;	// how often the address is checked
+
+private:
+	CNetSubSystem *m_pNet;
+	kilo::Log *m_pLog;
+	char m_Text[24];			// TXT "build=xxxxxxxx"
 };
 
 #endif

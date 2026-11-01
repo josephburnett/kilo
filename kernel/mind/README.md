@@ -260,26 +260,14 @@ On the laptop `kilo-mind-host --reset-fifo PATH` makes the RESET line a
 named pipe ('L' low, 'H' released; `posix.h` FifoResetGpio), which the fake
 optiboot body reads. Without it the edges are only logged.
 
-### Left to the Circle kernel (`kernel/src/`)
+### On the Circle kernel (`kernel/src/`)
 
-- The `Gpio` on GPIO4 (`CircleResetGpio` exists: low = output driven low,
-  released = input, no pull) and `Serial::set_baud(115200)` and back on the
-  PL011 (today it only accepts the rate it has).
-- Wiring: `host.attach_flasher(flasher, image)`, and `link_paused()` instead
-  of `bridge_open()` in the main loop, with the walker stopped too.
-- Boot-time flash from SD (Path B): read `body.json` and `body.bin` from the
-  FAT partition's root (next to `kernel7.img`; `kManifestFile`,
-  `kImageFile` in `flash/image.h`), `parse_manifest()`, then
-  `image.load_from(manifest, data, size)` (checks size and CRC). Once the
-  link has a HELLO (or none came within a few seconds: an empty or broken
-  firmware), `image.needs_flash(hello)` (or `needs_flash(nullptr)`) says
-  whether to `flasher.start(image, false)` and poll it until `!busy()`. A
-  matching build costs nothing at boot.
-- `--persist` (FLASH_BEGIN flag PERSIST): after DONE, `flasher.persist_pending()`
-  is true; write `image()`'s bytes as `body.bin` and `format_manifest()` as
-  `body.json` (manifest last), then `persist_done()`.
-- `kilo flash --rollback` (keep the last good image on SD) is not designed
-  yet.
+Wired as above, with the GPIO4 `Gpio`, the PL011's `set_baud()` switching
+in place, the boot-time flash from SD (path B: after the first HELLO or
+3 s, `parse_manifest()`, `load_from()`, `needs_flash()`) and `--persist`
+(`body.bin`, then `body.json`; `persist_done()` even when the write
+fails): kernel/README.md "Flashing the body". `kilo flash --rollback`
+(keep the last good image on SD) is not designed yet.
 
 ## The Mind
 

@@ -1,13 +1,16 @@
 //
 // kernel.h: the Kilo mind kernel: the body link (P1), the laptop interface
-// over Ethernet (P2) and the walking planner (P3).
+// over Ethernet (P2), the walking planner (P3) and flashing the body (P4).
 //
 #ifndef KILO_KERNEL_H
 #define KILO_KERNEL_H
 
 #include "seams.h"
+#include "bootcard.h"
 #include "net.h"
 #include "plannerbench.h"
+#include "flash/flasher.h"
+#include "flash/image.h"
 #include "link/serial_link.h"
 #include "net/host_server.h"
 #include "planner/walker.h"
@@ -46,7 +49,7 @@ struct CLinkWatch : kilo::LinkListener
 	kilo::Log *m_pLog = 0;
 	kilo::planner::Walker *m_pWalker = 0;
 	uint64_t m_nBootUs = 0;			// clock at the top of the kernel
-	bool m_bFirstHello = false;		// also the net task's cue for its USB scan
+	bool m_bFirstHello = false;		// the boot-time flash check waits for it
 	unsigned m_nTelemetry = 0;		// in the current second
 	unsigned m_nOverruns = 0;		// TELEMETRY with the OVERRUN flag, current second
 };
@@ -81,6 +84,8 @@ public:
 
 private:
 	kilo::Serial *ChooseSerial (void);
+	void BootFlash (uint64_t nNowUs);
+	void WatchFlash (void);
 	void DrainCircleLog (void);
 	void LogStats (void);
 	void UpdateLED (uint64_t nNowUs);
@@ -120,6 +125,23 @@ private:
 	kilo::HostServer	*m_pHost;
 	kilo::planner::Walker	*m_pWalker;
 	CPlannerBench		*m_pBench;	// 0 once done, or built without it
+
+	// Flashing the body (P4): the laptop's FLASH_* through the host server,
+	// and the image on the SD card at boot.
+	kilo::Flasher		*m_pFlasher;	// polled by the host server
+	CBootCard		*m_pBootCard;	// body.bin, body.json on the FAT partition
+	kilo::FlashImage	*m_pHostImage;	// 32 KB: FLASH_BEGIN..COMMIT fills it
+	kilo::FlashImage	*m_pCardImage;	// 32 KB: the SD card's, at boot
+	enum TBootFlash
+	{
+		BootFlashWait,			// for the first HELLO, or BootHelloWaitUs
+		BootFlashRunning,		// flashing the SD card's image
+		BootFlashDone
+	};
+	TBootFlash		m_BootFlash;
+	uint64_t		m_nLinkUpUs;	// link.connect() at boot
+	boolean			m_bGoAhead;	// the boot flash check is over: the net task may scan USB
+	boolean			m_bWasFlashing;
 
 	CTiming			m_Period;	// pass to pass: the 1 ms sleep and the other tasks
 	CTiming			m_Work;		// one pass's own work

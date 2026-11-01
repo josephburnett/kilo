@@ -2,13 +2,24 @@
 // seams.cpp: the mind core's seams on Circle (see seams.h).
 //
 #include "seams.h"
+#include <circle/bcm2835.h>
+#include <circle/bcmpropertytags.h>
+#include <circle/machineinfo.h>
+#include <circle/memio.h>
+#include <circle/synchronize.h>
 #include <circle/timer.h>
 #include <assert.h>
+
+// PL011 registers (circle/bcm2835.h has the addresses; lib/serial.cpp keeps
+// these bits to itself).
+#define UART_FR_BUSY		(1 << 3)
+#define UART_CR_UARTEN		(1 << 0)
 
 // ---- PL011 ------------------------------------------------------------------
 
 Pl011Serial::Pl011Serial (CInterruptSystem *pInterrupt)
 :	m_nLineErrors {0, 0, 0, 0, 0},
+	m_nDrainTimeouts (0),
 	m_Device (pInterrupt),
 	m_nBaud (0)
 {
@@ -65,9 +76,76 @@ uint32_t Pl011Serial::tx_free (void)
 	return m_Device.TxFree ();
 }
 
+// CSerialDevice has no call for a new rate, and its Initialize() must not
+// run twice: a second call adds "ttyS1" to the device name service again
+// (a heap entry each time) and counts the interrupt user twice, so the
+// destructor would never disconnect the IRQ. Destroying and re-creating the
+// device is worse: the destructor disconnects the IRQ and turns GPIO14/15
+// into inputs (TXD floats: the 328P may see a break or garbage) and the
+// rings go with it. So the rate is changed the way CSerialDevice::SetParity()
+// changes the line settings: wait until nothing is being sent, disable the
+// UART, write the divisor, write LCRH back (the PL011 latches IBRD/FBRD on a
+// write to LCRH), enable. Interrupt mask, FIFOs, pins and rings are untouched.
 bool Pl011Serial::set_baud (uint32_t nBaud)
 {
-	return nBaud == m_nBaud;
+	if (nBaud == m_nBaud)
+	{
+		return true;
+	}
+	if (m_nBaud == 0 || nBaud < 300 || nBaud > 4000000)
+	{
+		return false;			// not initialised, or out of the PL011's range
+	}
+
+	// Circle's divisor (lib/serial.cpp): integer part, and the 6-bit
+	// fraction rounded. 115200 from 48 MHz: IBRD 26, FBRD 3, 115176 baud
+	// (-0.02 %); 250000: IBRD 12, FBRD 0, exact.
+	unsigned nClockRate = CMachineInfo::Get ()->GetClockRate (CLOCK_ID_UART);
+	unsigned nBaud16 = nBaud * 16;
+	unsigned nIntDiv = nClockRate / nBaud16;
+	unsigned nFractDiv2 = (nClockRate % nBaud16) * 8 / nBaud;
+	unsigned nFractDiv = nFractDiv2 / 2 + nFractDiv2 % 2;
+	if (nIntDiv < 1 || nIntDiv > 0xFFFF || nFractDiv > 0x3F)
+	{
+		return false;
+	}
+
+	// Drain: the TX ring (the interrupt handler empties it into the FIFO)
+	// and the shift register. Bounded: the flasher calls this from the main
+	// loop. Bytes still queued after DrainUs go out at the new rate.
+	unsigned nStart = CTimer::GetClockTicks ();
+	while (m_Device.IsTransmitting ())
+	{
+		if (CTimer::GetClockTicks () - nStart >= DrainUs)
+		{
+			m_nDrainTimeouts++;
+			break;
+		}
+	}
+
+	// IRQs off for the few register writes, so the TX interrupt handler does
+	// not feed a disabled UART. A byte arriving meanwhile may be lost or
+	// garbled; the flasher drops what comes in around a switch anyway.
+	EnterCritical (IRQ_LEVEL);
+	PeripheralEntry ();
+
+	u32 nCR = read32 (ARM_UART0_CR);
+	write32 (ARM_UART0_CR, nCR & ~UART_CR_UARTEN);
+	for (unsigned i = 0; i < 100000 && (read32 (ARM_UART0_FR) & UART_FR_BUSY); i++)
+	{
+		// the last character's stop bit (drained above, so at most one)
+	}
+	write32 (ARM_UART0_IBRD, nIntDiv);
+	write32 (ARM_UART0_FBRD, nFractDiv);
+	write32 (ARM_UART0_LCRH, read32 (ARM_UART0_LCRH));
+	write32 (ARM_UART0_CR, nCR);
+
+	PeripheralExit ();
+	LeaveCritical ();
+
+	m_nBaud = nBaud;
+
+	return true;
 }
 
 // ---- USB serial -------------------------------------------------------------

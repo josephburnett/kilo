@@ -11,7 +11,8 @@
 //   - the address and the link are read from CNetConfig / CNetDeviceLayer.
 // The one long call is the USB scan (KILO_BODY_SERIAL=pl011 only): Circle's
 // USB enumeration spins in CTimer::MsDelay, so it stalls the main loop once,
-// about a second (est.), after the body's first HELLO (CKiloNet::BringUp).
+// about a second (est.), after the body's first HELLO and the boot-time
+// flash check (CKiloNet::BringUp).
 //
 // Addressing (protocol/spec.toml [host]): Circle asks DHCP as "kilo"; when
 // no lease came KILO_HOST_DHCP_TIMEOUT_MS after the Ethernet link came up,
@@ -25,10 +26,15 @@
 //
 #include "net.h"
 #include "util/log.h"
+#include "util/fmt.h"
 #include <circle/net/in.h>
 #include <circle/net/netconfig.h>
 #include <circle/net/ipaddress.h>
+#include <circle/net/mdnsdaemon.h>
+#include <circle/net/mdnspublisher.h>
 #include <circle/sched/scheduler.h>
+#include <circle/string.h>
+#include <circle/timer.h>
 #include <circle/util.h>
 #include <assert.h>
 
@@ -105,12 +111,12 @@ int32_t CircleListener::accept (void)
 
 // ---- the task -----------------------------------------------------------------
 
-CKiloNet::CKiloNet (CNetSubSystem *pNet, CUSBHCIDevice *pUSB, const boolean *pBodyUp,
-		    kilo::Log *pLog, CircleListener *pListener)
+CKiloNet::CKiloNet (CNetSubSystem *pNet, CUSBHCIDevice *pUSB, const boolean *pGoAhead,
+		    kilo::Log *pLog, CircleListener *pListener, u32 nBuild)
 :	CTask (0x10000),		// 64 KB: the USB scan runs on this stack
 	m_pNet (pNet),
 	m_pUSB (pUSB),
-	m_pBodyUp (pBodyUp),
+	m_pGoAhead (pGoAhead),
 	m_pLog (pLog),
 	m_pListener (pListener),
 	m_pListen (0),
@@ -120,7 +126,9 @@ CKiloNet::CKiloNet (CNetSubSystem *pNet, CUSBHCIDevice *pUSB, const boolean *pBo
 	m_bFallback (FALSE),
 	m_bNoLinkLogged (FALSE),
 	m_nStartUs (0),
-	m_nRefused (0)
+	m_nRefused (0),
+	m_nBuild (nBuild),
+	m_pMdns (0)
 {
 	memset (m_IP, 0, sizeof m_IP);
 	SetName ("kilonet");
@@ -150,8 +158,8 @@ void CKiloNet::BringUp (void)
 	if (m_pUSB != 0)
 	{
 		// The scan spins (no yield) for about a second (est.): let the link
-		// get its HELLO first.
-		while (   !(m_pBodyUp != 0 && *m_pBodyUp)
+		// get its HELLO and a boot-time flash run first.
+		while (   !(m_pGoAhead != 0 && *m_pGoAhead)
 		       && m_Clock.now_us () - m_nStartUs < UsbWaitUs)
 		{
 			CScheduler::Get ()->MsSleep (10);
@@ -269,6 +277,13 @@ void CKiloNet::OpenListener (void)
 	logf (*m_pLog, LogLevel::Info, "listening on %u.%u.%u.%u:%u (%s): kilo status --host %u.%u.%u.%u",
 	      a[0], a[1], a[2], a[3], (unsigned) KILO_HOST_PORT,
 	      m_bFallback ? "link-local fallback" : "DHCP lease", a[0], a[1], a[2], a[3]);
+
+#if KILO_MDNS
+	if (m_pMdns == 0)
+	{
+		m_pMdns = new CKiloMdns (m_pNet, m_pLog, m_nBuild);	// first runs at this task's next sleep
+	}
+#endif
 }
 
 void CKiloNet::AcceptAll (void)
@@ -403,3 +418,61 @@ void CKiloNet::Pump (CircleConn *pConn)
 		pConn->m_Tx.Drop ((unsigned) nResult);
 	}
 }
+
+#if KILO_MDNS
+
+// ---- mDNS -----------------------------------------------------------------------
+
+CKiloMdns::CKiloMdns (CNetSubSystem *pNet, kilo::Log *pLog, u32 nBuild)
+:	m_pNet (pNet),
+	m_pLog (pLog)
+{
+	format (m_Text, sizeof m_Text, "build=%08x", (unsigned) nBuild);
+	SetName ("kilomdns");
+}
+
+void CKiloMdns::Run (void)
+{
+	// The publisher's constructor starts Circle's responder and sleeps until
+	// it has probed the name (3 queries 250 ms apart): this task waits, the
+	// main loop and the net task run.
+	uint64_t t0 = CTimer::GetClockTicks64 ();
+	CmDNSPublisher *pPublisher = new CmDNSPublisher (m_pNet);
+	CString Hostname (CmDNSDaemon::Get ()->GetHostname ());
+	logf (*m_pLog, LogLevel::Info, "mDNS: %s.local answers with this address (%u ms to claim the name)",
+	      (const char *) Hostname, (unsigned) ((CTimer::GetClockTicks64 () - t0) / 1000));
+
+	static const char ServiceName[] = "kilo";
+	const char *Text[] = {m_Text, nullptr};
+	boolean bPublished = FALSE;
+	u8 Last[4] = {0, 0, 0, 0};
+	for (;;)
+	{
+		u8 IP[4];
+		m_pNet->GetConfig ()->GetIPAddress ()->CopyTo (IP);
+		if (   (IP[0] | IP[1] | IP[2] | IP[3]) != 0
+		    && memcmp (IP, Last, sizeof IP) != 0)
+		{
+			// A new address: withdraw the service (a goodbye with TTL 0) and
+			// announce it again; the A record carries the address of the moment.
+			if (bPublished)
+			{
+				pPublisher->UnpublishService (ServiceName);
+				bPublished = FALSE;
+			}
+			if (pPublisher->PublishService (ServiceName, "_kilo._tcp", KILO_HOST_PORT, Text))
+			{
+				bPublished = TRUE;
+				memcpy (Last, IP, sizeof Last);
+				logf (*m_pLog, LogLevel::Info, "mDNS: announced %s._kilo._tcp.local, port %u, at "
+				      "%u.%u.%u.%u: kilo status --host %s.local", ServiceName, (unsigned) KILO_HOST_PORT,
+				      IP[0], IP[1], IP[2], IP[3], (const char *) Hostname);
+			}
+			// else the publisher has not started yet: again next pass
+		}
+
+		CScheduler::Get ()->MsSleep (PeriodMs);
+	}
+}
+
+#endif	// KILO_MDNS

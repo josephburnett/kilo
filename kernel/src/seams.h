@@ -35,13 +35,21 @@ public:
 	int32_t read (uint8_t *pBuffer, uint32_t nCount) override;
 	int32_t write (const uint8_t *pBuffer, uint32_t nCount) override;
 	uint32_t tx_free (void) override;
-	// Only the rate given to Initialize(): CSerialDevice cannot be
-	// initialised twice. Switching to 115200 for flashing is P4's.
+	// A new line rate (the flasher's 115200 and back to 250000): waits up to
+	// DrainUs for the TX ring and the shift register to empty, then
+	// reprograms the divisor in place (seams.cpp). The interrupt, the GPIO
+	// pins and both rings stay as they are.
 	bool set_baud (uint32_t nBaud) override;
+
+	// The longest set_baud() waits for queued bytes to go out: 2 KB at
+	// 250000 baud is 82 ms.
+	static const unsigned DrainUs = 100000;
 
 	// Receive errors reported by the driver, per SERIAL_ERROR_* (1..4:
 	// break, overrun, framing, parity). Overrun also counts a full RX ring.
 	unsigned m_nLineErrors[5];
+	// set_baud() went ahead after DrainUs with bytes still queued.
+	unsigned m_nDrainTimeouts;
 
 private:
 	class CPL011 : public CSerialDevice
@@ -50,6 +58,7 @@ private:
 		CPL011 (CInterruptSystem *pInterrupt) : CSerialDevice (pInterrupt) {}
 		unsigned TxFree (void) { return AvailableForWrite (); }
 	};
+
 
 	CPL011 m_Device;
 	unsigned m_nBaud;
