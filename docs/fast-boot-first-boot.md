@@ -152,6 +152,18 @@ kernel/tools/netboot.sh 192.168.88.X
 with the address from step 4. It ends in a second or two. The Pi then runs
 the mind kernel.
 
+To send a kernel again later (a new build), you need the loader back.
+Once the mind kernel runs and has an address (step 8), on the laptop:
+
+```
+~/OpenCat/.venv/bin/kilo reboot --host 192.168.88.Y
+```
+
+It prints `REBOOT: OK (rebooting)`, Kilo lies down (REST), and the Pi
+restarts into the loader (the ACT light goes dark again, as in step 3).
+Then run `kernel/tools/netboot.sh` again with the loader's address (step 4;
+it is usually the same). Powering the Pi off and on does the same.
+
 ### 7. Watch the ACT LED
 
 | What the green light does | What it means |
@@ -393,6 +405,6 @@ Kilo off.
 | `kilo status` works but shows `alive=False` | The network is fine; Kilo's board is not talking to the Pi (see the slow-blink row above). |
 | `kilo posture` says `NO_BODY` or `NOT_CONTROLLER` | NO_BODY: the same as `alive=False`. NOT_CONTROLLER: another `kilo` command still holds Kilo; stop it (Ctrl-C) and try again. |
 
-To try again with a fresh kernel: power the Pi off and on (the loader starts
-again), find it (step 4; the address usually stays the same) and send the
-kernel (step 6).
+To try again with a fresh kernel: `kilo reboot --host 192.168.88.Y` (step 6)
+or power the Pi off and on (either way the loader starts again), find it
+(step 4; the address usually stays the same) and send the kernel (step 6).

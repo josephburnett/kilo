@@ -137,8 +137,12 @@ kernel/tools/netboot.sh 192.168.88.X other.img       # any image
 
 Or open `http://192.168.88.X:8080/` in a browser. The loader copies the image
 over itself and jumps to it; nothing is written to the card. To load another
-image, power-cycle the Pi so the loader starts again. The mind kernel shows
-its state on the ACT LED (green, GPIO47; "ACT LED" below).
+image, get the loader back: `kilo reboot --host IP` while the mind kernel
+runs (it reboots the Pi, which boots the card again: the loader; "The
+laptop interface" below), or power-cycle the Pi. Then `netboot.sh` again,
+to the loader's address (`kilo-netboot` in the router; usually the same).
+The mind kernel shows its state on the ACT LED (green, GPIO47; "ACT LED"
+below).
 
 `netboot.sh` uses `tools/tftp_put.py` (Python standard library, RFC 1350,
 512-byte blocks, resends after 1 s, 5 tries), so no TFTP client is needed.
@@ -235,6 +239,8 @@ link.connect() again              once a second, only if the Serial failed
 planner bench step                once, after the first laptop client (below)
 Circle's log events -> the ring   (USB, Ethernet, DHCP lines for `kilo log --host`)
 stats once a second, the ACT LED
+reboot                            after a laptop's REBOOT: 200 ms more passes (the OK leaves), then
+                                  Run() returns ShutdownReboot and main() calls reboot()
 CScheduler::usSleep(1000)         the net task runs here
 ```
 
@@ -340,7 +346,9 @@ so *max* includes them, as a real walk's would.
 ## The laptop interface
 
 `kilo --host IP` on the laptop talks to the kernel over the Ethernet cable,
-TCP port 5300 (docs/fast-boot.md §5, `mind/README.md` "Laptop interface").
+TCP port 5300 (docs/fast-boot.md §5, `mind/README.md` "Laptop interface"):
+`kilo status`, `monitor`, `log`, `posture`, `flash` and `reboot`, each with
+`--host IP` ("What `--host` does on the kernel today" below).
 
 ### Network bring-up
 
@@ -430,8 +438,17 @@ skipped first).
 Everything `kilo-mind-host` serves on the laptop, from the same `Mind`:
 `kilo status`, `kilo monitor` (TELEM), `kilo log` (the ring, Circle's lines
 included), `kilo posture NAME [--for S]` (REST when the controller lets go
-or goes silent), `kilo flash --host` and the raw bridge (`kilo.link` over
-TCP; everything on the link pauses). Params (`PARAM_*`) answer
+or goes silent), `kilo flash --host`, `kilo reboot --host` and the raw
+bridge (`kilo.link` over TCP; everything on the link pauses).
+
+`kilo reboot --host IP` takes control and sends `REBOOT`: the mind latches
+REST, answers OK, and 200 ms later the kernel returns `ShutdownReboot`
+(`main.cpp`: Circle's `reboot()`, the watchdog's full reset). The firmware
+then boots the SD card again: on the bench card that is the netboot
+loader, ready for the next `netboot.sh`, so a developer does not have to
+pull the Pi's power; on the production card, the mind kernel again. The
+CLI prints `REBOOT: OK (rebooting)`; a Pi that reboots sends no FIN, so
+the CLI waits 2 s for a close and is done either way. Params (`PARAM_*`) answer
 UNSUPPORTED. There is still no walk or trick command over `--host`: walks
 and tricks come from the IR remote (and from the behaviour runner when it
 is built in). A laptop client holding control (`kilo posture`) silences
@@ -697,6 +714,7 @@ long the link takes to come up; DHCP from the house router under the name
 after it, from a DHCP client that has been sending from 169.254.75.73);
 accept, receive and send through `GetStatus()` as read from Circle's source;
 `kilo status`, `log`, `monitor`, `posture` and the bridge over the cable;
+`kilo reboot` (the OK reaching the laptop in 200 ms; the loader coming back);
 the loop's period with the net task running (the stats line); the USB scan
 from the net task with `KILO_BODY_SERIAL=pl011` and how long it stalls the
 loop; the planner's cost on the Cortex-A7 (the bench line).

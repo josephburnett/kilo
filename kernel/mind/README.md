@@ -107,7 +107,7 @@ for (;;) {
 
 | Channel | Messages | Who |
 |---|---|---|
-| Commands | `STATUS_REQ` -> `STATUS`; `CONTROL`, `POSTURE`, `TELEM_SUB`, `LOG_SUB`, `BRIDGE_OPEN`/`_CLOSE` -> `RESULT`; `PARAM_GET`/`_SET` answer `UNSUPPORTED` until P3 | any client; `POSTURE`, `PARAM_SET` and the bridge need control |
+| Commands | `STATUS_REQ` -> `STATUS`; `CONTROL`, `POSTURE`, `TELEM_SUB`, `LOG_SUB`, `BRIDGE_OPEN`/`_CLOSE`, `REBOOT` -> `RESULT`; `PARAM_GET`/`_SET` answer `UNSUPPORTED` until P3 | any client; `POSTURE`, `PARAM_SET`, `REBOOT` and the bridge need control |
 | Telemetry | `TELEM` at 1-50 Hz: the latest TELEMETRY, last EVENT, link counters | any client |
 | Log | `LOG_LINE`: the last N lines of the ring, then live; seq gaps are lost lines | any client |
 | Raw bridge | `BRIDGE_TX`/`BRIDGE_RX`: UART bytes, the link paused | the controller |
@@ -118,6 +118,15 @@ rest observe. When the controller gives control up, closes, goes out of
 step, or asked for keepalive and sent nothing for 2 s, the bridge closes and
 the mind latches `SET_POSTURE REST` (the daemon's end of a hold in Python).
 
+Reboot: `REBOOT` (`kilo reboot --host IP`) is the controller's (an observer
+gets `NOT_CONTROLLER`, as for `POSTURE`; a running flash gets `FLASHING`).
+The server latches REST if the link is up, logs the request, writes
+`RESULT OK` to the socket at once, then sets `reboot_requested()` (also
+`Mind::reboot_requested()`), which the platform polls: the Circle kernel
+runs 200 ms more so the answer leaves, then reboots (on the bench card,
+back to the netboot loader); `kilo-mind-host` exits with status 3. Nothing
+blocks; the flag stays set.
+
 Addressing: Circle asks DHCP for 3 s (`KILO_HOST_DHCP_TIMEOUT_MS`) and
 otherwise takes 169.254.75.73/16 (`KILO_HOST_FALLBACK_IP_INIT`), so a
 direct cable works with the laptop's port set to link-local and no DHCP
@@ -127,8 +136,8 @@ platform's (`kernel/src/`), and on the laptop the `--listen` address.
 On the laptop: `kilo-mind-host --port PTY --listen 127.0.0.1:0` logs
 `listening on port N`; `kernel/host/test.sh` runs the real CLI against it
 and the virtual body (status, monitor, posture, log tail, REST when the
-controller is killed, and `kilo.link` through the bridge,
-`tests/bridge_client.py`).
+controller is killed, `kilo.link` through the bridge,
+`tests/bridge_client.py`, and `kilo reboot`: exit status 3).
 
 ## The planner
 
