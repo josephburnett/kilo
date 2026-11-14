@@ -96,6 +96,7 @@ class CircleLog final : public kilo::Log
 public:
 	CircleLog (CLogger *pLogger, kilo::LogLevel Min) : m_pLogger (pLogger), m_Min (Min) {}
 	void write (kilo::LogLevel Level, const char *pLine) override;
+	void set_min (kilo::LogLevel Min) { m_Min = Min; }
 
 private:
 	CLogger *m_pLogger;

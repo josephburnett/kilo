@@ -300,6 +300,14 @@ TShutdownMode CKernel::Run (void)
 	uint64_t nRebootAt = 0;			// 0: no REBOOT asked
 	unsigned nLastPass = CTimer::GetClockTicks ();
 
+	// From here only warnings and errors reach the screen. A line on the
+	// screen holds interrupts off for milliseconds (CScreenDevice's lock,
+	// more when it scrolls), longer than the PL011's 16-byte FIFO lasts at
+	// 250000 baud (0.64 ms): on the Pi the stats lines cost one overrun,
+	// one lost frame, every second (docs/fast-boot-first-boot-results.md).
+	// The ring keeps every line for `kilo log --host`.
+	m_CircleLog.set_min (LogLevel::Warn);
+
 	for (;;)
 	{
 		// CTimer::GetClockTicks: 1 MHz, 32 bits; differences wrap correctly.
@@ -581,9 +589,15 @@ void CKernel::LogStats (void)
 	if (m_pPl011 != 0)
 	{
 		const unsigned *e = m_pPl011->m_nLineErrors;
-		if (e[1] + e[2] + e[3] + e[4] + e[0] + m_pPl011->m_nDrainTimeouts != 0)
+		unsigned nErrors = e[1] + e[2] + e[3] + e[4] + e[0] + m_pPl011->m_nDrainTimeouts;
+		if (nErrors != 0)
 		{
-			logf (*m_pLog, LogLevel::Warn, "PL011 line errors: break %u overrun %u framing %u parity %u; "
+			// A warning (the screen, Run()) only when the count grew: a
+			// line on the screen can itself cost an overrun.
+			static unsigned s_nLast = 0;
+			LogLevel Level = nErrors != s_nLast ? LogLevel::Warn : LogLevel::Info;
+			s_nLast = nErrors;
+			logf (*m_pLog, Level, "PL011 line errors: break %u overrun %u framing %u parity %u; "
 			      "baud switches with bytes still queued %u", e[1], e[2], e[3], e[4], m_pPl011->m_nDrainTimeouts);
 		}
 	}
