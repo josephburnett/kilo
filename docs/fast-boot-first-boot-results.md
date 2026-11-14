@@ -24,7 +24,11 @@ observations (LEDs, screen) were not asked for and are marked so.
 | One `loop` line | `loop 889/s: period max 1127 mean 1125 us, work max 55 mean 7 us, mind.poll max 53 mean 5 us` (after the fix) |
 | Link | PL011 at 250000 through the socket: telemetry 25/s; after the fix 1 CRC error in 3900 frames (at start-up), none after |
 | `kilo reboot --host` | works: `REBOOT: OK (rebooting)`, the loader's page is back 13 s later, the mind's port 5300 answers about 14 s after the kernel is sent (DHCP included) |
-| `planner bench`, posture, remote, boot probe, flash | not run in this run |
+| Flash (step 12): reset wiring | the socket (pin 7, GPIO4) |
+| `kilo flash --host 192.168.88.9` | `flash: programming done, 214 pages`, `flash: verifying done, 214 pages`, `flash: done; HELLO build de6d2d7f reset FLASHED`, `flash ended in 9.0 s`, `verified: HELLO build de6d2d7f reset FLASHED` (the board ran 467b69b1 before) |
+| After the flash | `firmware proto 2.0 build de6d2d7f reset FLASHED config OK`; telemetry 25/s; decode errors 2 in 6700 frames. Mode RECOVERING with SERVOS_POWERED: the bare board lies upside down (pitch 179°), so the body's fall recovery runs, with no servos connected |
+| Battery | 8044 mV at the first status, 7855 mV 25 minutes later (Pi and board, no servos) |
+| `planner bench`, posture, remote, boot probe, `--persist` | not run in this run |
 
 **Found and fixed: one lost frame a second.** The first kernel showed
 `PL011 line errors: ... overrun N`, N growing by one a second, with one CRC
