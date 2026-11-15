@@ -512,7 +512,7 @@ void HostServer::update_commit(uint32_t i, uint8_t seq) {
     update_status();  // UPDATE_STATUS FAILED first, so the client has the error when RESULT arrives
     char why[60];
     if (e == KILO_UPDATE_ERROR_NOT_A_KERNEL)
-      format(why, sizeof why, "NOT_A_KERNEL: no %s in it (force to install)", KILO_HOST_UPDATE_MARKER);
+      format(why, sizeof why, "NOT_A_KERNEL: no %s (force installs it)", KILO_HOST_UPDATE_MARKER);
     else
       format(why, sizeof why, "%s: %u bytes, crc32 %08x", update_error_name(e),
              (unsigned)updater_->status().received, (unsigned)updater_->status().crc32);
