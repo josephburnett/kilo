@@ -22,7 +22,9 @@ files and update this table. They are compiled as C (`kernel/mind/sources.mk`)
 with the kernel's and the host's usual flags; they build without warnings
 under `-Wall -Wextra -Werror`.
 
-The kernel links only what the Noise layer calls (Circle links with
-`--gc-sections`): `crypto_x25519`, `crypto_x25519_public_key`,
+The Noise layer calls `crypto_x25519`, `crypto_x25519_public_key`,
 `crypto_blake2b*`, `crypto_aead_init_ietf`/`crypto_aead_write`/`crypto_aead_read`,
-`crypto_verify32` and `crypto_wipe`.
+`crypto_verify32` and `crypto_wipe`. The kernel links the whole file
+anyway (about 55 KB of ARM code, EdDSA and Argon2 included): Circle builds
+without `GC_SECTIONS`, and turning it on for the whole kernel to save
+some 25 KB is not worth a change nobody has run on the Pi.

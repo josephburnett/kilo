@@ -2,8 +2,10 @@
 // plannerbench.cpp: see plannerbench.h.
 //
 #include "plannerbench.h"
+#include "third_party/monocypher/monocypher.h"
 #include "util/log.h"
 #include <circle/timer.h>
+#include <circle/util.h>
 
 using namespace kilo;
 using namespace kilo::planner;
@@ -22,7 +24,15 @@ CPlannerBench::CPlannerBench (kilo::Log *pLog)
 	m_nTick (0),
 	m_nStartUs (0),
 	m_nSumUs (0),
-	m_nMaxUs (0)
+	m_nMaxUs (0),
+	m_nNoiseStep (0),
+	m_nInitiatorUs {0, 0},
+	m_nStepUs {0, 0, 0},
+	m_nSealMaxUs (0),
+	m_nOpenMaxUs (0),
+	m_nSealSumUs (0),
+	m_nOpenSumUs (0),
+	m_bNoiseOk (TRUE)
 {
 }
 
@@ -30,7 +40,7 @@ boolean CPlannerBench::Step (void)
 {
 	if (m_nPattern >= PatternCount)
 	{
-		return FALSE;
+		return NoiseStep ();
 	}
 
 	const Pattern *pPattern = find_pattern (Patterns[m_nPattern]);
@@ -81,7 +91,7 @@ boolean CPlannerBench::Step (void)
 		m_nPattern++;
 		m_bStarted = FALSE;
 
-		return m_nPattern < PatternCount;
+		return TRUE;	// the Noise phase follows
 	}
 
 	unsigned t0 = CTimer::GetClockTicks ();
@@ -95,6 +105,84 @@ boolean CPlannerBench::Step (void)
 	m_nTick++;
 
 	return TRUE;
+}
+
+// One X25519 operation (or one record sealed and opened) per call, as the
+// host server spreads its handshake over passes.
+boolean CPlannerBench::NoiseStep (void)
+{
+	using namespace kilo::noise;
+	static const u8 Prologue[] = "kilo noise bench";
+	unsigned nStep = m_nNoiseStep++;
+	unsigned t0 = CTimer::GetClockTicks ();
+	if (nStep == 0)
+	{
+		u8 SPriv[32], SPub[32], EI[32];
+		for (unsigned i = 0; i < 32; i++)
+		{
+			SPriv[i] = (u8) (i * 7 + 1);
+			EI[i] = (u8) (i * 5 + 3);
+		}
+		crypto_x25519_public_key (SPub, SPriv);	// (not timed: the laptop's)
+		t0 = CTimer::GetClockTicks ();
+		m_Initiator.init_initiator (Prologue, sizeof Prologue, SPriv, SPub, EI);
+		m_Initiator.write_message1 (0, 0, m_Msg);
+		m_nInitiatorUs[0] = CTimer::GetClockTicks () - t0;
+		u8 ER[32];
+		for (unsigned i = 0; i < 32; i++)
+		{
+			ER[i] = (u8) (i * 3 + 9);
+		}
+		m_Responder.init_responder (Prologue, sizeof Prologue, SPub, ER);
+		m_bNoiseOk = m_Responder.read_message1 (m_Msg, HandshakeKN::kMsg1Len, 0);
+		return TRUE;
+	}
+	if (nStep <= 3)
+	{
+		if (nStep == 1)
+		{
+			m_Responder.responder_keygen ();
+		}
+		else if (nStep == 2)
+		{
+			m_bNoiseOk = m_bNoiseOk && m_Responder.responder_ee ();
+		}
+		else
+		{
+			m_bNoiseOk = m_bNoiseOk && m_Responder.responder_se (0, 0, m_Msg, m_RSend, m_RRecv);
+		}
+		m_nStepUs[nStep - 1] = CTimer::GetClockTicks () - t0;
+		return TRUE;
+	}
+	if (nStep == 4)
+	{
+		m_bNoiseOk = m_bNoiseOk && m_Initiator.read_message2 (m_Msg, HandshakeKN::kMsg2Len, 0, m_ISend, m_IRecv);
+		m_nInitiatorUs[1] = CTimer::GetClockTicks () - t0;
+		memset (m_Record, 0x5A, sizeof m_Record);
+		return TRUE;
+	}
+	if (nStep < 5 + NoiseRecords)
+	{
+		m_bNoiseOk = m_bNoiseOk && m_RSend.encrypt (0, 0, m_Record, KILO_HOST_RECORD_MAX, m_Record);
+		unsigned t1 = CTimer::GetClockTicks ();
+		m_bNoiseOk = m_bNoiseOk && m_IRecv.decrypt (0, 0, m_Record, sizeof m_Record, m_Record);
+		unsigned t2 = CTimer::GetClockTicks ();
+		unsigned nSeal = t1 - t0, nOpen = t2 - t1;
+		m_nSealSumUs += nSeal;
+		m_nOpenSumUs += nOpen;
+		m_nSealMaxUs = nSeal > m_nSealMaxUs ? nSeal : m_nSealMaxUs;
+		m_nOpenMaxUs = nOpen > m_nOpenMaxUs ? nOpen : m_nOpenMaxUs;
+		return TRUE;
+	}
+	logf (*m_pLog, m_bNoiseOk ? LogLevel::Info : LogLevel::Error,
+	      "noise bench: X25519 keygen %u us, ee %u us, se %u us (the mind's handshake, a pass each); "
+	      "the laptop's side %u + %u us; a %u-byte record: seal mean %u max %u us, open mean %u max %u us%s",
+	      m_nStepUs[0], m_nStepUs[1], m_nStepUs[2], m_nInitiatorUs[0], m_nInitiatorUs[1],
+	      (unsigned) KILO_HOST_RECORD_MAX, (unsigned) (m_nSealSumUs / NoiseRecords), m_nSealMaxUs,
+	      (unsigned) (m_nOpenSumUs / NoiseRecords), m_nOpenMaxUs, m_bNoiseOk ? "" : ": FAILED (a step refused)");
+	m_Initiator.wipe ();
+	m_Responder.wipe ();
+	return FALSE;
 }
 
 void CPlannerBench::Report (void)

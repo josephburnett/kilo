@@ -105,6 +105,7 @@ private:
 	CUSBHCIDevice		m_USBHCI;
 	CNetSubSystem		m_Net;		// DHCP as "kilo"; the net task starts it
 	CBcmRandomNumberGenerator m_Random;
+	CircleRandom		m_KeyRandom;	// the host channel's ephemeral keys: m_Random, hashed
 
 	CircleClock		m_Clock;
 	CircleLog		m_CircleLog;	// into CLogger: the screen, or nowhere
@@ -124,7 +125,7 @@ private:
 	kilo::Log		*m_pLog;
 	CLinkWatch		m_Watch;
 
-	CircleListener		*m_pListener;	// the network seams (32 KB of rings), served by the net task
+	CircleListener		*m_pListener;	// the network seams (40 KB of rings: five slots), served by the net task
 	CKiloNet		*m_pNetTask;
 	CPlannerBench		*m_pBench;	// 0 once done, or built without it
 

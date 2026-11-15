@@ -6,11 +6,19 @@
 // cadence; one log line per pattern. The host's counterpart is
 // `make -C kernel/host bench` (kernel/host/tests/bench_planner.cpp).
 //
+// Then the host channel's Noise handshake (kernel/README.md "Who may talk to
+// Kilo: keys") between two fixed test keys, one X25519 per pass as the host
+// server does it, and the cost of sealing and opening a full record; one line:
+//   noise bench: X25519 keygen N us, ee N us, se N us (the mind's three passes); ...
+// The host's counterpart: kernel/host/tests/bench_noise.cpp.
+//
 // Off with `make -C kernel KILO_PLANNER_BENCH=0`.
 //
 #ifndef KILO_SRC_PLANNERBENCH_H
 #define KILO_SRC_PLANNERBENCH_H
 
+#include "net/noise.h"
+#include "proto/kilo_protocol.h"
 #include "planner/plan.h"
 #include "platform.h"
 #include <circle/types.h>
@@ -25,6 +33,7 @@ public:
 	boolean Step (void);
 
 private:
+	boolean NoiseStep (void);
 	void Report (void);
 
 	kilo::Log *m_pLog;
@@ -35,6 +44,19 @@ private:
 	unsigned m_nStartUs;		// start()'s cost
 	u64 m_nSumUs;
 	unsigned m_nMaxUs;
+
+	// The Noise phase, after the patterns.
+	static const unsigned NoiseRecords = 20;
+	unsigned m_nNoiseStep;
+	kilo::noise::HandshakeKN m_Initiator, m_Responder;
+	kilo::noise::CipherState m_ISend, m_IRecv, m_RSend, m_RRecv;
+	u8 m_Msg[64];
+	u8 m_Record[KILO_HOST_RECORD_MAX + kilo::noise::kTagLen];
+	unsigned m_nInitiatorUs[2];	// message 1, message 2
+	unsigned m_nStepUs[3];		// keygen, ee, se
+	unsigned m_nSealMaxUs, m_nOpenMaxUs;
+	u64 m_nSealSumUs, m_nOpenSumUs;
+	boolean m_bNoiseOk;
 };
 
 #endif

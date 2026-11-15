@@ -17,6 +17,7 @@
 #include <circle/serial.h>
 #include <circle/types.h>
 #include <circle/usb/usbserial.h>
+#include <circle/bcmrandom.h>
 
 // The PL011. Circle's CSerialDevice, with the free space of its TX ring made
 // visible (AvailableForWrite() is protected).
@@ -80,6 +81,23 @@ public:
 
 private:
 	CUSBSerialDevice *m_pDevice;
+};
+
+// Random bytes for the host channel's ephemeral keys (mind/platform.h):
+// the SoC's hardware RNG (CBcmRandomNumberGenerator, the one the link's
+// seed and the behaviour seed come from), twice as many bits as asked for,
+// hashed with BLAKE2b, so a weak bias in the generator does not reach the
+// key. Fails (fail closed) if the generator repeats one word throughout:
+// stuck.
+class CircleRandom final : public kilo::Random
+{
+public:
+	CircleRandom (CBcmRandomNumberGenerator *pRandom) : m_pRandom (pRandom), m_nCalls (0) {}
+	bool fill (uint8_t *pBuffer, uint32_t nLength) override;
+
+private:
+	CBcmRandomNumberGenerator *m_pRandom;
+	uint32_t m_nCalls;
 };
 
 // The system timer: 1 MHz, 64 bits (CTimer::GetClockTicks64), so no wrap.

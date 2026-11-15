@@ -135,11 +135,11 @@ private:
 	CByteRing<TxBytes> m_Tx;	// HostServer -> socket
 };
 
-// The listening side for HostServer: KILO_HOST_MAX_CLIENTS slots.
+// The listening side for HostServer: KILO_HOST_MAX_CLIENTS slots and a spare (kilo::kHostSlots).
 class CircleListener final : public kilo::Listener
 {
 public:
-	static const unsigned Slots = KILO_HOST_MAX_CLIENTS;
+	static const unsigned Slots = kilo::kHostSlots;	// KILO_HOST_MAX_CLIENTS and a spare (HostServer)
 
 	int32_t accept (void) override;
 	kilo::Conn *conn (uint32_t nSlot) override	{ return &m_Conn[nSlot]; }

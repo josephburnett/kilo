@@ -1,0 +1,20 @@
+# Kilo's authorized keys: the laptops that may talk to the mind over the
+# network (`kilo --host ...`: status, log, posture, flash, reboot, update).
+# The kernel build compiles this list into the kernel image
+# (kernel/keys/gen_keys.py); `make -C kernel` stops while it holds no key.
+# Nothing here is secret: these are public keys. The private key stays on
+# its laptop (~/.config/kilo/host_key) and never goes into the repo.
+#
+# One key per line: the laptop's X25519 public key in base64 (44
+# characters), a space, and a name (who, which machine). Blank lines and
+# lines starting with # are skipped. On each laptop, once:
+#
+#   kilo key init                                  make the key pair, print its line
+#   kilo key show >> kernel/keys/authorized_keys   add the line here
+#
+# then rebuild (make -C kernel) and install the kernel: `kilo update --host`
+# from a laptop whose key the running kernel already has, or the SD card in
+# a card reader (kernel/README.md "Who may talk to Kilo: keys").
+#
+# A line looks like this (an example, not a real key):
+#   9v3h1n6wqv2c2HTZcY8jOyB8kQ0uOcU7T1d6Wn7dZ0Q= joe@laptop

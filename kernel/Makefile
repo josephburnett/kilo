@@ -104,6 +104,23 @@ $(shell mkdir -p $(BUILD) && (echo $(KILO_BUILD) | cmp -s - $(BUILD)/build-id ||
 $(BUILD)/src/kernel.o: CPPFLAGS += -DKILO_BUILD=0x$(KILO_BUILD)
 $(BUILD)/src/kernel.o: $(BUILD)/build-id
 
+# Who may talk to Kilo (README "Who may talk to Kilo: keys"): the laptops'
+# public keys, compiled into kernel.o from KILO_AUTHORIZED_KEYS (default
+# keys/authorized_keys, committed; a path relative to kernel/, or absolute:
+# a test build uses a throwaway list). keys/gen_keys.py runs every build,
+# rewrites the header only when the list changed, and stops the build, saying
+# what to do, while the list has no key.
+KILO_AUTHORIZED_KEYS ?= keys/authorized_keys
+KEYS_SHOWN := $(if $(filter keys/authorized_keys,$(KILO_AUTHORIZED_KEYS)),kernel/keys/authorized_keys,$(KILO_AUTHORIZED_KEYS))
+KEYS_H := $(BUILD)/gen/authorized_keys.h
+.PHONY: kilo-keys
+kilo-keys:
+	@:
+$(KEYS_H): kilo-keys
+	@python3 keys/gen_keys.py "$(KILO_AUTHORIZED_KEYS)" $@ --shown-as "$(KEYS_SHOWN)"
+$(BUILD)/src/kernel.o: $(KEYS_H)
+$(BUILD)/src/kernel.o: CPPFLAGS += -I $(BUILD)/gen
+
 # The options reach src/ only; build/options changes when they do, so
 # switching them rebuilds what reads them.
 $(shell mkdir -p $(BUILD) && (echo $(KILO_DEFS) | cmp -s - $(BUILD)/options || echo $(KILO_DEFS) > $(BUILD)/options))

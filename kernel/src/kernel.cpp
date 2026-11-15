@@ -43,6 +43,8 @@
 //                  (two 100 ms flashes a second)
 //
 #include "kernel.h"
+#include "authorized_keys.h"		// generated from kernel/keys/authorized_keys (Makefile)
+#include "net/noise.h"
 #include "bootprobe.h"
 #include "link/names.h"
 #include "util/fmt.h"
@@ -148,6 +150,7 @@ CKernel::CKernel (void)
 	m_Logger (m_Options.GetLogLevel (), &m_Timer),
 	m_USBHCI (&m_Interrupt, &m_Timer),	// no plug-and-play: one scan
 	m_Net (0, 0, 0, 0, "kilo"),		// DHCP, hostname kilo (net.cpp: the fallback)
+	m_KeyRandom (&m_Random),
 	m_CircleLog (&m_Logger, LogLevel::Info),
 	m_KernelLog (&m_CircleLog),
 	m_pPl011 (0),
@@ -204,6 +207,12 @@ boolean CKernel::Initialize (void)
 	// runner logs it as %u) replays the same choices.
 	Config.seed = m_Random.GetNumber ();
 	Config.stats_period_ms = BodyStatsPeriodMs;
+	// Who may talk to it over the network: the laptops' public keys built
+	// in from kernel/keys/authorized_keys (build/gen/authorized_keys.h, the
+	// Makefile's KILO_AUTHORIZED_KEYS), the ephemeral keys from the hardware RNG.
+	Config.authorized_keys = kAuthorizedKeys;
+	Config.authorized_key_count = kAuthorizedKeyCount;
+	Config.random = &m_KeyRandom;
 	m_pMind = new Mind (m_Serial, m_Clock, m_KernelLog, m_pListener, Config);
 	m_pLog = &m_pMind->log ();
 	m_Watch.m_pLog = m_pLog;
@@ -211,6 +220,13 @@ boolean CKernel::Initialize (void)
 
 	logf (*m_pLog, LogLevel::Info, "Kilo mind, build %08x%s (%s)", (unsigned) KILO_BUILD,
 	      KILO_BEHAVIOUR ? " (behaviour runner on)" : "", KiloMindKernelMarker);
+	for (unsigned i = 0; i < kAuthorizedKeyCount; i++)
+	{
+		char Fingerprint[17];
+		kilo::noise::fingerprint (kAuthorizedKeys[i].key, Fingerprint);
+		logf (*m_pLog, LogLevel::Info, "host: authorized key %u of %u: %s %s", i + 1, kAuthorizedKeyCount,
+		      Fingerprint, kAuthorizedKeys[i].name);
+	}
 
 	kilo::Serial *pSerial = ChooseSerial ();
 	if (pSerial == 0)
