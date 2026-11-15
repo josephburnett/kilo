@@ -14,13 +14,14 @@ in protocol/spec.toml ``[host]`` and ``[[host_messages]]``; the dataclasses
     hl.subscribe_telem(10, on_telem)            # P.HostTelem at 10 Hz
     hl.subscribe_log(on_line, tail=20)          # P.HostLogLine: the last 20, then live
     hl.flash(image, manifest, on_status)        # P4: flash the body through the mind (controller)
+    hl.update(kernel_image, progress=...)       # write a new mind kernel onto its SD card (controller)
     hl.reboot()                                 # restart the mind (controller): OK, then it goes away
     hl.close()                                  # the mind latches REST if this was the controller
 
 Every command gets exactly one reply carrying its seq (STATUS for
 STATUS_REQ, RESULT otherwise); ``command()`` raises ``HostRefused`` for a
-RESULT whose code is not OK. TELEM, LOG_LINE, BRIDGE_RX and FLASH_STATUS
-arrive on the reader thread and go to the handlers.
+RESULT whose code is not OK. TELEM, LOG_LINE, BRIDGE_RX, FLASH_STATUS and
+UPDATE_STATUS arrive on the reader thread and go to the handlers.
 
 ``BridgeTransport`` is a kilo.link transport over the raw bridge, so the
 whole Python link stack (``SerialLink``, ``BodyClient``) can talk to the body
@@ -46,6 +47,16 @@ REPLY_TIMEOUT_S = 3.0
 FLASH_TIMEOUT_S = 60.0
 # After REBOOT's OK: how long `kilo reboot` waits for the connection to drop (wait_closed()).
 REBOOT_CLOSE_WAIT_S = 2.0
+# A whole kernel update after UPDATE_COMMIT: up to host.update_max_image (4 MB)
+# written to the SD card and read back. A 512 KB kernel takes seconds.
+UPDATE_TIMEOUT_S = 120.0
+
+
+def has_kernel_marker(image: bytes) -> bool:
+    """Whether image holds host.update_marker, the mind kernel's identity
+    (kernel/src/kernel.cpp): what the mind checks before it installs an
+    image without FORCE."""
+    return P.HOST_UPDATE_MARKER.encode("ascii") in image
 
 
 class HostError(Exception):
@@ -104,7 +115,9 @@ class HostLink:
         self.on_log: Callable[[Any], None] | None = None
         self.on_bridge: Callable[[bytes], None] | None = None
         self.on_flash: Callable[[Any], None] | None = None
+        self.on_update: Callable[[Any], None] | None = None
         self._flash_last: Any = None
+        self._update_last: Any = None
         self._flash_cond = threading.Condition()
         self._keepalive: threading.Thread | None = None
         self._reader = threading.Thread(target=self._read_loop, name="kilo-hostlink", daemon=True)
@@ -211,6 +224,42 @@ class HostLink:
                     raise HostError(f"no end of the flash within {timeout:g} s")
                 self._flash_cond.wait(min(left, 0.2))
 
+    def update(self, image: bytes, force: bool = False, progress: Callable[[Any], None] | None = None,
+               timeout: float = UPDATE_TIMEOUT_S) -> Any:
+        """Write a new mind kernel onto the mind's SD card: take control
+        (keepalive), UPDATE_BEGIN (size, zlib.crc32, FORCE), the image in
+        UPDATE_DATA chunks, UPDATE_COMMIT, then wait for UPDATE_STATUS DONE
+        or FAILED and return that P.HostUpdateStatus. ``progress`` sees every
+        UPDATE_STATUS. After DONE the mind reboots into the new kernel (the
+        connection drops). Raises HostRefused if the mind refuses (IMAGE_BAD:
+        its size, CRC or marker check failed, and the FAILED status that
+        says why went to ``progress`` first; UNSUPPORTED: no kernel store),
+        HostError on a lost connection or no end within ``timeout``."""
+        import zlib
+
+        with self._flash_cond:
+            self._update_last = None
+        self.on_update = progress
+        self.take_control(keepalive=True)
+        flags = int(P.UpdateFlags.FORCE) if force else 0
+        self.command(P.HostUpdateBegin(image_size=len(image), crc32=zlib.crc32(image), flags=flags))
+        step = P.HOST_UPDATE_CHUNK_MAX
+        for off in range(0, len(image), step):
+            self.send_stream(P.HostUpdateData(offset=off, data=bytes(image[off:off + step])))
+        self.command(P.HostUpdateCommit(), timeout=max(REPLY_TIMEOUT_S, 10.0))  # OK: writing has started
+        end = time.monotonic() + timeout
+        with self._flash_cond:
+            while True:
+                last = self._update_last
+                if last is not None and last.phase in (P.UpdatePhase.DONE, P.UpdatePhase.FAILED):
+                    return last
+                if self._closed.is_set():
+                    raise HostError(self.error or "connection closed while updating")
+                left = end - time.monotonic()
+                if left <= 0:
+                    raise HostError(f"no end of the update within {timeout:g} s")
+                self._flash_cond.wait(min(left, 0.2))
+
     def reboot(self) -> Any:
         """REBOOT (controller only: take control first): the RESULT OK, or
         HostRefused. The mind then restarts; see wait_closed()."""
@@ -288,6 +337,12 @@ class HostLink:
                 self.on_flash(msg)
             with self._flash_cond:
                 self._flash_last = msg
+                self._flash_cond.notify_all()
+        elif isinstance(msg, P.HostUpdateStatus):
+            if self.on_update is not None:
+                self.on_update(msg)
+            with self._flash_cond:
+                self._update_last = msg
                 self._flash_cond.notify_all()
 
     @property

@@ -202,7 +202,8 @@ def validate(spec: dict) -> None:
 
 HOST_DIRS = {"client_to_mind": (0x01, 0x7F, ("command", "stream")),
              "mind_to_client": (0x80, 0xFF, ("stream", "event"))}
-HOST_FLASH_IDS = (range(0x40, 0x50), range(0xC0, 0xD0))  # the flash channel (P4): FLASH_* only, and only there
+HOST_FLASH_IDS = (range(0x40, 0x50), range(0xC0, 0xD0))  # the image channel: FLASH_* and UPDATE_* only, and only there
+HOST_IMAGE_PREFIXES = ("FLASH_", "UPDATE_")
 
 
 def validate_host(spec: dict) -> None:
@@ -224,8 +225,9 @@ def validate_host(spec: dict) -> None:
         lo, hi, kinds = HOST_DIRS[m["dir"]]
         if not lo <= i <= hi or m["kind"] not in kinds:
             raise SpecError(f"host {n}: {m['dir']} must be {lo:#x}..{hi:#x} and one of {kinds}")
-        if any(i in r for r in HOST_FLASH_IDS) != n.startswith("FLASH_"):
-            raise SpecError(f"host {n}: ids 0x40..0x4F and 0xC0..0xCF are the flash channel's, for FLASH_* only")
+        if any(i in r for r in HOST_FLASH_IDS) != n.startswith(HOST_IMAGE_PREFIXES):
+            raise SpecError(f"host {n}: ids 0x40..0x4F and 0xC0..0xCF are the image channel's, for FLASH_* and "
+                            "UPDATE_* only")
         for f in m["fields"]:
             if "count_field" in f:
                 raise SpecError(f"host {n}.{f['name']}: no count_field arrays (use bytes)")
@@ -266,6 +268,14 @@ def validate_host(spec: dict) -> None:
         raise SpecError("host: FLASH_BEGIN image_size range != [1, host.flash_max_image]")
     if h["flash_max_image"] % h["flash_page"]:
         raise SpecError("host: flash_max_image must be whole pages")
+    ud = next(m for m in spec["host_messages"] if m["name"] == "UPDATE_DATA")
+    if ud["fields"][-1]["max"] != h["update_chunk_max"]:
+        raise SpecError("host: UPDATE_DATA data max != host.update_chunk_max")
+    ub = next(m for m in spec["host_messages"] if m["name"] == "UPDATE_BEGIN")
+    if next(f for f in ub["fields"] if f["name"] == "image_size")["range"] != [1, h["update_max_image"]]:
+        raise SpecError("host: UPDATE_BEGIN image_size range != [1, host.update_max_image]")
+    if not isinstance(h["update_marker"], str) or not h["update_marker"].isascii() or '"' in h["update_marker"]:
+        raise SpecError("host: update_marker must be a plain ASCII string")
 
 
 def field_range(spec: dict, msg: str, name: str) -> tuple[int, int]:
@@ -677,6 +687,8 @@ def gen_c_host(spec: dict, w) -> None:
     for k, v in h.items():
         if isinstance(v, list):
             w(f"#define KILO_HOST_{k.upper()}_INIT {{{', '.join(str(x) for x in v)}}}")
+        elif isinstance(v, str):
+            w(f'#define KILO_HOST_{k.upper()} "{v}"')
         else:
             w(f"#define KILO_HOST_{k.upper()} {v}{'UL' if v > 0xFFFF else 'u'}")
     w("")
@@ -1087,7 +1099,7 @@ def gen_py_host(spec: dict, L: list) -> None:
     w("# Frame on TCP: len u16 LE (bytes after it) | type | seq | payload | crc16 LE over type..payload")
     w("# (kilo_link_codec.build_host_frame, HostStreamDecoder).")
     for k, v in h.items():
-        w(f"HOST_{k.upper()} = {tuple(v)!r}" if isinstance(v, list) else f"HOST_{k.upper()} = {v}")
+        w(f"HOST_{k.upper()} = {tuple(v)!r}" if isinstance(v, list) else f"HOST_{k.upper()} = {v!r}")
     w("")
     w("")
     w("class HostMsgId(enum.IntEnum):")

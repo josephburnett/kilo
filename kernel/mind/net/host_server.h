@@ -21,6 +21,14 @@
 //   FLASH_COMMIT fill the image and start the flasher, which this server
 //   then polls; FLASH_STATUS goes to the client that committed. While the
 //   flasher has the UART, link_paused() is true as for the bridge.
+// - updating the mind's own kernel on its SD card, with a KernelUpdater
+//   attached (attach_updater()): UPDATE_BEGIN, UPDATE_DATA and UPDATE_COMMIT
+//   fill and check the image, then this server polls the updater, which
+//   writes it a slice per pass; UPDATE_STATUS goes to the client that
+//   committed. While it writes, link_paused() is true (the SD card stalls
+//   the loop). On DONE: REST latched, the DONE status sent, then
+//   reboot_requested(), as for REBOOT. A flash and an update exclude each
+//   other (FLASHING, UPDATING).
 //
 // Control: one controller, the first client to send CONTROL take=1; the
 // others are observers (STATUS, TELEM, LOG_LINE) and get NOT_CONTROLLER for
@@ -43,6 +51,7 @@
 #include "net/host_frame.h"
 #include "platform.h"
 #include "platform_net.h"
+#include "update/updater.h"
 #include "util/logring.h"
 
 namespace kilo {
@@ -67,6 +76,8 @@ class HostServer {
     uint32_t control_lost;     // ends of control that latched REST
     uint32_t flash_status_sent;
     uint32_t flash_bytes_rx;   // FLASH_DATA bytes taken into the image
+    uint32_t update_status_sent;
+    uint32_t update_bytes_rx;  // UPDATE_DATA bytes taken into the image
   };
 
   // mind_build: STATUS.mind_build (the git hash, 0 = unknown). The link and
@@ -83,17 +94,25 @@ class HostServer {
   // server). Without them FLASH_* are answered UNSUPPORTED. poll() then
   // polls the flasher: do not poll it yourself as well.
   void attach_flasher(Flasher& flasher, FlashImage& image);
+  // Serve UPDATE_* with this updater (it outlives the server). Without one
+  // they are answered UNSUPPORTED (kilo-mind-host without --card). poll()
+  // then polls it.
+  void attach_updater(KernelUpdater& updater);
 
   // The bridge is open: the link is paused, do not poll() or request() it.
   bool bridge_open() const { return bridge_; }
   // The bridge is open or the flasher has the UART: do not poll() the link,
   // request(), set goals that must go out, or stream FEET. The main loop
   // tests this instead of bridge_open().
-  bool link_paused() const { return bridge_ || (flasher_ != nullptr && flasher_->owns_uart()); }
+  bool link_paused() const { return bridge_ || (flasher_ != nullptr && flasher_->owns_uart()) || updating(); }
   // A flash is running (from FLASH_COMMIT until DONE or FAILED).
   bool flashing() const { return flasher_ != nullptr && flasher_->busy(); }
-  // A controller sent REBOOT and has its OK: the platform should restart
-  // (after a few passes, so the answer leaves). Stays set.
+  // A kernel update is being checked and written (from UPDATE_COMMIT until
+  // DONE or FAILED): the SD card is in use and the loop stalls on it.
+  bool updating() const { return updater_ != nullptr && updater_->busy(); }
+  // A controller sent REBOOT and has its OK, or a kernel update is DONE:
+  // the platform should restart (after a few passes, so the answer
+  // leaves). Stays set.
   bool reboot_requested() const { return reboot_; }
   // The controlling client's slot, -1 for none.
   int32_t controller() const { return controller_; }
@@ -131,6 +150,11 @@ class HostServer {
   void flash_commit(uint32_t i, uint8_t seq);
   void drop_image(const char* why);
   void flash_status();
+  void update_begin(uint32_t i, uint8_t seq, const uint8_t* p);
+  void update_commit(uint32_t i, uint8_t seq);
+  void drop_update(const char* why);
+  void update_status();
+  void update_reboot();
   void flush(uint32_t i);
 
   bool enqueue(uint32_t i, uint8_t type, uint8_t seq, const void* payload, uint32_t len);
@@ -164,6 +188,11 @@ class HostServer {
   bool receiving_ = false;       // FLASH_BEGIN accepted, no COMMIT yet
   bool persist_ = false;         // FLASH_BEGIN.flags PERSIST
   uint32_t flash_sent_ = 0;      // the flasher's changes() last sent
+
+  // Kernel updates (attach_updater()).
+  KernelUpdater* updater_ = nullptr;
+  int32_t update_client_ = -1;   // the client receiving, then the one UPDATE_STATUS goes to
+  uint32_t update_sent_ = 0;     // the updater's changes() last sent
 };
 
 }  // namespace kilo

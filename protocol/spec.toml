@@ -1155,8 +1155,9 @@ not_held = -32768
 #                  seq: the message whose reply_to names it, else RESULT;
 #        stream  = one-way, never answered (KEEPALIVE, BRIDGE_TX, TELEM, ...);
 #        event   = mind -> client reply (RESULT, STATUS).
-# 0x40..0x4F and 0xC0..0xCF are the flash channel (P4, §6): only FLASH_*
-# messages may use them (gen.py checks).
+# 0x40..0x4F and 0xC0..0xCF are the image channel: FLASH_* (the body's
+# firmware, P4, §6) and UPDATE_* (the mind's own kernel on its SD card); only
+# they may use them (gen.py checks).
 #
 # Rules: any number of clients up to host.max_clients; each may read STATUS
 # and subscribe to TELEM and LOG_LINE. One controller at a time: the first to
@@ -1192,6 +1193,21 @@ not_held = -32768
 # bridge and another FLASH_BEGIN get FLASHING. Losing control while
 # receiving drops the image; once flashing it runs to the end.
 #
+# Kernel update: the controller sends UPDATE_BEGIN (image_size, crc32, flags),
+# the mind kernel image in UPDATE_DATA chunks in order, then UPDATE_COMMIT.
+# The mind checks size, CRC-32 and (unless flags FORCE) that host.update_marker
+# is in the image, so that only a mind kernel is installed, and answers
+# COMMIT with RESULT OK (writing has started) or IMAGE_BAD. It then pauses its
+# link as for a flash and writes the image to its SD card's FAT partition as
+# kernel7.new, reads it back and compares the CRC-32, and only then removes
+# kernel7.old, renames kernel7.img to kernel7.old and kernel7.new to
+# kernel7.img. UPDATE_STATUS goes to that client at each phase and slice, and
+# last DONE or FAILED; a failure before the renames leaves kernel7.img as it
+# was. After DONE the mind does what REBOOT does (REST, then restart) and the
+# Pi boots the new kernel. A body flash and a kernel update exclude each
+# other (FLASHING, UPDATING); while the update writes, POSTURE, PARAM_SET,
+# REBOOT and the bridge get UPDATING.
+#
 # Addressing (decided in P2): on a direct cable nothing serves DHCP. The mind
 # asks DHCP for host.dhcp_timeout_ms; with no lease it takes the fixed
 # link-local address host.fallback_ip/host.fallback_prefix (169.254.75.73,
@@ -1217,6 +1233,9 @@ flash_max_image = 32256        # B: the ATmega328P's 32 KB less optiboot's 512 B
 flash_page = 128               # B: the 328P's flash page (one STK500 PROG_PAGE / READ_PAGE)
 flash_chunk_max = 200          # FLASH_DATA data bytes per frame (as the bridge)
 flash_baud = 115200            # optiboot's UART rate (the link's is link.baud)
+update_max_image = 4194304     # B: the largest mind kernel UPDATE_BEGIN.image_size may give (the Circle kernel's buffer, 4 MB)
+update_chunk_max = 200         # UPDATE_DATA data bytes per frame (as FLASH_DATA)
+update_marker = "KILO-MIND-KERNEL-1"  # must be in an image UPDATE_COMMIT installs unless FORCE: the mind kernel embeds it (kernel/src/kernel.cpp), the netboot loader does not
 
 [enums.host_result_code]       # RESULT.code
 OK = 0
@@ -1231,6 +1250,7 @@ BRIDGED = 8                    # refused while the raw bridge is open
 NOT_BRIDGED = 9                # BRIDGE_CLOSE without an open bridge
 IMAGE_BAD = 10                 # FLASH_COMMIT: the image does not check (FLASH_STATUS.error says why); FLASH_BEGIN: a bad manifest
 FLASHING = 11                  # refused while the body is being flashed
+UPDATING = 12                  # refused while the mind writes a new kernel to its SD card (UPDATE_COMMIT until DONE or FAILED)
 
 [enums.host_controller]        # STATUS.controller, as seen by the asking client
 NONE = 0
@@ -1285,6 +1305,31 @@ CONTROL_LOST = 16              # the controller let go while receiving: the imag
 
 [flags.flash_flags]            # FLASH_BEGIN.flags
 PERSIST = 0                    # after DONE the platform writes body.bin + body.json to SD (kernel/mind/README.md "Flashing")
+
+[enums.update_phase]           # UPDATE_STATUS.phase
+IDLE = 0
+RECEIVING = 1                  # UPDATE_BEGIN accepted, UPDATE_DATA arriving
+CHECKING = 2                   # UPDATE_COMMIT: size, CRC-32, host.update_marker
+WRITING = 3                    # kernel7.new on the SD card: done of image_size bytes
+VERIFYING = 4                  # kernel7.new read back: done of image_size bytes, then its CRC-32 compared
+INSTALLING = 5                 # kernel7.old removed, kernel7.img -> kernel7.old, kernel7.new -> kernel7.img
+DONE = 6                       # installed: the mind reboots into it (REST to the body first)
+FAILED = 7                     # error says why
+
+[enums.update_error]           # UPDATE_STATUS.error
+NONE = 0
+BAD_SIZE = 1                   # UPDATE_BEGIN.image_size 0 or over the mind's buffer (host.update_max_image at most)
+BAD_OFFSET = 2                 # UPDATE_DATA out of order or past image_size
+SHORT = 3                      # UPDATE_COMMIT before image_size bytes arrived
+CRC_MISMATCH = 4               # the image's CRC-32 is not UPDATE_BEGIN.crc32
+NOT_A_KERNEL = 5               # no host.update_marker in the image (and no FORCE): not the mind kernel
+WRITE_FAILED = 6               # creating or writing kernel7.new failed (no card?); kernel7.img unchanged
+VERIFY_FAILED = 7              # kernel7.new read back is not the image (size or CRC-32); kernel7.img unchanged
+INSTALL_FAILED = 8             # a remove or rename failed; kernel7.img is the old kernel (put back if it had been moved)
+CARD_BROKEN = 9                # kernel7.img moved away, the new one not installed, and putting the old one back failed: rewrite the card in a reader
+
+[flags.update_flags]           # UPDATE_BEGIN.flags
+FORCE = 0                      # skip the host.update_marker check: install any image (e.g. the netboot loader back)
 
 [structs.host_link_stats]      # 80 B: the mind's link counters (kernel/mind/link/stats.h; kilo/body/state.py LinkStats)
 fields = [
@@ -1381,7 +1426,7 @@ name = "REBOOT"
 id = 0x13
 dir = "client_to_mind"
 kind = "command"
-doc = "Reboot the mind (controller only): latch REST on the link, answer RESULT OK, then restart (the Pi re-enters the SD card's boot, e.g. the netboot loader; kilo-mind-host exits). FLASHING while a flash runs. The connection then drops."
+doc = "Reboot the mind (controller only): latch REST on the link, answer RESULT OK, then restart (the Pi re-enters the SD card's boot, e.g. the netboot loader; kilo-mind-host exits). FLASHING while a flash runs, UPDATING while a kernel update writes. The connection then drops."
 fields = []
 
 [[host_messages]]
@@ -1437,7 +1482,7 @@ name = "FLASH_BEGIN"
 id = 0x40
 dir = "client_to_mind"
 kind = "command"
-doc = "Start receiving a body image (controller only): its manifest. Drops any image received before. RESULT IMAGE_BAD for an image_size of 0 or over host.flash_max_image, or build 0; FLASHING while a flash runs; BRIDGED while the bridge is open."
+doc = "Start receiving a body image (controller only): its manifest. Drops any image received before. RESULT IMAGE_BAD for an image_size of 0 or over host.flash_max_image, or build 0; FLASHING while a flash runs; UPDATING while a kernel update runs; BRIDGED while the bridge is open."
 fields = [
   { name = "build", type = "u32", note = "the image's -DKILO_BUILD (commit hash, 8 hex digits): HELLO.fw_build after the flash" },
   { name = "image_size", type = "u32", unit = "B", range = [1, 32256], note = "bytes of body.bin" },
@@ -1462,6 +1507,37 @@ id = 0x42
 dir = "client_to_mind"
 kind = "command"
 doc = "Check the received image (size, CRC-32) and flash it. RESULT OK: flashing has started, FLASH_STATUS follows to this client until DONE or FAILED; IMAGE_BAD: the image is dropped, a FLASH_STATUS FAILED says why."
+fields = []
+
+[[host_messages]]
+name = "UPDATE_BEGIN"
+id = 0x48
+dir = "client_to_mind"
+kind = "command"
+doc = "Start receiving a mind kernel image for the SD card (controller only). Drops any image received before. RESULT IMAGE_BAD for an image_size of 0 or over the mind's buffer; FLASHING while a body flash runs or its image waits for SD; UPDATING while an update writes; BRIDGED while the bridge is open; UNSUPPORTED on a mind with no kernel store (kilo-mind-host without --card)."
+fields = [
+  { name = "image_size", type = "u32", unit = "B", range = [1, 4194304], note = "bytes of kernel7.img" },
+  { name = "crc32", type = "u32", note = "CRC-32 of the image (zlib.crc32)" },
+  { name = "flags", type = "u8", flags = "update_flags" },
+]
+
+[[host_messages]]
+name = "UPDATE_DATA"
+id = 0x49
+dir = "client_to_mind"
+kind = "stream"
+doc = "The next bytes of the kernel image, in order from offset 0. Not answered; an offset that is not the bytes received so far (or data past image_size) fails the image, which UPDATE_COMMIT then reports (BAD_OFFSET). Dropped unless from the client that sent UPDATE_BEGIN."
+fields = [
+  { name = "offset", type = "u32", unit = "B" },
+  { name = "data", type = "bytes", min = 1, max = 200 },
+]
+
+[[host_messages]]
+name = "UPDATE_COMMIT"
+id = 0x4A
+dir = "client_to_mind"
+kind = "command"
+doc = "Check the received image (size, CRC-32, and unless FORCE host.update_marker) and install it on the SD card. RESULT OK: writing has started, UPDATE_STATUS follows to this client until DONE (then the mind reboots into it: REST to the body, the connection drops) or FAILED; IMAGE_BAD: the image is dropped, an UPDATE_STATUS FAILED says why."
 fields = []
 
 [[host_messages]]
@@ -1558,4 +1634,20 @@ fields = [
   { name = "build", type = "u32", note = "the image's build" },
   { name = "fw_build", type = "u32", note = "HELLO.fw_build after the flash, 0 = none yet" },
   { name = "reset_cause", type = "u8", enum = "reset_cause", note = "of that HELLO" },
+]
+
+[[host_messages]]
+name = "UPDATE_STATUS"
+id = 0xC1
+dir = "mind_to_client"
+kind = "stream"
+doc = "Progress of a kernel update, to the client that committed it: on every phase change and slice written or read back, last DONE (the mind reboots next) or FAILED."
+fields = [
+  { name = "phase", type = "u8", enum = "update_phase" },
+  { name = "error", type = "u8", enum = "update_error" },
+  { name = "received", type = "u32", unit = "B", note = "image bytes received" },
+  { name = "image_size", type = "u32", unit = "B" },
+  { name = "done", type = "u32", unit = "B", note = "bytes written (WRITING) or read back (VERIFYING)" },
+  { name = "crc32", type = "u32", note = "the received image's CRC-32" },
+  { name = "card_crc32", type = "u32", note = "kernel7.new's CRC-32 as read back (0 until VERIFYING ends)" },
 ]

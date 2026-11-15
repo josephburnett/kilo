@@ -3,26 +3,31 @@
 // as one kilo::Mind (mind/mind.h), as kernel/host/main.cpp runs it on
 // Linux: the body link (P1), the laptop interface over Ethernet (P2), the
 // walker, the trick player, perception, the IR remote and the behaviour
-// runner (P3, the runner off unless built with KILO_BEHAVIOUR=1), and
-// flashing the body from the laptop or the SD card (P4).
+// runner (P3, the runner off unless built with KILO_BEHAVIOUR=1),
+// flashing the body from the laptop or the SD card (P4), and writing a new
+// kernel onto the SD card from the laptop (`kilo update --host`).
 //
 // Initialize: the screen (or nothing), interrupts, timer, then the Mind
-// (so every line is in its ring), the body link's Serial, the flasher,
-// mind.start() (the link connects: HELLO_REQ), the planner bench and last
+// (so every line is in its ring), the body link's Serial, the flasher, the
+// kernel updater, mind.start() (the link connects: HELLO_REQ), the planner bench and last
 // the net task. Then one pass every 1 ms:
 //
 //   mind.poll()        stamp liveness, serve the laptop (and poll the
-//                      flasher), then unless the bridge or the flasher has
-//                      the UART: the link, the walker, the trick player,
-//                      the remote, the behaviour runner
+//                      flasher and the kernel updater: a slice of SD card
+//                      writes), then unless the bridge or the flasher has
+//                      the UART or the updater the card: the link, the
+//                      walker, the trick player, the remote, the behaviour
+//                      runner
 //   the end of a flash: log it; --persist: write the image to SD
 //   the boot flash check: once, after the first HELLO (or 3 s)
 //   link.connect() again once a second if the Serial failed
 //   a planner bench step: once, after the first laptop client
 //   Circle's log events into the ring
 //   the stats lines once a second, the ACT LED
-//   a laptop's REBOOT: 200 ms on (the OK leaves, REST goes out), then
-//                      Run() returns ShutdownReboot (main.cpp: reboot())
+//   a laptop's REBOOT, or a kernel update installed: 200 ms on (the
+//                      answer leaves, REST goes out), then Run() returns
+//                      ShutdownReboot (main.cpp: reboot()): the firmware
+//                      boots the card's kernel7.img
 //   CScheduler::usSleep(1000): the net task and Circle's run here
 //
 // Logs go into the Mind's RAM ring, which `kilo log --host` reads, and to
@@ -34,7 +39,8 @@
 //   0.5 Hz blink   no body: no HELLO yet, or no TELEMETRY for 300 ms
 //   2 Hz blink     the body is alive: TELEMETRY flowing
 //   5 Hz blink     the body speaks another protocol major: not driven (flash it)
-//   double flash   flashing the body (two 100 ms flashes a second)
+//   double flash   flashing the body, or writing a kernel update to the card
+//                  (two 100 ms flashes a second)
 //
 #include "kernel.h"
 #include "bootprobe.h"
@@ -57,6 +63,18 @@
 #endif
 
 using namespace kilo;
+
+// This image's identity for `kilo update --host`: the kernel updater
+// (mind/update/updater.h) installs an image only if this string is in it
+// (unless forced), so the netboot loader, which lacks it, or a wrong file is
+// not written over kernel7.img by mistake. used: kept by the compiler; and
+// the start-up log line refers to it, so a build with Circle's GC_SECTIONS=1
+// (--gc-sections; off by default) keeps it too.
+extern "C" const char KiloMindKernelMarker[] __attribute__ ((used)) = KILO_HOST_UPDATE_MARKER;
+
+// The largest kernel image `kilo update --host` may send (the updater's
+// buffer, on the heap): about 8 times this kernel.
+static const uint32_t KernelImageMax = KILO_HOST_UPDATE_MAX_IMAGE;
 
 // The Pi's daemon ran `kilo run --remote --balance 0.99` (docs/setup.md,
 // ~/.config/kilo/env KILO_RUN_ARGS): the IR remote live, and balance on
@@ -144,6 +162,7 @@ CKernel::CKernel (void)
 	m_pBootCard (0),
 	m_pHostImage (0),
 	m_pCardImage (0),
+	m_pUpdater (0),
 	m_BootFlash (BootFlashWait),
 	m_nLinkUpUs (0),
 	m_bGoAhead (FALSE),
@@ -190,8 +209,8 @@ boolean CKernel::Initialize (void)
 	m_Watch.m_pLog = m_pLog;
 	m_pMind->set_tap (&m_Watch);
 
-	logf (*m_pLog, LogLevel::Info, "Kilo mind, build %08x%s", (unsigned) KILO_BUILD,
-	      KILO_BEHAVIOUR ? " (behaviour runner on)" : "");
+	logf (*m_pLog, LogLevel::Info, "Kilo mind, build %08x%s (%s)", (unsigned) KILO_BUILD,
+	      KILO_BEHAVIOUR ? " (behaviour runner on)" : "", KiloMindKernelMarker);
 
 	kilo::Serial *pSerial = ChooseSerial ();
 	if (pSerial == 0)
@@ -214,6 +233,14 @@ boolean CKernel::Initialize (void)
 	m_pFlasher = new Flasher (m_Serial, m_Clock, m_ResetGpio, m_pMind->link (), *m_pLog);
 	m_pMind->host ().attach_flasher (*m_pFlasher, *m_pHostImage);
 	m_pBootCard = new CBootCard (&m_Interrupt, &m_Timer, m_pLog);
+
+	// Updating this kernel on the card (`kilo update --host`): the host
+	// server fills the updater from UPDATE_* and polls it, and while it
+	// writes (a 16 KB slice of SD card I/O per pass, the loop stalled for
+	// each) the Mind pauses the link as for a flash. The card is mounted at
+	// the first write. On DONE the host server asks for the reboot below.
+	m_pUpdater = new KernelUpdater (new u8[KernelImageMax], KernelImageMax, *m_pBootCard, m_Clock, *m_pLog);
+	m_pMind->host ().attach_updater (*m_pUpdater);
 
 	// The clock reads nearly the same at every boot, so the core's
 	// clock-based seed would repeat (seq, type) pairs inside the body's
@@ -369,10 +396,11 @@ TShutdownMode CKernel::Run (void)
 			      "the Pi off; the runner has stopped, the link stays up");
 		}
 
-		// A laptop's REBOOT (HostServer): the answer is queued; give the
-		// net task RebootFlushUs of passes to send it, then restart. The
-		// firmware boots the SD card again (on the netboot card: the loader,
-		// which waits for the next kernel).
+		// A laptop's REBOOT, or a kernel update installed (HostServer):
+		// the answer is queued; give the net task RebootFlushUs of passes to
+		// send it, then restart. The firmware boots the SD card again: its
+		// kernel7.img (on the netboot card: the loader, which waits for the
+		// next kernel; after an update: the new kernel).
 		if (m_pMind->reboot_requested ())
 		{
 			if (nRebootAt == 0)
@@ -381,7 +409,9 @@ TShutdownMode CKernel::Run (void)
 			}
 			else if (nNow >= nRebootAt)
 			{
-				logf (*m_pLog, LogLevel::Warn, "rebooting (REBOOT from the laptop)");
+				logf (*m_pLog, LogLevel::Warn, "rebooting (%s)",
+				      m_pUpdater->status ().phase == KILO_UPDATE_PHASE_DONE
+				      ? "a new kernel7.img on the card: kilo update" : "REBOOT from the laptop");
 
 				return ShutdownReboot;
 			}
@@ -631,8 +661,10 @@ void CKernel::UpdateLED (uint64_t nNowUs)
 {
 	const BodyState &b = m_pMind->link ().state ();
 
-	// Flashing: two 100 ms flashes a second, a pattern no link state uses.
-	if (m_pFlasher->busy ())
+	// Flashing, or writing a kernel update: two 100 ms flashes a second, a
+	// pattern no link state uses (while the card is written the loop stalls
+	// a slice at a time, so the flashes stretch).
+	if (m_pFlasher->busy () || m_pUpdater->busy ())
 	{
 		unsigned nMs = (unsigned) (nNowUs / 1000 % 1000);
 		if (nMs < 100 || (nMs >= 200 && nMs < 300))

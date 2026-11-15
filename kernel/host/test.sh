@@ -7,7 +7,8 @@
 #      float sinf cosf sincosf tanf atanf atan2f);
 #   4. kilo-mind-host against the virtual body (the real body core on a pty), and
 #      against a silent pty and a protocol-1 fake body; kilo --host (status, monitor, posture,
-#      log, the bridge, kilo reboot: exit 3); walk-demo trotting the virtual body;
+#      log, the bridge, kilo reboot: exit 3, kilo update into --card DIR: exit 3 and the
+#      card's files checked); walk-demo trotting the virtual body;
 #   5. body flashing (P4): kilo flash --host through kilo-mind-host to a fake optiboot
 #      (tests/fake_optiboot.py), a refused CRC, a sync timeout, and kilo flash --sd.
 
@@ -229,6 +230,112 @@ echo "   kilo-mind-host exit status $status"
 expect "$OUT/cli_reboot.txt" "rebooting" "the CLI: OK, then the connection closed"
 expect "$OUT/host_reboot.log" "host: client [0-9]+ asked for a reboot \(REST latched\)" "REST before the reboot"
 expect "$OUT/host_reboot.log" "REBOOT from the laptop: exiting with status 3" "the host program's line"
+
+# Kernel update: kilo update --host writes a fake kernel (with the marker) into
+# kilo-mind-host --card DIR, which stands for the SD card. The mind installs it
+# (kernel7.img the new one, the old one kept as kernel7.old) and exits 3 as for
+# REBOOT; the CLI waits for the mind to come back (restarted here on the same
+# port, without --card) and prints its build. Before that, an image without
+# the marker is refused by the CLI and by the mind, and the card is unchanged.
+echo "== integration: kilo update --host into kilo-mind-host --card (exits 3, back on the same port)"
+UP="$OUT/update"
+rm -rf "$UP"
+mkdir -p "$UP/card"
+printf 'OLD KERNEL\n' > "$UP/card/kernel7.img"
+printf 'STALE\n' > "$UP/card/kernel7.old"
+cp "$REPO/kernel/boot/config.txt" "$UP/card/config.txt"
+KPY - "$UP" <<'EOF'
+import sys
+from kilo.protocol import kilo_protocol as P
+pattern = bytes((i * 131 + 7) % 256 for i in range(200000))
+marker = P.HOST_UPDATE_MARKER.encode()
+open(f"{sys.argv[1]}/kernel7.img", "wb").write(pattern[:150000] + marker + pattern[150000 + len(marker):])
+open(f"{sys.argv[1]}/loader.img", "wb").write(pattern[:60000])
+EOF
+start_body "$OUT/vbody_update.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u -m kilo.vbody.core
+"$HOST" --port "$PTY" --listen 127.0.0.1:0 --card "$UP/card" 2> "$UP/mind.log" &
+MIND_PID=$!
+trap stop_all EXIT
+HPORT=""
+for _ in $(seq 1 50); do
+    HPORT="$(grep -o 'listening on port [0-9]*' "$UP/mind.log" | grep -o '[0-9]*$' || true)"
+    [ -n "$HPORT" ] && break
+    sleep 0.1
+done
+[ -n "$HPORT" ] || { echo "FAILED: kilo-mind-host did not listen"; cat "$UP/mind.log"; exit 1; }
+H="127.0.0.1:$HPORT"
+sleep 1  # HELLO
+set +e
+KPY -m kilo.cli update --host "$H" --image "$UP/loader.img" > "$UP/cli_loader.txt" 2>&1
+s1=$?
+set -e
+[ "$s1" -eq 1 ] || { echo "FAILED: kilo update of an image without the marker: exit $s1"; cat "$UP/cli_loader.txt"; exit 1; }
+expect "$UP/cli_loader.txt" "has no KILO-MIND-KERNEL-1: it is not the mind kernel" "the CLI's own marker check"
+KPY - "$H" "$UP/loader.img" <<'EOF' | tee "$UP/loader_mind.txt"
+import sys
+from kilo.hostlink import HostLink, HostRefused
+from kilo.protocol import kilo_protocol as P
+seen = []
+with HostLink.connect(sys.argv[1]) as hl:
+    try:
+        hl.update(open(sys.argv[2], "rb").read(), progress=seen.append)
+        raise SystemExit("the mind installed an image without the marker")
+    except HostRefused as e:
+        assert e.code == P.HostResultCode.IMAGE_BAD and "NOT_A_KERNEL" in e.text, e
+        why = str(e)
+    assert seen and seen[-1].phase == P.UpdatePhase.FAILED and seen[-1].error == P.UpdateError.NOT_A_KERNEL, seen
+    hl.release_control()
+print(f"   the mind refused it: {why}")
+EOF
+[ "$(cat "$UP/card/kernel7.img")" = "OLD KERNEL" ] && [ ! -e "$UP/card/kernel7.new" ] \
+    || { echo "FAILED: a refused image changed the card"; ls -l "$UP/card"; exit 1; }
+KPY -m kilo.cli update --host "$H" --image "$UP/kernel7.img" --wait 20 > "$UP/cli_update.txt" 2>&1 &
+CLI_PID=$!
+set +e
+wait "$MIND_PID"
+status=$?
+set -e
+[ "$status" -eq 3 ] || { echo "FAILED: kilo-mind-host exit status $status, not 3"; cat "$UP/mind.log"; exit 1; }
+echo "   kilo-mind-host exit status $status after the update; restarting it on port $HPORT"
+"$HOST" --port "$PTY" --listen "$H" 2> "$UP/mind2.log" &
+MIND_PID=$!
+set +e
+wait "$CLI_PID"
+s2=$?
+set -e
+cat "$UP/cli_update.txt"
+[ "$s2" -eq 0 ] || { echo "FAILED: kilo update --host exit $s2"; cat "$UP/mind.log" "$UP/mind2.log"; exit 1; }
+KPY - "$H" <<'EOF' | tee "$UP/nocard.txt"
+import sys
+from kilo.hostlink import HostLink, HostRefused
+with HostLink.connect(sys.argv[1]) as hl:
+    try:
+        hl.update(b"x" * 100, force=True)
+        raise SystemExit("kilo-mind-host without --card took an update")
+    except HostRefused as e:
+        assert e.code_name == "UNSUPPORTED" and "--card" in e.text, e
+        print(f"   without --card: {e}")
+EOF
+kill -INT "$MIND_PID"
+wait "$MIND_PID" || true
+stop_body
+trap - EXIT
+cmp "$UP/kernel7.img" "$UP/card/kernel7.img" || { echo "FAILED: kernel7.img is not the image sent"; exit 1; }
+[ "$(cat "$UP/card/kernel7.old")" = "OLD KERNEL" ] || { echo "FAILED: kernel7.old is not the previous kernel"; exit 1; }
+[ ! -e "$UP/card/kernel7.new" ] || { echo "FAILED: kernel7.new left on the card"; exit 1; }
+cmp "$REPO/kernel/boot/config.txt" "$UP/card/config.txt" || { echo "FAILED: config.txt changed"; exit 1; }
+echo "   the card: kernel7.img the new kernel, kernel7.old the previous one, no kernel7.new"
+expect "$UP/cli_update.txt" "update: writing kernel7.new: [0-9]+ of 200000 bytes" "progress: writing"
+expect "$UP/cli_update.txt" "update: kernel7.new written \(200000 bytes\); reading it back" "progress: written"
+expect "$UP/cli_update.txt" "update: kernel7.new read back: 200000 bytes, crc32 [0-9a-f]{8}; installing" "progress: read back"
+expect "$UP/cli_update.txt" "update: DONE: kernel7.img on the SD card is the new kernel \(200000 bytes" "DONE"
+expect "$UP/cli_update.txt" "update: the mind is rebooting into it" "the reboot announced"
+expect "$UP/cli_update.txt" "update: the mind is back after [0-9.]+ s: mind build [0-9a-f]{8}" "the mind's build after"
+expect "$UP/mind.log" "update: kernel7.new read back: 200000 bytes" "the mind's read-back"
+expect "$UP/mind.log" "update: kernel7.img -> kernel7.old" "the first rename"
+expect "$UP/mind.log" "update: installed: kernel7.img is the new kernel" "installed"
+expect "$UP/mind.log" "kernel updated on the SD card: rebooting into it \(REST latched\)" "REST before the reboot"
+expect "$UP/mind.log" "kernel update installed in --card: exiting with status 3" "the host program's line"
 
 echo "== integration: walk-demo trots the virtual body for 3 s and stops"
 start_body "$OUT/vbody_walk.log" "$PYTHON" -u -m kilo.vbody.core

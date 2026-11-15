@@ -9,13 +9,14 @@ serves `kilo --host` over Ethernet from it ("The laptop interface"), P3's
 whole mind core runs in its loop as one `Mind` (the walker, tricks,
 perception, the IR remote, the behaviour runner: "The Mind's settings"), and
 P4 flashes the body from the laptop or the SD card ("Flashing the body"). P5's production card is
-`make-sd.sh --kernel` ("Two SD cards"). Not yet run on a Pi:
-docs/fast-boot-first-boot.md is the procedure.
+`make-sd.sh --kernel` ("SD cards"), and `kilo update --host` replaces the
+kernel on it over the network ("Updating the kernel over the network").
+docs/fast-boot-first-boot.md is the procedure on the Pi.
 
 | Path | What |
 |---|---|
 | `circle/` | Circle, a git submodule pinned to `Step51.1.1` |
-| `src/` | the mind kernel (`kernel7.img`): the core's seams on Circle (`seams.*`), the main loop (`kernel.*`), the network and its seams, mDNS (`net.*`), the body image on the SD card (`bootcard.*`), the planner bench (`plannerbench.*`), the boot probe (`bootprobe.*`) |
+| `src/` | the mind kernel (`kernel7.img`): the core's seams on Circle (`seams.*`), the main loop (`kernel.*`), the network and its seams, mDNS (`net.*`), the SD card: the body image and kernel updates (`bootcard.*`), the planner bench (`plannerbench.*`), the boot probe (`bootprobe.*`) |
 | `netboot/` | the network loader: Circle's `sample/38-bootloader` with our `kernel.cpp`, `kernel.h`, `main.cpp` (see below) |
 | `boot/config.txt` | the Pi's `config.txt` |
 | `tools/make-sd.sh` | writes a boot card |
@@ -54,7 +55,7 @@ images link (`lib`, `usb`, `input`, `fs`, `sched`, `net`, and the addons
 
 | Output | What | Size |
 |---|---|---|
-| `build/kernel7.img` | the mind kernel | 512,164 bytes (`KILO_BODY_SERIAL=auto`: 511,908) |
+| `build/kernel7.img` | the mind kernel | 522,532 bytes (`KILO_BODY_SERIAL=auto`: about 250 bytes less) |
 | `build/netboot/kernel7.img` | the network loader | 305,420 bytes |
 
 Of the mind kernel, the SD card (FatFs about 23 KB, the SD driver about
@@ -68,29 +69,44 @@ The `.elf`, `.map` and `.lst` beside each image are for debugging. A second
 build takes about 12 s on 4 cores. `make -C kernel clean` removes `build/`;
 `make -C kernel circle-clean` removes Circle's objects.
 
-The kernel logs `Kilo mind, build <hash>`: the first 8 hex digits of the
-commit, as `-DKILO_BUILD=0x<hash>`, the same convention as the body firmware.
+The kernel logs `Kilo mind, build <hash> (KILO-MIND-KERNEL-1)`: the first
+8 hex digits of the commit, as `-DKILO_BUILD=0x<hash>`, the same convention
+as the body firmware, and the image's identity for `kilo update` (below).
 
-## Two SD cards
+## SD cards
 
-Decided in P5 (docs/fast-boot.md P5 left "a second card, or an option the
-production kernel can chain to" open): **two cards**. Chaining from the
-mind kernel to the loader would put the loader's code and a decision
-(when to chain, how to ask for it with no keyboard) into every production
-boot; a second card costs nothing and cannot get in the way of the fast
-boot.
+**One card is enough.** It boots the mind kernel straight from
+`kernel7.img` at power-on, with no network, and `kilo update --host`
+replaces that kernel over the network ("Updating the kernel over the
+network"). P5 had settled on two cards (docs/fast-boot.md P5 left "a
+second card, or an option the production kernel can chain to" open):
+chaining from the mind kernel to the loader would put the loader's code
+and a decision into every production boot. The update needs neither: the
+kernel writes its successor to the card and reboots.
 
-**Bench card** (network loader), on a FAT-formatted card, mounted:
+The **netboot loader** stays a bench option: a kernel sent over the
+network runs from RAM and nothing is written, which suits trying builds
+that may not work. Both kinds of card share one `config.txt`
+(`boot/config.txt`; `make -C kernel card` stages byte-identical copies), so
+`kilo update` can turn a loader card into a kernel card and back by
+swapping `kernel7.img` alone.
+
+**Kernel card** (the mind kernel boots directly), on a FAT-formatted card,
+mounted:
+
+```
+kernel/tools/make-sd.sh /media/$USER/BOOT --kernel [--body ~/.cache/kilo-build]
+```
+
+**Loader card** (the bench):
 
 ```
 kernel/tools/make-sd.sh /media/$USER/BOOT --netboot
 ```
 
-**Production card** (the mind kernel boots directly):
-
-```
-kernel/tools/make-sd.sh /media/$USER/BOOT --kernel [--body ~/.cache/kilo-build]
-```
+A loader card becomes a kernel card without a card reader: netboot the
+mind kernel (below), then `kilo update --host IP`. Back:
+`kilo update --host IP --image kernel/build/netboot/kernel7.img --force`.
 
 Both write `bootcode.bin`, `start_cd.elf`, `fixup_cd.dat`, `LICENCE.broadcom`,
 `config.txt` and `kernel7.img`, about 1.3 MB. `--body DIR` also copies a
@@ -103,8 +119,11 @@ card stays (the script says so). The script never partitions or
 formats. It refuses anything that is not the root of a mounted vfat
 filesystem, and any partition holding files other than Pi boot files, so a
 Raspberry Pi OS card (it has `cmdline.txt` and `overlays/`) is refused rather
-than losing its Linux `kernel7.img`. `--force-dir` skips the mount checks; it
-exists for testing on a plain directory and is not for real cards.
+than losing its Linux `kernel7.img`; `kernel7.old` and `kernel7.new`, which
+`kilo update` leaves, are accepted (and kept). `--force-dir` skips the mount
+checks; it exists for testing on a plain directory and is not for real
+cards. `make -C kernel card` stages both cards' files in
+`build/card/netboot/` and `build/card/kernel/`, for copying by hand.
 
 That is the whole production boot path: the GPU firmware reads
 `config.txt`, loads `kernel7.img` and starts it; nothing else on the card
@@ -347,8 +366,8 @@ so *max* includes them, as a real walk's would.
 
 `kilo --host IP` on the laptop talks to the kernel over the Ethernet cable,
 TCP port 5300 (docs/fast-boot.md §5, `mind/README.md` "Laptop interface"):
-`kilo status`, `monitor`, `log`, `posture`, `flash` and `reboot`, each with
-`--host IP` ("What `--host` does on the kernel today" below).
+`kilo status`, `monitor`, `log`, `posture`, `flash`, `reboot` and `update`,
+each with `--host IP` ("What `--host` does on the kernel today" below).
 
 ### Network bring-up
 
@@ -441,8 +460,9 @@ skipped first).
 Everything `kilo-mind-host` serves on the laptop, from the same `Mind`:
 `kilo status`, `kilo monitor` (TELEM), `kilo log` (the ring, Circle's lines
 included), `kilo posture NAME [--for S]` (REST when the controller lets go
-or goes silent), `kilo flash --host`, `kilo reboot --host` and the raw
-bridge (`kilo.link` over TCP; everything on the link pauses).
+or goes silent), `kilo flash --host`, `kilo reboot --host`, `kilo update
+--host` ("Updating the kernel over the network") and the raw bridge
+(`kilo.link` over TCP; everything on the link pauses).
 
 `kilo reboot --host IP` takes control and sends `REBOOT`: the mind latches
 REST, answers OK, and 200 ms later the kernel returns `ShutdownReboot`
@@ -553,7 +573,7 @@ a frame only when `tx_free()` covers all of it; otherwise it counts
 | 0.5 Hz (1 s on, 1 s off) | no body: no HELLO yet, or no TELEMETRY for 300 ms |
 | 2 Hz | the body is alive: TELEMETRY flowing |
 | 5 Hz | the body's HELLO has another protocol major: the kernel stays up and keeps the heartbeat, but sends no goals or FEET (kilo-mind-host exits 2 instead) |
-| double flash (two 100 ms flashes, once a second) | flashing the body, from the laptop or the SD card, until the new firmware's HELLO (or FAILED) |
+| double flash (two 100 ms flashes, once a second) | flashing the body, from the laptop or the SD card, until the new firmware's HELLO (or FAILED); or writing a kernel update to the card (the flashes stretch: the loop stalls on each 16 KB slice) |
 | steady on or off for more than ~20 s | stopped: `Initialize` failed or a crash (Circle halts, the LED freezes) |
 
 The LED says nothing about the network (the log does). The blink freezes
@@ -669,6 +689,66 @@ meanwhile waits in the PL011's 2 KB RX ring. So the read is after the
 HELLO. A flash, when needed, takes about 10 s (est.) plus the new
 firmware's boot.
 
+### Updating the kernel over the network
+
+`kilo update --host IP [--image PATH] [--force]` writes a new mind kernel
+onto the SD card the Pi booted from, and the Pi boots it from the card from
+then on, with no network. The image is `kernel/build/kernel7.img` by
+default. The core's side is `mind/update/updater.*` (`mind/README.md`
+"Updating the kernel"); the card's is `CBootCard` as the core's
+`KernelStore` (`src/bootcard.*`).
+
+1. **Receive.** `UPDATE_BEGIN` (size, CRC-32, flags), the image in
+   `UPDATE_DATA` chunks into a 4 MB buffer on the heap (the largest image
+   it takes; the kernel is about 512 KB), `UPDATE_COMMIT`. The link runs on
+   meanwhile; the laptop channel reads 1 KB a pass, so 512 KB take about a
+   second.
+2. **Check** at `UPDATE_COMMIT`: all bytes in, the CRC-32 matches, and the
+   string `KILO-MIND-KERNEL-1` is in the image (`KiloMindKernelMarker` in
+   `src/kernel.cpp`; the start-up log line prints it). The netboot loader and
+   any other file lack it and are refused `IMAGE_BAD` (`NOT_A_KERNEL`):
+   nothing is written. `--force` (flag `FORCE`) skips this check only: it is
+   how the loader goes back on the card. Check with `grep -ac
+   KILO-MIND-KERNEL-1 kernel/build/kernel7.img` (a count above 0) and the
+   same on `kernel/build/netboot/kernel7.img` (0).
+3. **Write** `kernel7.new`, **read it back** and compare its length and
+   CRC-32, then **install**: remove `kernel7.old` if there is one, rename
+   `kernel7.img` to `kernel7.old`, `kernel7.new` to `kernel7.img`. FatFs
+   writes the file's data, FAT and directory entry by `f_close`, and
+   `f_unlink`/`f_rename` sync the volume before they return. Every step is
+   logged (`update: ...`, with its time in ms), and `UPDATE_STATUS` reports
+   each phase and slice to the laptop.
+4. **Reboot**, as `kilo reboot` does: REST to the body, the DONE status out,
+   200 ms, `ShutdownReboot`; the firmware boots the new `kernel7.img`. The
+   CLI prints the result and `the mind is rebooting into it`, then polls
+   port 5300 (`--wait S`, 30 s by default) and prints the new mind's
+   `mind build`.
+
+**Failures leave the card bootable.** Anything before the renames
+(creating, writing or reading back `kernel7.new`; `WRITE_FAILED`,
+`VERIFY_FAILED`) removes `kernel7.new` and leaves `kernel7.img` as it was;
+so does a failed removal of `kernel7.old` or a failed first rename
+(`INSTALL_FAILED`). If the last rename fails, `kernel7.old` is renamed back
+to `kernel7.img` (`INSTALL_FAILED`). Only if that fails too is the card left
+without `kernel7.img` (`CARD_BROKEN`, logged as an error): then, and after
+a bad kernel that boots but does not work (the check proves the file is a
+mind kernel, not that it runs), the card goes into a reader
+(docs/fast-boot-first-boot.md step 13, "If it fails").
+
+**The SD writes are sliced**: the updater writes or reads 16 KB per main
+loop pass (`KernelUpdater::kSliceBytes`), so the net task runs between
+slices and the laptop sees progress. Each slice still stalls the loop (the
+SD driver busy-waits), so from `UPDATE_COMMIT` to DONE `link_paused()` is
+true, as during a flash: the link, the walker and the rest pause, the body's
+watchdog covers the silence (stop, then REST after 1.5 s), and a walk cut
+off is aborted when the pause ends. For a 512 KB kernel that is 32 slices
+written and 32 read back: about 0.5-2 s (est., depending on the card's
+write speed; the log's `update: kernel7.new written: ... in N ms` and
+`read back: ... in N ms` measure it), then the 200 ms before the reboot.
+POSTURE, PARAM_SET, REBOOT, the bridge and a body flash are refused
+`UPDATING` meanwhile, and an update is refused `FLASHING` while a body
+flash runs or its `--persist` image waits for the card.
+
 ### mDNS
 
 With an address (DHCP or the link-local fallback), the net task starts a
@@ -734,7 +814,10 @@ card: Circle's SDHOST driver on Kilo's card, how long initialisation,
 mount and the 31 KB read take (the log lines), FatFs writing body.bin and
 body.json and the laptop then reading them; the boot flash check with a
 matching build, another build and no HELLO; `--persist`; the LED's double
-flash; the USB scan waiting for the go-ahead (`pl011` build). The
+flash; the USB scan waiting for the go-ahead (`pl011` build). Kernel
+updates: FatFs writing, reading back and renaming `kernel7.*` on Kilo's
+card, the slices' time, the 4 MB heap buffer, the reboot into the new
+kernel and `kilo update` seeing it come back. The
 `Mind` on the Pi: IR remote keys through the kernel (the body's
 `EVENT IR_KEY` reaching the remote; walks and postures from the keys);
 tricks from the compiled-in library (upload and play on the real body);
@@ -767,6 +850,12 @@ compiled but has never run.
   line the CLI waits for would tell it.
 - **`kilo flash --rollback`** (keep the last good image on SD): not
   designed (mind/README.md).
+- **A power cut during a kernel update.** Before the renames the card's
+  `kernel7.img` is untouched, but FatFs updates the FAT in place, so a cut
+  while `kernel7.new` is written could still damage the partition. Between
+  the two renames (milliseconds) a cut leaves no `kernel7.img`. Either way:
+  a card reader. A kernel that boots but does not work cannot fall back to
+  `kernel7.old` by itself: the GPU firmware boots `kernel7.img` only.
 - **Loader on the 2 B.** Not run on hardware yet (docs/fast-boot.md §7). If it
   fails, write `kernel7.img` to the card with `make-sd.sh --kernel`.
 - **Licence.** Circle is GPLv3, so any `kernel7.img` that links it is too,

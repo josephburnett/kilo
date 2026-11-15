@@ -249,6 +249,7 @@ class HostResultCode(enum.IntEnum):
     NOT_BRIDGED = 9
     IMAGE_BAD = 10
     FLASHING = 11
+    UPDATING = 12
 
 
 class HostController(enum.IntEnum):
@@ -294,6 +295,30 @@ class FlashError(enum.IntEnum):
     WRONG_BUILD = 14
     BAD_RESET_CAUSE = 15
     CONTROL_LOST = 16
+
+
+class UpdatePhase(enum.IntEnum):
+    IDLE = 0
+    RECEIVING = 1
+    CHECKING = 2
+    WRITING = 3
+    VERIFYING = 4
+    INSTALLING = 5
+    DONE = 6
+    FAILED = 7
+
+
+class UpdateError(enum.IntEnum):
+    NONE = 0
+    BAD_SIZE = 1
+    BAD_OFFSET = 2
+    SHORT = 3
+    CRC_MISMATCH = 4
+    NOT_A_KERNEL = 5
+    WRITE_FAILED = 6
+    VERIFY_FAILED = 7
+    INSTALL_FAILED = 8
+    CARD_BROKEN = 9
 
 
 class TelemetryFlags(enum.IntFlag):
@@ -366,6 +391,10 @@ class HostState(enum.IntFlag):
 
 class FlashFlags(enum.IntFlag):
     PERSIST = 1 << 0
+
+
+class UpdateFlags(enum.IntFlag):
+    FORCE = 1 << 0
 
 
 LEN_OK = 0
@@ -2798,6 +2827,9 @@ HOST_FLASH_MAX_IMAGE = 32256
 HOST_FLASH_PAGE = 128
 HOST_FLASH_CHUNK_MAX = 200
 HOST_FLASH_BAUD = 115200
+HOST_UPDATE_MAX_IMAGE = 4194304
+HOST_UPDATE_CHUNK_MAX = 200
+HOST_UPDATE_MARKER = 'KILO-MIND-KERNEL-1'
 
 
 class HostMsgId(enum.IntEnum):
@@ -2816,12 +2848,16 @@ class HostMsgId(enum.IntEnum):
     FLASH_BEGIN = 0x40
     FLASH_DATA = 0x41
     FLASH_COMMIT = 0x42
+    UPDATE_BEGIN = 0x48
+    UPDATE_DATA = 0x49
+    UPDATE_COMMIT = 0x4A
     RESULT = 0x80
     STATUS = 0x81
     TELEM = 0x82
     LOG_LINE = 0x83
     BRIDGE_RX = 0x84
     FLASH_STATUS = 0xC0
+    UPDATE_STATUS = 0xC1
 
 
 @dataclass
@@ -3075,7 +3111,7 @@ class HostParamSet:
 
 @dataclass
 class HostReboot:
-    """host 0x13 REBOOT (command). Reboot the mind (controller only): latch REST on the link, answer RESULT OK, then restart (the Pi re-enters the SD card's boot, e.g. the netboot loader; kilo-mind-host exits). FLASHING while a flash runs. The connection then drops."""
+    """host 0x13 REBOOT (command). Reboot the mind (controller only): latch REST on the link, answer RESULT OK, then restart (the Pi re-enters the SD card's boot, e.g. the netboot loader; kilo-mind-host exits). FLASHING while a flash runs, UPDATING while a kernel update writes. The connection then drops."""
     ID: ClassVar[int] = 0x13
     NAME: ClassVar[str] = 'REBOOT'
     KIND: ClassVar[Kind] = Kind.COMMAND
@@ -3313,7 +3349,7 @@ class HostBridgeClose:
 
 @dataclass
 class HostFlashBegin:
-    """host 0x40 FLASH_BEGIN (command). Start receiving a body image (controller only): its manifest. Drops any image received before. RESULT IMAGE_BAD for an image_size of 0 or over host.flash_max_image, or build 0; FLASHING while a flash runs; BRIDGED while the bridge is open."""
+    """host 0x40 FLASH_BEGIN (command). Start receiving a body image (controller only): its manifest. Drops any image received before. RESULT IMAGE_BAD for an image_size of 0 or over host.flash_max_image, or build 0; FLASHING while a flash runs; UPDATING while a kernel update runs; BRIDGED while the bridge is open."""
     ID: ClassVar[int] = 0x40
     NAME: ClassVar[str] = 'FLASH_BEGIN'
     KIND: ClassVar[Kind] = Kind.COMMAND
@@ -3409,6 +3445,133 @@ class HostFlashCommit:
     """host 0x42 FLASH_COMMIT (command). Check the received image (size, CRC-32) and flash it. RESULT OK: flashing has started, FLASH_STATUS follows to this client until DONE or FAILED; IMAGE_BAD: the image is dropped, a FLASH_STATUS FAILED says why."""
     ID: ClassVar[int] = 0x42
     NAME: ClassVar[str] = 'FLASH_COMMIT'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 0
+    MAX_LEN: ClassVar[int] = 0
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<')
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostUpdateBegin:
+    """host 0x48 UPDATE_BEGIN (command). Start receiving a mind kernel image for the SD card (controller only). Drops any image received before. RESULT IMAGE_BAD for an image_size of 0 or over the mind's buffer; FLASHING while a body flash runs or its image waits for SD; UPDATING while an update writes; BRIDGED while the bridge is open; UNSUPPORTED on a mind with no kernel store (kilo-mind-host without --card)."""
+    ID: ClassVar[int] = 0x48
+    NAME: ClassVar[str] = 'UPDATE_BEGIN'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 9
+    MAX_LEN: ClassVar[int] = 9
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<IIB')
+    image_size: int = 0  # B; range 1..4194304; bytes of kernel7.img
+    crc32: int = 0  # CRC-32 of the image (zlib.crc32)
+    flags: int = 0  # flags update_flags
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.image_size)
+        v.append(self.crc32)
+        v.append(self.flags)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['image_size'] = v[0]
+        kw['crc32'] = v[1]
+        kw['flags'] = v[2]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostUpdateData:
+    """host 0x49 UPDATE_DATA (stream). The next bytes of the kernel image, in order from offset 0. Not answered; an offset that is not the bytes received so far (or data past image_size) fails the image, which UPDATE_COMMIT then reports (BAD_OFFSET). Dropped unless from the client that sent UPDATE_BEGIN."""
+    ID: ClassVar[int] = 0x49
+    NAME: ClassVar[str] = 'UPDATE_DATA'
+    KIND: ClassVar[Kind] = Kind.STREAM
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 5
+    MAX_LEN: ClassVar[int] = 204
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<I')
+    offset: int = 0  # B
+    data: bytes = b''  # 1..200 B
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.offset)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['offset'] = v[0]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        tail = bytes(self.data)
+        if not 1 <= len(tail) <= 200:
+            raise PayloadError('data: 1..200 bytes, got %d' % len(tail))
+        try:
+            return self._FMT.pack(*self._fixed_values()) + tail
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data[:4]), data=data[4:])
+
+
+@dataclass
+class HostUpdateCommit:
+    """host 0x4A UPDATE_COMMIT (command). Check the received image (size, CRC-32, and unless FORCE host.update_marker) and install it on the SD card. RESULT OK: writing has started, UPDATE_STATUS follows to this client until DONE (then the mind reboots into it: REST to the body, the connection drops) or FAILED; IMAGE_BAD: the image is dropped, an UPDATE_STATUS FAILED says why."""
+    ID: ClassVar[int] = 0x4A
+    NAME: ClassVar[str] = 'UPDATE_COMMIT'
     KIND: ClassVar[Kind] = Kind.COMMAND
     DIR: ClassVar[str] = 'client_to_mind'
     IS_QUERY: ClassVar[bool] = False
@@ -3789,6 +3952,64 @@ class HostFlashStatus:
         return cls._from_fixed(cls._FMT.unpack(data))
 
 
+@dataclass
+class HostUpdateStatus:
+    """host 0xC1 UPDATE_STATUS (stream). Progress of a kernel update, to the client that committed it: on every phase change and slice written or read back, last DONE (the mind reboots next) or FAILED."""
+    ID: ClassVar[int] = 0xC1
+    NAME: ClassVar[str] = 'UPDATE_STATUS'
+    KIND: ClassVar[Kind] = Kind.STREAM
+    DIR: ClassVar[str] = 'mind_to_client'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 22
+    MAX_LEN: ClassVar[int] = 22
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BBIIIII')
+    phase: int = 0  # enum update_phase
+    error: int = 0  # enum update_error
+    received: int = 0  # B; image bytes received
+    image_size: int = 0  # B
+    done: int = 0  # B; bytes written (WRITING) or read back (VERIFYING)
+    crc32: int = 0  # the received image's CRC-32
+    card_crc32: int = 0  # kernel7.new's CRC-32 as read back (0 until VERIFYING ends)
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.phase)
+        v.append(self.error)
+        v.append(self.received)
+        v.append(self.image_size)
+        v.append(self.done)
+        v.append(self.crc32)
+        v.append(self.card_crc32)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['phase'] = v[0]
+        kw['error'] = v[1]
+        kw['received'] = v[2]
+        kw['image_size'] = v[3]
+        kw['done'] = v[4]
+        kw['crc32'] = v[5]
+        kw['card_crc32'] = v[6]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
 HOST_MESSAGES: dict[int, type] = {
     0x01: HostStatusReq,
     0x02: HostControl,
@@ -3805,12 +4026,16 @@ HOST_MESSAGES: dict[int, type] = {
     0x40: HostFlashBegin,
     0x41: HostFlashData,
     0x42: HostFlashCommit,
+    0x48: HostUpdateBegin,
+    0x49: HostUpdateData,
+    0x4A: HostUpdateCommit,
     0x80: HostResult,
     0x81: HostStatus,
     0x82: HostTelem,
     0x83: HostLogLine,
     0x84: HostBridgeRx,
     0xC0: HostFlashStatus,
+    0xC1: HostUpdateStatus,
 }
 
 
@@ -3847,6 +4072,12 @@ def host_payload_len_status(msg_type: int, payload: bytes) -> int:
         return LEN_OK if 5 <= n <= 204 else LEN_BAD
     if msg_type == 0x42:
         return LEN_OK if n == 0 else LEN_BAD
+    if msg_type == 0x48:
+        return LEN_OK if n == 9 else LEN_BAD
+    if msg_type == 0x49:
+        return LEN_OK if 5 <= n <= 204 else LEN_BAD
+    if msg_type == 0x4A:
+        return LEN_OK if n == 0 else LEN_BAD
     if msg_type == 0x80:
         return LEN_OK if 2 <= n <= 62 else LEN_BAD
     if msg_type == 0x81:
@@ -3859,6 +4090,8 @@ def host_payload_len_status(msg_type: int, payload: bytes) -> int:
         return LEN_OK if 1 <= n <= 200 else LEN_BAD
     if msg_type == 0xC0:
         return LEN_OK if n == 21 else LEN_BAD
+    if msg_type == 0xC1:
+        return LEN_OK if n == 22 else LEN_BAD
     return LEN_UNKNOWN_TYPE
 
 

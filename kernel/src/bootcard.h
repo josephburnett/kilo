@@ -1,7 +1,11 @@
 //
-// bootcard.h: the body image on the SD card's FAT partition (docs/fast-boot.md
+// bootcard.h: the SD card's FAT partition. The body image (docs/fast-boot.md
 // §6, P4): body.bin and body.json next to kernel7.img, read at boot (path B,
-// `kilo flash --sd`) and written after `kilo flash --host --persist`.
+// `kilo flash --sd`) and written after `kilo flash --host --persist`. And the
+// mind's own kernel (`kilo update --host`): CBootCard is the core's
+// KernelStore (mind/platform.h), the files the kernel updater
+// (mind/update/updater.h) writes and renames: kernel7.new, kernel7.img,
+// kernel7.old.
 //
 // Circle's FatFs addon (addon/fatfs, ChaN's FatFs: long names, read and
 // write) over its SD driver (addon/SDCard; on the Pi 2 B the SDHOST
@@ -9,8 +13,9 @@
 // "body.json" is not one.
 //
 // Every call spins: the SD driver busy-waits (Circle's NO_BUSY_WAIT is off),
-// so the main loop stops for the duration. Each call logs how long it took.
-// Not for interrupt context or a second core.
+// so the main loop stops for the duration. The body image calls log how
+// long they took; the updater logs its own steps. Not for interrupt context
+// or a second core.
 //
 #ifndef KILO_SRC_BOOTCARD_H
 #define KILO_SRC_BOOTCARD_H
@@ -23,7 +28,7 @@
 #include <circle/timer.h>
 #include <circle/types.h>
 
-class CBootCard
+class CBootCard : public kilo::KernelStore
 {
 public:
 	CBootCard (CInterruptSystem *pInterrupt, CTimer *pTimer, kilo::Log *pLog);
@@ -43,6 +48,19 @@ public:
 	// half an image (and the CRC is checked at boot anyway). FALSE on any
 	// failure, logged.
 	boolean PersistBodyImage (const kilo::FlashImage &rImage);
+
+	// kilo::KernelStore, for the kernel updater: its own file object, so
+	// the body image calls (one pass each) cannot disturb a file it keeps
+	// open across passes. The first call mounts the card. Failures are
+	// logged with FatFs's error.
+	Result create (const char *pName) override;
+	Result open (const char *pName) override;
+	Result write (const uint8_t *pData, uint32_t nLen) override;
+	int32_t read (uint8_t *pBuffer, uint32_t nLen) override;
+	Result close (void) override;
+	Result remove (const char *pName) override;
+	Result rename (const char *pFrom, const char *pTo) override;
+	Result sync (void) override;
 
 private:
 	// The whole file into pBuffer: its size, or ReadMissing, ReadTooBig,
@@ -65,6 +83,9 @@ private:
 	boolean m_bMounted;
 	FATFS m_FileSystem;
 	FIL m_File;
+	FIL m_KernelFile;		// the KernelStore's open file
+	boolean m_bKernelOpen;
+	boolean m_bKernelWriting;
 };
 
 #endif

@@ -3,7 +3,9 @@
 // and writing, FlashImage, the STK500 flasher against a scripted optiboot
 // on a fake UART and clock (sync after the LED blink, pages, verify, the
 // HELLO after; no bootloader, a desync, a bad signature, a verify mismatch
-// retried, a wrong build), and the flash channel of HostServer.
+// retried, a wrong build), and the image channel of HostServer: FLASH_*,
+// and UPDATE_* (the kernel updater against an in-memory card,
+// tests/fake_store.h) with the exclusion between the two.
 #include <cstdlib>
 #include <deque>
 #include <fstream>
@@ -17,7 +19,9 @@
 #include "net/host_frame.h"
 #include "net/host_server.h"
 #include "tests/check.h"
+#include "tests/fake_store.h"
 #include "tests/fakes.h"
+#include "update/updater.h"
 #include "util/logring.h"
 
 using namespace kilo;
@@ -616,12 +620,16 @@ struct HostRig {
   FlashImage image;
   FakeListener listener;
   HostServer server{listener, link, body, clock, ring, ring, 1};
+  FakeStore store;
+  std::vector<uint8_t> kernel_buf = std::vector<uint8_t>(1u << 20);
+  KernelUpdater updater{kernel_buf.data(), (uint32_t)kernel_buf.size(), store, clock, ring};
   uint8_t seq = 0;
   std::vector<HostFrame> stash;  // what command() read besides its RESULT
 
   HostRig() {
     link.connect();
     server.attach_flasher(flasher, image);
+    server.attach_updater(updater);
   }
   void pass() {
     link.mark_alive();
@@ -664,7 +672,31 @@ struct HostRig {
     }
     pass();
   }
+  void send_kernel(FakeConn& c, const std::vector<uint8_t>& d, uint32_t crc, uint8_t flags) {
+    kilo_host_update_begin_t b = {(uint32_t)d.size(), crc, flags};
+    CHECK(command(c, KILO_HOST_MSG_UPDATE_BEGIN, &b, sizeof b) == KILO_HOST_RESULT_CODE_OK);
+    for (uint32_t o = 0; o < d.size(); o += 200) {
+      uint8_t p[204];
+      uint32_t n = std::min<uint32_t>(200, (uint32_t)d.size() - o);
+      std::memcpy(p, &o, 4);
+      std::memcpy(p + 4, d.data() + o, n);
+      c.send(KILO_HOST_MSG_UPDATE_DATA, 0, p, 4 + n);
+      if (o % 800 == 0) pass();  // 4 frames, within the 1 KB a pass reads per client
+    }
+    pass();
+  }
 };
+
+std::vector<kilo_host_update_status_t> update_statuses(const std::vector<HostFrame>& fs) {
+  std::vector<kilo_host_update_status_t> out;
+  for (const HostFrame& f : fs) {
+    if (f.type != KILO_HOST_MSG_UPDATE_STATUS) continue;
+    kilo_host_update_status_t st;
+    std::memcpy(&st, f.payload, sizeof st);
+    out.push_back(st);
+  }
+  return out;
+}
 
 void test_host_channel() {
   static HostRig r;
@@ -775,6 +807,124 @@ void test_host_channel() {
   CHECK(r.command(a, KILO_HOST_MSG_FLASH_BEGIN, &b, sizeof b) == KILO_HOST_RESULT_CODE_OK);
 }
 
+// UPDATE_* on HostServer: control, the checks' refusals (status first),
+// the exclusion with a body flash both ways, the refusals while writing,
+// and DONE: the card's files, REST, reboot_requested().
+void test_update_channel() {
+  static HostRig r;
+  FakeConn& a = r.connect(0);
+  FakeConn& obs = r.connect(1);
+  r.store.files["kernel7.img"] = {'O', 'L', 'D'};
+  std::vector<uint8_t> k = pattern(200000, 3);
+  std::memcpy(k.data() + 150000, KILO_HOST_UPDATE_MARKER, std::strlen(KILO_HOST_UPDATE_MARKER));
+  uint32_t kcrc = crc32(k.data(), (uint32_t)k.size());
+  kilo_host_update_begin_t ub = {(uint32_t)k.size(), kcrc, 0};
+
+  // Observers may not; the controller may.
+  CHECK(r.command(obs, KILO_HOST_MSG_UPDATE_BEGIN, &ub, sizeof ub) == KILO_HOST_RESULT_CODE_NOT_CONTROLLER);
+  CHECK(r.command(obs, KILO_HOST_MSG_UPDATE_COMMIT) == KILO_HOST_RESULT_CODE_NOT_CONTROLLER);
+  uint8_t take[2] = {1, 0};
+  CHECK(r.command(a, KILO_HOST_MSG_CONTROL, take, 2) == KILO_HOST_RESULT_CODE_OK);
+  CHECK(r.command(a, KILO_HOST_MSG_UPDATE_COMMIT) == KILO_HOST_RESULT_CODE_BAD_ARG);  // nothing begun
+  kilo_host_update_begin_t big = {(uint32_t)r.kernel_buf.size() + 1, 0, 0};
+  CHECK(r.command(a, KILO_HOST_MSG_UPDATE_BEGIN, &big, sizeof big) == KILO_HOST_RESULT_CODE_IMAGE_BAD);
+
+  // No marker: UPDATE_STATUS FAILED NOT_A_KERNEL, then RESULT IMAGE_BAD; the card untouched.
+  std::vector<uint8_t> loader = pattern(5000, 9);
+  r.send_kernel(a, loader, crc32(loader.data(), 5000), 0);
+  uint8_t s = r.seq++;
+  a.send(KILO_HOST_MSG_UPDATE_COMMIT, s);
+  r.pass();
+  std::vector<HostFrame> fs = a.take();
+  CHECK(fs.size() == 2 && fs[0].type == KILO_HOST_MSG_UPDATE_STATUS && fs[1].type == KILO_HOST_MSG_RESULT);
+  if (fs.size() == 2) {
+    std::vector<kilo_host_update_status_t> st = update_statuses(fs);
+    CHECK(st.size() == 1 && st[0].phase == KILO_UPDATE_PHASE_FAILED && st[0].error == KILO_UPDATE_ERROR_NOT_A_KERNEL &&
+          st[0].received == 5000);
+    CHECK(fs[1].seq == s && fs[1].payload[1] == KILO_HOST_RESULT_CODE_IMAGE_BAD);
+  }
+  CHECK(r.store.ops.empty() && !r.server.updating());
+
+  // A body flash runs: UPDATE_BEGIN is refused (FLASHING) until it ends.
+  std::vector<uint8_t> body = pattern(3000, 7);
+  r.send_image(a, body, 0x3D441EC0, crc32(body.data(), 3000), 0);
+  CHECK(r.command(a, KILO_HOST_MSG_FLASH_COMMIT) == KILO_HOST_RESULT_CODE_OK && r.server.flashing());
+  CHECK(r.command(a, KILO_HOST_MSG_UPDATE_BEGIN, &ub, sizeof ub) == KILO_HOST_RESULT_CODE_FLASHING);
+  for (int t = 0; t < 20000 && r.server.flashing(); t++) r.run_ms(1);
+  CHECK(!r.server.flashing() && r.flasher.status().phase == KILO_FLASH_PHASE_DONE);
+  a.take();
+  r.stash.clear();
+
+  // The kernel: RESULT OK, CHECKING behind it, then the link paused and the refusals while it writes.
+  r.send_kernel(a, k, kcrc, 0);
+  CHECK(r.server.stats().update_bytes_rx >= k.size());
+  CHECK(r.command(a, KILO_HOST_MSG_UPDATE_COMMIT) == KILO_HOST_RESULT_CODE_OK);
+  CHECK(r.server.updating() && r.server.link_paused());
+  kilo_host_flash_begin_t fb = {0x3D441EC0, 3000, crc32(body.data(), 3000), 0};
+  CHECK(r.command(a, KILO_HOST_MSG_FLASH_BEGIN, &fb, sizeof fb) == KILO_HOST_RESULT_CODE_UPDATING);
+  kilo_host_posture_t q = {KILO_POSTURE_STAND, 0, 0};
+  CHECK(r.command(a, KILO_HOST_MSG_POSTURE, &q, sizeof q) == KILO_HOST_RESULT_CODE_UPDATING);
+  CHECK(r.command(a, KILO_HOST_MSG_REBOOT) == KILO_HOST_RESULT_CODE_UPDATING);
+  CHECK(r.command(a, KILO_HOST_MSG_BRIDGE_OPEN) == KILO_HOST_RESULT_CODE_UPDATING);
+  CHECK(r.command(a, KILO_HOST_MSG_UPDATE_BEGIN, &ub, sizeof ub) == KILO_HOST_RESULT_CODE_UPDATING);
+  CHECK(!r.server.reboot_requested());
+  std::vector<kilo_host_update_status_t> sts = update_statuses(r.stash);
+  for (int t = 0; t < 100 && r.server.updating(); t++) {
+    r.run_ms(1);
+    std::vector<kilo_host_update_status_t> more = update_statuses(a.take());
+    sts.insert(sts.end(), more.begin(), more.end());
+  }
+  r.run_ms(1);
+  std::vector<kilo_host_update_status_t> more = update_statuses(a.take());
+  sts.insert(sts.end(), more.begin(), more.end());
+  CHECK(update_statuses(obs.take()).empty());  // only the update's client gets them
+  CHECK(!sts.empty());
+  if (!sts.empty()) {
+    CHECK(sts.front().phase == KILO_UPDATE_PHASE_CHECKING);
+    const kilo_host_update_status_t& last = sts.back();
+    CHECKF(last.phase == KILO_UPDATE_PHASE_DONE && last.received == k.size() && last.image_size == k.size() &&
+               last.crc32 == kcrc && last.card_crc32 == kcrc,
+           "phase %u error %u", last.phase, last.error);
+    uint8_t phase = 0;
+    int writing = 0, verifying = 0;
+    for (const auto& st : sts) {
+      CHECK(st.phase >= phase);
+      phase = st.phase;
+      writing += st.phase == KILO_UPDATE_PHASE_WRITING;
+      verifying += st.phase == KILO_UPDATE_PHASE_VERIFYING;
+    }
+    CHECKF(writing >= 12 && verifying >= 12, "%d writing, %d verifying statuses", writing, verifying);
+  }
+  CHECK(r.store.files["kernel7.img"] == k && r.store.text("kernel7.old") == "OLD" && !r.store.has("kernel7.new"));
+  CHECK(r.server.reboot_requested() && !r.server.link_paused());
+  CHECK(r.capture.has("kernel updated on the SD card: rebooting into it (REST latched)"));
+  // Rebooting: no new flash or update.
+  CHECK(r.command(a, KILO_HOST_MSG_FLASH_BEGIN, &fb, sizeof fb) == KILO_HOST_RESULT_CODE_UPDATING);
+  CHECK(r.command(a, KILO_HOST_MSG_UPDATE_BEGIN, &ub, sizeof ub) == KILO_HOST_RESULT_CODE_UPDATING);
+}
+
+// Losing control (or the client) while receiving drops the kernel image.
+void test_update_dropped() {
+  static HostRig r;
+  FakeConn& a = r.connect(0);
+  uint8_t take[2] = {1, 0};
+  CHECK(r.command(a, KILO_HOST_MSG_CONTROL, take, 2) == KILO_HOST_RESULT_CODE_OK);
+  std::vector<uint8_t> k = pattern(1000, 3);
+  r.send_kernel(a, k, crc32(k.data(), 1000), KILO_UPDATE_FLAGS_FORCE);
+  CHECK(r.updater.receiving());
+  uint8_t give[2] = {0, 0};
+  CHECK(r.command(a, KILO_HOST_MSG_CONTROL, give, 2) == KILO_HOST_RESULT_CODE_OK);
+  CHECK(!r.updater.receiving() && r.capture.has("kernel image dropped (the controller let go)"));
+  CHECK(r.command(a, KILO_HOST_MSG_CONTROL, take, 2) == KILO_HOST_RESULT_CODE_OK);
+  CHECK(r.command(a, KILO_HOST_MSG_UPDATE_COMMIT) == KILO_HOST_RESULT_CODE_BAD_ARG);
+  // FORCE: an image without the marker goes on the card.
+  r.store.files["kernel7.img"] = {'O', 'L', 'D'};
+  r.send_kernel(a, k, crc32(k.data(), 1000), KILO_UPDATE_FLAGS_FORCE);
+  CHECK(r.command(a, KILO_HOST_MSG_UPDATE_COMMIT) == KILO_HOST_RESULT_CODE_OK);
+  r.run_ms(10);
+  CHECK(r.store.files["kernel7.img"] == k && r.server.reboot_requested());
+}
+
 void test_no_flasher() {
   FakeClock clock;
   FakeSerial serial;
@@ -793,6 +943,15 @@ void test_no_flasher() {
   server.poll();
   std::vector<HostFrame> fs = c.take();
   CHECK(fs.size() == 2 && fs[1].payload[1] == KILO_HOST_RESULT_CODE_UNSUPPORTED);
+  // No kernel store either (kilo-mind-host without --card): UPDATE_* UNSUPPORTED, saying so.
+  kilo_host_update_begin_t ub = {10, 0, 0};
+  c.send(KILO_HOST_MSG_UPDATE_BEGIN, 2, &ub, sizeof ub);
+  c.send(KILO_HOST_MSG_UPDATE_COMMIT, 3);
+  server.poll();
+  fs = c.take();
+  CHECK(fs.size() == 2 && fs[0].payload[1] == KILO_HOST_RESULT_CODE_UNSUPPORTED &&
+        fs[1].payload[1] == KILO_HOST_RESULT_CODE_UNSUPPORTED);
+  if (!fs.empty()) CHECK(std::string((const char*)fs[0].payload + 2, fs[0].len - 2).find("--card") != std::string::npos);
 }
 
 }  // namespace
@@ -814,6 +973,8 @@ int main(int argc, char** argv) {
   test_wrong_build_and_no_hello();
   test_short_writes();
   test_host_channel();
+  test_update_channel();
+  test_update_dropped();
   test_no_flasher();
   return report("flash");
 }
