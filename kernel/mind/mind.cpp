@@ -35,6 +35,7 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
       runner_(body_, personality(cfg), log_, cfg.seed),
       remote_(link_, walker_, player_, clock, log_, cfg.remote_cfg) {
   link_.set_listener(this);
+  if (cfg.random != nullptr) host_.set_keys(cfg.authorized_keys, cfg.authorized_key_count, *cfg.random);
   runner_.set_clock(seconds, this);
   runner_.set_percept_source(&body_);
   runner_.set_paused(paused, this);

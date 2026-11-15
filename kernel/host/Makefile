@@ -44,6 +44,8 @@ TESTS += test_host
 MIND_BUILD := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo 0)
 $(shell mkdir -p $(B) && (echo $(MIND_BUILD) | cmp -s - $(B)/mind-build-id || echo $(MIND_BUILD) > $(B)/mind-build-id))
 $(B)/obj/host/main.o: CXXFLAGS += -DKILO_MIND_BUILD=0x$(MIND_BUILD)
+# --authorized-keys' default: this checkout's key list, the one the Circle kernel builds in.
+$(B)/obj/host/main.o: CXXFLAGS += -DKILO_AUTHORIZED_KEYS='"$(abspath $(KERNEL)/keys/authorized_keys)"'
 $(B)/obj/host/main.o: $(B)/mind-build-id
 
 # Body flashing (docs/fast-boot.md P4): the image, CRC-32, manifest and the

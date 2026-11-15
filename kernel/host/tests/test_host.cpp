@@ -15,6 +15,7 @@
 #include "net/host_frame.h"
 #include "net/host_server.h"
 #include "tests/check.h"
+#include "tests/fake_net.h"
 #include "tests/fakes.h"
 #include "util/logring.h"
 
@@ -29,75 +30,6 @@ std::vector<uint8_t> unhex(const std::string& s) {
   return out;
 }
 
-// ---- fakes of the network seams ------------------------------------------------
-
-class FakeConn final : public Conn {
- public:
-  std::vector<uint8_t> in;   // what the client sent, read from pos on
-  size_t pos = 0;
-  std::vector<uint8_t> out;  // what the server wrote
-  bool open = false;
-  bool peer_closed = false;
-  int32_t write_room = -1;   // >= 0: take at most this many bytes per write
-  HostRx rx;                 // the client's decoder of out
-
-  int32_t read(uint8_t* buf, uint32_t n) override {
-    if (!open) return -1;
-    size_t k = std::min<size_t>(n, in.size() - pos);
-    if (k == 0) return peer_closed ? -1 : 0;
-    std::memcpy(buf, in.data() + pos, k);
-    pos += k;
-    return (int32_t)k;
-  }
-  int32_t write(const uint8_t* buf, uint32_t n) override {
-    if (!open) return -1;
-    uint32_t k = write_room >= 0 && (uint32_t)write_room < n ? (uint32_t)write_room : n;
-    out.insert(out.end(), buf, buf + k);
-    return (int32_t)k;
-  }
-  void close() override { open = false; }
-  bool is_open() const override { return open; }
-
-  void send(uint8_t type, uint8_t seq, const void* payload = nullptr, uint32_t len = 0) {
-    uint8_t f[KILO_HOST_MAX_FRAME];
-    uint32_t n = host_frame_encode(type, seq, (const uint8_t*)payload, len, f);
-    in.insert(in.end(), f, f + n);
-  }
-  // The frames the server wrote since the last call.
-  std::vector<HostFrame> take() {
-    std::vector<HostFrame> got;
-    for (uint8_t b : out) {
-      HostRxStatus st = rx.push(b);
-      if (st == HostRxStatus::Frame) got.push_back(rx.frame());
-      CHECKF(st == HostRxStatus::Frame || st == HostRxStatus::None, "server wrote a broken frame");
-    }
-    out.clear();
-    return got;
-  }
-};
-
-class FakeListener final : public Listener {
- public:
-  FakeConn conns[5];  // one more than the server serves
-  std::deque<int32_t> pending;
-
-  int32_t accept() override {
-    if (pending.empty()) return -1;
-    int32_t s = pending.front();
-    pending.pop_front();
-    conns[s].open = true;
-    return s;
-  }
-  Conn* conn(uint32_t slot) override { return &conns[slot]; }
-  uint32_t slots() const override { return 5; }
-
-  FakeConn& connect(int32_t slot) {
-    conns[slot] = FakeConn();
-    pending.push_back(slot);
-    return conns[slot];
-  }
-};
-
 struct Rig {
   FakeSerial serial;
   FakeClock clock;
@@ -105,9 +37,27 @@ struct Rig {
   LogRing ring{clock, &capture};
   SerialLink link{serial, clock, ring};
   FakeListener listener;
+  FakeRandom random;
   HostServer server{listener, link, serial, clock, ring, ring, 0x1E1405F0u};
 
-  Rig() { link.connect(); }
+  Rig() {
+    link.connect();
+    uint32_t n;
+    const AuthorizedKey* keys = test_keys(&n);
+    server.set_keys(keys, n, random);
+  }
+  // A connection that becomes a client: the hello, the handshake (one
+  // X25519 per pass: three passes), the client's first record.
+  FakeConn& connect(int32_t slot) {
+    FakeConn& c = listener.connect(slot);
+    for (int k = 0; k < 10 && !c.established; k++) {
+      pass();
+      c.pump();
+    }
+    pass();
+    CHECKF(c.established && c.open, "slot %d: no handshake", (int)slot);
+    return c;
+  }
   // One pass of the mind's loop, as kilo-mind-host does it.
   void pass() {
     link.mark_alive();
@@ -242,7 +192,7 @@ void test_logring() {
 
 void test_status_and_errors() {
   Rig r;
-  FakeConn& c = r.listener.connect(0);
+  FakeConn& c = r.connect(0);
   r.pass();
   CHECK(r.server.clients() == 1);
   c.send(KILO_HOST_MSG_STATUS_REQ, 42);
@@ -295,14 +245,15 @@ void test_status_and_errors() {
   CHECK(result_code(got, 3) == KILO_HOST_RESULT_CODE_BAD_LEN);
   CHECK(result_code(got, 4) == KILO_HOST_RESULT_CODE_UNSUPPORTED);
   CHECK(c.open && r.server.clients() == 1);
-  // A bad CRC: out of step, closed.
-  size_t at = c.in.size();
-  c.send(KILO_HOST_MSG_STATUS_REQ, 5);
-  c.in[at + 3] ^= 0x40;
+  // A bad CRC (in a record that authenticates): out of step, closed.
+  uint8_t f[KILO_HOST_MAX_FRAME];
+  uint32_t fn = host_frame_encode(KILO_HOST_MSG_STATUS_REQ, 5, nullptr, 0, f);
+  f[3] ^= 0x40;
+  c.send_record(f, fn);
   r.pass();
   CHECK(!c.open && r.server.clients() == 0 && r.server.stats().out_of_step == 1);
   // A slot past what the server serves is closed at accept.
-  FakeConn& extra = r.listener.connect(4);
+  FakeConn& extra = r.listener.connect(FakeListener::kConns - 1);
   r.pass();
   CHECK(!extra.open && r.server.stats().refused == 1);
 }
@@ -312,8 +263,8 @@ void test_control_rules() {
   kilo_telemetry_t t = {};
   t.epoch = 2;  // epoch goals wait for the body's first epoch
   r.serial.feed_frame(KILO_MSG_TELEMETRY, 0, &t, sizeof t);
-  FakeConn& a = r.listener.connect(0);
-  FakeConn& b = r.listener.connect(1);
+  FakeConn& a = r.connect(0);
+  FakeConn& b = r.connect(1);
   r.pass();
   uint8_t take[2] = {1, 0};
   kilo_host_posture_t stand = {KILO_POSTURE_STAND, 0, 0};
@@ -381,7 +332,7 @@ void test_control_rules() {
 
 void test_keepalive() {
   Rig r;
-  FakeConn& a = r.listener.connect(0);
+  FakeConn& a = r.connect(0);
   r.pass();
   uint8_t take_ka[2] = {1, 1};
   kilo_host_posture_t stand = {KILO_POSTURE_STAND, 0, 0};
@@ -411,7 +362,7 @@ void test_keepalive() {
 
 void test_telem_rate() {
   Rig r;
-  FakeConn& a = r.listener.connect(0);
+  FakeConn& a = r.connect(0);
   r.pass();
   uint8_t hz = 10;
   a.send(KILO_HOST_MSG_TELEM_SUB, 1, &hz, 1);
@@ -441,9 +392,9 @@ void test_log_tail() {
   Rig r;
   for (int i = 0; i < 5; i++) logf(r.ring, LogLevel::Info, "early %d", i);
   logf(r.ring, LogLevel::Debug, "debug line");
-  FakeConn& a = r.listener.connect(0);
-  r.pass();  // "client 0 connected" is logged too
-  uint8_t sub[3] = {1, 4, KILO_LOG_LEVEL_INFO};
+  FakeConn& a = r.connect(0);
+  // "client 0 connected", the handshake and "is a client" are logged too
+  uint8_t sub[3] = {1, 6, KILO_LOG_LEVEL_INFO};
   a.send(KILO_HOST_MSG_LOG_SUB, 1, sub, 3);
   r.pass();
   std::vector<std::string> lines;
@@ -455,10 +406,12 @@ void test_log_tail() {
     std::memcpy(&s, f.payload, 4);
     seqs.push_back(s);
   }
-  // the last 4 lines: early 3, early 4, (debug: filtered), client connected
-  CHECKF(lines.size() == 3, "%zu lines", lines.size());
-  if (lines.size() == 3) {
+  // the last 6 lines: early 3, early 4, (debug: filtered), client connected, the handshake, a client
+  CHECKF(lines.size() == 5, "%zu lines", lines.size());
+  if (lines.size() == 5) {
     CHECK(lines[0] == "early 3" && lines[1] == "early 4" && lines[2].find("client 0 connected") != std::string::npos);
+    CHECK(lines[3].find("noise: client 0: handshake with key ") != std::string::npos &&
+          lines[3].find("(test@laptop)") != std::string::npos && lines[4].find("client 0 is a client") != std::string::npos);
     CHECK(seqs[1] == seqs[0] + 1 && seqs[2] == seqs[1] + 2);  // the debug line between is filtered
   }
   logf(r.ring, LogLevel::Warn, "live line");
@@ -479,8 +432,8 @@ void test_log_tail() {
 
 void test_bridge() {
   Rig r;
-  FakeConn& a = r.listener.connect(0);
-  FakeConn& b = r.listener.connect(1);
+  FakeConn& a = r.connect(0);
+  FakeConn& b = r.connect(1);
   r.pass();
   b.send(KILO_HOST_MSG_BRIDGE_OPEN, 1);  // an observer may not
   uint8_t take[2] = {1, 0};
@@ -538,8 +491,8 @@ void test_reboot() {
   kilo_telemetry_t t = {};
   t.epoch = 2;  // epoch goals wait for the body's first epoch
   r.serial.feed_frame(KILO_MSG_TELEMETRY, 0, &t, sizeof t);
-  FakeConn& a = r.listener.connect(0);
-  FakeConn& b = r.listener.connect(1);
+  FakeConn& a = r.connect(0);
+  FakeConn& b = r.connect(1);
   r.pass();
   b.send(KILO_HOST_MSG_REBOOT, 1);  // an observer may not
   r.pass();
@@ -564,12 +517,236 @@ void test_reboot() {
 
 void test_slow_client_dropped() {
   Rig r;
-  FakeConn& a = r.listener.connect(0);
+  FakeConn& a = r.connect(0);
   r.pass();
   a.write_room = 0;  // never drains
   for (int i = 0; i < 40; i++) a.send(KILO_HOST_MSG_STATUS_REQ, (uint8_t)i);  // 40 x 170 B > the 4 KB ring
   r.pass();
   CHECK(!a.open && r.server.clients() == 0);
+}
+
+// ---- the secure layer (net/host_secure.cpp) -------------------------------------------
+
+// Passes until c has the mind's answer (and message 2 when OK), at most max.
+int passes_to_answer(Rig& r, FakeConn& c, int max = 20) {
+  for (int k = 1; k <= max; k++) {
+    r.pass();
+    c.pump();
+    if (c.answered && (c.status != KILO_HOST_HELLO_STATUS_OK || c.established || c.hs_failed)) return k;
+  }
+  return -1;
+}
+
+void test_handshake_and_records() {
+  Rig r;
+  FakeConn& c = r.connect(0);
+  CHECK(r.server.clients() == 1 && r.server.stats().handshakes == 1 && c.status == KILO_HOST_HELLO_STATUS_OK);
+  CHECK(r.capture.has("noise: client 0: handshake with key ") && r.capture.has("(test@laptop) in "));
+  // Several frames in one record, and a frame cut across two records: the
+  // plaintext is one stream.
+  uint8_t f[3 * KILO_HOST_MAX_FRAME];
+  uint32_t n = host_frame_encode(KILO_HOST_MSG_STATUS_REQ, 1, nullptr, 0, f);
+  n += host_frame_encode(KILO_HOST_MSG_STATUS_REQ, 2, nullptr, 0, f + n);
+  n += host_frame_encode(KILO_HOST_MSG_STATUS_REQ, 3, nullptr, 0, f + n);
+  c.send_record(f, 9);
+  c.send_record(f + 9, n - 9);
+  c.send_record(nullptr, 0);  // an empty record is fine
+  r.pass();
+  std::vector<HostFrame> got = c.take();
+  CHECK(count(got, KILO_HOST_MSG_STATUS) == 3 && c.open && !c.bad_record);
+  // The log tail comes back in records of at most KILO_HOST_RECORD_MAX (FakeConn checks each).
+  uint8_t sub[3] = {1, 60, KILO_LOG_LEVEL_DEBUG};
+  for (int i = 0; i < 70; i++) logf(r.ring, LogLevel::Info, "a line long enough to fill records quickly %d", i);
+  c.send(KILO_HOST_MSG_LOG_SUB, 4, sub, 3);
+  r.run_ms(50, 1);
+  CHECK(count(c.take(), KILO_HOST_MSG_LOG_LINE) == 60 && !c.bad_record);
+}
+
+void test_one_x25519_per_pass() {
+  Rig r;
+  FakeConn& a = r.listener.connect(0);
+  FakeConn& b = r.listener.connect(1);
+  FakeConn& d = r.listener.connect(2);
+  auto answered = [&]() { return (int)a.established + (int)b.established + (int)d.established; };
+  // Three connections need nine X25519 steps; one runs per pass, round robin.
+  int seen[10] = {};
+  for (int k = 1; k <= 9; k++) {
+    r.pass();
+    a.pump();
+    b.pump();
+    d.pump();
+    seen[k] = answered();
+  }
+  CHECKF(seen[6] == 0 && seen[7] == 1 && seen[8] == 2 && seen[9] == 3, "answered after 6..9 passes: %d %d %d %d",
+         seen[6], seen[7], seen[8], seen[9]);
+  r.pass();
+  CHECK(r.server.clients() == 3);
+}
+
+void test_no_hello_timeout() {
+  Rig r;
+  FakeConn& idle = r.listener.connect_raw(0);   // sends nothing
+  FakeConn& half = r.listener.connect_raw(1);   // half a hello
+  half.send_raw({'K', 'I', 'L', 'O', KILO_HOST_VERSION, 0});
+  FakeConn& mute = r.listener.connect(2);       // the handshake, but never a record
+  mute.first_record = false;
+  r.run_ms(2900, 10);
+  mute.pump();
+  CHECK(idle.open && half.open && mute.open && mute.established);
+  CHECK(r.server.clients() == 0 && r.server.connections() == 3);
+  // An observer's STATUS counts only clients; a pending connection cannot take control.
+  FakeConn& c = r.connect(3);
+  c.send(KILO_HOST_MSG_STATUS_REQ, 1);
+  r.pass();
+  std::vector<HostFrame> got = c.take();
+  const HostFrame* s = find(got, KILO_HOST_MSG_STATUS);
+  CHECK(s != nullptr && s->payload[offsetof(kilo_host_status_t, clients)] == 1);
+  r.run_ms(200, 10);
+  CHECK(!idle.open && !half.open && !mute.open && c.open);
+  CHECK(r.server.stats().handshake_timeouts == 3 && r.server.clients() == 1);
+  CHECK(idle.out.empty() && half.out.empty());  // nothing was ever answered
+}
+
+void test_refusals() {
+  Rig r;
+  // An unknown key: KEY_UNKNOWN in clear, then closed, nothing more.
+  FakeConn& u = r.listener.connect_raw(0);
+  u.start(stranger_key().priv, stranger_key().pub);
+  CHECK(passes_to_answer(r, u) == 1 && u.status == KILO_HOST_HELLO_STATUS_KEY_UNKNOWN && !u.open);
+  CHECK(u.raw.empty() && r.capture.has("is not authorized (3 keys known)"));
+  // Another version.
+  FakeConn& v = r.listener.connect_raw(0);
+  v.start(laptop_key().priv, laptop_key().pub, KILO_HOST_VERSION + 1);
+  CHECK(passes_to_answer(r, v) == 1 && v.status == KILO_HOST_HELLO_STATUS_BAD_VERSION && !v.open);
+  // A plaintext frame (a version-1 client): closed at once, unanswered.
+  FakeConn& p = r.listener.connect_raw(0);
+  uint8_t f[KILO_HOST_MAX_FRAME];
+  uint32_t n = host_frame_encode(KILO_HOST_MSG_STATUS_REQ, 1, nullptr, 0, f);
+  p.send_raw(std::vector<uint8_t>(f, f + n));
+  r.pass();
+  CHECK(!p.open && p.out.empty());
+  // No randomness: REFUSED, fail closed.
+  r.random.fail = true;
+  FakeConn& q = r.listener.connect(0);
+  CHECK(passes_to_answer(r, q) == 1 && q.status == KILO_HOST_HELLO_STATUS_REFUSED && !q.open);
+  r.random.fail = false;
+  CHECK(r.server.stats().hello_refused == 4 && r.server.stats().handshakes == 0 && r.server.clients() == 0);
+}
+
+void test_wrong_private_key() {
+  Rig r;
+  // The laptop's public key with another private key: the mind answers (it
+  // cannot tell yet), message 2 does not authenticate for the impostor, and
+  // a record it makes up does not authenticate for the mind.
+  FakeConn& m = r.listener.connect_raw(0);
+  m.start(stranger_key().priv, laptop_key().pub);
+  passes_to_answer(r, m);
+  CHECK(m.status == KILO_HOST_HELLO_STATUS_OK && m.hs_failed && !m.established && m.open);
+  CHECK(r.server.clients() == 0);
+  uint8_t key[32] = {9};
+  m.send_cs.init(key);
+  uint8_t f[KILO_HOST_MAX_FRAME];
+  uint32_t n = host_frame_encode(KILO_HOST_MSG_STATUS_REQ, 1, nullptr, 0, f);
+  m.send_record(f, n);
+  r.pass();
+  CHECK(!m.open && r.server.stats().auth_failed == 1 && r.server.stats().handshakes == 0);
+}
+
+void test_bad_records() {
+  Rig r;
+  uint8_t f[KILO_HOST_MAX_FRAME];
+  uint32_t n = host_frame_encode(KILO_HOST_MSG_STATUS_REQ, 1, nullptr, 0, f);
+  // Tampered: a flipped bit in the ciphertext, in the tag, in the length.
+  for (size_t where : {size_t(2), size_t(2 + n + 3), size_t(0)}) {
+    FakeConn& c = r.connect(0);
+    size_t at = c.in.size();
+    c.send(KILO_HOST_MSG_STATUS_REQ, 1);
+    c.in[at + where] ^= (where == 0 ? 0x01 : 0x20);
+    c.send(KILO_HOST_MSG_STATUS_REQ, 2);  // (a longer length takes a byte of this one)
+    r.pass();
+    CHECKF(!c.open && c.take().empty(), "tampered at %zu: closed, unanswered", where);
+  }
+  // Replayed: the same record twice.
+  {
+    FakeConn& c = r.connect(0);
+    size_t at = c.in.size();
+    c.send(KILO_HOST_MSG_STATUS_REQ, 1);
+    std::vector<uint8_t> rec(c.in.begin() + (long)at, c.in.end());
+    r.pass();
+    CHECK(c.open && count(c.take(), KILO_HOST_MSG_STATUS) == 1);
+    c.send_raw(rec);
+    r.pass();
+    CHECK(!c.open && c.take().empty());
+  }
+  // Truncated: a record cut short, the next one behind it.
+  {
+    FakeConn& c = r.connect(0);
+    size_t at = c.in.size();
+    c.send(KILO_HOST_MSG_STATUS_REQ, 1);
+    c.in.resize(c.in.size() - 5);
+    c.send(KILO_HOST_MSG_STATUS_REQ, 2);
+    r.pass();
+    CHECK(!c.open && c.take().empty());
+    (void)at;
+  }
+  // Too long (one past the limit), and shorter than a tag: closed without reading on.
+  for (uint32_t len : {(uint32_t)KILO_HOST_RECORD_MAX + noise::kTagLen + 1, noise::kTagLen - 1}) {
+    FakeConn& c = r.connect(0);
+    c.send_raw({(uint8_t)len, (uint8_t)(len >> 8)});
+    r.pass();
+    CHECKF(!c.open, "record length %u", len);
+  }
+  // The largest record is fine: a STATUS_REQ, a BRIDGE_TX (not the
+  // controller: dropped unanswered) and KEEPALIVEs, exactly KILO_HOST_RECORD_MAX bytes.
+  {
+    FakeConn& c = r.connect(0);
+    std::vector<uint8_t> big(f, f + n);
+    uint8_t fb[KILO_HOST_MAX_FRAME], pad[196] = {};
+    uint32_t bn = host_frame_encode(KILO_HOST_MSG_BRIDGE_TX, 0, pad, sizeof pad, fb);
+    big.insert(big.end(), fb, fb + bn);
+    while (big.size() < KILO_HOST_RECORD_MAX) {
+      uint8_t k[8];
+      uint32_t kn = host_frame_encode(KILO_HOST_MSG_KEEPALIVE, 0, nullptr, 0, k);
+      big.insert(big.end(), k, k + kn);
+    }
+    CHECK(big.size() == KILO_HOST_RECORD_MAX);
+    c.send_record(big.data(), (uint32_t)big.size());
+    r.run_ms(5, 1);
+    std::vector<HostFrame> got = c.take();
+    CHECK(c.open && got.size() == 1 && count(got, KILO_HOST_MSG_STATUS) == 1);
+  }
+  CHECK(r.server.stats().auth_failed == 7);
+}
+
+void test_slots() {
+  Rig r;
+  // Four idle connections that never say hello hold every client slot ...
+  FakeConn* idle[4];
+  for (int s = 0; s < 4; s++) {
+    idle[s] = &r.listener.connect_raw(s);
+    r.run_ms(10, 10);
+  }
+  // ... yet a laptop gets in at once: the oldest idle one makes room.
+  FakeConn& c = r.connect(4);
+  CHECK(c.open && r.server.clients() == 1 && !idle[0]->open && idle[1]->open && r.server.stats().evicted == 1);
+  // Again and again: the client is never the one closed.
+  for (int k = 0; k < 6; k++) {
+    int32_t slot = -1;
+    for (int s = 0; s < 4; s++)
+      if (!r.listener.conns[s].open) slot = s;
+    r.listener.connect_raw(slot);
+    r.run_ms(10, 10);
+    CHECK(c.open && r.server.connections() == 4);
+  }
+  c.send(KILO_HOST_MSG_STATUS_REQ, 1);
+  r.pass();
+  CHECK(c.open && count(c.take(), KILO_HOST_MSG_STATUS) == 1);
+  // Four clients: a fifth connection is closed at once.
+  Rig q;
+  for (int s = 0; s < 4; s++) q.connect(s);
+  FakeConn& fifth = q.listener.connect(4);
+  q.pass();
+  CHECK(!fifth.open && q.server.clients() == 4 && q.server.stats().refused == 1);
 }
 
 }  // namespace
@@ -590,6 +767,13 @@ int main(int argc, char** argv) {
   test_bridge();
   test_reboot();
   test_slow_client_dropped();
+  test_handshake_and_records();
+  test_one_x25519_per_pass();
+  test_no_hello_timeout();
+  test_refusals();
+  test_wrong_private_key();
+  test_bad_records();
+  test_slots();
   std::printf("  %d host vectors\n", g_vectors);
   return report("host");
 }

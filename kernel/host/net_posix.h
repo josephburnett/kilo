@@ -23,7 +23,7 @@ class PosixConn final : public Conn {
 
 class PosixListener final : public Listener {
  public:
-  static constexpr uint32_t kSlots = 4;
+  static constexpr uint32_t kSlots = kHostSlots;  // KILO_HOST_MAX_CLIENTS and a spare (mind/platform_net.h)
 
   // Bind and listen on spec "[addr:]port" (addr default 127.0.0.1; port 0 =
   // any free one, see port()). False and error() on failure.

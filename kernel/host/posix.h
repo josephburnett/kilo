@@ -4,6 +4,7 @@
 #ifndef KILO_HOST_POSIX_H
 #define KILO_HOST_POSIX_H
 #include <stddef.h>
+#include "net/authorized_keys.h"
 #include "platform.h"
 
 namespace kilo {
@@ -97,6 +98,21 @@ class DirStore final : public KernelStore {
   int fd_ = -1;
   bool writing_ = false;
 };
+
+// The host channel's ephemeral keys (mind/platform.h Random): getrandom().
+class PosixRandom final : public Random {
+ public:
+  bool fill(uint8_t* buf, uint32_t n) override;
+};
+
+// kilo-mind-host --authorized-keys FILE: the laptops' public keys, in the
+// format of kernel/keys/authorized_keys (which kernel/keys/gen_keys.py
+// compiles into the Circle kernel): per line, the 32-byte X25519 public key
+// in base64 (44 characters), then optionally its name; blank lines and
+// lines starting with # are skipped. At most max keys into keys; false and
+// a message in error on a bad line or an unreadable file.
+bool load_authorized_keys(const char* path, AuthorizedKey* keys, uint32_t max, uint32_t* n, char* error,
+                          size_t cap);
 
 }  // namespace kilo
 

@@ -9,8 +9,6 @@ namespace {
 
 constexpr uint32_t kKeepaliveUs = KILO_HOST_KEEPALIVE_TIMEOUT_MS * 1000u;
 constexpr uint32_t kBodyLostUs = KILO_BODY_LOST_MS * 1000u;
-constexpr uint32_t kReadChunk = 256;
-constexpr uint32_t kReadsPerPoll = 4;  // bounded work per client per pass (1 KB)
 constexpr uint32_t kResultTextMax = KILO_HOST_RESULT_MAX_LEN - 2;
 
 const char* name_of(uint8_t type) {
@@ -57,7 +55,19 @@ void HostServer::attach_updater(KernelUpdater& updater) {
   update_sent_ = updater.changes();
 }
 
+void HostServer::set_keys(const AuthorizedKey* keys, uint32_t n, Random& random) {
+  keys_ = keys;
+  n_keys_ = keys != nullptr ? n : 0;
+  random_ = &random;
+}
+
 uint32_t HostServer::clients() const {
+  uint32_t n = 0;
+  for (const Client& c : clients_) n += c.open && c.phase == Phase::Open ? 1u : 0u;
+  return n;
+}
+
+uint32_t HostServer::connections() const {
   uint32_t n = 0;
   for (const Client& c : clients_) n += c.open ? 1u : 0u;
   return n;
@@ -68,8 +78,10 @@ uint32_t HostServer::clients() const {
 void HostServer::poll() {
   uint64_t now = clock_.now_us();
   accept(now);
-  for (uint32_t i = 0; i < kMaxClients; i++)
+  for (uint32_t i = 0; i < kSlots; i++)
     if (clients_[i].open) read_client(i, now);
+  handshake_step(now);
+  expire(now);
   if (controller_ >= 0) {
     const Client& c = clients_[controller_];
     if (c.keepalive && now - c.last_rx_us > kKeepaliveUs) {
@@ -88,7 +100,7 @@ void HostServer::poll() {
     update_status();
   }
   streams(now);
-  for (uint32_t i = 0; i < kMaxClients; i++)
+  for (uint32_t i = 0; i < kSlots; i++)
     if (clients_[i].open) flush(i);
 }
 
@@ -97,7 +109,7 @@ void HostServer::accept(uint64_t now) {
     int32_t slot = listener_.accept();
     if (slot < 0) return;
     Conn* conn = listener_.conn((uint32_t)slot);
-    if ((uint32_t)slot >= kMaxClients || clients_[slot].open) {
+    if ((uint32_t)slot >= kSlots || clients_[slot].open) {
       conn->close();
       stats_.refused++;
       continue;
@@ -105,37 +117,45 @@ void HostServer::accept(uint64_t now) {
     Client& c = clients_[slot];
     mem_zero(&c, sizeof c);
     c.open = true;
+    c.phase = Phase::Hello;
     c.conn = conn;
+    c.opened_us = now;
+    c.key = -1;
     c.rx.reset();
     c.last_rx_us = now;
     stats_.accepted++;
-    logf(log_, LogLevel::Info, "host: client %d connected (%u open)", (int)slot, (unsigned)clients());
+    logf(log_, LogLevel::Info, "host: client %d connected (%u open)", (int)slot, (unsigned)connections());
+    evict();
+  }
+}
+
+// More than kMaxClients open: close the oldest connection that is not a
+// client yet (with kMaxClients clients, that is the newest one).
+void HostServer::evict() {
+  while (connections() > kMaxClients) {
+    int32_t oldest = -1;
+    for (uint32_t i = 0; i < kSlots; i++) {
+      const Client& c = clients_[i];
+      if (c.open && c.phase != Phase::Open && (oldest < 0 || c.opened_us < clients_[oldest].opened_us))
+        oldest = (int32_t)i;
+    }
+    if (oldest < 0) return;  // cannot be: at most kMaxClients are clients
+    if (clients() >= kMaxClients) {
+      stats_.refused++;
+      drop((uint32_t)oldest, "closed: every slot has a client");
+    } else {
+      stats_.evicted++;
+      drop((uint32_t)oldest, "closed: still in its handshake, and a newer connection needs the slot");
+    }
   }
 }
 
 void HostServer::read_client(uint32_t i, uint64_t now) {
-  uint8_t buf[kReadChunk];
-  for (uint32_t r = 0; r < kReadsPerPoll; r++) {
-    Client& c = clients_[i];
-    if (!c.open) return;
-    int32_t n = c.conn->read(buf, sizeof buf);
-    if (n < 0) {
-      drop(i, "closed");
-      return;
-    }
-    if (n == 0) return;
-    for (int32_t k = 0; k < n; k++) {
-      HostRxStatus st = c.rx.push(buf[k]);
-      if (st == HostRxStatus::Frame) {
-        handle(i, c.rx.frame(), now);
-        if (!c.open) return;
-      } else if (st != HostRxStatus::None) {
-        stats_.out_of_step++;
-        drop(i, st == HostRxStatus::BadCrc ? "bad CRC: out of step" : "bad length: out of step");
-        return;
-      }
-    }
-  }
+  Client& c = clients_[i];
+  if (c.closing) return;  // its refusal is being written; nothing more is read
+  if (c.phase == Phase::Hello) read_hello(i, now);
+  else if (c.phase == Phase::Proving || c.phase == Phase::Open) read_records(i, now);
+  // Keygen, Ee, Se: nothing is read until message 2 is out (the client waits for it).
 }
 
 void HostServer::drop(uint32_t i, const char* why) {
@@ -143,6 +163,9 @@ void HostServer::drop(uint32_t i, const char* why) {
   if (!c.open) return;
   c.conn->close();
   c.open = false;
+  c.hs.wipe();
+  c.send.clear();
+  c.recv.clear();
   stats_.closed++;
   logf(log_, LogLevel::Info, "host: client %d %s", (int)i, why);
   if (controller_ == (int32_t)i) lose_control(why);
@@ -360,7 +383,7 @@ void HostServer::reboot(uint32_t i, uint8_t seq) {
   logf(log_, LogLevel::Warn, "host: client %d asked for a reboot (%s)", (int)i,
        rest ? "REST latched" : "no link: no REST");
   result(i, seq, type, KILO_HOST_RESULT_CODE_OK, "rebooting");
-  flush(i);
+  flush(i, true);  // the OK leaves now: kilo-mind-host exits at once
   reboot_ = true;
 }
 
@@ -569,7 +592,7 @@ void HostServer::update_reboot() {
   }
   logf(log_, LogLevel::Warn, "host: kernel updated on the SD card: rebooting into it (%s)",
        rest ? "REST latched" : "no link: no REST");
-  if (update_client_ >= 0) flush((uint32_t)update_client_);
+  if (update_client_ >= 0) flush((uint32_t)update_client_, true);
   reboot_ = true;
 }
 
@@ -597,9 +620,9 @@ void HostServer::pump_bridge() {
 }
 
 void HostServer::streams(uint64_t now) {
-  for (uint32_t i = 0; i < kMaxClients; i++) {
+  for (uint32_t i = 0; i < kSlots; i++) {
     Client& c = clients_[i];
-    if (!c.open) continue;
+    if (!c.open || c.phase != Phase::Open) continue;
     if (c.telem_period_us != 0 && now >= c.telem_next_us) {
       c.telem_next_us += c.telem_period_us;
       if (c.telem_next_us <= now) c.telem_next_us = now + c.telem_period_us;  // fell behind: no burst
@@ -646,7 +669,7 @@ void HostServer::streams(uint64_t now) {
 
 bool HostServer::enqueue(uint32_t i, uint8_t type, uint8_t seq, const void* payload, uint32_t len) {
   Client& c = clients_[i];
-  if (!c.open || room(i) < len + kHostOverhead) return false;
+  if (!c.open || c.phase != Phase::Open || room(i) < len + kHostOverhead) return false;
   uint8_t frame[KILO_HOST_MAX_FRAME];
   uint32_t n = host_frame_encode(type, seq, (const uint8_t*)payload, len, frame);
   if (n == 0) return false;
@@ -674,20 +697,32 @@ void HostServer::result(uint32_t i, uint8_t seq, uint8_t request, uint8_t code, 
   reply(i, seq, buf, 2 + n, KILO_HOST_MSG_RESULT);
 }
 
-void HostServer::flush(uint32_t i) {
+// What is sealed (c.out: the clear answer, then records) goes to the
+// connection; then the queued frames are sealed, a record at a time. A
+// partly written record stays in c.out for the next pass.
+void HostServer::flush(uint32_t i, bool all) {
   Client& c = clients_[i];
-  while (c.open && c.tx_len > 0) {
-    uint32_t seg = kTxBytes - c.tx_head < c.tx_len ? kTxBytes - c.tx_head : c.tx_len;
-    int32_t w = c.conn->write(c.tx + c.tx_head, seg);
-    if (w < 0) {
-      drop(i, "write failed");
+  for (uint32_t sealed = 0; c.open;) {
+    while (c.out_len > 0) {
+      int32_t w = c.conn->write(c.out + c.out_head, c.out_len);
+      if (w < 0) {
+        drop(i, "write failed");
+        return;
+      }
+      if (w == 0) return;
+      c.out_head += (uint32_t)w;
+      c.out_len -= (uint32_t)w;
+    }
+    c.out_head = 0;
+    if (c.closing) {
+      drop(i, c.closing_why);
       return;
     }
-    if (w == 0) return;
-    c.tx_head = (c.tx_head + (uint32_t)w) % kTxBytes;
-    c.tx_len -= (uint32_t)w;
+    if (c.phase != Phase::Open || c.tx_len == 0) return;
+    if (!all && sealed == kRecordsPerFlush) return;  // bounded work per pass; the rest next pass
+    if (!seal(i)) return;
+    sealed++;
   }
-  if (c.tx_len == 0) c.tx_head = 0;
 }
 
 // ---- state ----------------------------------------------------------------------

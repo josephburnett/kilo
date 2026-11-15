@@ -30,6 +30,19 @@
 //   reboot_requested(), as for REBOOT. A flash and an update exclude each
 //   other (FLASHING, UPDATING).
 //
+// Who may connect (kernel/README.md "Who may talk to Kilo: keys", the spec's
+// [host] comments): every connection starts with a clear hello naming the
+// laptop's static public key, which must be in the list set_keys() gives,
+// then the Noise KN handshake (net/noise.h), then encrypted records that
+// carry the frames below. The responder's three X25519 operations run one
+// per pass, for all connections together (poll(): handshake_step()). A
+// connection is a client only once a record from it authenticates; until
+// then it is served nothing, is not counted (clients(), STATUS.clients) and
+// is closed KILO_HOST_HANDSHAKE_TIMEOUT_MS after it opened. kSlots is one
+// more than kMaxClients: a new connection always gets a slot, and when that
+// makes more than kMaxClients open, the oldest one that is not yet a client
+// is closed (the new one itself if every other is a client).
+//
 // Control: one controller, the first client to send CONTROL take=1; the
 // others are observers (STATUS, TELEM, LOG_LINE) and get NOT_CONTROLLER for
 // POSTURE, PARAM_SET, REBOOT and the bridge. When the controller gives up
@@ -48,7 +61,9 @@
 #include "flash/flasher.h"
 #include "flash/image.h"
 #include "link/serial_link.h"
+#include "net/authorized_keys.h"
 #include "net/host_frame.h"
+#include "net/noise.h"
 #include "platform.h"
 #include "platform_net.h"
 #include "update/updater.h"
@@ -59,13 +74,20 @@ namespace kilo {
 class HostServer {
  public:
   static constexpr uint32_t kMaxClients = KILO_HOST_MAX_CLIENTS;
+  static constexpr uint32_t kSlots = kHostSlots;  // the listener's slots: kMaxClients + 1 (see above)
   static constexpr uint32_t kTxBytes = 4096;  // per client: about 25 TELEM, or a log tail of 24 long lines
+  static constexpr uint32_t kRecordBytes = 2 + KILO_HOST_RECORD_MAX + noise::kTagLen;  // a whole record on the wire
 
   struct Stats {
     uint32_t accepted;
-    uint32_t refused;       // accepted into a slot past kMaxClients (closed at once)
+    uint32_t refused;       // accepted into a slot past kSlots, or with kMaxClients clients (closed at once)
     uint32_t closed;
     uint32_t out_of_step;   // bad length or CRC: closed
+    uint32_t handshakes;    // connections that became clients (a record from them authenticated)
+    uint32_t hello_refused; // a bad magic, version or unknown key, or no randomness: closed
+    uint32_t auth_failed;   // a bad message 1, a record that did not authenticate or a bad record length: closed
+    uint32_t handshake_timeouts;  // not a client within KILO_HOST_HANDSHAKE_TIMEOUT_MS: closed
+    uint32_t evicted;       // closed while still in the handshake, to free a slot for a newer connection
     uint32_t requests;
     uint32_t telem_sent;
     uint32_t telem_skipped; // a client's ring was full
@@ -98,6 +120,10 @@ class HostServer {
   // they are answered UNSUPPORTED (kilo-mind-host without --card). poll()
   // then polls it.
   void attach_updater(KernelUpdater& updater);
+  // The laptops' public keys a connection may name (they outlive the
+  // server), and the source of the ephemeral keys. Without them (or with
+  // no keys) every hello is refused: fail closed.
+  void set_keys(const AuthorizedKey* keys, uint32_t n, Random& random);
 
   // The bridge is open: the link is paused, do not poll() or request() it.
   bool bridge_open() const { return bridge_; }
@@ -116,15 +142,46 @@ class HostServer {
   bool reboot_requested() const { return reboot_; }
   // The controlling client's slot, -1 for none.
   int32_t controller() const { return controller_; }
+  // Connections that are clients (a record from them authenticated), and all open ones.
   uint32_t clients() const;
+  uint32_t connections() const;
   const Stats& stats() const { return stats_; }
 
  private:
+  static constexpr uint32_t kReadChunk = 256;
+  static constexpr uint32_t kReadsPerPoll = 4;     // bounded work per client per pass (1 KB read)
+  static constexpr uint32_t kRecordsPerFlush = 2;  // ... and at most two records sealed (2 KB)
+
+  // A connection's place in the handshake (the spec's [host] comments).
+  enum class Phase : uint8_t {
+    Hello,    // reading the clear hello and Noise message 1
+    Keygen,   // waiting for a pass to make the ephemeral key (X25519)
+    Ee,       // ... for ee
+    Se,       // ... for se; then the answer and message 2 go out
+    Proving,  // waiting for the client's first record
+    Open,     // a client: its records carry frames
+  };
+
   struct Client {
     bool open;
+    Phase phase;
+    bool closing;              // a clear refusal is queued: close once it is written
+    const char* closing_why;
     Conn* conn;
+    uint64_t opened_us;        // accept(): the handshake deadline counts from here
+    int32_t key;               // the hello's key: its index in keys_
+    uint64_t hs_start_us;      // message 1 complete
+    uint32_t hs_us;            // message 1 complete to message 2 sealed: the mind's handshake
+    uint32_t hs_slowest_us;    // the slowest of the three X25519 steps
+    noise::HandshakeKN hs;
+    noise::CipherState send, recv;
+    uint8_t in[kRecordBytes];  // the hello and message 1, then the record being read
+    uint32_t in_len;
+    uint8_t out[kRecordBytes]; // the clear answer and message 2, then the record being written
+    uint32_t out_head;
+    uint32_t out_len;
     HostRx rx;
-    uint8_t tx[kTxBytes];
+    uint8_t tx[kTxBytes];      // frames waiting to be sealed into a record
     uint32_t tx_head;  // first byte to send
     uint32_t tx_len;   // bytes queued
     uint8_t out_seq;   // seq of this client's stream frames
@@ -138,7 +195,17 @@ class HostServer {
   };
 
   void accept(uint64_t now);
+  void evict();
   void read_client(uint32_t i, uint64_t now);
+  // The secure layer (net/host_secure.cpp).
+  void read_hello(uint32_t i, uint64_t now);
+  void hello_complete(uint32_t i, uint64_t now);
+  void refuse(uint32_t i, uint8_t status, const char* why);
+  void handshake_step(uint64_t now);
+  void read_records(uint32_t i, uint64_t now);
+  void record_in(uint32_t i, uint64_t now);
+  void expire(uint64_t now);
+  bool seal(uint32_t i);
   void handle(uint32_t i, const HostFrame& f, uint64_t now);
   void drop(uint32_t i, const char* why);
   void lose_control(const char* why);
@@ -155,7 +222,10 @@ class HostServer {
   void drop_update(const char* why);
   void update_status();
   void update_reboot();
-  void flush(uint32_t i);
+  // Write out what is sealed, sealing at most a few records per call (all:
+  // until the ring is empty or the connection takes no more, for an OK that
+  // must leave now).
+  void flush(uint32_t i, bool all = false);
 
   bool enqueue(uint32_t i, uint8_t type, uint8_t seq, const void* payload, uint32_t len);
   void reply(uint32_t i, uint8_t seq, const void* payload, uint32_t len, uint8_t type);
@@ -175,7 +245,11 @@ class HostServer {
   uint32_t mind_build_;
   uint64_t start_us_;
 
-  Client clients_[kMaxClients] = {};
+  Client clients_[kSlots] = {};
+  const AuthorizedKey* keys_ = nullptr;
+  uint32_t n_keys_ = 0;
+  Random* random_ = nullptr;
+  uint32_t hs_next_ = 0;  // where handshake_step() looks first (round robin)
   int32_t controller_ = -1;
   bool bridge_ = false;
   bool reboot_ = false;
