@@ -33,6 +33,8 @@ CORE_C := $(filter %.c,$(MIND_SRCS))
 HOST_SRCS := main.cpp posix.cpp baud.cpp
 TESTS := test_fmt test_frames test_link test_names test_planner test_walker
 PLANNER_VECTORS := tests/planner_vectors.txt
+# The Noise layer's known answers (tests/gen_noise_vectors.py; test.sh checks they are current).
+NOISE_VECTORS := tests/noise_vectors.txt
 
 # The laptop interface (docs/fast-boot.md P2): POSIX sockets for --listen, its
 # unit tests, and the build id STATUS reports (the commit's first 8 hex digits,
@@ -108,8 +110,9 @@ $(B)/test_planner_vectors: tests/test_planner_vectors.cpp $(SAN_OBJS)
 $(B)/test_planner_vectors_double: tests/test_planner_vectors.cpp $(DBL_OBJS)
 	$(CXX) $(CXXFLAGS) -DKILO_PLANNER_DOUBLE $(SAN) -O1 -MMD $< $(DBL_OBJS) -o $@
 
-check: $(TESTS:%=$(B)/%) $(B)/vectors.txt $(B)/test_planner_vectors $(B)/test_planner_vectors_double
+check: $(TESTS:%=$(B)/%) $(B)/vectors.txt $(B)/test_planner_vectors $(B)/test_planner_vectors_double $(B)/test_noise
 	@fail=0; for t in $(TESTS); do $(B)/$$t $(B)/vectors.txt || fail=1; done; \
+	$(B)/test_noise $(NOISE_VECTORS) || fail=1; \
 	$(B)/test_planner_vectors $(PLANNER_VECTORS) || fail=1; \
 	$(B)/test_planner_vectors_double $(PLANNER_VECTORS) || fail=1; exit $$fail
 

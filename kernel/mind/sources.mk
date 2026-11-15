@@ -24,9 +24,10 @@ MIND_SRCS += \
 
 # Who may talk to the mind (kernel/README.md "Who may talk to Kilo: keys"):
 # Monocypher (vendored, byte-identical upstream C) under the host channel's
-# Noise layer.
+# Noise layer (net/noise).
 MIND_SRCS += \
-	mind/third_party/monocypher/monocypher.c
+	mind/third_party/monocypher/monocypher.c \
+	mind/net/noise.cpp
 
 # Body flashing (docs/fast-boot.md §6, P4): the image, its CRC-32 and
 # manifest, and the STK500v1 flasher.
