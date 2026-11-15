@@ -55,7 +55,7 @@ images link (`lib`, `usb`, `input`, `fs`, `sched`, `net`, and the addons
 
 | Output | What | Size |
 |---|---|---|
-| `build/kernel7.img` | the mind kernel | 591,076 bytes with one key (`KILO_BODY_SERIAL=auto`: about 250 bytes less) |
+| `build/kernel7.img` | the mind kernel | 591,140 bytes with one key (`KILO_BODY_SERIAL=auto`: about 250 bytes less) |
 | `build/netboot/kernel7.img` | the network loader | 305,420 bytes |
 
 Of the mind kernel, the SD card (FatFs about 23 KB, the SD driver about
@@ -64,7 +64,7 @@ Of the mind kernel, the SD card (FatFs about 23 KB, the SD driver about
 sources were in the image before the kernel used them; composing the
 `Mind` changed its size by less than 1 KB. The keys (Monocypher, all of
 it linked: about 55 KB; the Noise layer and the secure host server, about
-13 KB) took the image from 522,532 to 591,076 bytes; each authorized key
+13 KB) took the image from 522,532 to 591,140 bytes; each authorized key
 adds 72 bytes.
 
 The build needs at least one laptop key in `keys/authorized_keys` ("Who may
