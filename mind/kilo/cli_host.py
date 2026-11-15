@@ -271,19 +271,25 @@ def cmd_update(args: argparse.Namespace, hl: HostLink) -> int:
     shown: dict[str, int] = {}
 
     def progress(st: Any) -> None:
+        # A phase's last slice and the next phase's start arrive as one status
+        # (the latest): each phase's first status says the one before is done.
         phase = _name(P.UpdatePhase, st.phase)
-        if phase in ("WRITING", "VERIFYING"):
-            step = st.done * 4 // max(1, st.image_size)  # quarters
-            if shown.get(phase) == step:
-                return
-            shown[phase] = step
-            verb = "writing kernel7.new" if phase == "WRITING" else "reading kernel7.new back"
-            print(f"update: {verb}: {st.done} of {st.image_size} bytes", flush=True)
-        elif phase == "CHECKING":
+        first = phase not in shown
+        if first and phase == "CHECKING":
             print(f"update: the mind checked the image (size, crc32 {st.crc32:08x}"
                   f"{'' if args.force else ', marker'}): writing it to the SD card", flush=True)
-        elif phase == "INSTALLING":
-            print("update: installing: kernel7.img -> kernel7.old, kernel7.new -> kernel7.img", flush=True)
+        elif first and phase == "VERIFYING":
+            print(f"update: kernel7.new written ({st.image_size} bytes); reading it back", flush=True)
+        elif first and phase == "INSTALLING":
+            print(f"update: kernel7.new read back: {st.done} bytes, crc32 {st.card_crc32:08x}; installing: "
+                  "kernel7.img -> kernel7.old, kernel7.new -> kernel7.img", flush=True)
+        if phase in ("WRITING", "VERIFYING") and st.done > 0:
+            step = st.done * 4 // max(1, st.image_size)  # quarters
+            if shown.get(phase) != step:
+                verb = "writing kernel7.new" if phase == "WRITING" else "reading kernel7.new back"
+                print(f"update: {verb}: {st.done} of {st.image_size} bytes", flush=True)
+            shown[phase] = step
+        shown.setdefault(phase, -1)
 
     try:
         st = hl.update(data, force=args.force, progress=progress)
