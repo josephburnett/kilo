@@ -19,6 +19,7 @@
     kilo --kilolog [FILE] COMMAND ...    (also: kilo monitor --percepts; kilo.cli_tools)
     kilo --override posture|balance|trick ...   (through a daemon whose behaviour runner is active)
     kilo --host IP[:PORT] status|posture|monitor|flash|reboot|update ...; kilo log --host IP   (a C++ mind: kilo.cli_host)
+    kilo key init [--name NAME] | show   this laptop's key for --host (kilo.hostkey); --key PATH / $KILO_HOST_KEY
 
 Every command first tries the daemon socket (``kilo run``, kilo.daemon; path
 from kilo.remote.socket_path()); when no daemon listens, or ``--direct`` is
@@ -84,7 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--direct", action="store_true", help="never use the daemon: open the port directly")
     p.add_argument("--host", metavar="IP[:PORT]",
                    help=f"talk to a C++ mind over its host channel (port {P.HOST_PORT}; kilo.cli_host): "
-                        "status, posture, monitor, log, flash, reboot, update")
+                        "status, posture, monitor, log, flash, reboot, update; needs this laptop's key "
+                        "(kilo key init)")
+    p.add_argument("--key", metavar="PATH", default=None,
+                   help="this laptop's private key for --host (default $KILO_HOST_KEY, else "
+                        "~/.config/kilo/host_key; kilo key init makes it)")
     p.add_argument("--override", action="store_true",
                    help="through a daemon running the behaviour runner: pause it while this command holds "
                         "the body (posture, balance, trick, walk, pose) instead of being refused")
@@ -167,14 +172,15 @@ def build_parser() -> argparse.ArgumentParser:
         description="Send a mind kernel image to the mind over --host. The mind checks its size, CRC-32 and the "
                     f"mind kernel's marker ({P.HOST_UPDATE_MARKER}), writes it to its SD card as kernel7.new, "
                     "reads it back, renames kernel7.img to kernel7.old and kernel7.new to kernel7.img, and reboots "
-                    "into it. A failure before the renames leaves the card as it was. To put the netboot loader "
-                    "back on the card (it has no marker): kilo update --host IP "
-                    "--image kernel/build/netboot/kernel7.img --force.")
+                    "into it. A failure before the renames leaves the card as it was. Before sending, this CLI "
+                    "checks that the image has this laptop's public key built in (kilo key show): a kernel without "
+                    "it would refuse this laptop afterwards. To put the netboot loader back on the card (it has no "
+                    "marker and no keys): kilo update --host IP --image kernel/build/netboot/kernel7.img --force.")
     s.add_argument("--image", type=Path, default=None, metavar="PATH",
                    help="the kernel image (default: kernel/build/kernel7.img of this checkout, `make -C kernel`)")
     s.add_argument("--force", action="store_true",
-                   help="install an image without the marker: how the netboot loader goes back on the card "
-                        "(--image kernel/build/netboot/kernel7.img --force)")
+                   help="install an image without the marker or without this laptop's key: how the netboot "
+                        "loader goes back on the card (--image kernel/build/netboot/kernel7.img --force)")
     s.add_argument("--wait", type=float, default=30.0, metavar="S",
                    help="seconds to wait for the mind to come back after its reboot and show its build "
                         "(default 30; 0: do not wait)")
@@ -220,6 +226,19 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--rollback", action="store_true",
                    help="flash the last good image kept on the mind's SD (not yet: docs/fast-boot.md §6)")
 
+    s = sub.add_parser(
+        "key", help="this laptop's key for --host: init (make it, once) or show (the line for "
+                    "kernel/keys/authorized_keys)",
+        description="The mind talks over the network (kilo --host) only to laptops whose public key is built into "
+                    "its kernel (kernel/keys/authorized_keys). `kilo key init` makes this laptop's key pair in "
+                    "~/.config/kilo/host_key (or --key PATH, $KILO_HOST_KEY) if there is none, never overwriting "
+                    "one, and prints the public line; `kilo key show` prints that line again (stdout) and the "
+                    "key's fingerprint (stderr). Add the line with `kilo key show >> kernel/keys/authorized_keys`, "
+                    "rebuild (make -C kernel) and install the kernel (kilo update --host from a laptop the mind "
+                    "knows, or the SD card).")
+    s.add_argument("action", choices=("init", "show"))
+    s.add_argument("--name", default=None, help="init: the key's name in the public line (default user@hostname)")
+
     s = sub.add_parser("vbody", help="run a virtual body on a pty")
     s.add_argument("--fall-after", type=float, default=None, metavar="S",
                    help="simulate a fall S seconds after start")
@@ -261,6 +280,7 @@ def build_parser() -> argparse.ArgumentParser:
     for name, sp in sub.choices.items():  # `kilo status --host IP` too (`kilo log --host`: kilo.cli_host)
         if name != "log":
             sp.add_argument("--host", default=argparse.SUPPRESS, metavar="IP[:PORT]", help=argparse.SUPPRESS)
+            sp.add_argument("--key", default=argparse.SUPPRESS, metavar="PATH", help=argparse.SUPPRESS)
     return p
 
 
@@ -780,6 +800,32 @@ def cmd_reboot(args: argparse.Namespace) -> int:
     return EXIT_ERR
 
 
+def cmd_key(args: argparse.Namespace) -> int:
+    """`kilo key init|show`: this laptop's key for the host channel (kilo.hostkey)."""
+    from kilo import hostkey
+
+    try:
+        if args.action == "init":
+            key, made = hostkey.init(args.key, args.name)
+        else:
+            key, made = hostkey.load(args.key), False
+    except hostkey.HostKeyError as e:
+        print(f"kilo key {args.action}: {e}", file=sys.stderr)
+        return EXIT_ERR
+    except OSError as e:
+        print(f"kilo key {args.action}: {e}", file=sys.stderr)
+        return EXIT_ERR
+    if args.action == "init":
+        state = "made" if made else "already there, not changed"
+        print(f"kilo key: {key.path} {state}; fingerprint {key.fingerprint}", file=sys.stderr)
+        print(f"kilo key: add this line to {hostkey.KEYS_FILE} (kilo key show >> {hostkey.KEYS_FILE}), then "
+              "rebuild and install the kernel:", file=sys.stderr)
+    else:
+        print(f"kilo key: {key.path}, fingerprint {key.fingerprint}", file=sys.stderr)
+    print(key.line())
+    return EXIT_OK
+
+
 def cmd_update(args: argparse.Namespace) -> int:
     """`kilo update` without --host: it writes a C++ mind's own SD card (kilo.cli_host)."""
     print("kilo update: needs --host IP[:PORT] (it writes a new kernel onto a C++ mind's SD card)", file=sys.stderr)
@@ -950,7 +996,7 @@ LINK_COMMANDS = {"status": cmd_status, "monitor": cmd_monitor, "posture": cmd_po
                  "cal": cmd_cal, "param": cmd_param, "pca": cmd_pca, "eeprom": cmd_eeprom}
 # Commands that manage the port (or the daemon) themselves: cmd(args).
 PORT_COMMANDS = {"flash": cmd_flash, "vbody": cmd_vbody, "run": cmd_run, "daemon": cmd_daemon,
-                 "log": cmd_log, "reboot": cmd_reboot, "update": cmd_update}
+                 "log": cmd_log, "reboot": cmd_reboot, "update": cmd_update, "key": cmd_key}
 # Link-command modes that must send nothing, so they cannot share the daemon's port.
 SILENT_MODES = {"monitor": ("passive", "--passive"), "posture": ("then_watch", "--then-watch"),
                 "trick": ("then_watch", "--then-watch")}

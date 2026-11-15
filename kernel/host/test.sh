@@ -8,7 +8,9 @@
 #   4. kilo-mind-host against the virtual body (the real body core on a pty), and
 #      against a silent pty and a protocol-1 fake body; kilo --host (status, monitor, posture,
 #      log, the bridge, kilo reboot: exit 3, kilo update into --card DIR: exit 3 and the
-#      card's files checked); walk-demo trotting the virtual body;
+#      card's files checked), all over the Noise channel with a throwaway key (kilo key init),
+#      and refused: a key the mind does not know, no key file, a plaintext frame;
+#      walk-demo trotting the virtual body;
 #   5. body flashing (P4): kilo flash --host through kilo-mind-host to a fake optiboot
 #      (tests/fake_optiboot.py), a refused CRC, a sync timeout, and kilo flash --sd.
 
@@ -42,6 +44,10 @@ make -s -C "$HERE" -j"$JOBS" bench
 
 echo "== freestanding core"
 make -s -C "$HERE" freestanding
+
+echo "== Noise vectors up to date (noiseprotocol, the published cacophony and snow vectors)"
+"$PYTHON" "$HERE/tests/gen_noise_vectors.py" | cmp -s - "$HERE/tests/noise_vectors.txt" ||
+    { echo "FAILED: stale; run: $PYTHON kernel/host/tests/gen_noise_vectors.py > kernel/host/tests/noise_vectors.txt"; exit 1; }
 
 # Start a body that prints its pty; sets BODY_PID and PTY.
 start_body() {
@@ -126,8 +132,20 @@ expect "$OUT/host_proto1.log" "protocol major 1 != expected 2: refusing to drive
 # The CLI and vbody come from this checkout's mind/ (PYTHONPATH), not the venv's editable install.
 echo "== integration: kilo --host against kilo-mind-host --listen and the virtual body"
 KPY() { PYTHONPATH="$REPO/mind${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON" "$@"; }
+# A throwaway key for this run (never the owner's ~/.config/kilo/host_key): kilo key init makes
+# it, kilo key show gives the line kilo-mind-host --authorized-keys reads, as the kernel build does.
+KEYDIR="$OUT/keys"
+rm -rf "$KEYDIR" "$KEYDIR.line"
+KPY -m kilo.cli --key "$KEYDIR/host_key" key init --name test@kernel-host 2> "$OUT/key_init.txt" > "$KEYDIR.line"
+expect "$OUT/key_init.txt" "host_key made; fingerprint [0-9a-f]{16}" "kilo key init made the key"
+[ "$(stat -c %a "$KEYDIR/host_key")" = 600 ] && [ "$(stat -c %a "$KEYDIR")" = 700 ] \
+    || { echo "FAILED: the key's modes"; ls -la "$KEYDIR"; exit 1; }
+KPY -m kilo.cli --key "$KEYDIR/host_key" key show 2> /dev/null > "$KEYDIR/authorized_keys"
+cmp -s "$KEYDIR.line" "$KEYDIR/authorized_keys" || { echo "FAILED: key init and key show differ"; exit 1; }
+export KILO_HOST_KEY="$KEYDIR/host_key"
+KEYS="$KEYDIR/authorized_keys"
 start_body "$OUT/vbody_host.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u -m kilo.vbody.core
-"$HOST" --port "$PTY" --listen 127.0.0.1:0 2> "$OUT/host_listen.log" &
+"$HOST" --port "$PTY" --authorized-keys "$KEYS" --listen 127.0.0.1:0 2> "$OUT/host_listen.log" &
 MIND_PID=$!
 stop_all() { kill "$MIND_PID" 2>/dev/null || true; wait "$MIND_PID" 2>/dev/null || true; stop_body; }
 trap stop_all EXIT
@@ -148,6 +166,32 @@ expect "$OUT/cli_status.txt" "firmware +proto 2\.[0-9]+ +build 45524f43" "status
 expect "$OUT/cli_status.txt" "link +connected=True alive=True" "status: the link alive"
 KPY -m kilo.cli status --host "$H" --json > "$OUT/cli_status.json"
 expect "$OUT/cli_status.json" '"mind_build": "[0-9a-f]{8}"' "status --json: the mind build"
+expect "$OUT/host_listen.log" "noise: client [0-9]+: handshake with key [0-9a-f]{16} \(test@kernel-host\) in [0-9]+\.[0-9] ms, slowest step [0-9]+ us" \
+    "the mind's handshake line"
+grep -o "noise: client [0-9]*: handshake .*" "$OUT/host_listen.log" | head -1 | sed 's/^/   /'
+
+echo "== integration: refused over --host (an unknown key, no key file, a key others can read, a plaintext frame)"
+KPY -m kilo.cli --key "$KEYDIR/stranger_key" key init --name stranger 2> /dev/null > /dev/null
+set +e
+KPY -m kilo.cli --key "$KEYDIR/stranger_key" --host "$H" status > "$OUT/cli_stranger.txt" 2>&1
+s1=$?
+KPY -m kilo.cli --key "$KEYDIR/no_such_key" --host "$H" status > "$OUT/cli_nokey.txt" 2>&1
+s2=$?
+chmod 644 "$KEYDIR/stranger_key"
+KPY -m kilo.cli --key "$KEYDIR/stranger_key" --host "$H" status > "$OUT/cli_unsafe.txt" 2>&1
+s3=$?
+set -e
+sed 's/^/   /' "$OUT/cli_stranger.txt" "$OUT/cli_nokey.txt" "$OUT/cli_unsafe.txt"
+[ "$s1" -eq 1 ] && [ "$s2" -eq 1 ] && [ "$s3" -eq 1 ] || { echo "FAILED: refusals exit $s1 $s2 $s3, want 1"; exit 1; }
+expect "$OUT/cli_stranger.txt" "the mind does not know this laptop's key \([0-9a-f]{16}, .*stranger_key\)\. Add .kilo key show.'s line to kernel/keys/authorized_keys" \
+    "an unknown key: what to do"
+expect "$OUT/cli_nokey.txt" "no host key at .*no_such_key: create one with .kilo key init." "no key file: kilo key init"
+expect "$OUT/cli_unsafe.txt" "can be read by others \(mode 0644\).*chmod 600" "a key file others can read"
+expect "$OUT/host_listen.log" "host: client [0-9]+: key [0-9a-f]{16} is not authorized" "the mind's refusal"
+KPY "$HERE/tests/plaintext_client.py" "$H" | tee "$OUT/plaintext.txt"
+expect "$OUT/plaintext.txt" "the connection closed, nothing answered" "a plaintext frame: closed, unanswered"
+expect "$OUT/host_listen.log" "closed: no host channel hello \(a plaintext or version 1 client\?\), unanswered" \
+    "the mind's log of the plaintext frame"
 
 KPY -m kilo.cli --host "$H" monitor --json --rate 10 --duration 2 > "$OUT/cli_monitor.jsonl"
 n="$(grep -c '"mode": "' "$OUT/cli_monitor.jsonl" || true)"
@@ -205,7 +249,7 @@ if grep -Eq "decode errors [1-9]" "$OUT/host_listen.log"; then echo "FAILED: dec
 # and kilo-mind-host exits with status 3 (the Circle kernel reboots the Pi there).
 echo "== integration: kilo reboot --host (kilo-mind-host exits 3)"
 start_body "$OUT/vbody_reboot.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u -m kilo.vbody.core
-"$HOST" --port "$PTY" --listen 127.0.0.1:0 2> "$OUT/host_reboot.log" &
+"$HOST" --port "$PTY" --authorized-keys "$KEYS" --listen 127.0.0.1:0 2> "$OUT/host_reboot.log" &
 MIND_PID=$!
 trap stop_all EXIT
 HPORT=""
@@ -246,14 +290,18 @@ printf 'STALE\n' > "$UP/card/kernel7.old"
 cp "$REPO/kernel/boot/config.txt" "$UP/card/config.txt"
 KPY - "$UP" <<'EOF'
 import sys
+from kilo import hostkey
 from kilo.protocol import kilo_protocol as P
 pattern = bytes((i * 131 + 7) % 256 for i in range(200000))
 marker = P.HOST_UPDATE_MARKER.encode()
-open(f"{sys.argv[1]}/kernel7.img", "wb").write(pattern[:150000] + marker + pattern[150000 + len(marker):])
+pub = hostkey.load().public  # built in, as kernel/keys/gen_keys.py puts the keys into a real kernel
+img = pattern[:150000] + marker + pattern[150000 + len(marker):]
+open(f"{sys.argv[1]}/kernel7.img", "wb").write(img[:100000] + pub + img[100000 + len(pub):])
+open(f"{sys.argv[1]}/nokey.img", "wb").write(img)
 open(f"{sys.argv[1]}/loader.img", "wb").write(pattern[:60000])
 EOF
 start_body "$OUT/vbody_update.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u -m kilo.vbody.core
-"$HOST" --port "$PTY" --listen 127.0.0.1:0 --card "$UP/card" 2> "$UP/mind.log" &
+"$HOST" --port "$PTY" --authorized-keys "$KEYS" --listen 127.0.0.1:0 --card "$UP/card" 2> "$UP/mind.log" &
 MIND_PID=$!
 trap stop_all EXIT
 HPORT=""
@@ -271,6 +319,12 @@ s1=$?
 set -e
 [ "$s1" -eq 1 ] || { echo "FAILED: kilo update of an image without the marker: exit $s1"; cat "$UP/cli_loader.txt"; exit 1; }
 expect "$UP/cli_loader.txt" "has no KILO-MIND-KERNEL-1: it is not the mind kernel" "the CLI's own marker check"
+set +e
+KPY -m kilo.cli update --host "$H" --image "$UP/nokey.img" > "$UP/cli_nokey.txt" 2>&1
+s1=$?
+set -e
+[ "$s1" -eq 1 ] || { echo "FAILED: kilo update of a kernel without this laptop's key: exit $s1"; cat "$UP/cli_nokey.txt"; exit 1; }
+expect "$UP/cli_nokey.txt" "does not have this laptop's key \([0-9a-f]{16}\) built in" "the CLI's key check"
 KPY - "$H" "$UP/loader.img" <<'EOF' | tee "$UP/loader_mind.txt"
 import sys
 from kilo.hostlink import HostLink, HostRefused
@@ -297,7 +351,7 @@ status=$?
 set -e
 [ "$status" -eq 3 ] || { echo "FAILED: kilo-mind-host exit status $status, not 3"; cat "$UP/mind.log"; exit 1; }
 echo "   kilo-mind-host exit status $status after the update; restarting it on port $HPORT"
-"$HOST" --port "$PTY" --listen "$H" 2> "$UP/mind2.log" &
+"$HOST" --port "$PTY" --authorized-keys "$KEYS" --listen "$H" 2> "$UP/mind2.log" &
 MIND_PID=$!
 set +e
 wait "$CLI_PID"
@@ -376,7 +430,7 @@ start_flash_rig() {  # start_flash_rig <name> <fake_optiboot args...>
     local name="$1"; shift
     start_body "$FL/$name.body.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u "$HERE/tests/fake_optiboot.py" \
         --reset-fifo "$FL/$name.fifo" "$@"
-    "$HOST" --port "$PTY" --listen 127.0.0.1:0 --reset-fifo "$FL/$name.fifo" 2> "$FL/$name.mind.log" &
+    "$HOST" --port "$PTY" --authorized-keys "$KEYS" --listen 127.0.0.1:0 --reset-fifo "$FL/$name.fifo" 2> "$FL/$name.mind.log" &
     MIND_PID=$!
     HPORT=""
     for _ in $(seq 1 50); do

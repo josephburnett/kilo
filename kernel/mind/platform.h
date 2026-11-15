@@ -70,6 +70,20 @@ class Gpio {
   ~Gpio() = default;
 };
 
+// Random bytes fit for keys: the host channel's ephemeral Noise keys
+// (net/host_server.h). The Circle kernel's come from the SoC's hardware RNG
+// (CBcmRandomNumberGenerator, hashed), kilo-mind-host's from getrandom().
+// No other part of the core needs it (the behaviour RNG is seeded, not secret).
+class Random {
+ public:
+  // n bytes into buf; false if the source failed or looks broken: then
+  // buf must not be used (the server refuses the handshake: fail closed).
+  virtual bool fill(uint8_t* buf, uint32_t n) = 0;
+
+ protected:
+  ~Random() = default;
+};
+
 // The SD card's FAT partition, for the mind's own kernel image
 // (update/updater.h: kernel7.img, kernel7.new, kernel7.old, bare names).
 // One file open at a time. Unlike the seams above these calls may block for

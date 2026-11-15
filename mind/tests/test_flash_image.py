@@ -20,6 +20,7 @@ import pytest
 
 from kilo import cli
 from kilo.hostlink import HostLink, HostRefused
+from noise_mind import Responder
 from kilo.protocol import kilo_link_codec as C
 from kilo.protocol import kilo_protocol as P
 from kilo.tools import body_image as BI
@@ -149,6 +150,9 @@ class FlashMind:
     (or FAILED with `fail_with`)."""
 
     def __init__(self, fail_with: int | None = None, fw_build: int | None = None):
+        from kilo import hostkey
+
+        self.keys = [hostkey.load().public]  # the test's key ($KILO_HOST_KEY, conftest.py)
         self.srv = socket.socket()
         self.srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.srv.bind(("127.0.0.1", 0))
@@ -173,9 +177,10 @@ class FlashMind:
         dec = C.HostStreamDecoder()
         controller = False
         out_seq = 0
+        r = Responder(c, self.keys)
 
         def send(msg: Any, seq: int) -> None:
-            c.sendall(C.encode_host_message(msg, seq))
+            r.send(C.encode_host_message(msg, seq))
 
         def result(seq: int, req: int, code: int = 0, text: bytes = b"") -> None:
             send(P.HostResult(request=req, code=code, text=text), seq)
@@ -186,9 +191,12 @@ class FlashMind:
             out_seq += 1
 
         try:
+            if not r.handshake():
+                c.close()
+                return
             while True:
-                data = c.recv(65536)
-                if not data:
+                data = r.recv()
+                if data is None:
                     return
                 for f in dec.feed(data):
                     m = P.decode_host_payload(f.type, f.payload)

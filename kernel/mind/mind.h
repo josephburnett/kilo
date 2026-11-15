@@ -62,6 +62,12 @@ struct MindConfig {
   const behaviour::Personality* personality = nullptr;  // null: behaviour::kPersonality
   remote::RemoteConfig remote_cfg;
   uint32_t stats_period_ms = 0;  // > 0: STATS_REQ this often, the answer logged ("body STATS: ...")
+  // The laptop interface's keys (net/host_server.h set_keys(); they outlive
+  // the Mind) and the source of its ephemeral keys. Without a Random every
+  // connection is refused.
+  const AuthorizedKey* authorized_keys = nullptr;
+  uint32_t authorized_key_count = 0;
+  Random* random = nullptr;
 };
 
 class Mind final : public LinkListener {

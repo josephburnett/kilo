@@ -1,0 +1,88 @@
+{
+ "note": "The Noise_KN_25519_ChaChaPoly_BLAKE2b entries of two published Noise test vector files, copied unchanged; kernel/host/tests/gen_noise_vectors.py turns them into noise_vectors.txt for test_noise.cpp.",
+ "sources": [
+  {
+   "file": "cacophony.txt",
+   "url": "https://raw.githubusercontent.com/haskell-cryptography/cacophony/master/vectors/cacophony.txt",
+   "sha256": "3bde7c09a6f349ee11c825c50fcc02649f8f02a47c857a459206b357f9386cae",
+   "licence": "cacophony: the Unlicense (public domain)",
+   "fetched": "2026-11-14"
+  },
+  {
+   "file": "snow.txt",
+   "url": "https://raw.githubusercontent.com/mcginty/snow/main/tests/vectors/snow.txt",
+   "sha256": "69da433305fd045f6c9f01b656662a389d022688986fd39fbe7af009cd402fd3",
+   "licence": "snow: Apache-2.0",
+   "fetched": "2026-11-14"
+  }
+ ],
+ "vectors": [
+  {
+   "source": "cacophony.txt",
+   "protocol_name": "Noise_KN_25519_ChaChaPoly_BLAKE2b",
+   "init_prologue": "4a6f686e2047616c74",
+   "init_static": "e61ef9919cde45dd5f82166404bd08e38bceb5dfdfded0a34c8df7ed542214d1",
+   "init_ephemeral": "893e28b9dc6ca8d611ab664754b8ceb7bac5117349a4439a6b0569da977c464a",
+   "resp_prologue": "4a6f686e2047616c74",
+   "resp_ephemeral": "bbdb4cdbd309f1a1f2e1456967fe288cadd6f712d65dc7b7793d5e63da6b375b",
+   "resp_remote_static": "6bc3822a2aa7f4e6981d6538692b3cdf3e6df9eea6ed269eb41d93c22757b75a",
+   "handshake_hash": "c72b5cf38492a730c8b0e7fc65c230fc44b6876bca704cfaa191f61261bbcbd5659cd03c7882c83139f982b38f5e96d4944c2d719df61d2ec901cf4e5c188b19",
+   "messages": [
+    {
+     "payload": "4c756477696720766f6e204d69736573",
+     "ciphertext": "ca35def5ae56cec33dc2036731ab14896bc4c75dbb07a61f879f8e3afa4c79444c756477696720766f6e204d69736573"
+    },
+    {
+     "payload": "4d757272617920526f746862617264",
+     "ciphertext": "95ebc60d2b1fa672c1f46a8aa265ef51bfe38e7ccb39ec5be34069f144808843d7179edeba31152b3bf6a6c2870401ed8000b5c5f2eebd4d12d7349a2bd52b"
+    },
+    {
+     "payload": "462e20412e20486179656b",
+     "ciphertext": "4f4945412bb3480c283fded0104a71c248ad9a39963324e9fe5887"
+    },
+    {
+     "payload": "4361726c204d656e676572",
+     "ciphertext": "07ddf2cec5a015dcd50dbb9b5ee61febc436db6b0f4e6a6a7c88da"
+    },
+    {
+     "payload": "4a65616e2d426170746973746520536179",
+     "ciphertext": "c5df36d437206734b09b1a1a3d4e382283f3b45141d5db0485121fb8e652aeab37"
+    },
+    {
+     "payload": "457567656e2042f6686d20766f6e2042617765726b",
+     "ciphertext": "3a4b0ded5d48b644b40a2226ec009866b4470506319e66fe678c55d8ee66727368aa08924a"
+    }
+   ]
+  },
+  {
+   "source": "snow.txt",
+   "protocol_name": "Noise_KN_25519_ChaChaPoly_BLAKE2b",
+   "init_prologue": "5468657265206973206e6f20726967687420616e642077726f6e672e2054686572652773206f6e6c792066756e20616e6420626f72696e672e",
+   "init_psks": [],
+   "init_static": "6d2d72b0c2672948227336de854827aeb91a6eaad59643c70810c8560d905091",
+   "init_ephemeral": "f6d206af873f57ba8ea61945d56e0b26e91eda2d44ccd53c271b928976505ccd",
+   "resp_prologue": "5468657265206973206e6f20726967687420616e642077726f6e672e2054686572652773206f6e6c792066756e20616e6420626f72696e672e",
+   "resp_psks": [],
+   "resp_ephemeral": "1992bbc8add75e271aeea8c7bae9c81bf6b7bafdb5f980dd4e410313b2c8a1f5",
+   "resp_remote_static": "12b0b5b12a74f3426cb15514e532672018091304eb28b71008ba6d56008bf461",
+   "messages": [
+    {
+     "payload": "7077a263eef98e89818713950ab6c4422bc4b9bf82b39169ae2407185f96caa7",
+     "ciphertext": "db914dd824c2c9541da9acdeaaabaf4e92cc058a5d3017af56047bf5d3a7857a7077a263eef98e89818713950ab6c4422bc4b9bf82b39169ae2407185f96caa7"
+    },
+    {
+     "payload": "8510be113df761e56263453f105f2e8c26b933ac012d93af8883eb7ccc386235",
+     "ciphertext": "95d98a5adf72b124f8eebeb3869ced1a7a78b05de2b447cfe5d9f6ca7ea6b315ef1b2e1e330f4e09ba2a3d5f74f204c808c777f554e6c80aad4476f260bf38a451380b8c52f492f8493a7c758dc86026"
+    },
+    {
+     "payload": "8760e33413370aa5d3e44c606c5d9a52c2c89e92ebc16b9d2635b026582a365c",
+     "ciphertext": "c1dead4f7b8222b8505b1912a82e01508152229f7f2cdde6bea6a039d56ea4d26a2a84a8dc7d4728ce9f2d21ef02fc34"
+    },
+    {
+     "payload": "41b051f1db2b6d8874e9599091746a63b0c1429879d09ddc40b19c1deac736f5",
+     "ciphertext": "23a5bc0619dabe79d0248a9ba2393c447269ba979bdf93bf7d672fa63a065f1abe79887c57a7a78ca73ec0d7e3477935"
+    }
+   ]
+  }
+ ]
+}

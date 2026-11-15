@@ -32,6 +32,11 @@ Words used below:
   the chip is reset.
 - **Reset line**: the wire that restarts Kilo's board when it is pulled
   low. The Pi pulls it with its header pin 7 (GPIO4).
+- **Key**: the mind talks over the network only to laptops it knows. Each
+  laptop has a key pair: a private key, a file that stays on that laptop and
+  is never shared, and a public key, a line of 44 letters and digits that
+  may be shown to anyone. The public keys of the laptops Kilo knows are
+  built into the kernel (kernel/README.md, "Who may talk to Kilo: keys").
 
 ## What you need
 
@@ -97,6 +102,23 @@ stray key press does not make Kilo move on the desk.
 ## Steps
 
 ### 1. Build and write the card (on the laptop)
+
+First this laptop's key, once (if `kilo key show` already prints a line,
+and that line is in `kernel/keys/authorized_keys`, skip this):
+
+```
+~/OpenCat/.venv/bin/kilo key init
+~/OpenCat/.venv/bin/kilo key show >> kernel/keys/authorized_keys
+```
+
+The first command makes the key pair: the private key goes into
+`~/.config/kilo/host_key` (only you can read it; never copy it anywhere),
+and it prints the public line, which ends with this laptop's name. The
+second adds that line to the list the kernel is built with. Commit the
+list (it holds public keys only). Without a key in it, the next command
+stops and says this.
+
+Then build:
 
 ```
 git submodule update --init kernel/circle
@@ -235,10 +257,15 @@ bench card needs the router.)
 ~/OpenCat/.venv/bin/kilo status --host 192.168.88.Y
 ```
 
+(It uses this laptop's key from step 1. If it says `no host key`, step 1's
+`kilo key init` was not run on this laptop; if it says `the mind does not
+know this laptop's key`, the kernel was built without this laptop's line:
+add it, rebuild, and send the kernel again, step 6.)
+
 A good answer looks like this (your numbers will differ):
 
 ```
-mind        build 3d441ec0  up 42.7 s  host channel v1  clients 1  controller NONE
+mind        build 3d441ec0  up 42.7 s  host channel v2  clients 1  controller NONE
 link        connected=True alive=True contact=True
 firmware    proto 2.0  build 1a2b3c4d  reset COLD  config OK
 mode        REST  epoch 1  flags -  age 12 ms
@@ -270,7 +297,10 @@ When the laptop first connects, the mind times its walking planner once,
 for about 5 seconds, without moving Kilo. Copy into the results:
 
 - the three lines starting `planner bench` (trot, walk, crawl): how long
-  the walking planner takes on this Pi. The mind keeps only its last 64
+  the walking planner takes on this Pi, and the line starting `noise
+  bench`: how long the key handshake's three steps take on this Pi;
+- the line starting `noise: client` (one per connection): this laptop's
+  key, and how long its handshake took; The mind keeps only its last 64
   log lines, about 15 seconds' worth, so if these are missing, the status
   command was too long ago: power-cycle the Pi, send the kernel again
   (step 6) and run this log command first;
@@ -422,7 +452,9 @@ laptop:
 ~/OpenCat/.venv/bin/kilo update --host 192.168.88.Y
 ```
 
-It sends `kernel/build/kernel7.img` (the build from step 1). While the Pi
+It sends `kernel/build/kernel7.img` (the build from step 1). It first
+checks that this laptop's key is in that image (so that the new kernel will
+still let this laptop in) and stops if it is not. While the Pi
 writes the card, the ACT light gives two short flashes, then a pause (as
 when flashing Kilo's board) and Kilo lies down. The laptop prints lines
 starting `update:`, then
@@ -478,6 +510,9 @@ Kilo off.
 | The Pi resets when Kilo's cable goes in | The 5 V problem above. Note it; Kilo must be on before the cable goes in. |
 | Steady light for more than 20 s | Note whether it was on or off, and whether a screen showed anything. Power-cycle and try once more. |
 | No **kilo** in the router's list | Wait a minute and look again, and try the loader's address anyway. If nothing answers, note it: the kernel's network did not come up. |
+| `kilo status` says `no host key` | Step 1's `kilo key init` was not run on this laptop (or `--key`/`KILO_HOST_KEY` points elsewhere). |
+| `kilo status` says `the mind does not know this laptop's key` | The kernel was built without this laptop's line in `kernel/keys/authorized_keys`: add it (`kilo key show >> kernel/keys/authorized_keys`), `make -C kernel`, send it again (step 6), or for the card in step 13 use a laptop the mind knows, or the card reader. |
+| `kilo status` says `can be read by others` | The key file's permissions: `chmod 600 ~/.config/kilo/host_key`. |
 | `kilo status` cannot connect, or waits and gives up | Check the address. Does the Pi answer at all? `ping 192.168.88.Y` (Ctrl-C stops it). Note what `ping` says. |
 | `kilo status` works but shows `alive=False` | The network is fine; Kilo's board is not talking to the Pi (see the slow-blink row above). |
 | `kilo posture` says `NO_BODY` or `NOT_CONTROLLER` | NO_BODY: the same as `alive=False`. NOT_CONTROLLER: another `kilo` command still holds Kilo; stop it (Ctrl-C) and try again. |

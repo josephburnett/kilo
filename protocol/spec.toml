@@ -1140,6 +1140,41 @@ not_held = -32768
 # these messages, and they cost its firmware nothing (types, #defines and
 # inline functions it never uses).
 #
+# Security (version 2; kernel/README.md "Who may talk to Kilo: keys"): every
+# byte after the handshake is encrypted and authenticated with the Noise
+# protocol host.noise_protocol, pattern KN: the laptop has a static X25519
+# key pair, whose public key must be in the list built into the mind
+# (kernel/keys/authorized_keys); the mind has no key and no secret. Nothing
+# is served without a key, STATUS and the log included; there is no
+# plaintext mode.
+#   1. Client -> mind, in clear, host.hello_len bytes, then Noise message 1:
+#        magic host.hello_magic (4 ASCII) | version u8 (host.version) |
+#        flags u8 (0) | reserved u16 (0) | static public key (32)
+#        then 32 bytes: -> e (the client's ephemeral key; empty payload)
+#      A wrong magic is closed at once, unanswered (a version-1 client's
+#      plaintext frame among them).
+#   2. Mind -> client, in clear, host.reply_len bytes:
+#        magic | version u8 (the mind's) | status u8 (host_hello_status) | reserved u16 (0)
+#      then, for OK only, Noise message 2 (48 bytes): <- e, ee, se (an empty
+#      payload's tag). Otherwise the mind closes the connection.
+#   The Noise prologue is host.noise_prologue (ASCII) followed by the 40
+#   hello bytes, and the pre-message (-> s) is the hello's key, so changing
+#   any clear byte fails the handshake.
+#   3. Then each way a stream of records, each one Noise transport message:
+#        len u16 LE | ciphertext (len - 16) | tag (16)       16 <= len <= host.record_max + 16
+#      The plaintexts, concatenated, are the frame stream below (a sender puts
+#      whole frames in a record; a record may be empty). The client sends its
+#      first record at once (an empty one will do): only a record that
+#      authenticates proves it holds the private key (KN authenticates the
+#      initiator then), and until then the connection is not a client: it
+#      sees nothing, counts for nothing (STATUS.clients, control) and is
+#      closed host.handshake_timeout_ms after it connected. A record that
+#      does not authenticate, a bad length, or a nonce at 2^62 closes the
+#      connection, unanswered.
+#   Slots: the mind keeps at most host.max_clients connections; a new one
+#   always gets in, closing the oldest connection that is not yet a client
+#   if it must; with max_clients clients it is closed at once.
+#
 # Framing (TCP is a reliable byte stream, so no COBS and no delimiter):
 #     len u16 LE | type u8 | seq u8 | payload (0..host.max_payload) | crc16 u16 LE
 #   len counts the bytes after itself (2 + payload + 2). crc16 is the body
@@ -1215,8 +1250,15 @@ not_held = -32768
 # (NetworkManager "Link-Local Only", or `ip addr add 169.254.1.1/16 dev IF`)
 # and runs `kilo --host 169.254.75.73`. On a LAN with DHCP the lease wins.
 [host]
-version = 1                    # host channel protocol version (STATUS.host_version); bump on any layout change
+version = 2                    # host channel protocol version (STATUS.host_version, the hello's); bump on any layout change. 2: Noise
 port = 5300                    # TCP
+noise_protocol = "Noise_KN_25519_ChaChaPoly_BLAKE2b"  # Noise revision 34 name of the handshake and transport
+noise_prologue = "kilo-host-2" # then the 40 hello bytes: the Noise prologue
+hello_magic = "KILO"           # the first 4 bytes each way
+hello_len = 40                 # B: the client's clear hello (magic, version, flags, reserved, static public key)
+reply_len = 8                  # B: the mind's clear answer (magic, version, status, reserved)
+record_max = 1024              # B: a record's plaintext at most (the tag adds 16)
+handshake_timeout_ms = 3000    # a connection that sent no authenticated record by then is closed
 max_payload = 240              # bytes
 max_frame = 246                # len (2) + type, seq (2) + max_payload + crc (2)
 max_clients = 4                # connections the mind serves at once; more are closed at accept
@@ -1251,6 +1293,12 @@ NOT_BRIDGED = 9                # BRIDGE_CLOSE without an open bridge
 IMAGE_BAD = 10                 # FLASH_COMMIT: the image does not check (FLASH_STATUS.error says why); FLASH_BEGIN: a bad manifest
 FLASHING = 11                  # refused while the body is being flashed
 UPDATING = 12                  # refused while the mind writes a new kernel to its SD card (UPDATE_COMMIT until DONE or FAILED)
+
+[enums.host_hello_status]      # the mind's clear answer to the hello
+OK = 0                         # Noise message 2 follows
+KEY_UNKNOWN = 1                # the hello's public key is not in the mind's list (kernel/keys/authorized_keys)
+BAD_VERSION = 2                # the hello's version is not the mind's (its own follows in the answer)
+REFUSED = 3                    # no handshake now (the mind has no randomness): try again later
 
 [enums.host_controller]        # STATUS.controller, as seen by the asking client
 NONE = 0

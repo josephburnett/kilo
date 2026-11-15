@@ -161,7 +161,13 @@ daemon; `--port P` naming another port than the daemon's opens P directly.
 talks to a C++ mind instead (the Circle kernel on the Pi, or
 `kernel/host/build/kilo-mind-host --port PTY --listen 127.0.0.1:0` on the
 laptop) over its host channel (docs/fast-boot.md §5, `kilo.hostlink`,
-`kilo.cli_host`). It serves `status`, `posture NAME [--transition T] [--for
+`kilo.cli_host`). The mind answers only laptops whose public key is built
+into it (kernel/README.md "Who may talk to Kilo: keys"): `kilo key init`
+makes this laptop's key pair once (`~/.config/kilo/host_key`, mode 0600,
+never overwritten), `kilo key show` prints the line for
+`kernel/keys/authorized_keys`; `--key PATH` or `$KILO_HOST_KEY` picks
+another key file (`kilo.hostkey`). The handshake and the encrypted records
+are `kilo.hostsecure`, on the `noiseprotocol` package. It serves `status`, `posture NAME [--transition T] [--for
 S]`, `monitor [--rate HZ] [--duration S] [--json]` and `kilo log --host`;
 every other command says it is not available over --host yet. `posture`
 takes control of the mind (one controller at a time; other clients only
@@ -1196,6 +1202,8 @@ kilo/cli.py                 the `kilo` command
 kilo/cli_tools.py           `kilo log`, `--kilolog`, `monitor --percepts`, `kilo daemon` link lines
 kilo/cli_host.py            `kilo --host`: status, posture, monitor, log against a C++ mind
 kilo/hostlink.py            the host channel client (TCP to the C++ mind) and BridgeTransport (kilo.link over the raw bridge)
+kilo/hostsecure.py          the host channel's secure layer: the hello, the Noise KN handshake, records (noiseprotocol)
+kilo/hostkey.py             this laptop's key file for --host: `kilo key init|show`, --key, $KILO_HOST_KEY
 kilo/daemon/                `kilo run`: owns the port, serves the socket, holds, port release (map in __init__.py)
 kilo/remote.py              socket path resolver, JSON-lines client, RemoteBody (BodyClient over the socket)
 kilo/tools/flash.py         build + flash; kilo/tools/gpio.py GPIO4 reset

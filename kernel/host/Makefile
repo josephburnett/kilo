@@ -5,7 +5,7 @@
 #
 #   make              build/kilo-mind-host, build/walk-demo
 #   make check        unit tests (sanitizers), the planner against the Python vectors
-#   make bench        the planner's cost per tick (no sanitizers)
+#   make bench        the planner's cost per tick, the Noise handshake's (no sanitizers)
 #   make freestanding the core built and linked with -ffreestanding -nostdlib
 #
 # kernel/host/test.sh runs all three and the integration run against vbody.
@@ -33,6 +33,8 @@ CORE_C := $(filter %.c,$(MIND_SRCS))
 HOST_SRCS := main.cpp posix.cpp baud.cpp
 TESTS := test_fmt test_frames test_link test_names test_planner test_walker
 PLANNER_VECTORS := tests/planner_vectors.txt
+# The Noise layer's known answers (tests/gen_noise_vectors.py; test.sh checks they are current).
+NOISE_VECTORS := tests/noise_vectors.txt
 
 # The laptop interface (docs/fast-boot.md P2): POSIX sockets for --listen, its
 # unit tests, and the build id STATUS reports (the commit's first 8 hex digits,
@@ -42,6 +44,8 @@ TESTS += test_host
 MIND_BUILD := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo 0)
 $(shell mkdir -p $(B) && (echo $(MIND_BUILD) | cmp -s - $(B)/mind-build-id || echo $(MIND_BUILD) > $(B)/mind-build-id))
 $(B)/obj/host/main.o: CXXFLAGS += -DKILO_MIND_BUILD=0x$(MIND_BUILD)
+# --authorized-keys' default: this checkout's key list, the one the Circle kernel builds in.
+$(B)/obj/host/main.o: CXXFLAGS += -DKILO_AUTHORIZED_KEYS='"$(abspath $(KERNEL)/keys/authorized_keys)"'
 $(B)/obj/host/main.o: $(B)/mind-build-id
 
 # Body flashing (docs/fast-boot.md P4): the image, CRC-32, manifest and the
@@ -108,8 +112,9 @@ $(B)/test_planner_vectors: tests/test_planner_vectors.cpp $(SAN_OBJS)
 $(B)/test_planner_vectors_double: tests/test_planner_vectors.cpp $(DBL_OBJS)
 	$(CXX) $(CXXFLAGS) -DKILO_PLANNER_DOUBLE $(SAN) -O1 -MMD $< $(DBL_OBJS) -o $@
 
-check: $(TESTS:%=$(B)/%) $(B)/vectors.txt $(B)/test_planner_vectors $(B)/test_planner_vectors_double
+check: $(TESTS:%=$(B)/%) $(B)/vectors.txt $(B)/test_planner_vectors $(B)/test_planner_vectors_double $(B)/test_noise
 	@fail=0; for t in $(TESTS); do $(B)/$$t $(B)/vectors.txt || fail=1; done; \
+	$(B)/test_noise $(NOISE_VECTORS) || fail=1; \
 	$(B)/test_planner_vectors $(PLANNER_VECTORS) || fail=1; \
 	$(B)/test_planner_vectors_double $(PLANNER_VECTORS) || fail=1; exit $$fail
 
@@ -122,9 +127,13 @@ $(B)/bench_planner: tests/bench_planner.cpp $(CORE_OBJS)
 	$(CXX) $(CXXFLAGS) $< $(CORE_OBJS) -o $@
 $(B)/bench_planner_double: tests/bench_planner.cpp $(BENCH_DBL_OBJS)
 	$(CXX) $(CXXFLAGS) -DKILO_PLANNER_DOUBLE $< $(BENCH_DBL_OBJS) -o $@
-bench: $(B)/bench_planner $(B)/bench_planner_double
+# The host channel's Noise handshake and records (as the kernel's boot bench).
+$(B)/bench_noise: tests/bench_noise.cpp $(CORE_OBJS)
+	$(CXX) $(CXXFLAGS) $< $(CORE_OBJS) -o $@
+bench: $(B)/bench_planner $(B)/bench_planner_double $(B)/bench_noise
 	$(B)/bench_planner
 	$(B)/bench_planner_double
+	$(B)/bench_noise
 
 # ---- freestanding check -----------------------------------------------------
 # Only the compiler's own headers (stdint.h, stddef.h, stdarg.h), no libc's;

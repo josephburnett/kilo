@@ -15,8 +15,13 @@
 // card's FAT partition (kernel7.img, kernel7.new, kernel7.old there, posix.h
 // DirStore); without --card UPDATE_BEGIN is refused UNSUPPORTED.
 //
-//   kilo-mind-host --port /dev/pts/N [--listen [ADDR:]PORT] [--reset-fifo PATH] [--card DIR] [--duration S]
-//                  [--verbose] [--remote] [--behaviour] [--seed N] [--balance KP]
+// The laptop channel needs a key (kernel/README.md "Who may talk to Kilo:
+// keys"), as on the Pi: the clients' public keys come from
+// --authorized-keys FILE (default: the checkout's kernel/keys/authorized_keys,
+// which the Circle kernel builds in), so the tests use throwaway keys.
+//
+//   kilo-mind-host --port /dev/pts/N [--listen [ADDR:]PORT] [--authorized-keys FILE] [--reset-fifo PATH]
+//                  [--card DIR] [--duration S] [--verbose] [--remote] [--behaviour] [--seed N] [--balance KP]
 //
 // Exit status: 0 after --duration (or SIGINT/SIGTERM) with a HELLO seen;
 // 1 no HELLO, or the port failed; 2 the body speaks another protocol major
@@ -34,6 +39,7 @@
 #include "flash/image.h"
 #include "link/serial_link.h"
 #include "net/host_server.h"
+#include "net/noise.h"
 #include "update/updater.h"
 
 #include "mind.h"
@@ -43,6 +49,9 @@
 
 #ifndef KILO_MIND_BUILD
 #define KILO_MIND_BUILD 0
+#endif
+#ifndef KILO_AUTHORIZED_KEYS
+#define KILO_AUTHORIZED_KEYS "kernel/keys/authorized_keys"
 #endif
 
 using namespace kilo;
@@ -56,6 +65,9 @@ constexpr int kExitReboot = 3;
 
 // The kernel updater's buffer: the largest image UPDATE_BEGIN may give, as on the Pi.
 constexpr uint32_t kKernelImageMax = KILO_HOST_UPDATE_MAX_IMAGE;
+
+// --authorized-keys: as many keys as a test or a household needs.
+constexpr uint32_t kMaxKeys = 64;
 
 void on_signal(int) { g_stop = 1; }
 
@@ -112,12 +124,15 @@ void log_stats(Log& log, const SerialLink& link, const Window& w) {
 
 int usage() {
   fprintf(stderr,
-          "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--reset-fifo PATH] [--card DIR]\n"
-          "                      [--duration SECONDS] [--verbose] [--remote] [--behaviour] [--seed N] [--balance KP]\n"
+          "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--authorized-keys FILE] [--reset-fifo PATH]\n"
+          "                      [--card DIR] [--duration SECONDS] [--verbose] [--remote] [--behaviour] [--seed N]\n"
+          "                      [--balance KP]\n"
+          "  --authorized-keys FILE  the laptops' public keys --listen accepts (default %s)\n"
           "  --card DIR  take kernel updates (kilo update --host) into DIR as if it were the SD card\n"
           "exit status: 0 done (a HELLO seen), 1 no HELLO or the port failed, 2 the body speaks another\n"
           "             protocol major, 3 REBOOT from a laptop client (kilo reboot --host) or a kernel\n"
-          "             update installed in --card DIR (kilo update --host), 64 bad usage\n");
+          "             update installed in --card DIR (kilo update --host), 64 bad usage\n",
+          KILO_AUTHORIZED_KEYS);
   return 64;
 }
 
@@ -128,6 +143,7 @@ int main(int argc, char** argv) {
   const char* listen = nullptr;
   const char* reset_fifo = nullptr;
   const char* card = nullptr;
+  const char* keys_path = KILO_AUTHORIZED_KEYS;
   double duration_s = -1;
   bool verbose = false;
   MindConfig cfg;
@@ -142,6 +158,8 @@ int main(int argc, char** argv) {
       listen = argv[++i];
     } else if (strcmp(argv[i], "--reset-fifo") == 0 && i + 1 < argc) {
       reset_fifo = argv[++i];
+    } else if (strcmp(argv[i], "--authorized-keys") == 0 && i + 1 < argc) {
+      keys_path = argv[++i];
     } else if (strcmp(argv[i], "--card") == 0 && i + 1 < argc) {
       card = argv[++i];
     } else if (strcmp(argv[i], "--duration") == 0 && i + 1 < argc) {
@@ -178,6 +196,19 @@ int main(int argc, char** argv) {
   if (!seeded) cfg.seed = clock.now_us() ^ ((uint64_t)getpid() << 20);  // Python: a random seed, logged
   PosixSerial serial;
   PosixListener listener;
+  static PosixRandom random;
+  static AuthorizedKey keys[kMaxKeys];
+  uint32_t n_keys = 0;
+  if (listen != nullptr) {
+    char err[256];
+    if (!load_authorized_keys(keys_path, keys, kMaxKeys, &n_keys, err, sizeof err)) {
+      fprintf(stderr, "kilo-mind-host: --authorized-keys: %s\n", err);
+      return 1;
+    }
+    cfg.authorized_keys = keys;
+    cfg.authorized_key_count = n_keys;
+    cfg.random = &random;
+  }
   // static: the Mind holds ~60 KB of buffers (the laptop channel's, perception's windows)
   static Mind mind(serial, clock, stderr_log, listen != nullptr ? &listener : nullptr, cfg);
   Log& log = mind.log();  // every line: the RAM ring (`kilo log --host`), then stderr
@@ -210,6 +241,13 @@ int main(int argc, char** argv) {
     }
     logf(log, LogLevel::Info, "listening on port %u (--listen %s; mind build %08x)", (unsigned)listener.port(),
          listen, (unsigned)KILO_MIND_BUILD);
+    logf(log, n_keys > 0 ? LogLevel::Info : LogLevel::Warn, "%u authorized keys from %s%s", (unsigned)n_keys,
+         keys_path, n_keys > 0 ? "" : ": every laptop will be refused");
+    for (uint32_t k = 0; k < n_keys; k++) {
+      char fp[17];
+      noise::fingerprint(keys[k].key, fp);
+      logf(log, LogLevel::Info, "  key %s %s", fp, keys[k].name);
+    }
   }
   mind.start();
 

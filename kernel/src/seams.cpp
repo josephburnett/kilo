@@ -8,6 +8,8 @@
 #include <circle/memio.h>
 #include <circle/synchronize.h>
 #include <circle/timer.h>
+#include <circle/util.h>
+#include "third_party/monocypher/monocypher.h"
 #include <assert.h>
 
 // PL011 registers (circle/bcm2835.h has the addresses; lib/serial.cpp keeps
@@ -190,6 +192,42 @@ bool UsbSerial::set_baud (uint32_t nBaud)
 }
 
 // ---- clock, log, GPIO4 ------------------------------------------------------
+
+// ---- randomness --------------------------------------------------------------
+
+bool CircleRandom::fill (uint8_t *pBuffer, uint32_t nLength)
+{
+	// Each 32 bytes out: 16 words (64 bytes) from the generator, a call
+	// counter and the clock, through BLAKE2b-256.
+	for (uint32_t nDone = 0; nDone < nLength; nDone += 32)
+	{
+		u32 Words[16 + 3];
+		boolean bStuck = TRUE;
+		for (unsigned i = 0; i < 16; i++)
+		{
+			Words[i] = m_pRandom->GetNumber ();
+			bStuck = bStuck && Words[i] == Words[0];
+		}
+		if (bStuck)
+		{
+			crypto_wipe (Words, sizeof Words);
+			return false;
+		}
+		Words[16] = m_nCalls++;
+		uint64_t nNow = CTimer::GetClockTicks64 ();
+		Words[17] = (u32) nNow;
+		Words[18] = (u32) (nNow >> 32);
+		u8 Hash[32];
+		crypto_blake2b (Hash, sizeof Hash, (const u8 *) Words, sizeof Words);
+		uint32_t nChunk = nLength - nDone < 32 ? nLength - nDone : 32;
+		memcpy (pBuffer + nDone, Hash, nChunk);
+		crypto_wipe (Words, sizeof Words);
+		crypto_wipe (Hash, sizeof Hash);
+	}
+	return true;
+}
+
+// ---- clock -------------------------------------------------------------------
 
 uint64_t CircleClock::now_us (void)
 {

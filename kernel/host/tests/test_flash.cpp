@@ -19,6 +19,7 @@
 #include "net/host_frame.h"
 #include "net/host_server.h"
 #include "tests/check.h"
+#include "tests/fake_net.h"
 #include "tests/fake_store.h"
 #include "tests/fakes.h"
 #include "update/updater.h"
@@ -557,58 +558,6 @@ void test_short_writes() {
 
 // ---- the flash channel of HostServer -----------------------------------------------------
 
-class FakeConn final : public Conn {
- public:
-  std::vector<uint8_t> in;
-  size_t pos = 0;
-  std::vector<uint8_t> out;
-  bool open = false;
-  HostRx rx;
-
-  int32_t read(uint8_t* buf, uint32_t n) override {
-    if (!open) return -1;
-    size_t k = std::min<size_t>(n, in.size() - pos);
-    if (k) std::memcpy(buf, in.data() + pos, k);
-    pos += k;
-    return (int32_t)k;
-  }
-  int32_t write(const uint8_t* buf, uint32_t n) override {
-    if (!open) return -1;
-    out.insert(out.end(), buf, buf + n);
-    return (int32_t)n;
-  }
-  void close() override { open = false; }
-  bool is_open() const override { return open; }
-
-  void send(uint8_t type, uint8_t seq, const void* payload = nullptr, uint32_t len = 0) {
-    uint8_t f[KILO_HOST_MAX_FRAME];
-    uint32_t n = host_frame_encode(type, seq, (const uint8_t*)payload, len, f);
-    in.insert(in.end(), f, f + n);
-  }
-  std::vector<HostFrame> take() {
-    std::vector<HostFrame> got;
-    for (uint8_t b : out)
-      if (rx.push(b) == HostRxStatus::Frame) got.push_back(rx.frame());
-    out.clear();
-    return got;
-  }
-};
-
-class FakeListener final : public Listener {
- public:
-  FakeConn conns[4];
-  std::deque<int32_t> pending;
-  int32_t accept() override {
-    if (pending.empty()) return -1;
-    int32_t s = pending.front();
-    pending.pop_front();
-    conns[s].open = true;
-    return s;
-  }
-  Conn* conn(uint32_t slot) override { return &conns[slot]; }
-  uint32_t slots() const override { return 4; }
-};
-
 struct HostRig {
   FakeClock clock;
   FakeGpio gpio;
@@ -619,6 +568,7 @@ struct HostRig {
   Flasher flasher{body, clock, gpio, link, ring};
   FlashImage image;
   FakeListener listener;
+  FakeRandom random;
   HostServer server{listener, link, body, clock, ring, ring, 1};
   FakeStore store;
   std::vector<uint8_t> kernel_buf = std::vector<uint8_t>(1u << 20);
@@ -630,6 +580,9 @@ struct HostRig {
     link.connect();
     server.attach_flasher(flasher, image);
     server.attach_updater(updater);
+    uint32_t n;
+    const AuthorizedKey* keys = test_keys(&n);
+    server.set_keys(keys, n, random);
   }
   void pass() {
     link.mark_alive();
@@ -642,10 +595,16 @@ struct HostRig {
       pass();
     }
   }
+  // A client: the hello, the handshake (a pass per X25519), its first record.
   FakeConn& connect(int32_t slot) {
-    listener.pending.push_back(slot);
+    FakeConn& c = listener.connect(slot);
+    for (int k = 0; k < 10 && !c.established; k++) {
+      pass();
+      c.pump();
+    }
     pass();
-    return listener.conns[slot];
+    CHECKF(c.established && c.open, "slot %d: no handshake", (int)slot);
+    return c;
   }
   // A command's RESULT code (-1: none).
   int command(FakeConn& c, uint8_t type, const void* p = nullptr, uint32_t len = 0) {
@@ -932,10 +891,17 @@ void test_no_flasher() {
   LogRing ring{clock, &capture};
   SerialLink link{serial, clock, ring};
   FakeListener listener;
+  FakeRandom random;
   static HostServer server{listener, link, serial, clock, ring, ring, 1};
-  listener.pending.push_back(0);
+  uint32_t nk;
+  const AuthorizedKey* keys = test_keys(&nk);
+  server.set_keys(keys, nk, random);
+  FakeConn& c = listener.connect(0);
+  for (int k = 0; k < 10 && !c.established; k++) {
+    server.poll();
+    c.pump();
+  }
   server.poll();
-  FakeConn& c = listener.conns[0];
   uint8_t take[2] = {1, 0};
   c.send(KILO_HOST_MSG_CONTROL, 0, take, 2);
   kilo_host_flash_begin_t b = {1, 10, 0, 0};

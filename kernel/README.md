@@ -55,14 +55,21 @@ images link (`lib`, `usb`, `input`, `fs`, `sched`, `net`, and the addons
 
 | Output | What | Size |
 |---|---|---|
-| `build/kernel7.img` | the mind kernel | 522,532 bytes (`KILO_BODY_SERIAL=auto`: about 250 bytes less) |
+| `build/kernel7.img` | the mind kernel | 591,140 bytes with one key (`KILO_BODY_SERIAL=auto`: about 250 bytes less) |
 | `build/netboot/kernel7.img` | the network loader | 305,420 bytes |
 
 Of the mind kernel, the SD card (FatFs about 23 KB, the SD driver about
 18 KB) and mDNS (about 9 KB) came with P4. The linker keeps every object of
 `MIND_SRCS` whether or not it is called (no `--gc-sections`), so P3's
 sources were in the image before the kernel used them; composing the
-`Mind` changed its size by less than 1 KB.
+`Mind` changed its size by less than 1 KB. The keys (Monocypher, all of
+it linked: about 55 KB; the Noise layer and the secure host server, about
+13 KB) took the image from 522,532 to 591,140 bytes; each authorized key
+adds 72 bytes.
+
+The build needs at least one laptop key in `keys/authorized_keys` ("Who may
+talk to Kilo: keys"), or `KILO_AUTHORIZED_KEYS=FILE`; without one it stops
+and says what to do.
 
 The `.elf`, `.map` and `.lst` beside each image are for debugging. A second
 `make` with nothing changed does nothing. From clean (Circle included) the
@@ -263,9 +270,10 @@ reboot                            after a laptop's REBOOT: 200 ms more passes (t
 CScheduler::usSleep(1000)         the net task runs here
 ```
 
-Where the memory is: the `Mind` (68 KB: the log ring 11 KB, the host
-server's per-client buffers 18 KB, perception's windows 17 KB, the
-behaviour runner 6 KB), the network slots (`CircleListener`, 32 KB of
+Where the memory is: the `Mind` (87 KB: the log ring 11 KB, the host
+server's five connections 36 KB (each 4 KB of frames to send, a 1 KB
+record each way and its Noise state), perception's windows 17 KB, the
+behaviour runner 6 KB), the network slots (`CircleListener`, 40 KB of
 rings) and the two flash images (32 KB each) are on Circle's heap, built in
 `Initialize`. `CKernel` itself (4 KB) lives on `main()`'s stack, so they
 are not its members; as statics, their initialisers would go into the
@@ -356,9 +364,17 @@ logs one line per pattern:
 planner bench trot: start 612 us; next() x1450 mean 31.20 us max 140 us (a tick is 20000 us; Python on the Pi: max 4500 us)
 ```
 
-(numbers made up.) It pauses during a walk, a trick, a flash or the raw
-bridge, takes about
-5 s, then frees its planner. `make -C kernel KILO_PLANNER_BENCH=0` leaves
+(numbers made up.) Then the host channel's handshake ("Who may talk to
+Kilo: keys"), between two fixed test keys, one X25519 per pass as the host
+server runs it, and a full 1024-byte record sealed and opened 20 times:
+
+```
+noise bench: X25519 keygen 2900 us, ee 2950 us, se 2950 us (the mind's handshake, a pass each); the laptop's side 2900 + 5900 us; a 1024-byte record: seal mean 60 max 90 us, open mean 60 max 85 us
+```
+
+(numbers made up; on the laptop `make -C kernel/host bench` prints about
+95 us per X25519 and 3.5 us per record.) It pauses during a walk, a trick,
+a flash or the raw bridge, takes about 5 s, then frees its planner. `make -C kernel KILO_PLANNER_BENCH=0` leaves
 it out (about 400 bytes). Interrupts (USB, the PL011) land inside the timed calls,
 so *max* includes them, as a real walk's would.
 
@@ -368,6 +384,139 @@ so *max* includes them, as a real walk's would.
 TCP port 5300 (docs/fast-boot.md §5, `mind/README.md` "Laptop interface"):
 `kilo status`, `monitor`, `log`, `posture`, `flash`, `reboot` and `update`,
 each with `--host IP` ("What `--host` does on the kernel today" below).
+
+### Who may talk to Kilo: keys
+
+In plain words: the mind answers only laptops it knows. Each laptop has a
+**key pair**, two linked numbers made once by `kilo key init`: a private
+key, which stays in a file on that laptop (`~/.config/kilo/host_key`,
+readable by its owner only) and is never copied anywhere, and a public key,
+which may be shown to anyone. The public keys of the laptops that may talk
+to Kilo are listed in `kernel/keys/authorized_keys`, in the repo, and the
+build puts that list inside the kernel. When the laptop connects, it proves
+it has the private key that belongs to a public key on the list, without
+sending the private key; from then on everything between the two is
+scrambled so that nobody else on the network can read it or change it
+unnoticed. A laptop that is not on the list gets nothing at all: no
+status, no log, no control, no flashing, no kernel update. Nothing on the
+mind is secret: the mind has no key of its own.
+
+To add a laptop (once per laptop):
+
+```
+kilo key init                                  # makes ~/.config/kilo/host_key; prints the public line
+kilo key show >> kernel/keys/authorized_keys   # adds the line to the list
+make -C kernel                                 # the list is built into kernel7.img
+```
+
+then install the new kernel: `kilo update --host IP` from a laptop the
+running kernel already knows ("Updating the kernel over the network"), or
+the SD card in a card reader (`make -C kernel card`, `tools/make-sd.sh`),
+or for a bench run from RAM `tools/netboot.sh` (the loader takes any
+kernel). `make -C kernel` stops, saying the above, while the list has no
+key. A test build can use another list: `make -C kernel
+KILO_AUTHORIZED_KEYS=/path/to/list`; `kilo-mind-host` reads its list at
+start-up (`--authorized-keys FILE`, default the same committed file).
+`kilo update` checks before sending that the image has this laptop's
+public key in it, so an update cannot lock the laptop out by mistake
+(`--force` skips that, as it does for the marker). `--key PATH` or
+`$KILO_HOST_KEY` picks another key file; a key file that others can read
+is refused (`chmod 600`), as ssh does. With no key file, every `--host`
+command says to run `kilo key init`; with a key the mind does not know, it
+says so and how to add it. The mind's log names each laptop that connects
+by its key's fingerprint and name (`noise: client 0: handshake with key
+1a2b3c4d5e6f7a8b (joe@rtb) in 9.1 ms, slowest step 2900 us`; numbers made
+up) and each refused key by its fingerprint; `kilo key show` prints this
+laptop's.
+
+The technical description (the spec's `[host]` comments are the
+reference):
+
+- **Protocol**: the Noise Protocol Framework, revision 34,
+  `Noise_KN_25519_ChaChaPoly_BLAKE2b`: X25519, ChaCha20-Poly1305 (IETF,
+  the 64-bit counter nonce little endian after four zero bytes), BLAKE2b
+  with HMAC-BLAKE2b HKDF. Pattern **KN**: the initiator (the laptop) has a
+  static key the responder (the mind) knows before the handshake (`-> s`
+  as a pre-message); the responder has none. Messages: `-> e`, then `<- e,
+  ee, se`. The mind's side is `mind/net/noise.*` over Monocypher 4.0.3
+  (`mind/third_party/monocypher/`, vendored byte for byte); the laptop's is
+  the Python `noiseprotocol` package (`mind/kilo/hostsecure.py`), an
+  independent implementation on purpose. Known-answer tests: the published
+  cacophony and snow vectors for this exact protocol and noiseprotocol's
+  output (`host/tests/test_noise.cpp`).
+- **Hello** (clear, 40 bytes, then Noise message 1, 32 bytes):
+  `"KILO" | version 2 | flags 0 | reserved u16 0 | the laptop's static
+  public key`. The mind looks the key up in its list, comparing every entry
+  whole in constant time, and answers in clear (8 bytes): `"KILO" | version
+  | status | reserved`, status `OK` followed by message 2 (48 bytes), else
+  `KEY_UNKNOWN`, `BAD_VERSION` or `REFUSED` (no randomness) and the
+  connection is closed. A wrong magic (a version-1 client's plaintext
+  frame, a port scanner) is closed at once, unanswered.
+- **Prologue**: `kilo-host-2` followed by the 40 hello bytes, so changing
+  any byte sent in clear makes the handshake fail.
+- **Records**: after the handshake each direction is a stream of Noise
+  transport messages, `len u16 LE | ciphertext | 16-byte tag`, each holding
+  up to 1024 bytes of plaintext (`host.record_max`): the unchanged host
+  frames (length, type, seq, payload, CRC) end to end, several to a record
+  (a sender puts whole frames in a record; the receiver treats the
+  plaintext as one stream). Every message of today fits a record many
+  times over: the largest frame is 246 bytes (a 200-byte `UPDATE_DATA`
+  chunk is 210).
+- **Proof**: in KN the mind learns that the laptop holds the private key
+  only from the laptop's first record, which the laptop sends at once
+  (empty). Until a record from it authenticates, a connection is no
+  client: it is served nothing, is not in `STATUS.clients`, cannot take
+  control, and is closed 3 s after it connected (`host.handshake_timeout_ms`).
+- **Failures close the connection, unanswered**: a record that does not
+  authenticate (tampered, replayed, out of order, made with another key), a
+  record length outside 16..1040, a nonce at 2^62 (never reached: that is
+  2^62 records). There is no error message to probe.
+- **Slots**: the mind serves four clients; the listener has a fifth slot,
+  and a new connection always gets in: if that makes five, the oldest
+  connection that is not a client yet is closed (the newest one, when four
+  clients are connected). Idle sockets cannot keep a laptop out; a flood
+  of new connections can (see below).
+- **Scheduling**: each X25519 costs milliseconds on the Cortex-A7 (est.
+  2-4 ms; about 0.1 ms on the laptop), so the mind's three (its ephemeral
+  key, ee, se) run one per main-loop pass, for all connections together,
+  round robin: a handshake takes three passes, and no pass does more than
+  one. The boot bench measures them ("Planner bench"). A record costs a few
+  microseconds per KB on the laptop; the server opens at most 1 KB of
+  records and seals at most two records per client per pass.
+- **Randomness**: the mind's ephemeral key comes from a new seam,
+  `Random` (`mind/platform.h`): on the Pi `CircleRandom`, the SoC's
+  hardware RNG (16 words per 32 bytes) hashed with BLAKE2b, refusing a
+  generator stuck on one value; `getrandom()` in `kilo-mind-host`. If it
+  fails, the hello is refused (`REFUSED`): fail closed. Secrets (the
+  ephemeral private key, the chaining key, DH results) are wiped when used.
+
+What this protects, and what it does not:
+
+- It protects everything on the host channel, port 5300: who may
+  connect, and the secrecy and integrity of every byte after the
+  handshake, status and logs included.
+- **The netboot loader is not protected.** It takes any kernel from anyone
+  on the network (`tools/netboot.sh`, Circle's HTTP and TFTP servers), so
+  while the bench card's loader runs, anyone on the LAN can run any kernel
+  on the Pi. The production card (the mind on the card) has no loader.
+- **Physical access wins**: whoever holds the SD card can write any kernel
+  (and any key list) onto it; whoever has the serial wires talks to the
+  body directly.
+- **Kilo has no identity** (KN: the responder has no static key). A laptop
+  cannot tell the real Kilo from an impostor on the network: anything that
+  knows the laptop's public key (which is public) can finish the handshake
+  as the responder, and then receives what the laptop sends: commands, a
+  body firmware image, a kernel image, none of them secret. It gains
+  nothing towards the real Kilo (every session has fresh keys, so nothing
+  can be replayed there), and the laptop believes what it reports. The
+  decision was that this is harmless.
+- Not protected against: someone on the network who floods the port with
+  new connections faster than a handshake completes (a denial of service:
+  each new connection closes the oldest one still in its handshake), or
+  fills the 64-line log with refusals. The public keys and the hello are
+  in clear, so an observer learns which laptop connects.
+- A key is revoked by removing its line, rebuilding and installing the
+  kernel; there is no expiry.
 
 ### Network bring-up
 
@@ -420,7 +569,8 @@ Limits of the fallback, from Circle's API:
 
 Circle's sockets block by default; the core's network seams must not
 (`mind/platform_net.h`). `CKiloNet` owns every socket and moves bytes
-between them and four connection slots (`KILO_HOST_MAX_CLIENTS`), each a
+between them and five connection slots (`KILO_HOST_MAX_CLIENTS` and a
+spare, `kilo::kHostSlots`: "Who may talk to Kilo: keys"), each a
 pair of rings; `HostServer::poll()` in the main loop touches only the rings
 (`CircleListener::accept`, `CircleConn::read`/`write`/`close`). Every 1 ms
 (`usSleep(1000)`), the task:
@@ -444,10 +594,11 @@ scheduler, and neither yields in the middle of a ring update. `Send()`
 yields once inside (after copying the bytes); meanwhile the main loop can
 only append past the bytes being sent, or mark the slot closing.
 
-**Ring sizes**, per slot: RX 4 KB, TX 4 KB, 32 KB for four. RX: a segment is
+**Ring sizes**, per slot: RX 4 KB, TX 4 KB, 40 KB for five. RX: a segment is
 at most `FRAME_BUFFER_SIZE` (1600) bytes and the task receives only when one
-fits, so 4 KB holds two and a margin; the laptop's requests are at most 246
-bytes (`KILO_HOST_MAX_FRAME`) and `HostServer` reads up to 1 KB a pass. TX:
+fits, so 4 KB holds two and a margin; the laptop's records are at most 1042
+bytes (`host.record_max` and the length and tag) and `HostServer` reads up
+to 1 KB a pass. TX:
 `HostServer` keeps its own 4 KB per client and flushes what this ring takes;
 the task empties it every ~1 ms into Circle's queue (64 KB more). The
 streams are at most about 10 kB/s (TELEM at 50 Hz, log lines), so 4 KB is
@@ -805,7 +956,10 @@ accept, receive and send through `GetStatus()` as read from Circle's source;
 `kilo reboot` (the OK reaching the laptop in 200 ms; the loader coming back);
 the loop's period with the net task running (the stats line); the USB scan
 from the net task (the default `pl011` build) and how long it stalls the
-loop; the planner's cost on the Cortex-A7 (the bench line).
+loop; the planner's cost on the Cortex-A7 (the bench line). The keys:
+the X25519 steps' time on the Cortex-A7 (the noise bench line, and the
+handshake line of each connection), the hardware RNG through
+`CircleRandom`, `kilo --host` over Noise to the Pi.
 Flashing: the PL011 rate switch (`set_baud()` in place) at 115200
 against optiboot and back; GPIO4 reaching the NyBoard's reset line (header
 pin 7 in the socket; on the bench a fourth wire); the `optiboot in sync N

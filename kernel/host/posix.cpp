@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/random.h>
 #include <sys/stat.h>
 #include <termios.h>
 #include <time.h>
@@ -199,5 +200,99 @@ KernelStore::Result DirStore::sync() {
   ::close(fd);
   return ok ? Result::Ok : fail("cannot sync", ".");
 }
+
+bool PosixRandom::fill(uint8_t* buf, uint32_t n) {
+  uint32_t got = 0;
+  while (got < n) {
+    ssize_t r = getrandom(buf + got, n - got, 0);
+    if (r < 0) {
+      if (errno == EINTR) continue;
+      return false;
+    }
+    got += (uint32_t)r;
+  }
+  return true;
+}
+
+namespace {
+
+int b64_value(char ch) {
+  if (ch >= 'A' && ch <= 'Z') return ch - 'A';
+  if (ch >= 'a' && ch <= 'z') return ch - 'a' + 26;
+  if (ch >= '0' && ch <= '9') return ch - '0' + 52;
+  if (ch == '+') return 62;
+  if (ch == '/') return 63;
+  return -1;
+}
+
+// 44 base64 characters (the last one '=') -> 32 bytes; false otherwise.
+bool b64_key(const char* s, size_t len, uint8_t out[32]) {
+  if (len != 44 || s[43] != '=') return false;
+  uint32_t acc = 0;
+  int bits = 0;
+  size_t k = 0;
+  for (size_t i = 0; i < 43; i++) {
+    int v = b64_value(s[i]);
+    if (v < 0) return false;
+    acc = (acc << 6) | (uint32_t)v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      if (k < 32) out[k++] = (uint8_t)(acc >> bits);
+      acc &= (1u << bits) - 1;
+    }
+  }
+  return k == 32 && acc == 0;  // the 2 bits left over must be zero (canonical)
+}
+
+}  // namespace
+
+bool load_authorized_keys(const char* path, AuthorizedKey* keys, uint32_t max, uint32_t* n, char* error,
+                          size_t cap) {
+  *n = 0;
+  FILE* f = fopen(path, "r");
+  if (f == nullptr) {
+    snprintf(error, cap, "cannot read %s: %s", path, strerror(errno));
+    return false;
+  }
+  char line[512];
+  int lineno = 0;
+  bool ok = true;
+  while (ok && fgets(line, sizeof line, f) != nullptr) {
+    lineno++;
+    size_t len = strlen(line);
+    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r' || line[len - 1] == ' ' || line[len - 1] == '\t'))
+      line[--len] = '\0';
+    const char* p = line;
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p == '\0' || *p == '#') continue;
+    const char* end = p;
+    while (*end != '\0' && *end != ' ' && *end != '\t') end++;
+    AuthorizedKey k;
+    memset(&k, 0, sizeof k);
+    if (!b64_key(p, (size_t)(end - p), k.key)) {
+      snprintf(error, cap, "%s:%d: not a public key (44 characters of base64, as `kilo key show` prints)", path,
+               lineno);
+      ok = false;
+      break;
+    }
+    while (*end == ' ' || *end == '\t') end++;
+    snprintf(k.name, sizeof k.name, "%s", *end != '\0' ? end : "unnamed");
+    for (uint32_t j = 0; j < *n && ok; j++) {
+      if (memcmp(keys[j].key, k.key, 32) == 0) {
+        snprintf(error, cap, "%s:%d: the same key again (%s)", path, lineno, keys[j].name);
+        ok = false;
+      }
+    }
+    if (ok && *n == max) {
+      snprintf(error, cap, "%s: more than %u keys", path, (unsigned)max);
+      ok = false;
+    }
+    if (ok) keys[(*n)++] = k;
+  }
+  fclose(f);
+  return ok;
+}
+
 
 }  // namespace kilo

@@ -14,8 +14,14 @@
 #ifndef KILO_MIND_PLATFORM_NET_H
 #define KILO_MIND_PLATFORM_NET_H
 #include <stdint.h>
+#include "proto/kilo_protocol.h"
 
 namespace kilo {
+
+// The connection slots a Listener has: KILO_HOST_MAX_CLIENTS clients and
+// one spare, so that a connection still in its handshake never keeps a new
+// one out (net/host_server.h).
+constexpr uint32_t kHostSlots = KILO_HOST_MAX_CLIENTS + 1;
 
 // One accepted TCP connection: a byte stream to one laptop client.
 class Conn {

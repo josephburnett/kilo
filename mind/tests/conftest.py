@@ -224,3 +224,21 @@ def _no_real_daemon(monkeypatch, tmp_path_factory):
     """Never let a test (or a `kilo` subprocess) find a developer's running
     daemon: point the socket somewhere empty unless a test sets its own."""
     monkeypatch.setenv("KILO_SOCKET", str(tmp_path_factory.mktemp("nosock") / "none.sock"))
+
+
+# ---- the host channel's key (kilo.hostkey) ----------------------------------------
+# Every test gets a throwaway laptop key in $KILO_HOST_KEY (never the owner's
+# ~/.config/kilo/host_key); the fake minds know its public key (host_key fixture).
+
+@pytest.fixture(scope="session")
+def _session_host_key(tmp_path_factory):
+    from kilo import hostkey
+
+    key, _ = hostkey.init(tmp_path_factory.mktemp("kilo-key") / "host_key", "test@pytest")
+    return key
+
+
+@pytest.fixture(autouse=True)
+def host_key(_session_host_key, monkeypatch):
+    monkeypatch.setenv("KILO_HOST_KEY", str(_session_host_key.path))
+    return _session_host_key
