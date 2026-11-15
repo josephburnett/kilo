@@ -188,6 +188,18 @@ void test_logring() {
   std::string longline(300, 'x');
   ring.write(LogLevel::Info, longline.c_str());
   CHECK(ring.get(ring.next_seq() - 1)->len == kLogLineMax - 1);
+  // Status lines: always on to the platform's sink; kept only while a
+  // laptop reads the log, or when they are warnings.
+  uint32_t kept = ring.next_seq();
+  size_t passed = next.lines.size();
+  logf(ring.status(), LogLevel::Info, "status %d", 1);
+  CHECK(ring.next_seq() == kept && next.lines.size() == passed + 1 && next.lines.back() == "status 1");
+  logf(ring.status(), LogLevel::Warn, "status %d", 2);
+  CHECK(ring.next_seq() == kept + 1 && next.lines.size() == passed + 2);
+  ring.set_watched(true);
+  logf(ring.status(), LogLevel::Info, "status %d", 3);
+  CHECK(ring.next_seq() == kept + 2 && std::string(ring.get(kept + 1)->text) == "status 3" &&
+        next.lines.size() == passed + 3);
 }
 
 void test_status_and_errors() {

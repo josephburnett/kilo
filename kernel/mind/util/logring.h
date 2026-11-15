@@ -9,6 +9,12 @@
 // seq of the next line it wants and asks get(seq). A reader that falls more
 // than kLines behind finds its lines overwritten and skips to first_seq():
 // the gap in seq numbers tells the client what it lost.
+//
+// Status lines (status(): the once-a-second link, loop and body counters)
+// go to the platform's sink always, and into the ring only while a laptop
+// reads the log (set_watched(), the HostServer). So with no laptop the
+// ring holds what happened (remote keys, walks, warnings) and not a few
+// seconds of counters.
 #ifndef KILO_MIND_UTIL_LOGRING_H
 #define KILO_MIND_UTIL_LOGRING_H
 #include <stdint.h>
@@ -37,12 +43,24 @@ class LogRing final : public Log {
 
   void write(LogLevel level, const char* line) override;
 
+  // The sink for status lines. Warnings and errors are kept as write() keeps them.
+  Log& status() { return status_; }
+  void set_watched(bool watched) { watched_ = watched; }
+  bool watched() const { return watched_; }
+
   uint32_t next_seq() const { return next_seq_; }  // the seq the next line gets: lines logged so far
   uint32_t first_seq() const { return next_seq_ > kLines ? next_seq_ - kLines : 0; }
   // The line with this seq, or null when it is overwritten or not logged yet.
   const LogEntry* get(uint32_t seq) const;
 
  private:
+  struct Status final : Log {
+    explicit Status(LogRing& ring) : ring_(ring) {}
+    void write(LogLevel level, const char* line) override;
+    LogRing& ring_;
+  };
+  Status status_{*this};
+  bool watched_ = false;
   Clock& clock_;
   Log* next_;
   uint64_t start_us_;

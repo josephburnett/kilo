@@ -19,6 +19,11 @@ void LogRing::write(LogLevel level, const char* line) {
   if (next_ != nullptr) next_->write(level, line);
 }
 
+void LogRing::Status::write(LogLevel level, const char* line) {
+  if (ring_.watched_ || level >= LogLevel::Warn) ring_.write(level, line);
+  else if (ring_.next_ != nullptr) ring_.next_->write(level, line);
+}
+
 const LogEntry* LogRing::get(uint32_t seq) const {
   if (seq >= next_seq_ || seq < first_seq()) return nullptr;
   return &lines_[seq % kLines];

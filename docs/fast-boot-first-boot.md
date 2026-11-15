@@ -301,7 +301,10 @@ for about 5 seconds, without moving Kilo. Copy into the results:
   bench`: how long the key handshake's three steps take on this Pi;
 - the line starting `noise: client` (one per connection): this laptop's
   key, and how long its handshake took; The mind keeps only its last 64
-  log lines, about 15 seconds' worth, so if these are missing, the status
+  log lines. The once-a-second counter lines go into them only while a
+  laptop is reading the log, so with no laptop the 64 lines hold what
+  happened (remote keys, walks, warnings). While a laptop reads the log
+  they fill in about 15 seconds, so if these lines are missing, the status
   command was too long ago: power-cycle the Pi, send the kernel again
   (step 6) and run this log command first;
 - one line starting `loop`: how regularly the mind's loop runs while the

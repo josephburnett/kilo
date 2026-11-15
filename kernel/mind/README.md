@@ -26,7 +26,7 @@ platform.h        the seams: Serial (non-blocking bytes, tx_free), Clock (us), L
                   KernelStore (the SD card's kernel7.* files: blocking, used only while the link is paused)
 platform_net.h    the network seams: Listener (accept into a fixed slot) and Conn (non-blocking TCP stream)
 util/fmt, log     a small printf (%d %u %x %s %c %%, width, '0') and log lines through Log
-util/logring      the RAM log: a Log sink keeping the last 64 lines, for `kilo log --host`
+util/logring      the RAM log: a Log sink keeping the last 64 lines, for `kilo log --host` (status lines only while a laptop reads it)
 net/host_frame    the laptop channel's framing: len u16 | type | seq | payload | crc16
 net/host_server   the laptop interface (P2): commands, telemetry and log streams, the raw bridge
 link/serial_link  the link state machine: a port of mind/kilo/link/serial_link.py

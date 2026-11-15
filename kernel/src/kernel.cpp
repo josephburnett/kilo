@@ -625,7 +625,8 @@ void CKernel::LogStats (void)
 {
 	const LinkStats &s = m_pMind->link ().stats ();
 	const BodyState &b = m_pMind->link ().state ();
-	logf (*m_pLog, LogLevel::Info,
+	Log &Status = m_pMind->log ().status ();	// in the RAM log only while a laptop reads it
+	logf (Status, LogLevel::Info,
 	      "link %s: telemetry %u/s (total %u) rx %u frames, tx %u (%u heartbeats) "
 	      "decode errors %u (crc %u cobs %u overflow %u) tx deferred %u short %u",
 	      m_pSerialName, m_Watch.m_nTelemetry, U (b.telemetry_count), U (s.frames_rx),
@@ -643,13 +644,13 @@ void CKernel::LogStats (void)
 			static unsigned s_nLast = 0;
 			LogLevel Level = nErrors != s_nLast ? LogLevel::Warn : LogLevel::Info;
 			s_nLast = nErrors;
-			logf (*m_pLog, Level, "PL011 line errors: break %u overrun %u framing %u parity %u; "
+			logf (Status, Level, "PL011 line errors: break %u overrun %u framing %u parity %u; "
 			      "baud switches with bytes still queued %u", e[1], e[2], e[3], e[4], m_pPl011->m_nDrainTimeouts);
 		}
 	}
 	if (b.has_telemetry)
 	{
-		logf (*m_pLog, LogLevel::Info, "body: mode %s epoch %u tick %u rx_err %u overruns %u/%u",
+		logf (Status, LogLevel::Info, "body: mode %s epoch %u tick %u rx_err %u overruns %u/%u",
 		      mode_name (b.telemetry.mode), b.telemetry.epoch, U (b.tick), b.telemetry.rx_err,
 		      m_Watch.m_nOverruns, m_Watch.m_nTelemetry);
 	}
@@ -659,7 +660,7 @@ void CKernel::LogStats (void)
 	// mind.poll: the mind core's share (the link, the laptop, the walker,
 	// whose wake every 20 ms of a walk runs the planner, the trick player,
 	// the remote, the behaviour runner's 10 Hz tick).
-	logf (*m_pLog, LogLevel::Info,
+	logf (Status, LogLevel::Info,
 	      "loop %u/s: period max %u mean %u us, work max %u mean %u us, mind.poll max %u mean %u us%s; "
 	      "%u clients",
 	      m_Period.m_nCount, m_Period.m_nMax, m_Period.Mean (), m_Work.m_nMax, m_Work.Mean (),

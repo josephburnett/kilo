@@ -82,6 +82,9 @@ void HostServer::poll() {
     if (clients_[i].open) read_client(i, now);
   handshake_step(now);
   expire(now);
+  bool watched = false;
+  for (uint32_t i = 0; i < kSlots; i++) watched = watched || (clients_[i].open && clients_[i].log_on);
+  ring_.set_watched(watched);  // status lines fill the ring only while someone reads it
   if (controller_ >= 0) {
     const Client& c = clients_[controller_];
     if (c.keepalive && now - c.last_rx_us > kKeepaliveUs) {

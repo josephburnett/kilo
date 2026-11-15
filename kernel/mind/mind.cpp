@@ -100,7 +100,7 @@ void Mind::stats(uint64_t now) {
         r.reply_len == sizeof(kilo_stats_t)) {
       kilo_stats_t st;
       mem_copy(&st, r.reply, sizeof st);
-      logf(log_, LogLevel::Info,
+      logf(log_.status(), LogLevel::Info,
            "body STATS: uptime %u s overruns %u max tick %u us rx_crc_err %u rx_overflow %u feet_late %u "
            "feet_underruns %u",
            (unsigned)st.uptime_s, st.overruns, st.max_tick_us, st.rx_crc_err, st.rx_overflow, st.feet_late,
