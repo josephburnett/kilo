@@ -14,7 +14,7 @@ Kilo assembled, on battery, LAN cable in. The card still held the netboot loader
 | A key Kilo does not know | Kilo logged `key ... is not authorized` and `refused: an unknown key`. The laptop printed "closed the connection without answering the hello": the refusal's 8 bytes did not arrive before the close (open, cosmetic) |
 | `kilo update --host 192.168.88.28` (build c527a97d, 591140 bytes) | Written, read back with crc32 02363240, installed (`kernel7.img` is the mind kernel, `kernel7.old` the loader), rebooted: "the mind is back after 10.7 s: mind build c527a97d" |
 | After the reboot | Status from build c527a97d; the loader's port 8080 no longer answers: Kilo runs from the card |
-| Power-on with no laptop | not yet run |
+| Power cycle by the owner, nothing sent from the laptop | `kilo status --host 192.168.88.28` answered: build c527a97d, up 20.3 s when asked, link alive, battery 7984 mV, distance 508 mm. Same address as before the power cycle |
 
 ## 2026-11-14, run 2
 
