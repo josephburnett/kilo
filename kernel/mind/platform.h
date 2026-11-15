@@ -4,7 +4,9 @@
 // clock_gettime, stderr), so the same core runs against the virtual body on
 // the laptop.
 //
-// The core never blocks: every call here returns at once. No virtual
+// The core never blocks: every call here returns at once, except
+// KernelStore's (see there), which the core makes only while the link is
+// paused. No virtual
 // destructors (a deleting destructor would pull in operator delete): the
 // platform owns its objects for the life of the program.
 #ifndef KILO_MIND_PLATFORM_H
@@ -66,6 +68,37 @@ class Gpio {
 
  protected:
   ~Gpio() = default;
+};
+
+// The SD card's FAT partition, for the mind's own kernel image
+// (update/updater.h: kernel7.img, kernel7.new, kernel7.old, bare names).
+// One file open at a time. Unlike the seams above these calls may block for
+// as long as the card takes (the Circle kernel's SD driver busy-waits): the
+// updater makes them only while the link is paused, a bounded slice per
+// pass. kilo-mind-host implements it on a directory (--card DIR).
+class KernelStore {
+ public:
+  enum class Result : uint8_t { Ok, Missing, Failed };
+
+  // Open name for writing, created or emptied.
+  virtual Result create(const char* name) = 0;
+  // Open name for reading; Missing if there is none.
+  virtual Result open(const char* name) = 0;
+  // All len bytes onto the open file, or Failed.
+  virtual Result write(const uint8_t* data, uint32_t len) = 0;
+  // Up to len bytes of the open file: the count, 0 at its end, -1 failed.
+  virtual int32_t read(uint8_t* buf, uint32_t len) = 0;
+  // Close the open file. After writing, Ok means its data are on the card.
+  virtual Result close() = 0;
+  // Missing if there is none.
+  virtual Result remove(const char* name) = 0;
+  // from must exist (else Missing); to must not.
+  virtual Result rename(const char* from, const char* to) = 0;
+  // Directory and allocation table changes are on the card.
+  virtual Result sync() = 0;
+
+ protected:
+  ~KernelStore() = default;
 };
 
 }  // namespace kilo

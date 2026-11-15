@@ -48,6 +48,8 @@ $(B)/obj/host/main.o: $(B)/mind-build-id
 # STK500 flasher against a scripted optiboot, and the host channel's flash
 # messages (the core sources are in mind/sources.mk).
 TESTS += test_flash
+# The mind's kernel onto its SD card (UPDATE_*): the updater against an in-memory card.
+TESTS += test_update
 # P3: tricks, perception, behaviour, remote and the Mind (their block is at the end;
 # TESTS must be complete here, before `check:` reads it for its prerequisites).
 TESTS += test_tricks test_perception test_behaviour test_remote test_mind

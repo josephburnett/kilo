@@ -27,6 +27,8 @@ const char* name_of(uint8_t type) {
     case KILO_HOST_MSG_BRIDGE_CLOSE: return "BRIDGE_CLOSE";
     case KILO_HOST_MSG_FLASH_BEGIN: return "FLASH_BEGIN";
     case KILO_HOST_MSG_FLASH_COMMIT: return "FLASH_COMMIT";
+    case KILO_HOST_MSG_UPDATE_BEGIN: return "UPDATE_BEGIN";
+    case KILO_HOST_MSG_UPDATE_COMMIT: return "UPDATE_COMMIT";
     default: return "?";
   }
 }
@@ -48,6 +50,11 @@ void HostServer::attach_flasher(Flasher& flasher, FlashImage& image) {
   flasher_ = &flasher;
   image_ = &image;
   flash_sent_ = flasher.changes();
+}
+
+void HostServer::attach_updater(KernelUpdater& updater) {
+  updater_ = &updater;
+  update_sent_ = updater.changes();
 }
 
 uint32_t HostServer::clients() const {
@@ -75,6 +82,10 @@ void HostServer::poll() {
   if (flasher_ != nullptr) {
     flasher_->poll();
     flash_status();
+  }
+  if (updater_ != nullptr) {
+    updater_->poll();
+    update_status();
   }
   streams(now);
   for (uint32_t i = 0; i < kMaxClients; i++)
@@ -136,6 +147,10 @@ void HostServer::drop(uint32_t i, const char* why) {
   logf(log_, LogLevel::Info, "host: client %d %s", (int)i, why);
   if (controller_ == (int32_t)i) lose_control(why);
   if (flash_client_ == (int32_t)i) flash_client_ = -1;  // a flash runs on; its status has nowhere to go
+  if (update_client_ == (int32_t)i) {
+    if (updater_->receiving()) drop_update(why);
+    update_client_ = -1;  // an update that is writing runs on
+  }
 }
 
 void HostServer::lose_control(const char* why) {
@@ -144,6 +159,7 @@ void HostServer::lose_control(const char* why) {
   controller_ = -1;
   if (bridge_) close_bridge("the controller let go");
   if (receiving_) drop_image("the controller let go");
+  if (updater_ != nullptr && updater_->receiving()) drop_update("the controller let go");
   stats_.control_lost++;
   // Python: the daemon ends a client's hold with REST (kilo/daemon/sessions.py).
   kilo_set_posture_t rest = {0, KILO_POSTURE_REST, 0, 0};  // the link fills the epoch
@@ -230,6 +246,7 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
       if (!is_controller) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
       if (bridge_) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_BRIDGED, "the bridge is open");
       if (flashing()) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_FLASHING, "the body is being flashed");
+      if (updating()) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UPDATING, "the kernel is being updated");
       if (q.posture > KILO_POSTURE_ZERO) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_BAD_ARG, "no such posture");
       if (!link_.connected() || link_.state().proto_ok == 0)
         return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_NO_BODY, "no body to drive");
@@ -244,6 +261,7 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
     case KILO_HOST_MSG_PARAM_SET:
       if (!is_controller) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
       if (flashing()) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_FLASHING, "the body is being flashed");
+      if (updating()) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UPDATING, "the kernel is being updated");
       return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "params: not yet (P3)");
     case KILO_HOST_MSG_REBOOT:
       return reboot(i, f.seq);
@@ -268,7 +286,9 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
       if (!is_controller) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
       if (!link_.connected()) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_NO_BODY, "the UART is closed");
       if (flashing()) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_FLASHING, "the body is being flashed");
+      if (updating()) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UPDATING, "the kernel is being updated");
       if (receiving_) drop_image("the bridge opened");
+      if (updater_ != nullptr && updater_->receiving()) drop_update("the bridge opened");
       if (!bridge_) {
         bridge_ = true;
         logf(log_, LogLevel::Info, "host: bridge open for client %d: link paused", (int)i);
@@ -302,6 +322,18 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
     }
     case KILO_HOST_MSG_FLASH_COMMIT:
       return flash_commit(i, f.seq);
+    case KILO_HOST_MSG_UPDATE_BEGIN:
+      return update_begin(i, f.seq, p);
+    case KILO_HOST_MSG_UPDATE_DATA: {
+      // A stream: never answered. An error sticks in the updater until COMMIT reports it.
+      if (updater_ == nullptr || !updater_->receiving() || update_client_ != (int32_t)i) return;
+      uint32_t offset;
+      mem_copy(&offset, p, sizeof offset);
+      if (updater_->write(offset, p + 4, f.len - 4u) == KILO_UPDATE_ERROR_NONE) stats_.update_bytes_rx += f.len - 4u;
+      return;
+    }
+    case KILO_HOST_MSG_UPDATE_COMMIT:
+      return update_commit(i, f.seq);
     default:
       return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UNSUPPORTED, name_of(f.type));
   }
@@ -316,8 +348,10 @@ void HostServer::reboot(uint32_t i, uint8_t seq) {
   const uint8_t type = KILO_HOST_MSG_REBOOT;
   if (controller_ != (int32_t)i) return result(i, seq, type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
   if (flashing()) return result(i, seq, type, KILO_HOST_RESULT_CODE_FLASHING, "the body is being flashed");
+  if (updating()) return result(i, seq, type, KILO_HOST_RESULT_CODE_UPDATING, "the kernel is being updated");
   if (bridge_) close_bridge("REBOOT");
   if (receiving_) drop_image("REBOOT");
+  if (updater_ != nullptr && updater_->receiving()) drop_update("REBOOT");
   bool rest = false;
   if (link_.connected()) {
     kilo_set_posture_t g = {0, KILO_POSTURE_REST, 0, 0};  // the link fills the epoch
@@ -341,6 +375,9 @@ void HostServer::flash_begin(uint32_t i, uint8_t seq, const uint8_t* p) {
   // The last image is still to be written to SD (PERSIST): it must not change under the platform.
   if (flasher_->persist_pending())
     return result(i, seq, type, KILO_HOST_RESULT_CODE_FLASHING, "the last image is not on SD yet");
+  if (updating() || reboot_)
+    return result(i, seq, type, KILO_HOST_RESULT_CODE_UPDATING, "the kernel is being updated");
+  if (updater_ != nullptr && updater_->receiving()) drop_update("a body image began");
   kilo_host_flash_begin_t b;
   mem_copy(&b, p, sizeof b);
   receiving_ = false;
@@ -364,6 +401,8 @@ void HostServer::flash_commit(uint32_t i, uint8_t seq) {
   if (flasher_ == nullptr) return result(i, seq, type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no flasher on this mind");
   if (controller_ != (int32_t)i) return result(i, seq, type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
   if (flashing()) return result(i, seq, type, KILO_HOST_RESULT_CODE_FLASHING, "a flash is running");
+  if (updating() || reboot_)
+    return result(i, seq, type, KILO_HOST_RESULT_CODE_UPDATING, "the kernel is being updated");
   if (!receiving_ || flash_client_ != (int32_t)i)
     return result(i, seq, type, KILO_HOST_RESULT_CODE_BAD_ARG, "no FLASH_BEGIN from this client");
   receiving_ = false;
@@ -427,6 +466,111 @@ void HostServer::flash_status() {
     return;  // try again next pass
   }
   flash_sent_ = flasher_->changes();
+}
+
+// ---- kernel update -------------------------------------------------------------------
+
+void HostServer::update_begin(uint32_t i, uint8_t seq, const uint8_t* p) {
+  const uint8_t type = KILO_HOST_MSG_UPDATE_BEGIN;
+  if (updater_ == nullptr)
+    return result(i, seq, type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no kernel store (kilo-mind-host: --card DIR)");
+  if (controller_ != (int32_t)i) return result(i, seq, type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
+  if (bridge_) return result(i, seq, type, KILO_HOST_RESULT_CODE_BRIDGED, "the bridge is open");
+  if (flashing()) return result(i, seq, type, KILO_HOST_RESULT_CODE_FLASHING, "the body is being flashed");
+  if (flasher_ != nullptr && flasher_->persist_pending())
+    return result(i, seq, type, KILO_HOST_RESULT_CODE_FLASHING, "the body image is not on SD yet");
+  if (updating()) return result(i, seq, type, KILO_HOST_RESULT_CODE_UPDATING, "an update is being written");
+  if (reboot_) return result(i, seq, type, KILO_HOST_RESULT_CODE_UPDATING, "rebooting");
+  if (receiving_) drop_image("a kernel update began");
+  kilo_host_update_begin_t b;
+  mem_copy(&b, p, sizeof b);
+  update_client_ = -1;
+  uint8_t e = updater_->begin(b.image_size, b.crc32, b.flags);
+  update_sent_ = updater_->changes();  // a refused BEGIN has its RESULT; no status
+  if (e != KILO_UPDATE_ERROR_NONE) {
+    char why[48];
+    format(why, sizeof why, "%s (size %u, max %u)", update_error_name(e), (unsigned)b.image_size,
+           (unsigned)updater_->capacity());
+    return result(i, seq, type, KILO_HOST_RESULT_CODE_IMAGE_BAD, why);
+  }
+  update_client_ = (int32_t)i;
+  logf(log_, LogLevel::Info, "host: client %d sends a kernel image: %u bytes, crc32 %08x%s", (int)i,
+       (unsigned)b.image_size, (unsigned)b.crc32, (b.flags & KILO_UPDATE_FLAGS_FORCE) ? ", force" : "");
+  result(i, seq, type, KILO_HOST_RESULT_CODE_OK);
+}
+
+void HostServer::update_commit(uint32_t i, uint8_t seq) {
+  const uint8_t type = KILO_HOST_MSG_UPDATE_COMMIT;
+  if (updater_ == nullptr)
+    return result(i, seq, type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no kernel store (kilo-mind-host: --card DIR)");
+  if (controller_ != (int32_t)i) return result(i, seq, type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
+  if (updating()) return result(i, seq, type, KILO_HOST_RESULT_CODE_UPDATING, "an update is being written");
+  if (!updater_->receiving() || update_client_ != (int32_t)i)
+    return result(i, seq, type, KILO_HOST_RESULT_CODE_BAD_ARG, "no UPDATE_BEGIN from this client");
+  uint8_t e = updater_->commit();
+  if (e != KILO_UPDATE_ERROR_NONE) {
+    update_status();  // UPDATE_STATUS FAILED first, so the client has the error when RESULT arrives
+    char why[60];
+    if (e == KILO_UPDATE_ERROR_NOT_A_KERNEL)
+      format(why, sizeof why, "NOT_A_KERNEL: no %s in it (force to install)", KILO_HOST_UPDATE_MARKER);
+    else
+      format(why, sizeof why, "%s: %u bytes, crc32 %08x", update_error_name(e),
+             (unsigned)updater_->status().received, (unsigned)updater_->status().crc32);
+    return result(i, seq, type, KILO_HOST_RESULT_CODE_IMAGE_BAD, why);
+  }
+  logf(log_, LogLevel::Info, "host: client %d: updating the kernel on the SD card (link paused)", (int)i);
+  result(i, seq, type, KILO_HOST_RESULT_CODE_OK);
+  update_status();  // CHECKING (passed), right behind the RESULT
+}
+
+void HostServer::drop_update(const char* why) {
+  updater_->drop();
+  update_sent_ = updater_->changes();
+  logf(log_, LogLevel::Info, "host: kernel image dropped (%s)", why);
+}
+
+// UPDATE_STATUS to the update's client when the updater's status moved (a
+// full ring skips a progress update; the last one waits for room), then on
+// DONE the reboot.
+void HostServer::update_status() {
+  if (updater_->changes() != update_sent_) {
+    if (update_client_ >= 0 && clients_[update_client_].open) {
+      const KernelUpdater::Status& u = updater_->status();
+      kilo_host_update_status_t st;
+      st.phase = u.phase;
+      st.error = u.error;
+      st.received = u.received;
+      st.image_size = u.size;
+      st.done = u.done;
+      st.crc32 = u.crc32;
+      st.card_crc32 = u.card_crc32;
+      Client& c = clients_[update_client_];
+      bool last = u.phase == KILO_UPDATE_PHASE_DONE || u.phase == KILO_UPDATE_PHASE_FAILED;
+      if (enqueue((uint32_t)update_client_, KILO_HOST_MSG_UPDATE_STATUS, c.out_seq, &st, sizeof st)) {
+        c.out_seq++;
+        stats_.update_status_sent++;
+      } else if (last) {
+        return;  // try again next pass
+      }
+    }
+    update_sent_ = updater_->changes();
+  }
+  if (updater_->status().phase == KILO_UPDATE_PHASE_DONE && !reboot_) update_reboot();
+}
+
+// The new kernel is on the card: what REBOOT does. REST to the body (the
+// link runs again from this pass), the DONE status written out, then the
+// flag the platform polls.
+void HostServer::update_reboot() {
+  bool rest = false;
+  if (link_.connected()) {
+    kilo_set_posture_t g = {0, KILO_POSTURE_REST, 0, 0};  // the link fills the epoch
+    rest = link_.set_goal(KILO_MSG_SET_POSTURE, (const uint8_t*)&g, sizeof g);
+  }
+  logf(log_, LogLevel::Warn, "host: kernel updated on the SD card: rebooting into it (%s)",
+       rest ? "REST latched" : "no link: no REST");
+  if (update_client_ >= 0) flush((uint32_t)update_client_);
+  reboot_ = true;
 }
 
 // ---- streams --------------------------------------------------------------------

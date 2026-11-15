@@ -29,6 +29,11 @@ MIND_SRCS += \
 	mind/flash/image.cpp \
 	mind/flash/flasher.cpp
 
+# The mind's own kernel onto its SD card (UPDATE_*): the image, its checks
+# and the write through the platform's KernelStore.
+MIND_SRCS += \
+	mind/update/updater.cpp
+
 # ---- P3 (docs/fast-boot.md): tricks, perception, behaviour, remote and the Mind --------
 MIND_SRCS += \
 	mind/tricks/model.cpp \
