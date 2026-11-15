@@ -1,7 +1,8 @@
 //
 // kernel.h: the Kilo mind kernel: the whole mind core (kilo::Mind: the body
 // link, the walker, tricks, perception, the IR remote, the behaviour runner
-// and the laptop interface) on Circle, and flashing the body (P4).
+// and the laptop interface) on Circle, flashing the body (P4), and updating
+// this kernel on the SD card from the laptop (`kilo update --host`).
 //
 #ifndef KILO_KERNEL_H
 #define KILO_KERNEL_H
@@ -12,6 +13,7 @@
 #include "plannerbench.h"
 #include "flash/flasher.h"
 #include "flash/image.h"
+#include "update/updater.h"
 #include "mind.h"
 #include <circle/actled.h>
 #include <circle/bcmrandom.h>
@@ -132,6 +134,11 @@ private:
 	CBootCard		*m_pBootCard;	// body.bin, body.json on the FAT partition
 	kilo::FlashImage	*m_pHostImage;	// 32 KB: FLASH_BEGIN..COMMIT fills it
 	kilo::FlashImage	*m_pCardImage;	// 32 KB: the SD card's, at boot
+
+	// Updating this kernel on the SD card (`kilo update --host`): the Mind's
+	// host server fills it from UPDATE_* and polls it; m_pBootCard is its
+	// KernelStore.
+	kilo::KernelUpdater	*m_pUpdater;	// its 4 MB image buffer on the heap
 	enum TBootFlash
 	{
 		BootFlashWait,			// for the first HELLO, or BootHelloWaitUs

@@ -1,5 +1,6 @@
 //
-// bootcard.cpp: body.bin and body.json on the SD card (see bootcard.h).
+// bootcard.cpp: body.bin and body.json on the SD card, and the kernel
+// updater's store (see bootcard.h).
 //
 #include "bootcard.h"
 #include "flash/flasher.h"
@@ -26,10 +27,13 @@ CBootCard::CBootCard (CInterruptSystem *pInterrupt, CTimer *pTimer, kilo::Log *p
 	m_pLog (pLog),
 	m_pEMMC (0),
 	m_bTried (FALSE),
-	m_bMounted (FALSE)
+	m_bMounted (FALSE),
+	m_bKernelOpen (FALSE),
+	m_bKernelWriting (FALSE)
 {
 	memset (&m_FileSystem, 0, sizeof m_FileSystem);
 	memset (&m_File, 0, sizeof m_File);
+	memset (&m_KernelFile, 0, sizeof m_KernelFile);
 }
 
 boolean CBootCard::Mount (void)
@@ -245,4 +249,161 @@ boolean CBootCard::WriteFile (const char *pName, const void *pData, unsigned nSi
 void CBootCard::Path (char *pOut, unsigned nSize, const char *pName) const
 {
 	format (pOut, nSize, "%s/%s", Drive, pName);
+}
+
+// ---- the kernel updater's store (kilo::KernelStore) ----------------------------------
+//
+// FatFs writes the file's data at f_write (multi-sector, straight from the
+// buffer when aligned) and the FAT and directory entry at f_close; f_unlink
+// and f_rename update the directory and sync the volume before they
+// return, so sync() has nothing left to do.
+
+static KernelStore::Result Failed (Log *pLog, const char *pWhat, const char *pName, FRESULT Result)
+{
+	logf (*pLog, LogLevel::Warn, "SD: %s %s (FatFs error %u%s)", pWhat, pName, (unsigned) Result,
+	      Result == FR_WRITE_PROTECTED ? ": write protected" : "");
+	return KernelStore::Result::Failed;
+}
+
+KernelStore::Result CBootCard::create (const char *pName)
+{
+	if (m_bKernelOpen || !Mount ())
+	{
+		return Result::Failed;
+	}
+	char Name[32];
+	Path (Name, sizeof Name, pName);
+	FRESULT Result = f_open (&m_KernelFile, Name, FA_WRITE | FA_CREATE_ALWAYS);
+	if (Result != FR_OK)
+	{
+		return Failed (m_pLog, "cannot create", pName, Result);
+	}
+	m_bKernelOpen = TRUE;
+	m_bKernelWriting = TRUE;
+
+	return Result::Ok;
+}
+
+KernelStore::Result CBootCard::open (const char *pName)
+{
+	if (m_bKernelOpen || !Mount ())
+	{
+		return Result::Failed;
+	}
+	char Name[32];
+	Path (Name, sizeof Name, pName);
+	FRESULT Result = f_open (&m_KernelFile, Name, FA_READ | FA_OPEN_EXISTING);
+	if (Result == FR_NO_FILE || Result == FR_NO_PATH)
+	{
+		return Result::Missing;
+	}
+	if (Result != FR_OK)
+	{
+		return Failed (m_pLog, "cannot open", pName, Result);
+	}
+	m_bKernelOpen = TRUE;
+	m_bKernelWriting = FALSE;
+
+	return Result::Ok;
+}
+
+KernelStore::Result CBootCard::write (const uint8_t *pData, uint32_t nLen)
+{
+	if (!m_bKernelOpen || !m_bKernelWriting)
+	{
+		return Result::Failed;
+	}
+	UINT nWritten = 0;
+	FRESULT Result = f_write (&m_KernelFile, pData, (UINT) nLen, &nWritten);
+	if (Result != FR_OK || nWritten != nLen)
+	{
+		logf (*m_pLog, LogLevel::Warn, "SD: writing the kernel failed (FatFs error %u, %u of %u bytes%s)",
+		      (unsigned) Result, (unsigned) nWritten, (unsigned) nLen,
+		      Result == FR_OK ? ": the card is full" : "");
+		return Result::Failed;
+	}
+
+	return Result::Ok;
+}
+
+int32_t CBootCard::read (uint8_t *pBuffer, uint32_t nLen)
+{
+	if (!m_bKernelOpen || m_bKernelWriting)
+	{
+		return -1;
+	}
+	UINT nRead = 0;
+	FRESULT Result = f_read (&m_KernelFile, pBuffer, (UINT) nLen, &nRead);
+	if (Result != FR_OK)
+	{
+		logf (*m_pLog, LogLevel::Warn, "SD: reading the kernel back failed (FatFs error %u)", (unsigned) Result);
+		return -1;
+	}
+
+	return (int32_t) nRead;
+}
+
+KernelStore::Result CBootCard::close (void)
+{
+	if (!m_bKernelOpen)
+	{
+		return Result::Failed;
+	}
+	m_bKernelOpen = FALSE;
+	FRESULT Result = f_close (&m_KernelFile);	// after writing: the cached sector, the FAT, the directory entry
+	if (Result != FR_OK)
+	{
+		return Failed (m_pLog, "cannot close", "the kernel file", Result);
+	}
+
+	return Result::Ok;
+}
+
+KernelStore::Result CBootCard::remove (const char *pName)
+{
+	if (!Mount ())
+	{
+		return Result::Failed;
+	}
+	char Name[32];
+	Path (Name, sizeof Name, pName);
+	FRESULT Result = f_unlink (Name);
+	if (Result == FR_NO_FILE)
+	{
+		return Result::Missing;
+	}
+	if (Result != FR_OK)
+	{
+		return Failed (m_pLog, "cannot remove", pName, Result);
+	}
+
+	return Result::Ok;
+}
+
+KernelStore::Result CBootCard::rename (const char *pFrom, const char *pTo)
+{
+	if (!Mount ())
+	{
+		return Result::Failed;
+	}
+	char From[32], To[32];
+	Path (From, sizeof From, pFrom);
+	// f_rename's new name has no drive: it stays on the old one's volume.
+	format (To, sizeof To, "%s", pTo);
+	FRESULT Result = f_rename (From, To);
+	if (Result == FR_NO_FILE)
+	{
+		return Result::Missing;
+	}
+	if (Result != FR_OK)
+	{
+		return Failed (m_pLog, "cannot rename", pFrom, Result);
+	}
+
+	return Result::Ok;
+}
+
+KernelStore::Result CBootCard::sync (void)
+{
+	return m_bMounted ? Result::Ok : Result::Failed;
 }
