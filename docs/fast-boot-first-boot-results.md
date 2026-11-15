@@ -3,6 +3,19 @@
 Runs of docs/fast-boot-first-boot.md. Newest first. Copy the block below
 for each run and fill in what you saw; "don't know" is a fine answer.
 
+## 2026-11-14, run 2
+
+Kilo reassembled by the owner: the Pi on the NyBoard's socket, all servos
+and the ultrasonic eyes plugged in. Run from rtb over the network.
+
+| Field | What was seen |
+|---|---|
+| Loader address | 192.168.88.2 this time (DHCP gave another address than run 1's .9; same MAC) |
+| `kilo status --host` | `mind build a89f1dcf`; `firmware proto 2.0 build de6d2d7f reset COLD config OK`; `mode LIMP`; `attitude pitch +3.38° roll +4.94°`; `battery 7983 mV`; `distance 364 mm` (the eyes are on the D6/D7 socket, G4) |
+| Servo plugs | the owner checked them against the port table (docs/architecture.md, joint table) |
+| `kilo posture stand --for 5`, Kilo held in the owner's hand | laptop: `holding stand for 5 s`, `released: the mind latched REST`; the owner: "Yeah, that was good!" (asked: legs straightened evenly, head forward, back to rest). Battery 7840 mV after |
+| Remote, walk, planner bench, boot probe | not run |
+
 ## 2026-11-14, run 1
 
 First run on the Pi. Filled in from rtb over the network; the owner's own
