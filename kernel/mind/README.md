@@ -3,7 +3,7 @@
 The part of the mind that runs both in the Circle kernel on the Pi 2 B and
 on the laptop (`kernel/host/`), against the virtual body. Phase P1 of
 `docs/fast-boot.md`: the body link; P3: the walking planner; P4: flashing
-the body. Platform-free
+the body; and updating the kernel on the SD card. Platform-free
 C++17: no exceptions, RTTI, heap, `std::` or `printf`; the only libc
 functions are `memcpy` and `memset`, through the compiler's builtins
 (`util/mem.h`), and the only libm functions the planner's `sinf`, `cosf`,
@@ -22,7 +22,8 @@ the planner's `sinf`, `cosf`, `sincosf`, `tanf`, `atanf`, `atan2f`
 proves it by linking the core with `-nostdlib`.
 
 ```
-platform.h        the seams: Serial (non-blocking bytes, tx_free), Clock (us), Log (lines), Gpio (body RESET)
+platform.h        the seams: Serial (non-blocking bytes, tx_free), Clock (us), Log (lines), Gpio (body RESET),
+                  KernelStore (the SD card's kernel7.* files: blocking, used only while the link is paused)
 platform_net.h    the network seams: Listener (accept into a fixed slot) and Conn (non-blocking TCP stream)
 util/fmt, log     a small printf (%d %u %x %s %c %%, width, '0') and log lines through Log
 util/logring      the RAM log: a Log sink keeping the last 64 lines, for `kilo log --host`
@@ -38,6 +39,7 @@ planner/          the walking planner: a port of mind/kilo/planner (model, patte
 flash/image       the body image in RAM (32 KB) and its manifest (body.json parse and write)
 flash/crc32       the image's CRC-32, as zlib.crc32
 flash/flasher     the STK500v1 flasher: RESET, optiboot, pages, verify, the HELLO after
+update/updater    the mind's own kernel onto the SD card: receive, check (CRC, marker), write, read back, rename
 
 tricks/           the trick model, the compiled-in library (library.gen.cpp) and the player (upload, play)
 perception/       ultrasonic and IMU detectors, the Percepts aggregator (kilo/perception)
@@ -111,7 +113,8 @@ for (;;) {
 | Telemetry | `TELEM` at 1-50 Hz: the latest TELEMETRY, last EVENT, link counters | any client |
 | Log | `LOG_LINE`: the last N lines of the ring, then live; seq gaps are lost lines | any client |
 | Raw bridge | `BRIDGE_TX`/`BRIDGE_RX`: UART bytes, the link paused | the controller |
-| Flash (P4) | `FLASH_BEGIN`, `FLASH_DATA`, `FLASH_COMMIT` -> `RESULT`; `FLASH_STATUS` until DONE or FAILED (ids 0x40-0x4F, 0xC0-0xCF) | the controller; see "Flashing" |
+| Flash (P4) | `FLASH_BEGIN`, `FLASH_DATA`, `FLASH_COMMIT` -> `RESULT`; `FLASH_STATUS` until DONE or FAILED (ids 0x40-0x42, 0xC0) | the controller; see "Flashing" |
+| Kernel update | `UPDATE_BEGIN`, `UPDATE_DATA`, `UPDATE_COMMIT` -> `RESULT`; `UPDATE_STATUS` until DONE (then the reboot) or FAILED (ids 0x48-0x4A, 0xC1) | the controller; see "Updating the kernel" |
 
 Control: the first client to send `CONTROL take=1` is the controller, the
 rest observe. When the controller gives control up, closes, goes out of
@@ -119,7 +122,8 @@ step, or asked for keepalive and sent nothing for 2 s, the bridge closes and
 the mind latches `SET_POSTURE REST` (the daemon's end of a hold in Python).
 
 Reboot: `REBOOT` (`kilo reboot --host IP`) is the controller's (an observer
-gets `NOT_CONTROLLER`, as for `POSTURE`; a running flash gets `FLASHING`).
+gets `NOT_CONTROLLER`, as for `POSTURE`; a running flash gets `FLASHING`, a
+kernel update that is writing `UPDATING`).
 The server latches REST if the link is up, logs the request, writes
 `RESULT OK` to the socket at once, then sets `reboot_requested()` (also
 `Mind::reboot_requested()`), which the platform polls: the Circle kernel
@@ -137,7 +141,8 @@ On the laptop: `kilo-mind-host --port PTY --listen 127.0.0.1:0` logs
 `listening on port N`; `kernel/host/test.sh` runs the real CLI against it
 and the virtual body (status, monitor, posture, log tail, REST when the
 controller is killed, `kilo.link` through the bridge,
-`tests/bridge_client.py`, and `kilo reboot`: exit status 3).
+`tests/bridge_client.py`, `kilo reboot`: exit status 3, and `kilo update`
+into `--card DIR`: exit status 3, then the card's files).
 
 ## The planner
 
@@ -278,6 +283,54 @@ in place, the boot-time flash from SD (path B: after the first HELLO or
 fails): kernel/README.md "Flashing the body". `kilo flash --rollback`
 (keep the last good image on SD) is not designed yet.
 
+## Updating the kernel
+
+The mind writes its own successor onto the SD card it booted from
+(`update/updater.*`; the laptop's side is `kilo update --host IP [--image
+PATH] [--force]`, the Circle side kernel/README.md "Updating the kernel over
+the network"):
+
+```cpp
+static KernelUpdater updater(buffer, capacity, store, clock, log);  // buffer: the platform's (4 MB on Circle)
+host.attach_updater(updater);   // UPDATE_*: the server fills and checks it, polls it, reboots after DONE
+```
+
+`UPDATE_BEGIN` (image_size, crc32, flags `FORCE`) -> `UPDATE_DATA` (offset +
+up to 200 bytes, in order, not answered) -> `UPDATE_COMMIT`. At COMMIT the
+updater checks that every byte arrived, the CRC-32 (`flash/crc32`) and,
+unless `FORCE`, that `KILO_HOST_UPDATE_MARKER` (`"KILO-MIND-KERNEL-1"`,
+spec `host.update_marker`) is in the image: the Circle kernel embeds it
+(`kernel/src/kernel.cpp`), the netboot loader does not, so a wrong file is
+refused `IMAGE_BAD` (an `UPDATE_STATUS FAILED NOT_A_KERNEL` first) and
+nothing is written. Then, through the platform's `KernelStore`
+(`platform.h`), a 16 KB slice per `poll()`:
+
+| Phase | What |
+|---|---|
+| CHECKING | checked; reported right behind `RESULT OK` |
+| WRITING | `kernel7.new` created, written slice by slice, closed |
+| VERIFYING | `kernel7.new` read back to its end: length and CRC-32 must be the image's |
+| INSTALLING | `kernel7.old` removed (if any), `kernel7.img` -> `kernel7.old`, `kernel7.new` -> `kernel7.img`, sync |
+| DONE | the server latches REST, sends the status, sets `reboot_requested()` (as REBOOT) |
+| FAILED | `WRITE_FAILED`, `VERIFY_FAILED`: `kernel7.new` removed, `kernel7.img` untouched; `INSTALL_FAILED`: a remove or rename failed, `kernel7.img` is the old kernel (renamed back if it had moved); `CARD_BROKEN`: renaming it back failed too, the card has no `kernel7.img` |
+
+`KernelStore`'s calls block (the SD card), so from COMMIT to the end
+`host.updating()` and `host.link_paused()` are true: the main loop polls
+nothing on the link, as during a flash, and `Mind` aborts a walk the pause
+cut off. Meanwhile `POSTURE`, `PARAM_SET`, `REBOOT`, the bridge and
+`FLASH_*` are refused `UPDATING`; `UPDATE_BEGIN` is refused `FLASHING`
+while a body flash runs (or its `--persist` image waits for the card). A
+`BEGIN` of either drops the other's image still being received, and losing
+control drops a receiving image. A server without an updater answers
+`UNSUPPORTED` (`kilo-mind-host` without `--card DIR`). The host channel
+version stays 1.
+
+On the laptop `kilo-mind-host --card DIR` is the store on a directory
+(`posix.h` DirStore): `kernel/host/test.sh` sends a fake kernel with the
+marker, checks `kernel7.img`, `kernel7.old` and that `kernel7.new` is gone,
+and the exit status 3; `tests/test_update.cpp` runs every store failure
+against an in-memory card (`tests/fake_store.h`).
+
 ## The Mind
 
 `mind.h` puts the whole core in one object, so a platform's main loop is
@@ -291,7 +344,8 @@ for (;;) mind.poll();                 // a few ms apart; never blocks
 ```
 
 One pass: stamp the link's liveness, serve the laptop, then, unless the
-raw bridge is open, poll the link, hand the command slot's answer to its
+raw bridge is open, the flasher has the UART or a kernel update is
+writing the SD card, poll the link, hand the command slot's answer to its
 owner (the trick player, the STATS poll) before anything may send
 another request, and run the walker, the trick player, the remote and the
 behaviour runner. Every TELEMETRY feeds perception; every EVENT goes to

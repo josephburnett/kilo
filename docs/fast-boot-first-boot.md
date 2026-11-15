@@ -403,7 +403,65 @@ If it fails: note the laptop's last line and the log lines above. Power
 Kilo off and on; if the light then never gets to the even blink, Kilo's
 board is waiting in optiboot: flash it the way you do today, from Linux.
 
-### 13. Finish
+### 13. Optional: start the mind from the card, with no network
+
+So far the card holds the loader, and the mind runs only after the laptop
+sends it (step 6). This step puts the mind itself on the card, over the
+network cable: after it, the Pi starts the mind at every power-on with no
+laptop and no network. Nothing needs the card reader unless it goes wrong.
+
+**Kernel update**: the mind writes a new `kernel7.img` onto its own card.
+It writes the new one as `kernel7.new`, reads it back to check it, and
+only then renames the old `kernel7.img` to `kernel7.old` and the new one to
+`kernel7.img`. Then it restarts into it.
+
+With the mind running from step 6 and its address from step 8, on the
+laptop:
+
+```
+~/OpenCat/.venv/bin/kilo update --host 192.168.88.Y
+```
+
+It sends `kernel/build/kernel7.img` (the build from step 1). While the Pi
+writes the card, the ACT light gives two short flashes, then a pause (as
+when flashing Kilo's board) and Kilo lies down. The laptop prints lines
+starting `update:`, then
+
+```
+update: DONE: kernel7.img on the SD card is the new kernel (... bytes, crc32 ... read back); the previous one is kernel7.old
+update: the mind is rebooting into it
+update: the mind is back after ... s: mind build ...
+```
+
+The Pi restarts by itself, this time straight into the mind (no loader, no
+`netboot.sh`). Copy those three lines into the results. Power the Pi off
+and on once and check that the light comes to the even blink again (step
+7) with no laptop involved; `kilo status --host 192.168.88.Y` should show
+the same `mind build`. From now on a new build goes on the card the same
+way: `make -C kernel`, then `kilo update --host 192.168.88.Y`.
+
+**Back to the loader** (to try builds from RAM again, step 6):
+
+```
+~/OpenCat/.venv/bin/kilo update --host 192.168.88.Y --image kernel/build/netboot/kernel7.img --force
+```
+
+`--force` is needed because the loader is not the mind: without it the
+mind refuses any file that is not a mind kernel (`NOT_A_KERNEL`), so a
+wrong file cannot end up on the card by mistake.
+
+**If it fails**, the laptop's last line says why. In every case but one the
+card still has its old `kernel7.img` and boots as before: note the line and
+the log (`kilo log --host 192.168.88.Y --lines 64 --duration 5`, the lines
+starting `update:` and `SD:`). The exception is a line with `CARD_BROKEN`,
+or a Pi that does not come back (the light steady for more than 20 s
+after the restart): then put the card in a card reader and copy the files
+of `kernel/build/card/netboot/` (the loader) or `kernel/build/card/kernel/`
+(the mind), made by `make -C kernel card` (step 1), onto the card's FAT
+partition, replacing what is there. `kernel7.old`, if the card has one, is
+the kernel from before the update: renaming it to `kernel7.img` also works.
+
+### 14. Finish
 
 Power the Pi off. Way A: unplug the USB cable from the Pi before you switch
 Kilo off.

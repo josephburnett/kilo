@@ -67,8 +67,9 @@ using namespace kilo;
 // This image's identity for `kilo update --host`: the kernel updater
 // (mind/update/updater.h) installs an image only if this string is in it
 // (unless forced), so the netboot loader, which lacks it, or a wrong file is
-// not written over kernel7.img by mistake. used: kept by the compiler;
-// referenced by the start-up log line: kept by the linker's --gc-sections.
+// not written over kernel7.img by mistake. used: kept by the compiler; and
+// the start-up log line refers to it, so a build with Circle's GC_SECTIONS=1
+// (--gc-sections; off by default) keeps it too.
 extern "C" const char KiloMindKernelMarker[] __attribute__ ((used)) = KILO_HOST_UPDATE_MARKER;
 
 // The largest kernel image `kilo update --host` may send (the updater's
