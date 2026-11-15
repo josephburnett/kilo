@@ -3,6 +3,19 @@
 Runs of docs/fast-boot-first-boot.md. Newest first. Copy the block below
 for each run and fill in what you saw; "don't know" is a fine answer.
 
+## 2026-11-15, run 3
+
+Kilo assembled, on battery, LAN cable in. The card still held the netboot loader; the Pi came up at 192.168.88.28.
+
+| Step | Result |
+|---|---|
+| Kernel with keys (host channel v2, build 899fe080) sent with `netboot.sh --http` | `kilo status --host` answered 11 s after the send: link alive, battery 8035 mV, distance 515 mm |
+| Handshake, in Kilo's log | `handshake with key 1d104bb805e1b051 (joe@rtb) in 9.9 ms, slowest step 2622 us`; loop `work max 79 us` afterwards, PL011 errors not growing |
+| A key Kilo does not know | Kilo logged `key ... is not authorized` and `refused: an unknown key`. The laptop printed "closed the connection without answering the hello": the refusal's 8 bytes did not arrive before the close (open, cosmetic) |
+| `kilo update --host 192.168.88.28` (build c527a97d, 591140 bytes) | Written, read back with crc32 02363240, installed (`kernel7.img` is the mind kernel, `kernel7.old` the loader), rebooted: "the mind is back after 10.7 s: mind build c527a97d" |
+| After the reboot | Status from build c527a97d; the loader's port 8080 no longer answers: Kilo runs from the card |
+| Power-on with no laptop | not yet run |
+
 ## 2026-11-14, run 2
 
 Kilo reassembled by the owner: the Pi on the NyBoard's socket, all servos
