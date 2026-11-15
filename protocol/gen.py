@@ -213,6 +213,14 @@ def validate_host(spec: dict) -> None:
         raise SpecError("host: max_frame != 2 + 2 + max_payload + 2")
     if h["max_frame"] > 0xFFFF + 2:
         raise SpecError("host: max_frame must fit the u16 length")
+    # The secure layer (version 2): the hello and answer layouts, the record size.
+    if len(h["hello_magic"]) != 4 or h["hello_len"] != 4 + 1 + 1 + 2 + 32 or h["reply_len"] != 4 + 1 + 1 + 2:
+        raise SpecError("host: hello is magic(4) version flags reserved(2) key(32); the answer magic version status "
+                        "reserved(2)")
+    if h["noise_protocol"] != "Noise_KN_25519_ChaChaPoly_BLAKE2b":
+        raise SpecError("host: the mind implements Noise_KN_25519_ChaChaPoly_BLAKE2b only (kernel/mind/net/noise.h)")
+    if not h["max_frame"] <= h["record_max"] <= 0xFFFF - 16:
+        raise SpecError("host: record_max must hold a whole frame and fit the u16 record length with its tag")
     ids, names = set(), set()
     for m in spec["host_messages"]:
         n, i = m["name"], m["id"]

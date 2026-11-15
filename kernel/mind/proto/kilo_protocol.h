@@ -264,6 +264,13 @@ enum kilo_host_result_code {
     KILO_HOST_RESULT_CODE_UPDATING = 12,
 };
 
+enum kilo_host_hello_status {
+    KILO_HOST_HELLO_STATUS_OK = 0,
+    KILO_HOST_HELLO_STATUS_KEY_UNKNOWN = 1,
+    KILO_HOST_HELLO_STATUS_BAD_VERSION = 2,
+    KILO_HOST_HELLO_STATUS_REFUSED = 3,
+};
+
 enum kilo_host_controller {
     KILO_HOST_CONTROLLER_NONE = 0,
     KILO_HOST_CONTROLLER_YOU = 1,
@@ -1304,8 +1311,15 @@ enum kilo_param_id {
 
 /* ---- Laptop interface: the host channel (spec [host], [[host_messages]]; docs/fast-boot.md §5) ----
  * Frame on TCP: len u16 LE (bytes after it) | type | seq | payload | crc16 LE over type..payload. */
-#define KILO_HOST_VERSION 1u
+#define KILO_HOST_VERSION 2u
 #define KILO_HOST_PORT 5300u
+#define KILO_HOST_NOISE_PROTOCOL "Noise_KN_25519_ChaChaPoly_BLAKE2b"
+#define KILO_HOST_NOISE_PROLOGUE "kilo-host-2"
+#define KILO_HOST_HELLO_MAGIC "KILO"
+#define KILO_HOST_HELLO_LEN 40u
+#define KILO_HOST_REPLY_LEN 8u
+#define KILO_HOST_RECORD_MAX 1024u
+#define KILO_HOST_HANDSHAKE_TIMEOUT_MS 3000u
 #define KILO_HOST_MAX_PAYLOAD 240u
 #define KILO_HOST_MAX_FRAME 246u
 #define KILO_HOST_MAX_CLIENTS 4u

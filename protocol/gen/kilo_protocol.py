@@ -252,6 +252,13 @@ class HostResultCode(enum.IntEnum):
     UPDATING = 12
 
 
+class HostHelloStatus(enum.IntEnum):
+    OK = 0
+    KEY_UNKNOWN = 1
+    BAD_VERSION = 2
+    REFUSED = 3
+
+
 class HostController(enum.IntEnum):
     NONE = 0
     YOU = 1
@@ -2809,8 +2816,15 @@ def from_dict(cls: type, d: dict) -> Any:
 # ---- Laptop interface: the host channel (spec [host], [[host_messages]]; docs/fast-boot.md §5) ----
 # Frame on TCP: len u16 LE (bytes after it) | type | seq | payload | crc16 LE over type..payload
 # (kilo_link_codec.build_host_frame, HostStreamDecoder).
-HOST_VERSION = 1
+HOST_VERSION = 2
 HOST_PORT = 5300
+HOST_NOISE_PROTOCOL = 'Noise_KN_25519_ChaChaPoly_BLAKE2b'
+HOST_NOISE_PROLOGUE = 'kilo-host-2'
+HOST_HELLO_MAGIC = 'KILO'
+HOST_HELLO_LEN = 40
+HOST_REPLY_LEN = 8
+HOST_RECORD_MAX = 1024
+HOST_HANDSHAKE_TIMEOUT_MS = 3000
 HOST_MAX_PAYLOAD = 240
 HOST_MAX_FRAME = 246
 HOST_MAX_CLIENTS = 4
