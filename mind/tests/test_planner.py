@@ -22,9 +22,9 @@ H = M.stance_height(205)  # 76 mm: STANCE's body height
 # ---- the body model ------------------------------------------------------------------------
 
 def test_model_masses_and_reach():
-    assert 900 <= M.total_g <= 1100  # Kilo weighs about 1 kg with the battery (estimates)
+    assert M.total_g == pytest.approx(358.0)  # weighed 2026-11-14, the Pi mounted
     cx, cy, cz = M.com([0] * 4, [H] * 4)
-    assert abs(cy) < 1e-9 and 0 < cx < 6 and -10 < cz < 5
+    assert abs(cy) < 1e-9 and cx == pytest.approx(7.5, abs=0.2) and cz == pytest.approx(-3.0, abs=0.3)  # as measured
     assert H == pytest.approx(76.0, abs=0.1)
     assert M.tau_s(80) == pytest.approx(0.090, abs=0.001)  # the 90 ms tip time constant of the doc
     for leg in LEGS:
@@ -67,10 +67,10 @@ def test_stability_margin():
     zs = [H] * 4
     four = stability(M, [0.0] * 4, zs, 0xF, 0.0, 0.0)
     assert four == pytest.approx(32.5, abs=0.5)  # the half track
-    # on three feet the mass sits on the diagonal's edge (the head makes it a little nose heavy)
+    # on three feet the mass sits near the diagonal's edge (nose heavy: 7.5 mm ahead of the centre)
     for lifted in LEGS:
         m = stability(M, [0.0] * 4, zs, 0xF & ~(1 << lifted), 0.0, 0.0)
-        assert abs(m) < 3.0
+        assert abs(m) < 4.0
     # a diagonal pair has no inside
     assert stability(M, [0.0] * 4, zs, (1 << LF) | (1 << RB), 0.0, 0.0) <= 0
 

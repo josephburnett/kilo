@@ -2,11 +2,11 @@
 
 Everything the planner (kilo.planner.plan) and the virtual body's physics
 (kilo.vbody.physics) know about Kilo's body is a field of ``BodyModel``.
-The lengths are measured (2026-10-11); the masses and where they sit, and
-the servo lag, are ESTIMATES (marked below) until the owner weighs Kilo
-per foot on a kitchen scale (with and without the battery) and runs a
-servo step test with the IMU recording (docs/walking-and-balance.md §9,
-§10). Change them here and nowhere else.
+The lengths are measured (2026-10-11), the total mass and the centre of
+gravity too (2026-11-14, with the Pi mounted; the split into parts is a
+fit, see below). The servo lag is an ESTIMATE until a servo step test with
+the IMU recording (docs/walking-and-balance.md §9, §10). Change them here
+and in kernel/mind/planner/model.h, nowhere else.
 
 Frames and conventions:
 
@@ -64,19 +64,24 @@ class BodyModel:
     foot_r_mm: float = 6.0       # the floor is this far below the foot disc's centre
     length_mm: float = 123.0     # front to back shoulder axle
     track_mm: float = 65.0       # left to right foot centre
-    # ---- masses: ESTIMATES (Kilo weighs roughly 1 kg with the battery) ----
+    # ---- masses: measured 2026-11-14, the Pi 2 B on the NyBoard's socket ----
+    # The owner's readings, Kilo in STAND: 358 g in all; the centre of
+    # gravity 54 mm behind the front shoulder axles (7.5 mm ahead of the
+    # origin), about 3 mm below the axles, taken as centred left to right.
+    # The split below is a fit to those: the battery was weighed (58 g,
+    # 2026-10-15) and sits about 16 mm below the axles; the Pi is the
+    # catalogue 45 g, about 20 mm above; the legs are estimates; the body is
+    # the rest, placed so that com() at STAND gives the measured point.
     # The frame with the NyBoard, the four shoulder servos, the head (two
-    # servos) and the tail servo; the head makes it a little nose-heavy.
-    # Replace with the per-foot scale readings: front pair vs back pair gives
-    # x, left pair vs right pair gives y.
-    body: Mass = Mass(700.0, 5.0, 0.0, 5.0)
-    # The 2S pack under the belly (est. 150 g).
-    battery: Mass = Mass(150.0, 0.0, 0.0, -15.0)
-    # The Pi 2 B is not carried yet (0 g); when it is, about 45 g on the back.
-    pi: Mass = Mass(0.0, -10.0, 0.0, 25.0)
-    upper_leg_g: float = 20.0    # upper link with the knee servo (est.)
+    # servos) and the tail servo; the head makes it nose-heavy.
+    body: Mass = Mass(183.0, 17.0, 0.0, 8.0)
+    # The 2S pack under the belly.
+    battery: Mass = Mass(58.0, 0.0, 0.0, -16.0)
+    # The Pi 2 B on the NyBoard's socket, on the back.
+    pi: Mass = Mass(45.0, -10.0, 0.0, 20.0)
+    upper_leg_g: float = 14.0    # upper link with the knee servo (est.)
     upper_leg_at: float = 0.8    # ...its centre this far from the shoulder (the servo sits at the knee)
-    lower_leg_g: float = 8.0     # lower link and foot (est.)
+    lower_leg_g: float = 4.0     # lower link and foot (est.)
     lower_leg_at: float = 0.5
     # ---- servos: ESTIMATES ----
     servo_lag_ms: float = 150.0  # command to motion under load; never measured (servo step test)

@@ -71,10 +71,10 @@ void check_ticks(const std::vector<TickPlan>& ticks, const char* what) {
 // ---- the body model ----------------------------------------------------------------------
 
 void test_model_masses_and_reach() {
-  CHECK(M.total_g() >= 900 && M.total_g() <= 1100);
+  CHECK(near(M.total_g(), 358.0, 0.01));  // weighed 2026-11-14, the Pi mounted
   real xs[4] = {0, 0, 0, 0}, zs[4] = {H, H, H, H};
   V3 c = M.com(xs, zs);
-  CHECK(std::fabs(c.y) < 1e-5 && c.x > 0 && c.x < 6 && c.z > -10 && c.z < 5);
+  CHECK(std::fabs(c.y) < 1e-5 && near(c.x, 7.5, 0.2) && near(c.z, -3.0, 0.3));  // as measured
   CHECK(near(H, 76.0, 0.1));
   CHECK(near(M.tau_s(80), 0.090, 0.001));  // the 90 ms tip time constant of the doc
   const real pts[4][2] = {{0, H}, {20, 70}, {-25, 60}, {10, 85}};
@@ -127,8 +127,8 @@ void test_leg_lengths_and_attitude_conventions() {
 void test_stability_margin() {
   real xs[4] = {0, 0, 0, 0}, zs[4] = {H, H, H, H};
   CHECK(near(stability(M, xs, zs, 0xF, 0, 0), 32.5, 0.5));  // the half track
-  for (int lifted = 0; lifted < 4; lifted++)  // on three feet the mass sits on the diagonal's edge
-    CHECK(std::fabs(stability(M, xs, zs, (uint8_t)(0xF & ~(1 << lifted)), 0, 0)) < 3.0);
+  for (int lifted = 0; lifted < 4; lifted++)  // on three feet the mass sits near the diagonal's edge
+    CHECK(std::fabs(stability(M, xs, zs, (uint8_t)(0xF & ~(1 << lifted)), 0, 0)) < 4.0);
   CHECK(stability(M, xs, zs, (1 << LF) | (1 << RB), 0, 0) <= 0);  // a diagonal pair has no inside
 }
 

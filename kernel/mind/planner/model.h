@@ -49,13 +49,15 @@ struct BodyModel {
   real foot_r_mm = 6;
   real length_mm = 123;  // front to back shoulder axle
   real track_mm = 65;    // left to right foot centre
-  // masses: ESTIMATES
-  Mass body = {700, 5, 0, 5};
-  Mass battery = {150, 0, 0, -15};
-  Mass pi = {0, -10, 0, 25};  // not carried yet
-  real upper_leg_g = 20;
+  // masses: measured 2026-11-14 with the Pi on the NyBoard's socket (358 g,
+  // the centre of gravity 7.5 mm ahead of the origin and 3 mm below the
+  // axles at STAND); the split is a fit, see mind/kilo/planner/model.py
+  Mass body = {183, 17, 0, 8};
+  Mass battery = {58, 0, 0, -16};
+  Mass pi = {45, -10, 0, 20};
+  real upper_leg_g = 14;
   real upper_leg_at = (real)0.8;
-  real lower_leg_g = 8;
+  real lower_leg_g = 4;
   real lower_leg_at = (real)0.5;
   // servos: ESTIMATES
   real servo_lag_ms = 150;
