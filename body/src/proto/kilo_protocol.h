@@ -261,6 +261,7 @@ enum kilo_host_result_code {
     KILO_HOST_RESULT_CODE_NOT_BRIDGED = 9,
     KILO_HOST_RESULT_CODE_IMAGE_BAD = 10,
     KILO_HOST_RESULT_CODE_FLASHING = 11,
+    KILO_HOST_RESULT_CODE_UPDATING = 12,
 };
 
 enum kilo_host_controller {
@@ -306,6 +307,30 @@ enum kilo_flash_error {
     KILO_FLASH_ERROR_WRONG_BUILD = 14,
     KILO_FLASH_ERROR_BAD_RESET_CAUSE = 15,
     KILO_FLASH_ERROR_CONTROL_LOST = 16,
+};
+
+enum kilo_update_phase {
+    KILO_UPDATE_PHASE_IDLE = 0,
+    KILO_UPDATE_PHASE_RECEIVING = 1,
+    KILO_UPDATE_PHASE_CHECKING = 2,
+    KILO_UPDATE_PHASE_WRITING = 3,
+    KILO_UPDATE_PHASE_VERIFYING = 4,
+    KILO_UPDATE_PHASE_INSTALLING = 5,
+    KILO_UPDATE_PHASE_DONE = 6,
+    KILO_UPDATE_PHASE_FAILED = 7,
+};
+
+enum kilo_update_error {
+    KILO_UPDATE_ERROR_NONE = 0,
+    KILO_UPDATE_ERROR_BAD_SIZE = 1,
+    KILO_UPDATE_ERROR_BAD_OFFSET = 2,
+    KILO_UPDATE_ERROR_SHORT = 3,
+    KILO_UPDATE_ERROR_CRC_MISMATCH = 4,
+    KILO_UPDATE_ERROR_NOT_A_KERNEL = 5,
+    KILO_UPDATE_ERROR_WRITE_FAILED = 6,
+    KILO_UPDATE_ERROR_VERIFY_FAILED = 7,
+    KILO_UPDATE_ERROR_INSTALL_FAILED = 8,
+    KILO_UPDATE_ERROR_CARD_BROKEN = 9,
 };
 
 /* ---- Bit flags (masks) ---- */
@@ -360,6 +385,8 @@ enum kilo_flash_error {
 #define KILO_HOST_STATE_FLASHING (1u << 7)
 
 #define KILO_FLASH_FLAGS_PERSIST (1u << 0)
+
+#define KILO_UPDATE_FLAGS_FORCE (1u << 0)
 
 /* ---- Shared element structs ---- */
 typedef struct KILO_PACKED kilo_keyframe_s {
@@ -1295,6 +1322,9 @@ enum kilo_param_id {
 #define KILO_HOST_FLASH_PAGE 128u
 #define KILO_HOST_FLASH_CHUNK_MAX 200u
 #define KILO_HOST_FLASH_BAUD 115200UL
+#define KILO_HOST_UPDATE_MAX_IMAGE 4194304UL
+#define KILO_HOST_UPDATE_CHUNK_MAX 200u
+#define KILO_HOST_UPDATE_MARKER "KILO-MIND-KERNEL-1"
 
 enum kilo_host_msg_id {
     KILO_HOST_MSG_STATUS_REQ = 0x01,
@@ -1312,12 +1342,16 @@ enum kilo_host_msg_id {
     KILO_HOST_MSG_FLASH_BEGIN = 0x40,
     KILO_HOST_MSG_FLASH_DATA = 0x41,
     KILO_HOST_MSG_FLASH_COMMIT = 0x42,
+    KILO_HOST_MSG_UPDATE_BEGIN = 0x48,
+    KILO_HOST_MSG_UPDATE_DATA = 0x49,
+    KILO_HOST_MSG_UPDATE_COMMIT = 0x4A,
     KILO_HOST_MSG_RESULT = 0x80,
     KILO_HOST_MSG_STATUS = 0x81,
     KILO_HOST_MSG_TELEM = 0x82,
     KILO_HOST_MSG_LOG_LINE = 0x83,
     KILO_HOST_MSG_BRIDGE_RX = 0x84,
     KILO_HOST_MSG_FLASH_STATUS = 0xC0,
+    KILO_HOST_MSG_UPDATE_STATUS = 0xC1,
 };
 
 /* host 0x01 STATUS_REQ: command. Answered by STATUS. Any client. */
@@ -1368,7 +1402,7 @@ KILO_STATIC_ASSERT(offsetof(kilo_host_param_set_t, id) == 0, kilo_sa_host_param_
 KILO_STATIC_ASSERT(offsetof(kilo_host_param_set_t, value) == 1, kilo_sa_host_param_set_value);
 KILO_STATIC_ASSERT(offsetof(kilo_host_param_set_t, persist) == 3, kilo_sa_host_param_set_persist);
 
-/* host 0x13 REBOOT: command. Reboot the mind (controller only): latch REST on the link, answer RESULT OK, then restart (the Pi re-enters the SD card's boot, e.g. the netboot loader; kilo-mind-host exits). FLASHING while a flash runs. The connection then drops. */
+/* host 0x13 REBOOT: command. Reboot the mind (controller only): latch REST on the link, answer RESULT OK, then restart (the Pi re-enters the SD card's boot, e.g. the netboot loader; kilo-mind-host exits). FLASHING while a flash runs, UPDATING while a kernel update writes. The connection then drops. */
 #define KILO_HOST_REBOOT_LEN 0u
 
 /* host 0x20 TELEM_SUB: command. TELEM to this client at hz (1..host.telem_max_hz; 0 = off). Any client. */
@@ -1406,7 +1440,7 @@ KILO_STATIC_ASSERT(offsetof(kilo_host_bridge_tx_t, data) == 0, kilo_sa_host_brid
 /* host 0x32 BRIDGE_CLOSE: command. Resume the mind's link (it reconnects: HELLO_REQ). Controller only. */
 #define KILO_HOST_BRIDGE_CLOSE_LEN 0u
 
-/* host 0x40 FLASH_BEGIN: command. Start receiving a body image (controller only): its manifest. Drops any image received before. RESULT IMAGE_BAD for an image_size of 0 or over host.flash_max_image, or build 0; FLASHING while a flash runs; BRIDGED while the bridge is open. */
+/* host 0x40 FLASH_BEGIN: command. Start receiving a body image (controller only): its manifest. Drops any image received before. RESULT IMAGE_BAD for an image_size of 0 or over host.flash_max_image, or build 0; FLASHING while a flash runs; UPDATING while a kernel update runs; BRIDGED while the bridge is open. */
 #define KILO_HOST_FLASH_BEGIN_LEN 13u
 typedef struct KILO_PACKED kilo_host_flash_begin_s {
     uint32_t build; /* the image's -DKILO_BUILD (commit hash, 8 hex digits): HELLO.fw_build after the flash */
@@ -1433,6 +1467,32 @@ KILO_STATIC_ASSERT(offsetof(kilo_host_flash_data_t, data) == 4, kilo_sa_host_fla
 
 /* host 0x42 FLASH_COMMIT: command. Check the received image (size, CRC-32) and flash it. RESULT OK: flashing has started, FLASH_STATUS follows to this client until DONE or FAILED; IMAGE_BAD: the image is dropped, a FLASH_STATUS FAILED says why. */
 #define KILO_HOST_FLASH_COMMIT_LEN 0u
+
+/* host 0x48 UPDATE_BEGIN: command. Start receiving a mind kernel image for the SD card (controller only). Drops any image received before. RESULT IMAGE_BAD for an image_size of 0 or over the mind's buffer; FLASHING while a body flash runs or its image waits for SD; UPDATING while an update writes; BRIDGED while the bridge is open; UNSUPPORTED on a mind with no kernel store (kilo-mind-host without --card). */
+#define KILO_HOST_UPDATE_BEGIN_LEN 9u
+typedef struct KILO_PACKED kilo_host_update_begin_s {
+    uint32_t image_size; /* B; range 1..4194304; bytes of kernel7.img */
+    uint32_t crc32; /* CRC-32 of the image (zlib.crc32) */
+    uint8_t flags; /* flags update_flags */
+} kilo_host_update_begin_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_update_begin_t) == 9, kilo_sa_host_update_begin_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_update_begin_t, image_size) == 0, kilo_sa_host_update_begin_image_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_update_begin_t, crc32) == 4, kilo_sa_host_update_begin_crc32);
+KILO_STATIC_ASSERT(offsetof(kilo_host_update_begin_t, flags) == 8, kilo_sa_host_update_begin_flags);
+
+/* host 0x49 UPDATE_DATA: stream. The next bytes of the kernel image, in order from offset 0. Not answered; an offset that is not the bytes received so far (or data past image_size) fails the image, which UPDATE_COMMIT then reports (BAD_OFFSET). Dropped unless from the client that sent UPDATE_BEGIN. */
+#define KILO_HOST_UPDATE_DATA_MIN_LEN 5u
+#define KILO_HOST_UPDATE_DATA_MAX_LEN 204u
+typedef struct KILO_PACKED kilo_host_update_data_s {
+    uint32_t offset; /* B */
+    uint8_t data[200]; /* 1..200 B, length implied */
+} kilo_host_update_data_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_update_data_t) == 204, kilo_sa_host_update_data_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_update_data_t, offset) == 0, kilo_sa_host_update_data_offset);
+KILO_STATIC_ASSERT(offsetof(kilo_host_update_data_t, data) == 4, kilo_sa_host_update_data_data);
+
+/* host 0x4A UPDATE_COMMIT: command. Check the received image (size, CRC-32, and unless FORCE host.update_marker) and install it on the SD card. RESULT OK: writing has started, UPDATE_STATUS follows to this client until DONE (then the mind reboots into it: REST to the body, the connection drops) or FAILED; IMAGE_BAD: the image is dropped, an UPDATE_STATUS FAILED says why. */
+#define KILO_HOST_UPDATE_COMMIT_LEN 0u
 
 /* host 0x80 RESULT: event. The answer to a command without a reply message of its own, and to any refused command: its seq, its type, a code and a short reason. */
 #define KILO_HOST_RESULT_MIN_LEN 2u
@@ -1555,6 +1615,26 @@ KILO_STATIC_ASSERT(offsetof(kilo_host_flash_status_t, build) == 12, kilo_sa_host
 KILO_STATIC_ASSERT(offsetof(kilo_host_flash_status_t, fw_build) == 16, kilo_sa_host_flash_status_fw_build);
 KILO_STATIC_ASSERT(offsetof(kilo_host_flash_status_t, reset_cause) == 20, kilo_sa_host_flash_status_reset_cause);
 
+/* host 0xC1 UPDATE_STATUS: stream. Progress of a kernel update, to the client that committed it: on every phase change and slice written or read back, last DONE (the mind reboots next) or FAILED. */
+#define KILO_HOST_UPDATE_STATUS_LEN 22u
+typedef struct KILO_PACKED kilo_host_update_status_s {
+    uint8_t phase; /* enum update_phase */
+    uint8_t error; /* enum update_error */
+    uint32_t received; /* B; image bytes received */
+    uint32_t image_size; /* B */
+    uint32_t done; /* B; bytes written (WRITING) or read back (VERIFYING) */
+    uint32_t crc32; /* the received image's CRC-32 */
+    uint32_t card_crc32; /* kernel7.new's CRC-32 as read back (0 until VERIFYING ends) */
+} kilo_host_update_status_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_update_status_t) == 22, kilo_sa_host_update_status_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_update_status_t, phase) == 0, kilo_sa_host_update_status_phase);
+KILO_STATIC_ASSERT(offsetof(kilo_host_update_status_t, error) == 1, kilo_sa_host_update_status_error);
+KILO_STATIC_ASSERT(offsetof(kilo_host_update_status_t, received) == 2, kilo_sa_host_update_status_received);
+KILO_STATIC_ASSERT(offsetof(kilo_host_update_status_t, image_size) == 6, kilo_sa_host_update_status_image_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_update_status_t, done) == 10, kilo_sa_host_update_status_done);
+KILO_STATIC_ASSERT(offsetof(kilo_host_update_status_t, crc32) == 14, kilo_sa_host_update_status_crc32);
+KILO_STATIC_ASSERT(offsetof(kilo_host_update_status_t, card_crc32) == 18, kilo_sa_host_update_status_card_crc32);
+
 /* A host payload's length against its type: KILO_LEN_OK, KILO_LEN_BAD or KILO_LEN_UNKNOWN_TYPE. */
 static inline uint8_t kilo_host_payload_len_check(uint8_t type, uint16_t len)
 {
@@ -1589,6 +1669,12 @@ static inline uint8_t kilo_host_payload_len_check(uint8_t type, uint16_t len)
         return (len >= 5u && len <= 204u) ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_FLASH_COMMIT:
         return len == 0u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_UPDATE_BEGIN:
+        return len == 9u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_UPDATE_DATA:
+        return (len >= 5u && len <= 204u) ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_UPDATE_COMMIT:
+        return len == 0u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_RESULT:
         return (len >= 2u && len <= 62u) ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_STATUS:
@@ -1601,6 +1687,8 @@ static inline uint8_t kilo_host_payload_len_check(uint8_t type, uint16_t len)
         return (len >= 1u && len <= 200u) ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_FLASH_STATUS:
         return len == 21u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_UPDATE_STATUS:
+        return len == 22u ? KILO_LEN_OK : KILO_LEN_BAD;
     default:
         return KILO_LEN_UNKNOWN_TYPE;
     }
@@ -1622,14 +1710,18 @@ static inline uint8_t kilo_host_msg_kind(uint8_t type)
     case KILO_HOST_MSG_BRIDGE_CLOSE:
     case KILO_HOST_MSG_FLASH_BEGIN:
     case KILO_HOST_MSG_FLASH_COMMIT:
+    case KILO_HOST_MSG_UPDATE_BEGIN:
+    case KILO_HOST_MSG_UPDATE_COMMIT:
         return KILO_KIND_COMMAND;
     case KILO_HOST_MSG_KEEPALIVE:
     case KILO_HOST_MSG_BRIDGE_TX:
     case KILO_HOST_MSG_FLASH_DATA:
+    case KILO_HOST_MSG_UPDATE_DATA:
     case KILO_HOST_MSG_TELEM:
     case KILO_HOST_MSG_LOG_LINE:
     case KILO_HOST_MSG_BRIDGE_RX:
     case KILO_HOST_MSG_FLASH_STATUS:
+    case KILO_HOST_MSG_UPDATE_STATUS:
         return KILO_KIND_STREAM;
     case KILO_HOST_MSG_RESULT:
     case KILO_HOST_MSG_STATUS:

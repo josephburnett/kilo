@@ -330,6 +330,22 @@ def host_frame_cases():
         ("flash_status_sync_timeout", "FLASH_STATUS", 0,
          {"phase": 8, "error": 6, "attempt": 2, "stk_cmd": 0x30, "page": 0, "pages": 245, "received": 31234,
           "build": 0x3D441EC0, "fw_build": 0, "reset_cause": 0}, "FAILED SYNC_TIMEOUT on GET_SYNC"),
+        ("update_begin", "UPDATE_BEGIN", 14, {"image_size": 524288, "crc32": 0xCBF43926, "flags": 0}, "512 KB, checked"),
+        ("update_begin_force", "UPDATE_BEGIN", 15, {"image_size": 4194304, "crc32": 0x1C291CA3, "flags": 1},
+         "FORCE, the largest image"),
+        ("update_data_first", "UPDATE_DATA", 0, {"offset": 0, "data": "0c0000ea" * 50},
+         "max chunk: an ARM branch, repeated"),
+        ("update_data_last", "UPDATE_DATA", 0, {"offset": 524200, "data": "00" * 88}, "the tail, 88 B"),
+        ("update_commit", "UPDATE_COMMIT", 16, {}, ""),
+        ("update_status_writing", "UPDATE_STATUS", 0,
+         {"phase": 3, "error": 0, "received": 524288, "image_size": 524288, "done": 65536, "crc32": 0xCBF43926,
+          "card_crc32": 0}, "64 KB of 512 KB written"),
+        ("update_status_done", "UPDATE_STATUS", 0,
+         {"phase": 6, "error": 0, "received": 524288, "image_size": 524288, "done": 524288, "crc32": 0xCBF43926,
+          "card_crc32": 0xCBF43926}, "DONE: read back, installed"),
+        ("update_status_not_a_kernel", "UPDATE_STATUS", 0,
+         {"phase": 7, "error": 5, "received": 1000, "image_size": 1000, "done": 0, "crc32": 0x12345678,
+          "card_crc32": 0}, "FAILED: no marker"),
     ]
 
 

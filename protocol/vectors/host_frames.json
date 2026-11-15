@@ -532,6 +532,140 @@
    "payload": "080602300000f500027a0000c01e443d0000000000",
    "wire": "1900c000080602300000f500027a0000c01e443d000000000028f8",
    "note": "FAILED SYNC_TIMEOUT on GET_SYNC"
+  },
+  {
+   "name": "update_begin",
+   "msg": "UPDATE_BEGIN",
+   "type": 72,
+   "dir": "client_to_mind",
+   "kind": "command",
+   "seq": 14,
+   "fields": {
+    "image_size": 524288,
+    "crc32": 3421780262,
+    "flags": 0
+   },
+   "payload": "000008002639f4cb00",
+   "wire": "0d00480e000008002639f4cb009e77",
+   "note": "512 KB, checked"
+  },
+  {
+   "name": "update_begin_force",
+   "msg": "UPDATE_BEGIN",
+   "type": 72,
+   "dir": "client_to_mind",
+   "kind": "command",
+   "seq": 15,
+   "fields": {
+    "image_size": 4194304,
+    "crc32": 472456355,
+    "flags": 1
+   },
+   "payload": "00004000a31c291c01",
+   "wire": "0d00480f00004000a31c291c014267",
+   "note": "FORCE, the largest image"
+  },
+  {
+   "name": "update_data_first",
+   "msg": "UPDATE_DATA",
+   "type": 73,
+   "dir": "client_to_mind",
+   "kind": "stream",
+   "seq": 0,
+   "fields": {
+    "offset": 0,
+    "data": "0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea"
+   },
+   "payload": "000000000c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea",
+   "wire": "d0004900000000000c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000ea0c0000eaf7b7",
+   "note": "max chunk: an ARM branch, repeated"
+  },
+  {
+   "name": "update_data_last",
+   "msg": "UPDATE_DATA",
+   "type": 73,
+   "dir": "client_to_mind",
+   "kind": "stream",
+   "seq": 0,
+   "fields": {
+    "offset": 524200,
+    "data": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+   },
+   "payload": "a8ff070000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "wire": "60004900a8ff07000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000025a0",
+   "note": "the tail, 88 B"
+  },
+  {
+   "name": "update_commit",
+   "msg": "UPDATE_COMMIT",
+   "type": 74,
+   "dir": "client_to_mind",
+   "kind": "command",
+   "seq": 16,
+   "fields": {},
+   "payload": "",
+   "wire": "04004a1039ed",
+   "note": ""
+  },
+  {
+   "name": "update_status_writing",
+   "msg": "UPDATE_STATUS",
+   "type": 193,
+   "dir": "mind_to_client",
+   "kind": "stream",
+   "seq": 0,
+   "fields": {
+    "phase": 3,
+    "error": 0,
+    "received": 524288,
+    "image_size": 524288,
+    "done": 65536,
+    "crc32": 3421780262,
+    "card_crc32": 0
+   },
+   "payload": "03000000080000000800000001002639f4cb00000000",
+   "wire": "1a00c10003000000080000000800000001002639f4cb00000000afe9",
+   "note": "64 KB of 512 KB written"
+  },
+  {
+   "name": "update_status_done",
+   "msg": "UPDATE_STATUS",
+   "type": 193,
+   "dir": "mind_to_client",
+   "kind": "stream",
+   "seq": 0,
+   "fields": {
+    "phase": 6,
+    "error": 0,
+    "received": 524288,
+    "image_size": 524288,
+    "done": 524288,
+    "crc32": 3421780262,
+    "card_crc32": 3421780262
+   },
+   "payload": "06000000080000000800000008002639f4cb2639f4cb",
+   "wire": "1a00c10006000000080000000800000008002639f4cb2639f4cbf9fa",
+   "note": "DONE: read back, installed"
+  },
+  {
+   "name": "update_status_not_a_kernel",
+   "msg": "UPDATE_STATUS",
+   "type": 193,
+   "dir": "mind_to_client",
+   "kind": "stream",
+   "seq": 0,
+   "fields": {
+    "phase": 7,
+    "error": 5,
+    "received": 1000,
+    "image_size": 1000,
+    "done": 0,
+    "crc32": 305419896,
+    "card_crc32": 0
+   },
+   "payload": "0705e8030000e8030000000000007856341200000000",
+   "wire": "1a00c1000705e8030000e8030000000000007856341200000000ae3a",
+   "note": "FAILED: no marker"
   }
  ],
  "errors": [
