@@ -5,7 +5,7 @@
 #
 #   make              build/kilo-mind-host, build/walk-demo
 #   make check        unit tests (sanitizers), the planner against the Python vectors
-#   make bench        the planner's cost per tick (no sanitizers)
+#   make bench        the planner's cost per tick, the Noise handshake's (no sanitizers)
 #   make freestanding the core built and linked with -ffreestanding -nostdlib
 #
 # kernel/host/test.sh runs all three and the integration run against vbody.
@@ -127,9 +127,13 @@ $(B)/bench_planner: tests/bench_planner.cpp $(CORE_OBJS)
 	$(CXX) $(CXXFLAGS) $< $(CORE_OBJS) -o $@
 $(B)/bench_planner_double: tests/bench_planner.cpp $(BENCH_DBL_OBJS)
 	$(CXX) $(CXXFLAGS) -DKILO_PLANNER_DOUBLE $< $(BENCH_DBL_OBJS) -o $@
-bench: $(B)/bench_planner $(B)/bench_planner_double
+# The host channel's Noise handshake and records (as the kernel's boot bench).
+$(B)/bench_noise: tests/bench_noise.cpp $(CORE_OBJS)
+	$(CXX) $(CXXFLAGS) $< $(CORE_OBJS) -o $@
+bench: $(B)/bench_planner $(B)/bench_planner_double $(B)/bench_noise
 	$(B)/bench_planner
 	$(B)/bench_planner_double
+	$(B)/bench_noise
 
 # ---- freestanding check -----------------------------------------------------
 # Only the compiler's own headers (stdint.h, stddef.h, stdarg.h), no libc's;
