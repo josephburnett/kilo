@@ -3,6 +3,7 @@
 // NyBoard on a USB adapter.
 #ifndef KILO_HOST_POSIX_H
 #define KILO_HOST_POSIX_H
+#include <stddef.h>
 #include "platform.h"
 
 namespace kilo {
@@ -69,6 +70,32 @@ class FifoResetGpio final : public Gpio {
   const char* path_;
   Log& log_;
   int fd_ = -1;
+};
+
+// The SD card's FAT partition on the laptop (kilo-mind-host --card DIR): the
+// kernel updater's files (kernel7.img, kernel7.new, kernel7.old) in a
+// directory, so the integration test can check what an update leaves there.
+// close() after writing fsyncs the file, sync() the directory.
+class DirStore final : public KernelStore {
+ public:
+  DirStore(const char* dir, Log& log) : dir_(dir), log_(log) {}
+  ~DirStore();
+  Result create(const char* name) override;
+  Result open(const char* name) override;
+  Result write(const uint8_t* data, uint32_t len) override;
+  int32_t read(uint8_t* buf, uint32_t len) override;
+  Result close() override;
+  Result remove(const char* name) override;
+  Result rename(const char* from, const char* to) override;
+  Result sync() override;
+
+ private:
+  void path(char* out, size_t cap, const char* name) const;
+  Result fail(const char* what, const char* name);
+  const char* dir_;
+  Log& log_;
+  int fd_ = -1;
+  bool writing_ = false;
 };
 
 }  // namespace kilo

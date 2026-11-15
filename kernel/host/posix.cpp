@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
@@ -107,6 +108,96 @@ void FifoResetGpio::edge(char level) {
     return;
   }
   logf(log_, LogLevel::Debug, "gpio: %s (%s)", what, path_);
+}
+
+// ---- DirStore ----------------------------------------------------------------------
+
+DirStore::~DirStore() {
+  if (fd_ >= 0) ::close(fd_);
+}
+
+void DirStore::path(char* out, size_t cap, const char* name) const { snprintf(out, cap, "%s/%s", dir_, name); }
+
+KernelStore::Result DirStore::fail(const char* what, const char* name) {
+  logf(log_, LogLevel::Warn, "card: %s %s/%s: %s", what, dir_, name, strerror(errno));
+  return Result::Failed;
+}
+
+KernelStore::Result DirStore::create(const char* name) {
+  if (fd_ >= 0) return Result::Failed;
+  char p[512];
+  path(p, sizeof p, name);
+  fd_ = ::open(p, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd_ < 0) return fail("cannot create", name);
+  writing_ = true;
+  return Result::Ok;
+}
+
+KernelStore::Result DirStore::open(const char* name) {
+  if (fd_ >= 0) return Result::Failed;
+  char p[512];
+  path(p, sizeof p, name);
+  fd_ = ::open(p, O_RDONLY);
+  if (fd_ < 0) return errno == ENOENT ? Result::Missing : fail("cannot open", name);
+  writing_ = false;
+  return Result::Ok;
+}
+
+KernelStore::Result DirStore::write(const uint8_t* data, uint32_t len) {
+  if (fd_ < 0 || !writing_) return Result::Failed;
+  while (len > 0) {
+    ssize_t w = ::write(fd_, data, len);
+    if (w < 0 && errno == EINTR) continue;
+    if (w <= 0) return fail("cannot write", "kernel7.new");
+    data += w;
+    len -= (uint32_t)w;
+  }
+  return Result::Ok;
+}
+
+int32_t DirStore::read(uint8_t* buf, uint32_t len) {
+  if (fd_ < 0 || writing_) return -1;
+  for (;;) {
+    ssize_t n = ::read(fd_, buf, len);
+    if (n < 0 && errno == EINTR) continue;
+    return n < 0 ? -1 : (int32_t)n;
+  }
+}
+
+KernelStore::Result DirStore::close() {
+  if (fd_ < 0) return Result::Failed;
+  bool ok = !writing_ || fsync(fd_) == 0;
+  ok = ::close(fd_) == 0 && ok;
+  fd_ = -1;
+  return ok ? Result::Ok : fail("cannot close", "(open file)");
+}
+
+KernelStore::Result DirStore::remove(const char* name) {
+  char p[512];
+  path(p, sizeof p, name);
+  if (::unlink(p) == 0) return Result::Ok;
+  return errno == ENOENT ? Result::Missing : fail("cannot remove", name);
+}
+
+KernelStore::Result DirStore::rename(const char* from, const char* to) {
+  char a[512], b[512];
+  path(a, sizeof a, from);
+  path(b, sizeof b, to);
+  struct stat st;
+  if (::stat(a, &st) != 0) return errno == ENOENT ? Result::Missing : fail("cannot stat", from);
+  if (::stat(b, &st) == 0) {  // as FatFs: never onto an existing file
+    logf(log_, LogLevel::Warn, "card: cannot rename %s to %s: it exists", from, to);
+    return Result::Failed;
+  }
+  return ::rename(a, b) == 0 ? Result::Ok : fail("cannot rename", from);
+}
+
+KernelStore::Result DirStore::sync() {
+  int fd = ::open(dir_, O_RDONLY | O_DIRECTORY);
+  if (fd < 0) return fail("cannot open", ".");
+  bool ok = fsync(fd) == 0;
+  ::close(fd);
+  return ok ? Result::Ok : fail("cannot sync", ".");
 }
 
 }  // namespace kilo

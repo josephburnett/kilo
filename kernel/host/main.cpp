@@ -10,15 +10,19 @@
 // picks a free one). The laptop channel includes flashing the body (P4,
 // mind/flash/flasher.h): the body's RESET line is the named pipe given by
 // --reset-fifo (posix.h FifoResetGpio), which the fake optiboot body of
-// kernel/host/tests/fake_optiboot.py reads.
+// kernel/host/tests/fake_optiboot.py reads. With --card DIR it also takes
+// kernel updates (UPDATE_*, mind/update/updater.h): DIR stands for the SD
+// card's FAT partition (kernel7.img, kernel7.new, kernel7.old there, posix.h
+// DirStore); without --card UPDATE_BEGIN is refused UNSUPPORTED.
 //
-//   kilo-mind-host --port /dev/pts/N [--listen [ADDR:]PORT] [--reset-fifo PATH] [--duration S] [--verbose]
-//                  [--remote] [--behaviour] [--seed N] [--balance KP]
+//   kilo-mind-host --port /dev/pts/N [--listen [ADDR:]PORT] [--reset-fifo PATH] [--card DIR] [--duration S]
+//                  [--verbose] [--remote] [--behaviour] [--seed N] [--balance KP]
 //
 // Exit status: 0 after --duration (or SIGINT/SIGTERM) with a HELLO seen;
 // 1 no HELLO, or the port failed; 2 the body speaks another protocol major
-// (refusing to drive); 3 a laptop's controller sent REBOOT (the Circle
-// kernel restarts the Pi there; this program stops); 64 bad usage.
+// (refusing to drive); 3 a laptop's controller sent REBOOT, or a kernel
+// update was installed in --card DIR (the Circle kernel restarts the Pi
+// there; this program stops); 64 bad usage.
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
@@ -30,6 +34,7 @@
 #include "flash/image.h"
 #include "link/serial_link.h"
 #include "net/host_server.h"
+#include "update/updater.h"
 
 #include "mind.h"
 #include "net_posix.h"
@@ -46,8 +51,11 @@ namespace {
 
 volatile sig_atomic_t g_stop = 0;
 
-// The exit status after a laptop's REBOOT (the usage text lists it).
+// The exit status after a laptop's REBOOT or an installed kernel update (the usage text lists it).
 constexpr int kExitReboot = 3;
+
+// The kernel updater's buffer: the largest image UPDATE_BEGIN may give, as on the Pi.
+constexpr uint32_t kKernelImageMax = KILO_HOST_UPDATE_MAX_IMAGE;
 
 void on_signal(int) { g_stop = 1; }
 
@@ -104,10 +112,12 @@ void log_stats(Log& log, const SerialLink& link, const Window& w) {
 
 int usage() {
   fprintf(stderr,
-          "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--reset-fifo PATH] [--duration SECONDS]\n"
-          "                      [--verbose] [--remote] [--behaviour] [--seed N] [--balance KP]\n"
+          "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--reset-fifo PATH] [--card DIR]\n"
+          "                      [--duration SECONDS] [--verbose] [--remote] [--behaviour] [--seed N] [--balance KP]\n"
+          "  --card DIR  take kernel updates (kilo update --host) into DIR as if it were the SD card\n"
           "exit status: 0 done (a HELLO seen), 1 no HELLO or the port failed, 2 the body speaks another\n"
-          "             protocol major, 3 REBOOT from a laptop client (kilo reboot --host), 64 bad usage\n");
+          "             protocol major, 3 REBOOT from a laptop client (kilo reboot --host) or a kernel\n"
+          "             update installed in --card DIR (kilo update --host), 64 bad usage\n");
   return 64;
 }
 
@@ -117,6 +127,7 @@ int main(int argc, char** argv) {
   const char* port = nullptr;
   const char* listen = nullptr;
   const char* reset_fifo = nullptr;
+  const char* card = nullptr;
   double duration_s = -1;
   bool verbose = false;
   MindConfig cfg;
@@ -131,6 +142,8 @@ int main(int argc, char** argv) {
       listen = argv[++i];
     } else if (strcmp(argv[i], "--reset-fifo") == 0 && i + 1 < argc) {
       reset_fifo = argv[++i];
+    } else if (strcmp(argv[i], "--card") == 0 && i + 1 < argc) {
+      card = argv[++i];
     } else if (strcmp(argv[i], "--duration") == 0 && i + 1 < argc) {
       duration_s = strtod(argv[++i], &end);
       if (*end != '\0' || duration_s < 0) return usage();
@@ -180,6 +193,15 @@ int main(int argc, char** argv) {
   static FlashImage image;  // 32 KB
   static Flasher flasher(serial, clock, gpio, mind.link(), log);
   mind.host().attach_flasher(flasher, image);  // the Mind's poll() serves and polls it
+  // --card: the kernel updater on a directory, its 4 MB buffer on the heap
+  // (as on the Pi); they live until the program ends.
+  KernelUpdater* updater = nullptr;
+  if (card != nullptr) {
+    DirStore* store = new DirStore(card, log);
+    updater = new KernelUpdater(new uint8_t[kKernelImageMax], kKernelImageMax, *store, clock, log);
+    mind.host().attach_updater(*updater);  // polled by the Mind's poll() too
+    logf(log, LogLevel::Info, "kernel updates go to %s (--card)", card);
+  }
   mind.set_tap(&window);
   if (listen != nullptr) {
     if (!listener.open(listen)) {
@@ -208,7 +230,9 @@ int main(int argc, char** argv) {
       break;
     }
     if (mind.reboot_requested()) {  // its OK is sent (HostServer flushed it); closing tells the client the rest
-      logf(log, LogLevel::Warn, "REBOOT from the laptop: exiting with status %d", kExitReboot);
+      bool updated = updater != nullptr && updater->status().phase == KILO_UPDATE_PHASE_DONE;
+      logf(log, LogLevel::Warn, "%s: exiting with status %d",
+           updated ? "kernel update installed in --card" : "REBOOT from the laptop", kExitReboot);
       status = kExitReboot;
       break;
     }
