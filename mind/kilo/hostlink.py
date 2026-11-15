@@ -7,7 +7,7 @@ in protocol/spec.toml ``[host]`` and ``[[host_messages]]``; the dataclasses
 (``P.HostStatus``, ...) and the framing (``C.build_host_frame``,
 ``C.HostStreamDecoder``) are generated and vendored like the body link's.
 
-    hl = HostLink.connect("169.254.75.73")      # port 5300 unless given
+    hl = HostLink.connect("169.254.75.73")      # port 5300 unless given; this laptop's key (kilo.hostkey)
     st = hl.status()                            # P.HostStatus
     hl.take_control(keepalive=True)             # then POSTURE; a background thread sends KEEPALIVE
     hl.command(P.HostPosture(posture=P.Posture.STAND))
@@ -23,6 +23,11 @@ STATUS_REQ, RESULT otherwise); ``command()`` raises ``HostRefused`` for a
 RESULT whose code is not OK. TELEM, LOG_LINE, BRIDGE_RX, FLASH_STATUS and
 UPDATE_STATUS arrive on the reader thread and go to the handlers.
 
+Every byte goes through the secure layer (kilo.hostsecure): the hello
+with this laptop's public key, the Noise KN handshake, then records. A
+mind that does not know the key raises ``HostKeyRefused``; no key file
+(``kilo key init``), or one others can read, raises ``HostKeyProblem``.
+
 ``BridgeTransport`` is a kilo.link transport over the raw bridge, so the
 whole Python link stack (``SerialLink``, ``BodyClient``) can talk to the body
 through the mind while the mind's own link is paused.
@@ -35,6 +40,7 @@ import threading
 import time
 from typing import Any, Callable
 
+from kilo import hostkey, hostsecure
 from kilo.protocol import kilo_link_codec as C
 from kilo.protocol import kilo_protocol as P
 
@@ -61,6 +67,14 @@ def has_kernel_marker(image: bytes) -> bool:
 
 class HostError(Exception):
     """The host channel failed: no connection, the stream out of step, no reply."""
+
+
+class HostKeyProblem(HostError):
+    """This laptop's key file is missing or unusable; the message says what to do."""
+
+
+class HostKeyRefused(HostError):
+    """The mind does not know this laptop's key, or the handshake with it failed."""
 
 
 class HostRefused(HostError):
@@ -101,9 +115,12 @@ class _Pending:
 class HostLink:
     """One connection to the mind's host channel. Thread-safe for requests."""
 
-    def __init__(self, sock: socket.socket, address: str = ""):
+    def __init__(self, sock: socket.socket, channel: hostsecure.Channel, address: str = "",
+                 key: hostkey.HostKey | None = None):
         self.address = address
+        self.key = key
         self._sock = sock
+        self._channel = channel
         self._dec = C.HostStreamDecoder()
         self._send_lock = threading.Lock()
         self._lock = threading.Lock()
@@ -124,15 +141,32 @@ class HostLink:
         self._reader.start()
 
     @classmethod
-    def connect(cls, addr: str, timeout: float = CONNECT_TIMEOUT_S) -> "HostLink":
+    def connect(cls, addr: str, timeout: float = CONNECT_TIMEOUT_S,
+                key: hostkey.HostKey | str | None = None) -> "HostLink":
+        """Connect and run the handshake with ``key`` (a HostKey, or a key
+        file's path; default: kilo.hostkey.key_path(), i.e. $KILO_HOST_KEY or
+        ~/.config/kilo/host_key)."""
         host, port = parse_address(addr)
+        if not isinstance(key, hostkey.HostKey):
+            try:
+                key = hostkey.load(key)
+            except hostkey.HostKeyError as e:
+                raise HostKeyProblem(str(e)) from None
         try:
             sock = socket.create_connection((host, port), timeout=timeout)
         except OSError as e:
             raise HostError(f"cannot reach the mind at {host}:{port}: {e}") from None
-        sock.settimeout(None)
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        return cls(sock, f"{host}:{port}")
+        try:
+            channel = hostsecure.open_channel(sock, key, timeout)
+        except (hostsecure.KeyUnknown, hostsecure.HandshakeFailed) as e:
+            sock.close()
+            raise HostKeyRefused(str(e)) from None
+        except hostsecure.ChannelError as e:
+            sock.close()
+            raise HostError(f"{host}:{port}: {e}") from None
+        sock.settimeout(None)
+        return cls(sock, channel, f"{host}:{port}", key)
 
     # ---- requests --------------------------------------------------------------------
     def request(self, msg: Any, timeout: float = REPLY_TIMEOUT_S) -> Any:
@@ -164,6 +198,11 @@ class HostLink:
     def send_stream(self, msg: Any) -> None:
         """KEEPALIVE, BRIDGE_TX: one-way, never answered."""
         self._send(msg, 0)
+
+    def send_streams(self, msgs: list[Any]) -> None:
+        """Several stream messages at once (FLASH_DATA, UPDATE_DATA): packed
+        into as few records as fit, in order."""
+        self._send_raw(b"".join(C.encode_host_message(m, 0) for m in msgs))
 
     def status(self) -> Any:
         return self.request(P.HostStatusReq())
@@ -208,8 +247,8 @@ class HostLink:
         flags = int(P.FlashFlags.PERSIST) if persist else 0
         self.command(P.HostFlashBegin(build=build, image_size=len(image), crc32=crc32, flags=flags))
         step = P.HOST_FLASH_CHUNK_MAX
-        for off in range(0, len(image), step):
-            self.send_stream(P.HostFlashData(offset=off, data=bytes(image[off:off + step])))
+        self.send_streams([P.HostFlashData(offset=off, data=bytes(image[off:off + step]))
+                           for off in range(0, len(image), step)])
         self.command(P.HostFlashCommit())  # OK: flashing has started
         end = time.monotonic() + timeout
         with self._flash_cond:
@@ -244,8 +283,10 @@ class HostLink:
         flags = int(P.UpdateFlags.FORCE) if force else 0
         self.command(P.HostUpdateBegin(image_size=len(image), crc32=zlib.crc32(image), flags=flags))
         step = P.HOST_UPDATE_CHUNK_MAX
-        for off in range(0, len(image), step):
-            self.send_stream(P.HostUpdateData(offset=off, data=bytes(image[off:off + step])))
+        batch = 64  # frames per send: about 13 KB, a dozen records
+        for first in range(0, len(image), step * batch):
+            self.send_streams([P.HostUpdateData(offset=off, data=bytes(image[off:off + step]))
+                               for off in range(first, min(len(image), first + step * batch), step)])
         self.command(P.HostUpdateCommit(), timeout=max(REPLY_TIMEOUT_S, 10.0))  # OK: writing has started
         end = time.monotonic() + timeout
         with self._flash_cond:
@@ -273,14 +314,18 @@ class HostLink:
 
     # ---- plumbing --------------------------------------------------------------------
     def _send(self, msg: Any, seq: int) -> None:
-        data = C.encode_host_message(msg, seq)
+        self._send_raw(C.encode_host_message(msg, seq))
+
+    def _send_raw(self, frames: bytes) -> None:
         with self._send_lock:
             if self._closed.is_set():
                 raise HostError(self.error or "connection closed")
             try:
-                self._sock.sendall(data)
+                self._channel.send(frames)
             except OSError as e:
                 raise HostError(f"send: {e}") from None
+            except hostsecure.ChannelError as e:
+                raise HostError(str(e)) from None
 
     def _keepalive_loop(self) -> None:
         period = P.HOST_KEEPALIVE_SEND_MS / 1000.0
@@ -293,14 +338,17 @@ class HostLink:
     def _read_loop(self) -> None:
         try:
             while True:
-                data = self._sock.recv(4096)
-                if not data:
+                data = self._channel.recv()
+                if data is None:
                     self.error = "the mind closed the connection"
                     break
                 for f in self._dec.feed(data):
                     self._dispatch(f)
         except C.HostFrameError as e:
             self.error = f"host stream out of step: {e}"
+        except hostsecure.ChannelError as e:
+            if not self._closed.is_set():
+                self.error = str(e)
         except OSError as e:
             if not self._closed.is_set():
                 self.error = f"receive: {e}"

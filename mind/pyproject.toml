@@ -7,7 +7,9 @@ name = "kilo-mind"
 version = "0.0.1"
 description = "Kilo mind: Python control software for the Kilo Nybble body firmware"
 requires-python = ">=3.11"
-dependencies = ["pyserial>=3.5"]
+# noiseprotocol: the host channel's Noise handshake and records (kilo.hostsecure, kilo --host);
+# it brings cryptography, which kilo.hostkey uses for the X25519 key pair.
+dependencies = ["pyserial>=3.5", "noiseprotocol>=0.3.1"]
 
 [project.optional-dependencies]
 test = ["pytest"]  # optional: pytest-xdist for `pytest -n 4`

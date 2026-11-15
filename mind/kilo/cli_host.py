@@ -17,6 +17,12 @@ today, and so what works here:
 ``--host`` may also follow the command (``kilo status --host IP``). Every
 other command prints that it is not available over --host yet.
 
+Every connection needs this laptop's key (kilo.hostkey: ``kilo key init``
+once, its line in kernel/keys/authorized_keys, the kernel rebuilt and
+installed); ``--key PATH`` or ``$KILO_HOST_KEY`` picks another key file. No
+key file, or a mind that does not know the key: one line saying what to
+do, exit status 1.
+
 ``posture`` takes control with keepalive and releases it at the end (Ctrl-C,
 ``--for``); the mind then latches REST, as the daemon does when a hold ends.
 If this process dies instead, the mind sees the socket close (or, if the
@@ -33,7 +39,8 @@ import zlib
 from pathlib import Path
 from typing import Any
 
-from kilo.hostlink import REBOOT_CLOSE_WAIT_S, HostError, HostLink, HostRefused, has_kernel_marker
+from kilo import hostkey
+from kilo.hostlink import REBOOT_CLOSE_WAIT_S, HostError, HostKeyRefused, HostLink, HostRefused, has_kernel_marker
 from kilo.protocol import kilo_protocol as P
 
 EXIT_OK, EXIT_ERR = 0, 1
@@ -311,10 +318,10 @@ def cmd_update(args: argparse.Namespace, hl: HostLink) -> int:
     hl.close()
     if args.wait <= 0:
         return EXIT_OK
-    return _wait_for_mind(args.host, args.wait, before)
+    return _wait_for_mind(args.host, args.wait, before, getattr(args, "key", None))
 
 
-def _wait_for_mind(addr: str, wait_s: float, before: int) -> int:
+def _wait_for_mind(addr: str, wait_s: float, before: int, key: Any = None) -> int:
     """Poll the mind's port until it answers STATUS again (a Pi reboots and
     boots the card in a few seconds); print its build."""
     start = time.monotonic()
@@ -325,8 +332,11 @@ def _wait_for_mind(addr: str, wait_s: float, before: int) -> int:
                   "new kernel: check the Pi (its LED, `kilo status --host`)", file=sys.stderr)
             return EXIT_ERR
         try:
-            with HostLink.connect(addr, timeout=min(1.0, max(0.1, left))) as hl:
+            with HostLink.connect(addr, timeout=min(1.0, max(0.1, left)), key=key) as hl:
                 build = hl.status().mind_build
+        except HostKeyRefused as e:
+            print(f"kilo update: the mind is back but refuses this laptop: {e}", file=sys.stderr)
+            return EXIT_ERR
         except (HostError, OSError):
             time.sleep(min(UPDATE_POLL_S, max(0.0, left)))
             continue
@@ -354,6 +364,18 @@ def _prepare_update(args: argparse.Namespace) -> int | None:
         print(f"kilo update: {path} has no {P.HOST_UPDATE_MARKER}: it is not the mind kernel (the netboot loader "
               "is not either). To install it anyway: --force", file=sys.stderr)
         return EXIT_ERR
+    if not args.force:
+        # The kernel has its authorized keys in its image as raw bytes
+        # (build/gen/authorized_keys.h): one without this laptop's would lock it out.
+        try:
+            key = hostkey.load(getattr(args, "key", None))
+        except hostkey.HostKeyError:
+            key = None  # the connection says what is wrong with it
+        if key is not None and key.public not in data:
+            print(f"kilo update: {path} does not have this laptop's key ({key.fingerprint}) built in: the new "
+                  f"kernel would refuse this laptop. Add `kilo key show`'s line to {hostkey.KEYS_FILE} and rebuild "
+                  "(make -C kernel); to install it anyway: --force", file=sys.stderr)
+            return EXIT_ERR
     args.update_image = data
     return None
 
@@ -419,7 +441,7 @@ def run_host(args: argparse.Namespace) -> int:
         if err is not None:
             return err
     try:
-        hl = HostLink.connect(args.host, timeout=args.timeout)
+        hl = HostLink.connect(args.host, timeout=args.timeout, key=getattr(args, "key", None))
     except (HostError, ValueError) as e:
         print(f"kilo {args.cmd}: {e}", file=sys.stderr)
         return EXIT_ERR

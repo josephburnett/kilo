@@ -1,6 +1,8 @@
 """kilo.hostlink and kilo.cli_host against a fake mind: a TCP server speaking
 the host channel (protocol/spec.toml [host_messages]) with the generated
-dataclasses and framing, the way kernel/mind/net/host_server.cpp does.
+dataclasses and framing, the way kernel/mind/net/host_server.cpp does, over
+the secure layer (the hello, Noise KN, records: tests/noise_mind.py, built
+from noiseprotocol as the mind's end).
 The real server is tested in kernel/host/tests/test_host.cpp, and both
 together (with the virtual body) in kernel/host/test.sh."""
 
@@ -15,16 +17,22 @@ from typing import Any
 
 import pytest
 
-from kilo import cli
-from kilo.hostlink import BridgeTransport, HostError, HostLink, HostRefused, has_kernel_marker, parse_address
+from kilo import cli, hostkey
+from kilo.hostlink import (BridgeTransport, HostError, HostKeyProblem, HostKeyRefused, HostLink, HostRefused,
+                           has_kernel_marker, parse_address)
 from kilo.protocol import kilo_link_codec as C
 from kilo.protocol import kilo_protocol as P
+from noise_mind import Responder
 
 
 class FakeMind:
     """One-connection-at-a-time host channel server. Records what it got."""
 
-    def __init__(self) -> None:
+    def __init__(self, keys: list[bytes]) -> None:
+        self.keys = keys  # the laptops' public keys this mind knows
+        self.hello_status = P.HostHelloStatus.OK  # another status: refuse every hello so
+        self.forge_on: int | None = None  # answer this type with a record that does not authenticate
+        self._resp: dict[socket.socket, Responder] = {}
         self.srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.srv.bind(("127.0.0.1", 0))
@@ -54,14 +62,18 @@ class FakeMind:
             threading.Thread(target=self._serve, args=(c,), daemon=True).start()
 
     def _send(self, c: socket.socket, msg: Any, seq: int) -> None:
-        c.sendall(C.encode_host_message(msg, seq))
+        self._resp[c].send(C.encode_host_message(msg, seq))
 
     def _serve(self, c: socket.socket) -> None:
         dec = C.HostStreamDecoder()
+        r = self._resp[c] = Responder(c, self.keys)
         try:
+            if not r.handshake(self.hello_status):
+                c.close()
+                return
             while True:
-                data = c.recv(4096)
-                if not data:
+                data = r.recv()
+                if data is None:
                     return
                 for f in dec.feed(data):
                     msg = P.decode_host_payload(f.type, f.payload)
@@ -75,7 +87,10 @@ class FakeMind:
 
     def _handle(self, c: socket.socket, seq: int, m: Any) -> None:
         if self.garbage_on == m.ID:
-            c.sendall(b"\x01\x00\xff")  # len 1: out of step
+            self._resp[c].send(b"\x01\x00\xff")  # a good record, but a frame of len 1: out of step
+            return
+        if self.forge_on == m.ID:
+            self._resp[c].send_forged()
             return
         if isinstance(m, P.HostStatusReq):
             st = P.HostStatus(host_version=P.HOST_VERSION, mind_build=0x1E1405F0, uptime_ms=4321,
@@ -174,8 +189,8 @@ class FakeMind:
 
 
 @pytest.fixture
-def mind():
-    m = FakeMind()
+def mind(host_key):
+    m = FakeMind([host_key.public])
     yield m
     m.close()
 
@@ -354,9 +369,16 @@ def test_cli_host_unreachable(capsys):
 MARKER = P.HOST_UPDATE_MARKER.encode()
 
 
-def kernel_bytes(n: int = 1000, marker: bool = True) -> bytes:
+def kernel_bytes(n: int = 1000, marker: bool = True, key: bool = True) -> bytes:
+    """A fake mind kernel: the marker, and this laptop's public key built in
+    (as kernel/keys/gen_keys.py puts the authorized keys into a real one)."""
     body = bytes((i * 7) % 251 for i in range(n))
-    return body[:400] + MARKER + body[400 + len(MARKER):] if marker else body
+    if marker:
+        body = body[:400] + MARKER + body[400 + len(MARKER):]
+    if marker and key:
+        pub = hostkey.load().public
+        body = body[:600] + pub + body[600 + len(pub):]
+    return body
 
 
 def test_has_kernel_marker():
@@ -454,3 +476,102 @@ def test_cli_update_mind_does_not_come_back(mind, tmp_path, capsys):
 def test_cli_update_needs_host(capsys):
     assert cli.main(["update"]) == 1
     assert "needs --host" in capsys.readouterr().err
+
+
+# ---- the secure layer (kilo.hostsecure, kilo.hostkey) --------------------------------------
+
+def test_a_key_the_mind_does_not_know(host_key, tmp_path):
+    m = FakeMind([bytes(32)])  # knows another key only
+    try:
+        with pytest.raises(HostKeyRefused, match="the mind does not know this laptop's key "
+                                                 f"\\({host_key.fingerprint}, .*kernel/keys/authorized_keys"):
+            HostLink.connect(m.addr)
+        assert m.got == []  # nothing was served
+    finally:
+        m.close()
+
+
+def test_cli_with_a_key_the_mind_does_not_know(host_key, capsys):
+    m = FakeMind([bytes(32)])
+    try:
+        assert cli.main(["--host", m.addr, "status"]) == 1
+        err = capsys.readouterr().err
+        assert err.startswith("kilo status: the mind does not know this laptop's key") and err.count("\n") == 1
+        assert "kilo update --host" in err and "card reader" in err and "make -C kernel" in err
+    finally:
+        m.close()
+
+
+def test_cli_without_a_key(mind, tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("KILO_HOST_KEY", str(tmp_path / "none"))
+    assert cli.main(["--host", mind.addr, "status"]) == 1
+    err = capsys.readouterr().err
+    assert "no host key at" in err and "kilo key init" in err and err.count("\n") == 1
+    with pytest.raises(HostKeyProblem):
+        HostLink.connect(mind.addr)
+    assert mind.got == []
+
+
+def test_cli_key_option(mind, tmp_path, capsys):
+    other, _ = hostkey.init(tmp_path / "other_key")
+    assert cli.main(["--key", str(other.path), "--host", mind.addr, "status"]) == 1  # the mind knows the default
+    assert "does not know this laptop's key" in capsys.readouterr().err
+    mind.keys.append(other.public)
+    assert cli.main(["status", "--host", mind.addr, "--key", str(other.path)]) == 0
+
+
+def test_the_wrong_private_key(mind, host_key, tmp_path):
+    # A key file whose private key is not the listed public key's: the
+    # mind's message 2 does not authenticate here.
+    other, _ = hostkey.init(tmp_path / "other")
+    impostor = hostkey.HostKey(other.private, host_key.public, "impostor", other.path)
+    with pytest.raises(HostKeyRefused, match="the handshake failed: the mind's answer did not authenticate"):
+        HostLink.connect(mind.addr, key=impostor)
+    assert mind.got == []
+
+
+def test_a_forged_record_from_the_mind(mind):
+    mind.forge_on = P.HostMsgId.STATUS_REQ
+    hl = HostLink.connect(mind.addr)
+    with pytest.raises(HostError, match="did not authenticate"):
+        hl.status()
+    assert hl.closed
+    hl.close()
+
+
+def test_the_mind_refuses_the_hello(mind):
+    mind.hello_status = P.HostHelloStatus.BAD_VERSION
+    with pytest.raises(HostError, match="host channel version"):
+        HostLink.connect(mind.addr)
+    mind.hello_status = P.HostHelloStatus.REFUSED
+    with pytest.raises(HostError, match="refused the handshake for now"):
+        HostLink.connect(mind.addr)
+
+
+def test_an_older_mind_closes_the_hello():
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+
+    def serve() -> None:
+        c, _ = srv.accept()
+        c.recv(100)
+        c.close()  # a version-1 mind: the hello is not a frame it knows
+
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        with pytest.raises(HostError, match="without answering the hello: it may be an older mind"):
+            HostLink.connect(f"127.0.0.1:{srv.getsockname()[1]}")
+    finally:
+        srv.close()
+
+
+def test_frames_are_packed_into_records(mind, host_key):
+    # 5000 bytes of UPDATE_DATA in 200-byte frames: several frames a record,
+    # none over host.record_max (the Responder would refuse a longer one).
+    img = kernel_bytes(5000)
+    with HostLink.connect(mind.addr) as hl:
+        assert hl.update(img).phase == P.UpdatePhase.DONE
+    assert bytes(mind.update_data) == img and mind.names().count("UPDATE_DATA") == 25
+    records = sum(r.records for r in mind._resp.values())
+    assert records < 25, f"{records} records for 25 UPDATE_DATA frames and a few commands"
