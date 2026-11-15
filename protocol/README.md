@@ -140,7 +140,11 @@ a `[structs.*]` entry or a fixed-length body payload (HELLO, TELEMETRY,
 EVENT) as a field. The body never sees it: its copy of the header only
 gains types and inline functions it does not call. C framing is in
 `kernel/mind/net/host_frame`, Python in `kilo_link_codec.py`
-(`build_host_frame`, `HostStreamDecoder`).
+(`build_host_frame`, `HostStreamDecoder`). Since version 2 the frames
+travel only inside Noise records, after a clear hello and a
+`Noise_KN_25519_ChaChaPoly_BLAKE2b` handshake that admits only the
+laptops whose key the mind knows (the `[host]` comments;
+`kernel/mind/net/noise.*`, `host_secure.cpp`; `mind/kilo/hostsecure.py`).
 
 ## Params
 

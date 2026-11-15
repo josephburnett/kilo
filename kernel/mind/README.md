@@ -100,6 +100,7 @@ with the framing and rules in its comments), generated into
 LogRing log(clock, &platform_log);            // every line: the ring, then the platform's sink
 SerialLink link(serial, clock, log);
 HostServer host(listener, link, serial, clock, log, log, build_id);
+host.set_keys(keys, n_keys, random);          // who may connect; without it nobody may
 for (;;) {
   link.mark_alive();
   host.poll();                                // accept, answer, stream, flush; never blocks
@@ -115,6 +116,28 @@ for (;;) {
 | Raw bridge | `BRIDGE_TX`/`BRIDGE_RX`: UART bytes, the link paused | the controller |
 | Flash (P4) | `FLASH_BEGIN`, `FLASH_DATA`, `FLASH_COMMIT` -> `RESULT`; `FLASH_STATUS` until DONE or FAILED (ids 0x40-0x42, 0xC0) | the controller; see "Flashing" |
 | Kernel update | `UPDATE_BEGIN`, `UPDATE_DATA`, `UPDATE_COMMIT` -> `RESULT`; `UPDATE_STATUS` until DONE (then the reboot) or FAILED (ids 0x48-0x4A, 0xC1) | the controller; see "Updating the kernel" |
+
+Who may connect (`kernel/README.md` "Who may talk to Kilo: keys" for the
+whole story; the spec's `[host]` comments for the bytes): every
+connection opens with a clear hello naming the laptop's X25519 public
+key, which must be in the list `set_keys()` gives (the Circle kernel's is
+built in from `kernel/keys/authorized_keys`; `kilo-mind-host` reads
+`--authorized-keys FILE`), then the Noise handshake
+`Noise_KN_25519_ChaChaPoly_BLAKE2b` (`net/noise.*`, over Monocypher in
+`third_party/monocypher/`), then records (`len u16 | ciphertext | tag`,
+up to 1024 bytes) that carry the frames above unchanged
+(`net/host_secure.cpp`). The responder's three X25519 operations run one
+per `poll()`, for all connections together. A connection is a client only
+once a record from it authenticates; until then it gets nothing, counts
+for nothing (`clients()`, `STATUS.clients`, control) and is closed after
+`KILO_HOST_HANDSHAKE_TIMEOUT_MS` (3 s). A bad record closes the
+connection, unanswered. The listener has `kHostSlots` (5) slots, one more
+than the clients, and a new connection closes the oldest one still in its
+handshake when it must, so idle sockets cannot keep a laptop out. The
+ephemeral keys come from the `Random` seam (`platform.h`); if it fails,
+the hello is refused. There is no plaintext mode, for tests either: the
+unit tests' fake connections run the handshake (`host/tests/fake_net.h`)
+and `kernel/host/test.sh` gives `kilo-mind-host` a throwaway key.
 
 Control: the first client to send `CONTROL take=1` is the controller, the
 rest observe. When the controller gives control up, closes, goes out of
@@ -137,8 +160,9 @@ direct cable works with the laptop's port set to link-local and no DHCP
 server. The server itself only sees connections: the address is the
 platform's (`kernel/src/`), and on the laptop the `--listen` address.
 
-On the laptop: `kilo-mind-host --port PTY --listen 127.0.0.1:0` logs
-`listening on port N`; `kernel/host/test.sh` runs the real CLI against it
+On the laptop: `kilo-mind-host --port PTY --listen 127.0.0.1:0
+--authorized-keys FILE` logs `listening on port N`; `kernel/host/test.sh`
+makes a throwaway key (`kilo key init --key ...`) and runs the real CLI against it
 and the virtual body (status, monitor, posture, log tail, REST when the
 controller is killed, `kilo.link` through the bridge,
 `tests/bridge_client.py`, `kilo reboot`: exit status 3, and `kilo update`
