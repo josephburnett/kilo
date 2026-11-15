@@ -575,3 +575,23 @@ def test_frames_are_packed_into_records(mind, host_key):
     assert bytes(mind.update_data) == img and mind.names().count("UPDATE_DATA") == 25
     records = sum(r.records for r in mind._resp.values())
     assert records < 25, f"{records} records for 25 UPDATE_DATA frames and a few commands"
+
+
+def test_every_host_command_takes_key(mind, tmp_path, capsys, monkeypatch):
+    # --key before or after the command, for each --host command; $KILO_HOST_KEY points nowhere.
+    other, _ = hostkey.init(tmp_path / "other")
+    mind.keys[:] = [other.public]
+    monkeypatch.setenv("KILO_HOST_KEY", str(tmp_path / "none"))
+    k = str(other.path)
+    assert cli.main(["log", "--host", mind.addr, "--key", k, "--lines", "1", "--duration", "0.2"]) == 0
+    assert cli.main(["--key", k, "--host", mind.addr, "log", "-n", "1", "--duration", "0.2"]) == 0
+    assert cli.main(["--host", mind.addr, "posture", "stand", "--for", "0.1", "--key", k]) == 0
+    assert cli.main(["--host", mind.addr, "monitor", "--duration", "0.2", "--key", k]) == 0
+    img = tmp_path / "kernel7.img"
+    body = bytearray(kernel_bytes(3000, key=False))
+    body[900:932] = other.public  # the other key built in
+    img.write_bytes(bytes(body))
+    assert cli.main(["update", "--host", mind.addr, "--image", str(img), "--wait", "0", "--key", k]) == 0
+    capsys.readouterr()
+    assert cli.main(["--host", mind.addr, "status"]) == 1  # without --key: $KILO_HOST_KEY, which is missing
+    assert "kilo key init" in capsys.readouterr().err

@@ -408,10 +408,11 @@ HOST_COMMANDS = {"status": cmd_status, "posture": cmd_posture, "monitor": cmd_mo
                  "flash": cmd_flash, "reboot": cmd_reboot, "update": cmd_update}
 
 
-def parse_log_argv(argv: list[str], host: str | None) -> argparse.Namespace:
+def parse_log_argv(argv: list[str], host: str | None, key: str | None = None) -> argparse.Namespace:
     """`kilo log` keeps its argv for kilo.logs (summary|replay|plot); over --host it is the live tail."""
     p = argparse.ArgumentParser(prog="kilo log --host", description="the mind's log: the last lines, then live")
     p.add_argument("--host", default=host, required=host is None, help="the mind's address, IP[:PORT]")
+    p.add_argument("--key", default=key, metavar="PATH", help="this laptop's key file (kilo key init)")
     p.add_argument("--lines", "-n", type=int, default=20, help="lines of history first (default 20; the mind keeps "
                                                                f"{P.HOST_LOG_RING_LINES})")
     p.add_argument("--level", choices=[lv.name.lower() for lv in P.LogLevel], default="debug")
@@ -426,9 +427,10 @@ def wants_host(args: argparse.Namespace) -> bool:
 def run_host(args: argparse.Namespace) -> int:
     """main() for `kilo --host ...`."""
     if args.cmd == "log":
-        log_args = parse_log_argv(list(args.log_argv or []), getattr(args, "host", None))
+        log_args = parse_log_argv(list(args.log_argv or []), getattr(args, "host", None), getattr(args, "key", None))
         args.host, args.lines, args.level, args.duration = (log_args.host, log_args.lines, log_args.level,
                                                             log_args.duration)
+        args.key = log_args.key
     fn = HOST_COMMANDS.get(args.cmd)
     if fn is None:
         return _unavailable(args.cmd)
