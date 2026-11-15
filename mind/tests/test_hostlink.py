@@ -10,12 +10,13 @@ import json
 import socket
 import threading
 import time
+import zlib
 from typing import Any
 
 import pytest
 
 from kilo import cli
-from kilo.hostlink import BridgeTransport, HostError, HostLink, HostRefused, parse_address
+from kilo.hostlink import BridgeTransport, HostError, HostLink, HostRefused, has_kernel_marker, parse_address
 from kilo.protocol import kilo_link_codec as C
 from kilo.protocol import kilo_protocol as P
 
@@ -34,6 +35,12 @@ class FakeMind:
         self.controller = False
         self.garbage_on: int | None = None  # reply to this type with bytes out of step
         self.reboot_closes = True  # after REBOOT's OK, close the connection (kilo-mind-host exiting)
+        # UPDATE_*: the image as received, and how the fake answers COMMIT.
+        self.update_store = True       # False: no kernel store (kilo-mind-host without --card)
+        self.update_fail: int | None = None  # an UPDATE_ERROR the write ends in (after CHECKING)
+        self.update_stays_down = False  # after DONE, stop listening (the mind never comes back)
+        self.update_begin: Any = None
+        self.update_data = bytearray()
         self._conns: list[socket.socket] = []
         threading.Thread(target=self._accept, daemon=True).start()
 
@@ -103,11 +110,56 @@ class FakeMind:
             self._ok(c, seq, m, 0, b"rebooting")
             if self.reboot_closes:
                 c.shutdown(socket.SHUT_RDWR)
+        elif isinstance(m, P.HostUpdateBegin):
+            if not self.update_store:
+                self._ok(c, seq, m, int(P.HostResultCode.UNSUPPORTED), b"no kernel store (kilo-mind-host: --card DIR)")
+                return
+            self.update_begin, self.update_data = m, bytearray()
+            self._ok(c, seq, m)
+        elif isinstance(m, P.HostUpdateData):
+            if m.offset == len(self.update_data):
+                self.update_data += m.data
+        elif isinstance(m, P.HostUpdateCommit):
+            self._update_commit(c, seq, m)
         elif isinstance(m, P.HostBridgeTx):
             self.bridge_tx += m.data
             self._send(c, P.HostBridgeRx(data=m.data.upper()), 0)
         elif m.KIND == P.Kind.COMMAND:
             self._ok(c, seq, m, int(P.HostResultCode.UNSUPPORTED))
+
+    def _update_commit(self, c: socket.socket, seq: int, m: Any) -> None:
+        b, data = self.update_begin, bytes(self.update_data)
+        n = len(data)
+
+        def status(phase: Any, error: int = 0, done: int = 0, card: int = 0) -> Any:
+            return P.HostUpdateStatus(phase=int(phase), error=error, received=n, image_size=b.image_size, done=done,
+                                      crc32=zlib.crc32(data), card_crc32=card)
+
+        error = 0
+        if n < b.image_size:
+            error = P.UpdateError.SHORT
+        elif zlib.crc32(data) != b.crc32:
+            error = P.UpdateError.CRC_MISMATCH
+        elif not b.flags & P.UpdateFlags.FORCE and not has_kernel_marker(data):
+            error = P.UpdateError.NOT_A_KERNEL
+        if error:  # as HostServer: the FAILED status first, then RESULT IMAGE_BAD
+            self._send(c, status(P.UpdatePhase.FAILED, int(error)), 0)
+            self._ok(c, seq, m, int(P.HostResultCode.IMAGE_BAD), f"{P.UpdateError(error).name}: test".encode())
+            return
+        self._ok(c, seq, m)
+        self._send(c, status(P.UpdatePhase.CHECKING), 1)
+        for k, done in enumerate(range(0, n + 1, max(1, n // 4))):
+            self._send(c, status(P.UpdatePhase.WRITING, done=done), 2 + k)
+            if self.update_fail == P.UpdateError.WRITE_FAILED and done > 0:
+                self._send(c, status(P.UpdatePhase.FAILED, int(self.update_fail), done=done), 20)
+                return
+        self._send(c, status(P.UpdatePhase.VERIFYING, done=n), 30)
+        self._send(c, status(P.UpdatePhase.INSTALLING, done=n, card=zlib.crc32(data)), 31)
+        self._send(c, status(P.UpdatePhase.DONE, done=n, card=zlib.crc32(data)), 32)
+        if self.update_stays_down:  # stop listening (shutdown: a blocked accept() keeps a closed socket open)
+            self.srv.shutdown(socket.SHUT_RDWR)
+            self.srv.close()
+        c.shutdown(socket.SHUT_RDWR)  # it reboots (kilo-mind-host: exits 3)
 
     def names(self) -> list[str]:
         return [m.NAME for m in self.got]
@@ -296,3 +348,109 @@ def test_cli_host_unreachable(capsys):
     s.close()
     assert cli.main(["--timeout", "1", "--host", f"127.0.0.1:{port}", "status"]) == 1
     assert "cannot reach the mind" in capsys.readouterr().err
+
+
+# ---- kernel updates (UPDATE_*) ----------------------------------------------------------
+MARKER = P.HOST_UPDATE_MARKER.encode()
+
+
+def kernel_bytes(n: int = 1000, marker: bool = True) -> bytes:
+    body = bytes((i * 7) % 251 for i in range(n))
+    return body[:400] + MARKER + body[400 + len(MARKER):] if marker else body
+
+
+def test_has_kernel_marker():
+    assert has_kernel_marker(kernel_bytes()) and not has_kernel_marker(kernel_bytes(marker=False))
+    assert P.HOST_UPDATE_MARKER == "KILO-MIND-KERNEL-1"
+    assert not has_kernel_marker(MARKER[:-1])
+
+
+def test_update(mind):
+    img = kernel_bytes(1000)
+    seen: list[Any] = []
+    with HostLink.connect(mind.addr) as hl:
+        st = hl.update(img, progress=seen.append)
+        assert st.phase == P.UpdatePhase.DONE and st.card_crc32 == zlib.crc32(img)
+        assert hl.wait_closed(2.0)
+    assert bytes(mind.update_data) == img
+    b = mind.update_begin
+    assert (b.image_size, b.crc32, b.flags) == (1000, zlib.crc32(img), 0)
+    data = [m for m in mind.got if isinstance(m, P.HostUpdateData)]
+    assert len(data) == 5 and all(len(m.data) <= P.HOST_UPDATE_CHUNK_MAX for m in data)
+    assert mind.names()[:2] == ["CONTROL", "UPDATE_BEGIN"] and mind.names()[-1] == "UPDATE_COMMIT"
+    phases = [P.UpdatePhase(x.phase).name for x in seen]
+    assert phases[0] == "CHECKING" and phases[-1] == "DONE" and "WRITING" in phases and "VERIFYING" in phases
+
+
+def test_update_refused(mind):
+    seen: list[Any] = []
+    with HostLink.connect(mind.addr) as hl:
+        with pytest.raises(HostRefused) as ei:
+            hl.update(kernel_bytes(marker=False), progress=seen.append)
+        assert ei.value.code_name == "IMAGE_BAD" and "NOT_A_KERNEL" in ei.value.text
+        assert seen and seen[-1].phase == P.UpdatePhase.FAILED and seen[-1].error == P.UpdateError.NOT_A_KERNEL
+        mind.update_store = False
+        with pytest.raises(HostRefused, match="UPDATE_BEGIN: UNSUPPORTED"):
+            hl.update(kernel_bytes())
+    with HostLink.connect(mind.addr) as hl:  # FORCE: no marker needed
+        mind.update_store = True
+        assert hl.update(kernel_bytes(marker=False), force=True).phase == P.UpdatePhase.DONE
+    assert mind.update_begin.flags == int(P.UpdateFlags.FORCE)
+
+
+def test_cli_update(mind, tmp_path, capsys):
+    img = tmp_path / "kernel7.img"
+    img.write_bytes(kernel_bytes(3000))
+    assert cli.main(["update", "--host", mind.addr, "--image", str(img), "--wait", "5"]) == 0
+    out = capsys.readouterr().out
+    assert "update: mind build 1e1405f0; sending" in out and "(3000 bytes, crc32" in out
+    assert "update: writing kernel7.new: 3000 of 3000 bytes" in out
+    assert "update: DONE: kernel7.img on the SD card is the new kernel (3000 bytes" in out
+    assert "update: the mind is rebooting into it" in out
+    assert "update: the mind is back after" in out and "mind build 1e1405f0  (the same build as before)" in out
+    assert bytes(mind.update_data) == img.read_bytes()
+    assert cli.main(["--host", mind.addr, "update", "--image", str(img), "--wait", "0"]) == 0
+    assert "the mind is back" not in capsys.readouterr().out
+
+
+def test_cli_update_refuses_locally(mind, tmp_path, capsys):
+    loader = tmp_path / "loader.img"
+    loader.write_bytes(kernel_bytes(2000, marker=False))
+    assert cli.main(["update", "--host", mind.addr, "--image", str(loader)]) == 1
+    err = capsys.readouterr().err
+    assert "has no KILO-MIND-KERNEL-1" in err and "--force" in err
+    empty = tmp_path / "empty.img"
+    empty.write_bytes(b"")
+    assert cli.main(["update", "--host", mind.addr, "--image", str(empty)]) == 1
+    assert cli.main(["update", "--host", mind.addr, "--image", str(tmp_path / "missing.img")]) == 1
+    assert "cannot read" in capsys.readouterr().err
+    assert mind.got == []  # nothing reached the mind
+    assert cli.main(["update", "--host", mind.addr, "--image", str(loader), "--force", "--wait", "0"]) == 0
+    assert "with --force" in capsys.readouterr().out and bytes(mind.update_data) == loader.read_bytes()
+
+
+def test_cli_update_failures(mind, tmp_path, capsys):
+    img = tmp_path / "kernel7.img"
+    img.write_bytes(kernel_bytes(3000))
+    mind.update_fail = int(P.UpdateError.WRITE_FAILED)
+    assert cli.main(["update", "--host", mind.addr, "--image", str(img)]) == 1
+    err = capsys.readouterr().err
+    assert "kilo update: FAILED: WRITE_FAILED: writing kernel7.new failed; the card's kernel7.img is unchanged" in err
+    mind.update_fail = None
+    mind.update_store = False
+    assert cli.main(["update", "--host", mind.addr, "--image", str(img)]) == 1
+    assert "UNSUPPORTED (no kernel store (kilo-mind-host: --card DIR))" in capsys.readouterr().err
+
+
+def test_cli_update_mind_does_not_come_back(mind, tmp_path, capsys):
+    img = tmp_path / "kernel7.img"
+    img.write_bytes(kernel_bytes(1000))
+    mind.update_stays_down = True
+    assert cli.main(["update", "--host", mind.addr, "--image", str(img), "--wait", "0.5"]) == 1
+    cap = capsys.readouterr()
+    assert "update: DONE" in cap.out and "did not come back within 0.5 s" in cap.err
+
+
+def test_cli_update_needs_host(capsys):
+    assert cli.main(["update"]) == 1
+    assert "needs --host" in capsys.readouterr().err

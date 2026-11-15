@@ -11,6 +11,8 @@ today, and so what works here:
     kilo --host IP flash [--persist] [--image body.bin [--manifest body.json]]   build and flash the body (P4)
     kilo reboot --host IP                          restart the mind (on the Pi: back to the SD card's boot,
                                                    e.g. the netboot loader); the body gets REST first
+    kilo update --host IP [--image PATH] [--force] [--wait S]   write a new kernel onto the mind's SD card;
+                                                   it reboots into it, and this waits for it to come back
 
 ``--host`` may also follow the command (``kilo status --host IP``). Every
 other command prints that it is not available over --host yet.
@@ -27,13 +29,19 @@ import argparse
 import json
 import sys
 import time
+import zlib
+from pathlib import Path
 from typing import Any
 
-from kilo.hostlink import REBOOT_CLOSE_WAIT_S, HostError, HostLink, HostRefused
+from kilo.hostlink import REBOOT_CLOSE_WAIT_S, HostError, HostLink, HostRefused, has_kernel_marker
 from kilo.protocol import kilo_protocol as P
 
 EXIT_OK, EXIT_ERR = 0, 1
 LEVEL_TAG = "DIWE"
+# `kilo update`'s default image: the mind kernel `make -C kernel` builds in this checkout.
+DEFAULT_KERNEL_IMAGE = Path(__file__).resolve().parents[2] / "kernel" / "build" / "kernel7.img"
+# After an update: how often `kilo update` tries to reach the rebooted mind.
+UPDATE_POLL_S = 0.5
 
 
 def _flags(value: int, cls: Any) -> list[str]:
@@ -183,7 +191,7 @@ def _run_for(duration: float | None, hl: HostLink) -> int:
 
 def _unavailable(what: str) -> int:
     print(f"kilo {what}: not available over --host yet (the C++ mind serves status, posture, monitor, log, flash, "
-          "reboot)",
+          "reboot, update)",
           file=sys.stderr)
     return EXIT_ERR
 
@@ -232,6 +240,118 @@ def cmd_reboot(args: argparse.Namespace, hl: HostLink) -> int:
     return EXIT_OK
 
 
+# What each UPDATE_STATUS error means for the card (kernel/mind/update/updater.h).
+UPDATE_ERROR_HELP = {
+    "BAD_SIZE": "the image is empty or larger than the mind's buffer",
+    "BAD_OFFSET": "the image arrived out of order",
+    "SHORT": "the image arrived incomplete",
+    "CRC_MISMATCH": "the image arrived damaged",
+    "NOT_A_KERNEL": f"no {P.HOST_UPDATE_MARKER} in it: not the mind kernel (--force installs it anyway)",
+    "WRITE_FAILED": "writing kernel7.new failed; the card's kernel7.img is unchanged",
+    "VERIFY_FAILED": "kernel7.new read back differs; the card's kernel7.img is unchanged",
+    "INSTALL_FAILED": "a rename failed; the card's kernel7.img is still the old kernel",
+    "CARD_BROKEN": "the card has NO kernel7.img now: rewrite it in a card reader (docs/fast-boot-first-boot.md)",
+}
+
+
+def describe_update_status(st: Any) -> str:
+    err = _name(P.UpdateError, st.error)
+    help_ = UPDATE_ERROR_HELP.get(err, "")
+    return f"{err}" + (f": {help_}" if help_ else "") + f" ({st.received} of {st.image_size} bytes received)"
+
+
+def cmd_update(args: argparse.Namespace, hl: HostLink) -> int:
+    """`kilo update --host IP`: the image (read in run_host), the mind's build
+    before, the update with progress lines, then the wait for the rebooted
+    mind and its build."""
+    data: bytes = args.update_image
+    before = hl.status().mind_build
+    print(f"update: mind build {before:08x}; sending {args.image_path} ({len(data)} bytes, crc32 "
+          f"{zlib.crc32(data):08x}){' with --force' if args.force else ''}", flush=True)
+    shown: dict[str, int] = {}
+
+    def progress(st: Any) -> None:
+        phase = _name(P.UpdatePhase, st.phase)
+        if phase in ("WRITING", "VERIFYING"):
+            step = st.done * 4 // max(1, st.image_size)  # quarters
+            if shown.get(phase) == step:
+                return
+            shown[phase] = step
+            verb = "writing kernel7.new" if phase == "WRITING" else "reading kernel7.new back"
+            print(f"update: {verb}: {st.done} of {st.image_size} bytes", flush=True)
+        elif phase == "CHECKING":
+            print(f"update: the mind checked the image (size, crc32 {st.crc32:08x}"
+                  f"{'' if args.force else ', marker'}): writing it to the SD card", flush=True)
+        elif phase == "INSTALLING":
+            print("update: installing: kernel7.img -> kernel7.old, kernel7.new -> kernel7.img", flush=True)
+
+    try:
+        st = hl.update(data, force=args.force, progress=progress)
+    except HostRefused as e:
+        if e.code == P.HostResultCode.IMAGE_BAD and e.text:
+            print(f"kilo update: FAILED: the mind refused the image: {e.text}", file=sys.stderr)
+        else:
+            print(f"kilo update: the mind refused: {e}", file=sys.stderr)
+        _release(hl)
+        return EXIT_ERR
+    if st.phase != P.UpdatePhase.DONE:
+        print(f"kilo update: FAILED: {describe_update_status(st)}", file=sys.stderr)
+        _release(hl)
+        return EXIT_ERR
+    print(f"update: DONE: kernel7.img on the SD card is the new kernel ({st.image_size} bytes, crc32 "
+          f"{st.card_crc32:08x} read back); the previous one is kernel7.old", flush=True)
+    print("update: the mind is rebooting into it", flush=True)
+    hl.wait_closed(REBOOT_CLOSE_WAIT_S)
+    hl.close()
+    if args.wait <= 0:
+        return EXIT_OK
+    return _wait_for_mind(args.host, args.wait, before)
+
+
+def _wait_for_mind(addr: str, wait_s: float, before: int) -> int:
+    """Poll the mind's port until it answers STATUS again (a Pi reboots and
+    boots the card in a few seconds); print its build."""
+    start = time.monotonic()
+    while True:
+        left = wait_s - (time.monotonic() - start)
+        if left <= 0:
+            print(f"kilo update: the mind did not come back within {wait_s:g} s (port {addr}); the card has the "
+                  "new kernel: check the Pi (its LED, `kilo status --host`)", file=sys.stderr)
+            return EXIT_ERR
+        try:
+            with HostLink.connect(addr, timeout=min(1.0, max(0.1, left))) as hl:
+                build = hl.status().mind_build
+        except (HostError, OSError):
+            time.sleep(min(UPDATE_POLL_S, max(0.0, left)))
+            continue
+        took = time.monotonic() - start
+        same = "  (the same build as before)" if build == before else f"  (was {before:08x})"
+        print(f"update: the mind is back after {took:.1f} s: mind build {build:08x}{same}")
+        return EXIT_OK
+
+
+def _prepare_update(args: argparse.Namespace) -> int | None:
+    """Read and check the image for `kilo update` (args.update_image); an exit code on failure."""
+    path = Path(args.image) if args.image is not None else DEFAULT_KERNEL_IMAGE
+    args.image_path = path
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        hint = " (build it: make -C kernel)" if args.image is None else ""
+        print(f"kilo update: cannot read {path}: {e.strerror}{hint}", file=sys.stderr)
+        return EXIT_ERR
+    if not 0 < len(data) <= P.HOST_UPDATE_MAX_IMAGE:
+        print(f"kilo update: {path} is {len(data)} bytes; the mind takes 1..{P.HOST_UPDATE_MAX_IMAGE}",
+              file=sys.stderr)
+        return EXIT_ERR
+    if not args.force and not has_kernel_marker(data):
+        print(f"kilo update: {path} has no {P.HOST_UPDATE_MARKER}: it is not the mind kernel (the netboot loader "
+              "is not either). To install it anyway: --force", file=sys.stderr)
+        return EXIT_ERR
+    args.update_image = data
+    return None
+
+
 def _release(hl: HostLink) -> None:
     try:
         hl.release_control()  # the mind latches REST
@@ -257,7 +377,7 @@ def _prepare_flash(args: argparse.Namespace) -> int | None:
 
 
 HOST_COMMANDS = {"status": cmd_status, "posture": cmd_posture, "monitor": cmd_monitor, "log": cmd_log,
-                 "flash": cmd_flash, "reboot": cmd_reboot}
+                 "flash": cmd_flash, "reboot": cmd_reboot, "update": cmd_update}
 
 
 def parse_log_argv(argv: list[str], host: str | None) -> argparse.Namespace:
@@ -286,6 +406,10 @@ def run_host(args: argparse.Namespace) -> int:
         return _unavailable(args.cmd)
     if args.cmd == "flash":
         err = _prepare_flash(args)
+        if err is not None:
+            return err
+    if args.cmd == "update":
+        err = _prepare_update(args)
         if err is not None:
             return err
     try:

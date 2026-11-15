@@ -11,13 +11,14 @@
     kilo flash [--legacy] [--no-build] [--hex FILE] [--reset auto|gpio|dtr|none] [--verify-timeout S] [--force]
     kilo flash --host IP [--persist] | --sd MOUNT   [--image body.bin [--manifest body.json]]   (a C++ mind, P4)
     kilo reboot --host IP[:PORT]   restart a C++ mind (the Pi: back to its SD card's boot, e.g. the netboot loader)
+    kilo update --host IP[:PORT] [--image kernel7.img] [--force] [--wait S]   a new kernel onto the mind's SD card
     kilo vbody [--fall-after S] [--no-keys]
     kilo run [--port P] [--socket PATH] [--log] [--kilolog [FILE]] [--behaviour] [--remote] [--balance [KP]]
     kilo daemon [status|stop]
     kilo log summary|replay|plot FILE ...
     kilo --kilolog [FILE] COMMAND ...    (also: kilo monitor --percepts; kilo.cli_tools)
     kilo --override posture|balance|trick ...   (through a daemon whose behaviour runner is active)
-    kilo --host IP[:PORT] status|posture|monitor|flash|reboot ...; kilo log --host IP   (a C++ mind: kilo.cli_host)
+    kilo --host IP[:PORT] status|posture|monitor|flash|reboot|update ...; kilo log --host IP   (a C++ mind: kilo.cli_host)
 
 Every command first tries the daemon socket (``kilo run``, kilo.daemon; path
 from kilo.remote.socket_path()); when no daemon listens, or ``--direct`` is
@@ -83,7 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--direct", action="store_true", help="never use the daemon: open the port directly")
     p.add_argument("--host", metavar="IP[:PORT]",
                    help=f"talk to a C++ mind over its host channel (port {P.HOST_PORT}; kilo.cli_host): "
-                        "status, posture, monitor, log, flash, reboot")
+                        "status, posture, monitor, log, flash, reboot, update")
     p.add_argument("--override", action="store_true",
                    help="through a daemon running the behaviour runner: pause it while this command holds "
                         "the body (posture, balance, trick, walk, pose) instead of being refused")
@@ -158,6 +159,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("reboot", help="restart a C++ mind over --host: the body gets REST, then the Pi reboots "
                                       "(on the netboot card: the loader waits for the next kernel)")
+
+    s = sub.add_parser(
+        "update", help="write a new kernel onto a C++ mind's SD card over --host; the Pi boots it from the card "
+                       "from then on (the mind reboots into it now), then wait for the mind to come back",
+        usage="kilo update --host IP[:PORT] [--image PATH] [--force] [--wait S]",
+        description="Send a mind kernel image to the mind over --host. The mind checks its size, CRC-32 and the "
+                    f"mind kernel's marker ({P.HOST_UPDATE_MARKER}), writes it to its SD card as kernel7.new, "
+                    "reads it back, renames kernel7.img to kernel7.old and kernel7.new to kernel7.img, and reboots "
+                    "into it. A failure before the renames leaves the card as it was. To put the netboot loader "
+                    "back on the card (it has no marker): kilo update --host IP "
+                    "--image kernel/build/netboot/kernel7.img --force.")
+    s.add_argument("--image", type=Path, default=None, metavar="PATH",
+                   help="the kernel image (default: kernel/build/kernel7.img of this checkout, `make -C kernel`)")
+    s.add_argument("--force", action="store_true",
+                   help="install an image without the marker: how the netboot loader goes back on the card "
+                        "(--image kernel/build/netboot/kernel7.img --force)")
+    s.add_argument("--wait", type=float, default=30.0, metavar="S",
+                   help="seconds to wait for the mind to come back after its reboot and show its build "
+                        "(default 30; 0: do not wait)")
 
     s = sub.add_parser("eeprom", help="read the body's EEPROM (EEPROM_READ)")
     es = s.add_subparsers(dest="eeprom_cmd", required=True, metavar="ACTION")
@@ -760,6 +780,12 @@ def cmd_reboot(args: argparse.Namespace) -> int:
     return EXIT_ERR
 
 
+def cmd_update(args: argparse.Namespace) -> int:
+    """`kilo update` without --host: it writes a C++ mind's own SD card (kilo.cli_host)."""
+    print("kilo update: needs --host IP[:PORT] (it writes a new kernel onto a C++ mind's SD card)", file=sys.stderr)
+    return EXIT_ERR
+
+
 def flash_image_options(args: argparse.Namespace) -> Any:
     from kilo.tools.flash import DEFAULT_BUILD_DIR, DEFAULT_SKETCH, ImageOptions
 
@@ -924,7 +950,7 @@ LINK_COMMANDS = {"status": cmd_status, "monitor": cmd_monitor, "posture": cmd_po
                  "cal": cmd_cal, "param": cmd_param, "pca": cmd_pca, "eeprom": cmd_eeprom}
 # Commands that manage the port (or the daemon) themselves: cmd(args).
 PORT_COMMANDS = {"flash": cmd_flash, "vbody": cmd_vbody, "run": cmd_run, "daemon": cmd_daemon,
-                 "log": cmd_log, "reboot": cmd_reboot}
+                 "log": cmd_log, "reboot": cmd_reboot, "update": cmd_update}
 # Link-command modes that must send nothing, so they cannot share the daemon's port.
 SILENT_MODES = {"monitor": ("passive", "--passive"), "posture": ("then_watch", "--then-watch"),
                 "trick": ("then_watch", "--then-watch")}
