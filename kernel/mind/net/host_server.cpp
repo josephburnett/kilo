@@ -129,14 +129,19 @@ void HostServer::accept(uint64_t now) {
   }
 }
 
-// More than kMaxClients open: close the oldest connection that is not a
-// client yet (with kMaxClients clients, that is the newest one).
+// More than kMaxClients open: close a connection that is not a client yet
+// (with kMaxClients clients, that is the newest one): one whose refusal is
+// being written first, then one still in its hello, then one further on;
+// the oldest of the first kind there is.
 void HostServer::evict() {
+  auto rank = [](const Client& c) { return c.closing ? 0 : c.phase == Phase::Hello ? 1 : 2; };
   while (connections() > kMaxClients) {
     int32_t oldest = -1;
     for (uint32_t i = 0; i < kSlots; i++) {
       const Client& c = clients_[i];
-      if (c.open && c.phase != Phase::Open && (oldest < 0 || c.opened_us < clients_[oldest].opened_us))
+      if (!c.open || c.phase == Phase::Open) continue;
+      if (oldest < 0 || rank(c) < rank(clients_[oldest]) ||
+          (rank(c) == rank(clients_[oldest]) && c.opened_us < clients_[oldest].opened_us))
         oldest = (int32_t)i;
     }
     if (oldest < 0) return;  // cannot be: at most kMaxClients are clients

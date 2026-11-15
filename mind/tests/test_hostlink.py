@@ -595,3 +595,16 @@ def test_every_host_command_takes_key(mind, tmp_path, capsys, monkeypatch):
     capsys.readouterr()
     assert cli.main(["--host", mind.addr, "status"]) == 1  # without --key: $KILO_HOST_KEY, which is missing
     assert "kilo key init" in capsys.readouterr().err
+
+
+def test_a_refused_send_uses_no_nonce(mind):
+    from kilo.protocol import kilo_link_codec as C2
+    with HostLink.connect(mind.addr) as hl:
+        ch = hl._channel
+        sent = ch._sent
+        good = C2.encode_host_message(P.HostStatusReq(), 1)
+        bad = (2000).to_bytes(2, "little") + bytes(2000)  # a frame no record can hold
+        with pytest.raises(ValueError):
+            ch.send(good + bad)
+        assert ch._sent == sent
+        assert hl.status().mind_build == 0x1E1405F0  # the stream is still in step

@@ -90,23 +90,33 @@ class Channel:
 
     def send(self, frames: bytes) -> None:
         """Whole host frames (concatenated) into as few records as fit."""
-        with self._send_lock:
-            out = bytearray()
-            i = 0
-            while True:
-                j = i
-                while j < len(frames):
-                    flen = 2 + int.from_bytes(frames[j:j + 2], "little")
-                    if j + flen - i > P.HOST_RECORD_MAX:
-                        break
-                    j += flen
-                if j == i and i < len(frames):
-                    raise ValueError("a frame longer than a record")
-                out += self._seal(bytes(frames[i:j]))
-                i = j
-                if i >= len(frames):
+        # Cut first, seal after: a refusal must not have used up nonces.
+        cuts = [0]
+        i = 0
+        while i < len(frames):
+            j = i
+            while j < len(frames):
+                flen = 2 + int.from_bytes(frames[j:j + 2], "little")
+                if j + flen - i > P.HOST_RECORD_MAX:
                     break
-            self._sock.sendall(out)
+                j += flen
+            if j == i:
+                raise ValueError("a frame longer than a record")
+            cuts.append(j)
+            i = j
+        if len(cuts) == 1:
+            cuts.append(0)  # nothing: one empty record
+        with self._send_lock:
+            out = b"".join(self._seal(bytes(frames[a:b])) for a, b in zip(cuts, cuts[1:]))
+            try:
+                self._sock.sendall(out)
+            except OSError:
+                # Part of a record may have gone: the stream is broken for good.
+                try:
+                    self._sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                raise
 
     def _seal(self, plain: bytes) -> bytes:
         if self._sent >= NONCE_LIMIT:

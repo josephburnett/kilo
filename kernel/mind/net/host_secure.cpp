@@ -22,6 +22,7 @@ constexpr uint32_t kPrologueLen = sizeof(kPrologue) - 1 + kHelloLen;
 static_assert(sizeof(kMagic) - 1 == 4, "spec host.hello_magic");
 static_assert(kHelloLen == 8 + noise::kDhLen, "spec host.hello_len: magic, version, flags, reserved, key");
 static_assert(HostServer::kRecordBytes <= 0xFFFF, "a record's length is a u16");
+static_assert(KILO_HOST_MAX_FRAME <= KILO_HOST_RECORD_MAX, "seal(): a whole frame fits a record");
 
 uint32_t elapsed_us(Clock& clock, uint64_t since) { return (uint32_t)(clock.now_us() - since); }
 
