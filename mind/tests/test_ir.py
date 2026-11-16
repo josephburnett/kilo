@@ -173,29 +173,29 @@ def test_remote_posture_keys_stop_a_walk_first():
 
 def test_remote_gait_keys():
     c, rc, key = rig()
-    assert key("C4") == "walk forward (walk) 11.1 mm/s"  # not walking: forward in that gait at 1x
-    assert c.calls[-1] == ("walk", "forward", "walk", 11.1)
+    assert key("C4") == "walk forward (walk) 17.8 mm/s"  # not walking: forward in that gait at 1x
+    assert c.calls[-1] == ("walk", "forward", "walk", 17.8)
     n = len(c.calls)
-    assert key("C4") == "walk forward (walk) 11.1 mm/s: unchanged" and len(c.calls) == n  # idempotent
+    assert key("C4") == "walk forward (walk) 17.8 mm/s: unchanged" and len(c.calls) == n  # idempotent
     key("B7")  # +4
-    assert key("A4") == "walk forward (trot) 77.8 mm/s"  # another gait: changed, the level kept
-    assert c.calls[-1] == ("walk", "forward", "trot", 77.8) and rc.level == 4
-    assert key("B4") == "walk forward (crawl) 13.2 mm/s"  # clamped by the crawl's top speed
+    assert key("A4") == "walk forward (trot) 152.2 mm/s"  # another gait: changed, the level kept
+    assert c.calls[-1] == ("walk", "forward", "trot", 158.4) and rc.level == 4  # 1.1x asked: the trot's top
+    assert key("B4") == "walk forward (crawl) 24.4 mm/s"
     for _ in range(5):
         key("B5")  # +4 +3 +2 +1 -1 -2
     assert rc.level == -2 and c.calls[-1][1] == "back"
-    assert key("B4") == "walk forward (crawl) 7.0 mm/s"  # the gait in use: forward at the magnitude
-    assert rc.level == 2 and c.calls[-1] == ("walk", "forward", "crawl", 7.0)
+    assert key("B4") == "walk forward (crawl) 15.6 mm/s"  # the gait in use: forward at the magnitude
+    assert rc.level == 2 and c.calls[-1] == ("walk", "forward", "crawl", 15.6)
     # every stop puts the level back
     assert key("B6") == "posture stand" and rc.level == 3 and rc.heading == "straight"
-    assert key("A4") == "walk forward (trot) 55.6 mm/s"
+    assert key("A4") == "walk forward (trot) 144.0 mm/s"
     key("B7")
     c.status = {"active": False}  # the walk ended by itself
-    assert key("A4") == "walk forward (trot) 55.6 mm/s" and rc.level == 3
+    assert key("A4") == "walk forward (trot) 144.0 mm/s" and rc.level == 3
     # a playing trick is stopped before a walk from standing
     c, rc, key = rig("TRICK")
     key("A4")
-    assert c.calls == [("stop_trick",), ("walk", "forward", "trot", 55.6)]
+    assert c.calls == [("stop_trick",), ("walk", "forward", "trot", 144.0)]
 
 
 def test_remote_speed_ladder():
@@ -203,46 +203,47 @@ def test_remote_speed_ladder():
     assert key("B7") == "ignored (not walking)" and key("B5") == "ignored (not walking)"
     assert c.calls == []  # they never start a walk
     key("A4")
+    # since 2026-11-15 the slowest level is about the old default (trot 55.6 mm/s), 1x more than twice it
     assert [key("B5") for _ in range(8)] == [
-        "speed 0.7x (trot 38.9 mm/s forward)", "speed 0.5x (trot 27.8 mm/s forward)",
-        "speed -0.5x (trot 27.8 mm/s back)", "speed -0.7x (trot 38.9 mm/s back)",
-        "speed -1x (trot 55.6 mm/s back)", "speed -1.4x (trot 77.8 mm/s back)",
-        "speed -2x (trot 92.6 mm/s back)", "speed -2x (trot 92.6 mm/s back): already the fastest back"]
-    assert rc.level == -5 and c.calls[-1] == ("walk", "back", "trot", 111.1)  # asked 2x; the planner caps it
+        "speed 0.7x (trot 100.8 mm/s forward)", "speed 0.4x (trot 57.6 mm/s forward)",
+        "speed -0.4x (trot 57.6 mm/s back)", "speed -0.7x (trot 100.8 mm/s back)",
+        "speed -1x (trot 144.0 mm/s back)", "speed -1.1x (trot 152.2 mm/s back)",
+        "speed -1.2x (trot 152.2 mm/s back)", "speed -1.2x (trot 152.2 mm/s back): already the fastest back"]
+    assert rc.level == -5 and c.calls[-1] == ("walk", "back", "trot", 172.8)  # asked 1.2x; the planner caps it
     for _ in range(4):
         key("B7")
     assert rc.level == -1
-    assert key("B7") == "speed 0.5x (trot 27.8 mm/s forward)" and c.calls[-1][1] == "forward"
+    assert key("B7") == "speed 0.4x (trot 57.6 mm/s forward)" and c.calls[-1][1] == "forward"
     for _ in range(3):
         key("B7")
-    assert key("B7") == "speed 2x (trot 92.6 mm/s forward)"
+    assert key("B7") == "speed 1.2x (trot 152.2 mm/s forward)"
     n = len(c.calls)
-    assert key("B7") == "speed 2x (trot 92.6 mm/s forward): already the fastest" and len(c.calls) == n
-    # a level the planner clamps to the same speed: the level moves, the real mm/s shown
-    assert key("C4") == "walk forward (walk) 12.0 mm/s"
-    assert key("B5") == "speed 1.4x (walk 12.0 mm/s forward)"
-    assert key("B5") == "speed 1x (walk 11.1 mm/s forward)"
+    assert key("B7") == "speed 1.2x (trot 152.2 mm/s forward): already the fastest" and len(c.calls) == n
+    # a level the planner clamps to the same speed (the trot's top two): the level moves, the real mm/s shown
+    assert key("B5") == "speed 1.1x (trot 152.2 mm/s forward)"
+    assert key("B5") == "speed 1x (trot 144.0 mm/s forward)"
+    assert key("C4") == "walk forward (walk) 17.8 mm/s"
 
 
 def test_remote_turns():
     c, rc, key = rig()
-    assert key("A6") == "walk left (trot) 55.6 mm/s"  # from standing: the turn at 1x
-    assert c.calls[-1] == ("walk", "left", "trot", 55.6)
-    assert key("A6") == "walk left (trot) 55.6 mm/s: unchanged"
-    assert key("C6") == "walk right (trot) 55.6 mm/s"
-    assert key("B5") == "speed 0.7x (trot 38.9 mm/s right)"
-    assert key("B5") == "speed 0.5x (trot 27.8 mm/s right)"
-    assert key("B5") == "speed 0.5x (trot 27.8 mm/s right): already the slowest"  # no sign flip in a turn
-    assert key("B7") == "speed 0.7x (trot 38.9 mm/s right)"
-    assert key("A4") == "walk forward (trot) 38.9 mm/s" and rc.heading == "straight"  # the gait: straight again
+    assert key("A6") == "walk left (trot) 144.0 mm/s"  # from standing: the turn at 1x
+    assert c.calls[-1] == ("walk", "left", "trot", 144.0)
+    assert key("A6") == "walk left (trot) 144.0 mm/s: unchanged"
+    assert key("C6") == "walk right (trot) 144.0 mm/s"
+    assert key("B5") == "speed 0.7x (trot 100.8 mm/s right)"
+    assert key("B5") == "speed 0.4x (trot 57.6 mm/s right)"
+    assert key("B5") == "speed 0.4x (trot 57.6 mm/s right): already the slowest"  # no sign flip in a turn
+    assert key("B7") == "speed 0.7x (trot 100.8 mm/s right)"
+    assert key("A4") == "walk forward (trot) 100.8 mm/s" and rc.heading == "straight"  # the gait: straight again
     key("C6")
-    assert key("C4") == "walk right (walk) 7.8 mm/s"  # another gait: the turn goes on in it
+    assert key("C4") == "walk right (walk) 12.4 mm/s"  # another gait: the turn goes on in it
     key("C4")
     key("B5")
     key("B5")  # +2: +1, -1
     assert rc.level == -1
-    assert key("A6") == "walk left (walk) 5.6 mm/s" and rc.level == 1  # backward, then a turn: the magnitude
-    assert key("C4") == "walk forward (walk) 5.6 mm/s"
+    assert key("A6") == "walk left (walk) 7.1 mm/s" and rc.level == 1  # backward, then a turn: the magnitude
+    assert key("C4") == "walk forward (walk) 7.1 mm/s"
 
 
 def test_remote_freeze():
@@ -255,7 +256,7 @@ def test_remote_freeze():
         assert key(g) == "ignored (frozen: B6 or A7 to go on)", g
     assert len(c.calls) == n and rc.behaviour.starts == 0
     assert key("B6") == "unfrozen, posture stand" and not rc.frozen
-    assert key("A4") == "walk forward (trot) 55.6 mm/s"  # from 1x again
+    assert key("A4") == "walk forward (trot) 144.0 mm/s"  # from 1x again
     # standing: holds the posture; A7 goes on too
     c, rc, key = rig()
     assert key("C7") == "frozen (holding the posture): only B6 or A7 act now" and c.calls == []

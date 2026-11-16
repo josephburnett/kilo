@@ -230,7 +230,7 @@ def test_client_walks_and_stops(rig):
     client.wait_ready(2)
     client.set_balance(True)
     st = client.walk("forward", "trot", balance=False)
-    assert st["pattern"] == "trot" and st["active"] and st["speed_mm_s"] == pytest.approx(55.6, abs=0.1)
+    assert st["pattern"] == "trot" and st["active"] and st["speed_mm_s"] == pytest.approx(144.0, abs=0.1)
     assert vb.telem_div == 1  # 50 Hz telemetry while streaming
     assert vb.balance["enable"] == 0 or wait_for(lambda: vb.balance["enable"] == 0, 1)
     assert "SET_POSTURE" not in client.link.goals()  # a posture refresh would end GAIT

@@ -15,8 +15,9 @@ How a tick is made (docs/walking-and-balance.md §10):
   (step height at mid-swing, zero speed at lift-off and touchdown) from
   where it left the ground to half a stride ahead of its shoulder. Speed and
   direction change the stride targets, which move at most 0.5 mm per tick,
-  and the stance time, which moves at most 2 % per tick, so any change at
-  any tick is smooth. A pattern change goes through the legs' way home: the
+  and the stance time, which moves at most 2 % per tick, with each slot's
+  shift following the stance time as it is (so a slower speed never leaves
+  a swing more than a stride to carry): any change at any tick is smooth. A pattern change goes through the legs' way home: the
   strides go to 0 and each leg steps under its shoulder (as for a stop),
   then the new pattern starts from its first group as a walk starts (from
   the walk, up to ~5.5 s); a second change while that runs just changes
@@ -28,9 +29,13 @@ How a tick is made (docs/walking-and-balance.md §10):
   solves for the smallest body move (a fore-aft shift of every foot, a roll
   and a little pitch by leg-length differences) that gives that margin at
   lift-off and at touchdown (the body model's centre of mass, linearised
-  and solved twice). The move runs during the shift and is complete
-  ``lead`` (the servo lag) before the lift; it is held until the foot is
-  down again. The solve is spread over the swing before the slot (a few
+  and solved twice). The move runs during the shift, paced by gravity (a
+  side that drops falls no faster than it can), and the lift starts
+  ``lead`` ticks after it ends (patterns.LEAN_LEAD_MS: three ticks BEFORE
+  its end, in the cosine's tail, where less than a tenth of the move is
+  left; the margin the plan reports counts it); it is held until the foot
+  is down again. The lean and the lift go to the servos together, so the
+  servo lag delays both alike. The solve is spread over the swing before the slot (a few
   units of work per tick, from where the feet will be when the slot
   starts), so no tick carries a whole solve; if something changed since (a
   command, a catch) it is solved again at the slot's start while the plan
@@ -147,7 +152,11 @@ class Planner:
         self.model = model
         self.cfg = config or PlannerConfig()
         self.tick = tick
-        self.lead = int(math.ceil(model.lag_ticks(pat.TICK_MS) - 1e-9))
+        # the lift's start after the lean's move (ticks; negative: before its end)
+        self.lead = int(round(pat.LEAN_LEAD_MS / pat.TICK_MS))
+        # a level-out (the stop's, or out of the walk into the trot) is done a
+        # servo lag before what comes next: the hand-over to STANCE, a trot's lift
+        self.settle = int(math.ceil(model.lag_ticks(pat.TICK_MS) - 1e-9))
         self.pattern = pat.pattern(pattern)
         self.direction = pat.direction(direction)
         self.speed_mm_s = pat.default_speed(self.pattern) if speed_mm_s is None else abs(float(speed_mm_s))
@@ -158,7 +167,6 @@ class Planner:
         self.s_tgt = [0.0, 0.0]
         self.stance_ticks = 1.0      # a foot's time on the ground now (slewed toward stance_tgt)
         self.stance_tgt = 1.0
-        self.shift_ticks = 1
         self.lean = Lean()
         self.lean_from = Lean()
         self.lean_to = Lean()
@@ -199,18 +207,17 @@ class Planner:
         return self._pending_pattern is not None
 
     def timing(self) -> pat.Timing:
-        return pat.timing(self.pattern, self.speed_mm_s, self.model.servo_lag_ms)
+        return pat.timing(self.pattern, self.speed_mm_s)
 
     def _apply_timing(self) -> None:
         tm = self.timing()
         shift = tm.shift_ms if self.cfg.shift_ms is None else self.cfg.shift_ms
         n = len(self.pattern.groups)
         self.stance_tgt = (n * (shift + self.pattern.swing_ms) - self.pattern.swing_ms) / pat.TICK_MS
-        self.shift_ticks = max(0, int(round(shift / pat.TICK_MS)))
         if self.stopping or self._pending_pattern is not None:
             self.s_tgt = [0.0, 0.0]
         else:
-            self.s_tgt = list(pat.side_strides(self.direction, tm.stride_mm, self.pattern))
+            self.s_tgt = list(pat.side_strides(self.direction, tm.stride_mm))
         self._next = None  # the next slot's lean was solved for the old timing
 
     def set_speed(self, speed_mm_s: float) -> None:
@@ -219,7 +226,8 @@ class Planner:
         if self._job is not None:  # this slot is still waiting for its lean: solve it for the new shift
             self._job = self._new_job(self.k, self.xg, self.s_cur, self.stance_ticks, self.lean_from, self.h)
         elif self.t < self.S:  # still in the shift: a new length, but never shorter than its lean needs
-            self.S = max(self.t + 1, self.tr_ticks + (self.lead if self._leaning() else 0), self.shift_ticks)
+            self.S = max(self.t + 1, self.tr_ticks + (self.lead if self._leaning() else 0),
+                         self._shift_for(self.stance_ticks))
 
     def set_direction(self, direction: str) -> None:
         self.direction = pat.direction(direction)
@@ -283,13 +291,13 @@ class Planner:
             self.finishing = True
         if self.finishing:
             self.lean_to = Lean()
-            self.tr_ticks = max(self.lead + 5, self._move_ticks(self.lean_from, self.lean_to, self.h))
-            self.S = self.tr_ticks + self.lead
+            self.tr_ticks = max(self.settle + 5, self._move_ticks(self.lean_from, self.lean_to, self.h))
+            self.S = self.tr_ticks + self.settle
             return
-        self.S = self.shift_ticks
+        self.S = self._shift_for(self.stance_ticks)
         if self._leaning() and not self.skip:
             if nxt is not None and nxt.matches(self.pattern, self.k, self.xg, self.s_cur, self.stance_ticks,
-                                               self.shift_ticks, self.lean_from):
+                                               self.S, self.lean_from):
                 job = nxt
             else:  # something changed since it was solved (a command, a catch): solved now, the slot waits
                 job = self._new_job(self.k, self.xg, self.s_cur, self.stance_ticks, self.lean_from, self.h)
@@ -302,8 +310,8 @@ class Planner:
             tr = 0
             if self.lean_to != self.lean_from:  # out of a leaning pattern: level first, as fast as gravity lets
                 tr = self._move_ticks(self.lean_from, self.lean_to, self.h)
-                self.S = max(self.S, tr + self.lead)
-            self.tr_ticks = max(1, tr, self.S - (self.lead if tr else 0))
+                self.S = max(self.S, tr + self.settle)
+            self.tr_ticks = max(1, tr, self.S - (self.settle if tr else 0))
 
     def _move_ticks(self, a: Lean, b: Lean, height: float) -> int:
         """Ticks the body needs to move from lean a to lean b on a smooth
@@ -319,6 +327,15 @@ class Planner:
                 need = max(need, math.pi * math.sqrt(amp / (0.5 * m.drop_accel(lever, h))))
         need = max(need, math.pi / 2 * abs(b.dx - a.dx) / cfg.dx_speed_mm_s)
         return max(1, int(math.ceil(need / (pat.TICK_MS / 1000.0))))
+
+    def _shift_for(self, stance: float) -> int:
+        """A slot's four-foot ticks for the stance time now (ticks): the shift
+        follows the stance time as it slews after a speed change, so the feet
+        on the ground slide one stride per cycle and the next swing never has
+        to carry a foot further than a stride in its fixed time."""
+        n = len(self.pattern.groups)
+        w = self.pattern.swing_ms
+        return max(0, int(round(((stance * pat.TICK_MS + w) / n - w) / pat.TICK_MS)))
 
     def _side_speed(self, leg: int) -> float:
         """mm per tick a foot on the ground slides back."""
@@ -340,13 +357,12 @@ class Planner:
     def _new_job(self, k: int, xg, s, stance: float, lean_from: Lean, h_now: float) -> _LeanJob:
         job = _LeanJob()
         job.pattern, job.k, job.xg, job.s, job.stance = self.pattern, k, tuple(xg), tuple(s), stance
-        job.shift, job.lean_from, job.result = self.shift_ticks, lean_from, None
+        job.shift, job.lean_from, job.result = self._shift_for(stance), lean_from, None
         group = self.pattern.groups[k]
         speed = [s[0 if LEFT[leg] else 1] / stance for leg in LEGS]
         tgt = [s[0 if LEFT[leg] else 1] / 2.0 for leg in LEGS]
         h = self.model.stance_height(self.pattern.body_h_256)
-        job.gen = self._lean_steps(group, list(xg), speed, tgt, h, h_now, self.shift_ticks, self.swing_ticks,
-                                   lean_from)
+        job.gen = self._lean_steps(group, list(xg), speed, tgt, h, h_now, job.shift, self.swing_ticks, lean_from)
         return job
 
     @staticmethod
@@ -371,10 +387,10 @@ class Planner:
     def _lean_steps(self, group: tuple, xg, speed, tgt, h: float, h_now: float, shift: int, swing: int,
                     lean_from: Lean):
         """The slot's shift, lean and move ticks (a generator: one unit of
-        work per step, the result as its return value). The move must be
-        done a servo lag before the lift: when it needs longer than the
-        speed's shift gives, the shift grows and the lean is solved again
-        for the later lift-off."""
+        work per step, the result as its return value). The lift starts
+        ``lead`` ticks after the move's end (negative: before it): when the
+        move needs longer than the speed's shift gives, the shift grows and
+        the lean is solved again for the later lift-off."""
         S = shift
         lean_to = yield from self._solve_steps(group, xg, speed, tgt, h, S, swing)
         tr = self._move_ticks(lean_from, lean_to, h_now)

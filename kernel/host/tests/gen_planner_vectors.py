@@ -125,6 +125,9 @@ def scenarios() -> None:
                                                               ("run", 40), ("dir", "forward"), ("run", 30)])
     scenario("walk_left", "walk", "left", speed=12.0, script=[("run", 120), ("dir", "back"), ("run", 60)])
     scenario("crawl_march", "crawl", "march", script=[("run", 120)])
+    # the top speeds (asked past them: capped), the lift in the lean move's tail
+    scenario("crawl_top_back", "crawl", "back", speed=40.0, script=[("run", 220)])
+    scenario("trot_top_down", "trot", speed=200.0, script=[("run", 60), ("speed", 100.0), ("run", 60)])
     # pattern changes: the legs go home first; out of the walk's lean, level first
     scenario("trot_to_walk", "trot", "left", script=[("run", 50), ("pattern", "walk"), ("run", 200)])
     scenario("walk_to_trot", "walk", script=[("run", 20), ("pattern", "crawl"), ("run", 10), ("pattern", "trot"),

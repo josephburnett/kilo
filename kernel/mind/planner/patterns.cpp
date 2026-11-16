@@ -5,11 +5,11 @@ namespace kilo {
 namespace planner {
 
 // Walk and crawl lift LB, LF, RB, RF (the lateral sequence); the trot the
-// diagonal pairs LF+RB, RF+LB. Values as in patterns.py's PATTERNS.
+// diagonal pairs LF+RB, RF+LB. Values (and why) as in patterns.py's PATTERNS.
 const Pattern kPatternTable[kPatterns] = {
-    {"walk", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 500, 30, 15, 205, 3200, 0, 4000, true},
-    {"trot", 2, 2, {{LF, RB}, {RF, LB}, {0, 0}, {0, 0}}, 150, 25, 8, 205, 600, 60, 1327, false},
-    {"crawl", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 297, 25, 18, 179, 2800, 0, 4000, true},
+    {"walk", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 300, 40, 15, 195, 2550, 0, 4000, true},
+    {"trot", 2, 2, {{LF, RB}, {RF, LB}, {0, 0}, {0, 0}}, 150, 35, 8, 205, 393, 40, 1327, false},
+    {"crawl", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 300, 50, 15, 179, 2550, 0, 4000, true},
 };
 
 const Pattern& default_pattern() { return kPatternTable[1]; }
@@ -45,30 +45,30 @@ bool find_direction(const char* name, Direction* out) {
 
 const char* direction_name(Direction d) { return kDirectionNames[(int)d]; }
 
-real shift_min_ms(const Pattern& p, real lag_ms) {
-  if (p.lean) return m_max(p.shift_min_ms, lag_ms + kLeanMoveMs);
+real shift_min_ms(const Pattern& p) {
+  if (p.lean) return m_max(p.shift_min_ms, kLeanMoveMs + kLeanLeadMs);
   return p.shift_min_ms;
 }
 
-static void stance_limits(const Pattern& p, real lag_ms, real* lo, real* hi) {
+static void stance_limits(const Pattern& p, real* lo, real* hi) {
   real n = p.n_groups;
-  *lo = n * (shift_min_ms(p, lag_ms) + p.swing_ms) - p.swing_ms;
+  *lo = n * (shift_min_ms(p) + p.swing_ms) - p.swing_ms;
   *hi = m_max(*lo, p.stance_max_ms);
 }
 
 real default_speed(const Pattern& p) { return p.stride_mm / (p.period_ms - p.swing_ms) * (real)1000.0; }
 
-void speed_range(const Pattern& p, real lag_ms, real* lo, real* hi) {
+void speed_range(const Pattern& p, real* lo, real* hi) {
   real st_lo, st_hi;
-  stance_limits(p, lag_ms, &st_lo, &st_hi);
+  stance_limits(p, &st_lo, &st_hi);
   *lo = kStrideMinMm / st_hi * (real)1000.0;
   *hi = p.stride_mm / st_lo * (real)1000.0;
 }
 
-Timing timing(const Pattern& p, real speed_mm_s, real lag_ms) {
+Timing timing(const Pattern& p, real speed_mm_s) {
   real n = p.n_groups;
   real st_lo, st_hi;
-  stance_limits(p, lag_ms, &st_lo, &st_hi);
+  stance_limits(p, &st_lo, &st_hi);
   real v = m_fabs(speed_mm_s);
   real stride = p.stride_mm;
   real stance = v > 0 ? stride / v * (real)1000.0 : m_inf();
@@ -81,9 +81,9 @@ Timing timing(const Pattern& p, real speed_mm_s, real lag_ms) {
   return {stride, period / n - p.swing_ms, stance, period, stride / stance * (real)1000.0};
 }
 
-Timing default_timing(const Pattern& p, real lag_ms) { return timing(p, default_speed(p), lag_ms); }
+Timing default_timing(const Pattern& p) { return timing(p, default_speed(p)); }
 
-void side_strides(Direction d, real stride, const Pattern& p, real out[2]) {
+void side_strides(Direction d, real stride, real out[2]) {
   switch (d) {
     case Direction::Forward:
       out[0] = out[1] = stride;
@@ -96,7 +96,7 @@ void side_strides(Direction d, real stride, const Pattern& p, real out[2]) {
       return;
     case Direction::Left:
     case Direction::Right: {
-      real t = kDefaultTurnMm * stride / p.stride_mm;
+      real t = kTurnFrac * stride;
       out[0] = d == Direction::Left ? -t : t;
       out[1] = d == Direction::Left ? t : -t;
       return;

@@ -10,8 +10,9 @@
 //   through the legs' way home.
 // - The lean (walk, crawl): before each lift the body's centre of mass is
 //   moved at least margin_mm inside the three feet that stay down (a small
-//   quadratic program on the linearised model), complete a servo lag before
-//   the lift. The solve is spread over the swing before the slot, a few
+//   quadratic program on the linearised model), the lift starting
+//   kLeanLeadMs after the move's end (three ticks before it, in its cosine
+//   tail; the servo lag delays the lean and the lift alike). The solve is spread over the swing before the slot, a few
 //   units of work a tick (LeanJob), so no tick carries a whole solve.
 // - Prediction: the attitude for tick t is the plane through the support
 //   feet planned a servo lag earlier; it goes in FEET as the balance's
@@ -212,13 +213,14 @@ class Planner {
   // Plan the next tick (tick()) and advance.
   const TickPlan& next();
 
-  Timing timing() const { return planner::timing(*pattern_, speed_mm_s_, model_.servo_lag_ms); }
+  Timing timing() const { return planner::timing(*pattern_, speed_mm_s_); }
   int swing_ticks() const;
   bool changing() const { return pending_ != nullptr; }
   bool stopping() const { return stopping_; }
   bool done() const { return done_; }
   uint32_t tick() const { return tick_; }
-  int lead() const { return lead_; }
+  int lead() const { return lead_; }      // the lift after the lean's move, ticks (negative: before its end)
+  int settle() const { return settle_; }  // a level-out done this long (the servo lag) before what follows
   const Pattern& pattern() const { return *pattern_; }
   const Pattern* pending_pattern() const { return pending_; }
   Direction direction() const { return direction_; }
@@ -238,6 +240,7 @@ class Planner {
 
  private:
   bool leaning() const { return pattern_->lean && cfg_.lean; }
+  int shift_for(real stance) const;
   bool home() const;
   void apply_timing();
   void start_slot();
@@ -259,6 +262,7 @@ class Planner {
   PlannerConfig cfg_;
   uint32_t tick_ = 0;
   int lead_ = 0;
+  int settle_ = 0;
   const Pattern* pattern_;
   Direction direction_ = Direction::Forward;
   real speed_mm_s_ = 0;
@@ -269,7 +273,6 @@ class Planner {
   real s_tgt_[2] = {};
   real stance_ticks_ = 1;  // a foot's time on the ground now (slewed toward stance_tgt_)
   real stance_tgt_ = 1;
-  int shift_ticks_ = 1;
   Lean lean_, lean_from_, lean_to_;
   int tr_ticks_ = 1;  // the lean's move takes this many ticks from the slot's start
   int k_ = -1;        // slot index into the groups

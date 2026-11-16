@@ -5,8 +5,9 @@ Kp 0.99, and the stream's timing. Deterministic: no threads, no wall time.
 
 What the virtual body can and cannot show: it is a rigid body on point
 feet. When the mass leaves the support it tips toward the lifted leg until
-that foot reaches the ground (about 11 degrees with the walk's 15 mm step;
-the floor run with the balance off rocked 15 degrees and stayed up). The
+that foot reaches the ground (about 9 degrees with the walk's 15 mm step and
+300 ms swing; the floor run with the balance off rocked 15 degrees with the
+old 500 ms swing and stayed up). The
 body's balance holds while a foot is up (as the firmware does since its
 tipping plant showed corrections on three feet enlarge the lean), so here
 it neither adds nor takes away on three feet. The rigid catch stops the
@@ -28,10 +29,13 @@ TICKS = 500  # 10 s
 
 
 def tipped_ticks(sim):
-    """Ticks with a leg in the air where the body was tipping (its mass past an edge)."""
+    """Ticks where the body was tipping (its mass past an edge): the roll more
+    than 3 deg off the plan. Any tick, not only those whose played support has
+    a leg up: the body follows its commands a servo lag late, so with the
+    300 ms swings of 2026-11-15 most of a tip shows after the played support
+    has all four feet again."""
     pred = sim.pred()
-    return sum(1 for t in sim.gait() if bin(t.support).count("1") == 3 and t.tick in pred
-               and abs(t.roll / 16 - pred[t.tick][1]) > 3)
+    return sum(1 for t in sim.gait() if t.tick in pred and abs(t.roll / 16 - pred[t.tick][1]) > 3)
 
 
 @pytest.mark.parametrize("pattern", ("walk", "crawl"))
@@ -76,28 +80,60 @@ def test_the_balance_loop_holds_on_three_feet():
 def test_the_trot_stays_up():
     sim = WalkSim("trot")
     assert sim.run(TICKS) == TICKS
-    assert not sim.fell() and sim.vb.max_tilt < 4 and sim.max_error() < 3.5  # 3.3 with the measured masses
+    assert not sim.fell() and sim.vb.max_tilt < 4 and sim.max_error() < 3.5  # 2.2 at 144 mm/s (3.3 at the old 56)
     two = [t for t in sim.gait() if bin(t.support).count("1") == 2]
     assert two and all(t.support in (0b0101, 0b1010) for t in two)  # diagonal pairs: LF+RB, RF+LB
 
 
+@pytest.mark.parametrize("direction", ("forward", "back"))
+def test_the_trot_at_its_default_and_top_shrugs_off_the_model_errors(direction):
+    """At 144 and 152 mm/s (two to three ticks on four feet) the trot stays
+    within 6.5 deg of its plan, with no hold and no catch, with the servos
+    lagging 100 or 200 ms (the model says 150) or the centre of mass 10 mm
+    ahead and 5 mm left of the model's with 50 g more battery."""
+    for speed in (144, 152):
+        for kw in (dict(lag_ms=100), dict(lag_ms=200), dict(body_model=wrong_mass(10, 5, 50))):
+            sim = WalkSim("trot", direction, speed, **kw)
+            assert sim.run(TICKS) == TICKS and not sim.fell()
+            st = sim.planner.stats
+            assert sim.max_error() < 6.5 and st["holds"] == 0 and st["catches"] == 0, (speed, kw, sim.max_error())
+
+
+def test_the_trot_at_mid_speeds_rocks_with_the_balance():
+    """A known weakness, the body's (not the plan's): at about 75 to 140 mm/s
+    (four-foot phases of 4 to 8 ticks) the body's balance loop, which corrects
+    on four feet and holds on two, rocks the trot, worst walking backward:
+    up to ~10 deg off the plan and gate holds, where the same steps with the
+    balance off stay within 3 deg. It does not fall. The remote's ladder puts
+    only its level 2 (0.7 x 144 = 101 mm/s) there."""
+    on = WalkSim("trot", "back", 100)
+    off = WalkSim("trot", "back", 100, balance=False)
+    on.run(TICKS)
+    off.run(TICKS)
+    assert not on.fell() and not off.fell()
+    assert off.max_error() < 3.5 and on.max_error() > 2 * off.max_error()
+
+
 def test_speed_changes_mid_walk_stay_up():
+    """The walk from its default to the bottom of the remote's ladder and to
+    its top, backward, into the trot and up to the trot's top speed. (Not to
+    the trot's mid speeds: test_the_trot_at_mid_speeds_rocks_with_the_balance.)"""
     sim = WalkSim("walk")
 
     def each(i):
         if i == 150:
-            sim.planner.set_speed(5)
+            sim.planner.set_speed(8)
         elif i == 350:
-            sim.planner.set_speed(12)
+            sim.planner.set_speed(21)
         elif i == 500:
             sim.planner.set_direction("back")
         elif i == 650:
-            sim.planner.set_pattern("trot")  # the legs go home first (up to ~5.5 s from the walk)
+            sim.planner.set_pattern("trot")  # the legs go home first (up to ~4 s from the walk)
         elif i == 700:
-            sim.planner.set_speed(90)
+            sim.planner.set_speed(150)
     assert sim.run(1150, each=each) == 1150
     assert not sim.fell() and sim.max_error() < 4
-    assert sim.planner.pattern.name == "trot" and sim.planner.timing().speed_mm_s == pytest.approx(90)
+    assert sim.planner.pattern.name == "trot" and sim.planner.timing().speed_mm_s == pytest.approx(150)
     assert sim.vb.feet_underruns == 0 and not sim.vb.feet_refused
 
 
@@ -133,7 +169,9 @@ def test_the_planned_stop_hands_over_to_stance():
     n = sim.run(600)
     assert n < 600 and sim.stream.ended == "stopped" and sim.stream.ok and sim.handovers == 1
     assert ("GAIT_STOPPED", 0) in sim.events and sim.vb.feet is None and sim.vb.posture == "STANCE"
-    assert sim.max_error() < 2.5 and not sim.fell()
+    # 3, not 2.5 as before 2026-11-15: the faster walk's lean moves faster, and the physics' 20 ms
+    # settling alone puts that much between the plan and the measured roll during a move
+    assert sim.max_error() < 3.0 and not sim.fell()
 
 
 def test_predicted_attitude_matches_the_telemetry_conventions():
@@ -208,8 +246,8 @@ def test_a_14_mm_margin_keeps_a_wrong_centre_of_mass_on_its_plan(pattern):
     """The same error in all four directions: with margin_mm 14 the walk and
     the crawl stay near the plan with no catch and no hold (with 10 they
     need the catch or the gate in one or two directions). With the masses
-    measured 2026-11-14: the walk within 2.8 deg, the crawl within 2.9 deg
-    except 10 mm ahead and 5 mm right, 4.1 deg."""
+    measured 2026-11-14 and the faster gaits of 2026-11-15: the walk within
+    2.3 deg, the crawl within 2.1 deg (before: 2.8 and 4.1)."""
     for dx, dy in ((10, 5), (10, -5), (-10, 5), (-10, -5)):
         sim = WalkSim(pattern, body_model=wrong_mass(dx, dy, 50), config=PlannerConfig(margin_mm=14.0))
         assert sim.run(1500) == 1500
