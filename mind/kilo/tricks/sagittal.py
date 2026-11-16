@@ -4,9 +4,10 @@ Given the 11 joint angles of a keyframe, where does Kilo rest, on what, how
 far is its centre of mass from tipping, and what torque does each servo
 hold? This is for tricks whose support is not the four feet (rear_up: the
 hind feet and the tail), which the planner's model (kilo.planner.model)
-does not cover. The masses and leg geometry come from that model; the tail,
-the outline of the frame and the Pi are ESTIMATES here (docs/rear-up-trick.md
-lists what to measure), so every check runs over ranges of them.
+does not cover. The masses and leg geometry come from that model; the tail
+is the owner's measurement (2026-11-16, read as below); the outline of the
+frame and the Pi are ESTIMATES (docs/rear-up-trick.md section 2 lists what
+is still to measure), so every check runs over ranges of them.
 
 Frames and conventions:
 
@@ -20,11 +21,18 @@ Frames and conventions:
 - Legs as body/src/core/ik.h: theta1 from straight down (+ = foot forward),
   theta2 the knee bend; OpenCat angles: front shoulder = -theta1, front knee
   = 90 - theta2; back shoulder = -theta1, back knee = -(theta2 + 90).
-- The tail: a straight lever from its pivot to its tip. At servo angle t its
-  direction, measured from straight back (-x) and positive toward +z (up),
-  is ``tail_zero_deg + tail_sign * t``. Which way the tail turns and where
-  0 points are the first thing to measure; with ``tail_sign`` wrong the
-  tail goes up instead of down and the rear-up has no prop.
+- The tail (kilo.tricks.sagittal.tail_point; MEASURED by the owner
+  2026-11-16, the reading of the numbers is an INTERPRETATION, see
+  docs/rear-up-trick.md §2): a straight 94 mm lever whose servo turns it
+  LEFT AND RIGHT, not up and down. The servo's axis lies in the body's
+  mid-plane and points backward and up, ``tail_axis_deg`` (40) above
+  straight back; at servo 0 the tail points backward and ``tail_droop_deg``
+  (18) below straight back. The tip therefore sweeps a cone about the axis
+  (58 deg half-angle: a circle of radius 80 mm whose centre is 50 mm along
+  the axis), LOWEST at 0 and rising to either side. In the side view the
+  tail is a strut that cannot be driven down; turning it moves the tip
+  sideways (``tail_sign``: +1 if a positive servo angle swings the tip to
+  the left, +y; NOT KNOWN) and up.
 
 Statics. A rigid body on flat ground rests on an edge of the convex hull of
 its outline (in the side view) with the centre of mass above that edge. The
@@ -67,18 +75,19 @@ class Geometry:
     # what a centre of mass a little forward of the model would do).
     com_dx: float = 0.0
     com_dz: float = 0.0
-    # ---- the tail: ESTIMATES (docs/rear-up-trick.md, M1-M3) ----
-    tail_pivot_x: float = -86.0   # the tail servo's axle, mm (25 mm behind the back shoulder axles)
-    tail_pivot_z: float = 6.0
-    tail_len: float = 60.0        # pivot to the tip that touches the floor, straight line
-    tail_g: float = 6.0           # the moving part (taken out of the frame's lump)
+    # ---- the tail: MEASURED 2026-11-16 (the owner, a ruler; docs/rear-up-trick.md §2) ----
+    tail_pivot_x: float = -70.5   # the tail servo's axis meets the mid-plane 9 mm behind the back shoulder axles
+    tail_pivot_z: float = 24.0    # ...and 24 mm above them
+    tail_len: float = 94.0        # pivot to the tip, straight line
+    tail_droop_deg: float = 18.0  # at servo 0 the tail points this far below straight back
+    tail_axis_deg: float = 40.0   # the servo's axis points backward and this far up (INTERPRETATION)
+    tail_sign: float = 1.0        # +1: a positive servo angle swings the tip LEFT (+y). NOT KNOWN
+    tail_g: float = 6.0           # the moving part (taken out of the frame's lump): ESTIMATE
     tail_com_frac: float = 0.5
-    tail_zero_deg: float = 30.0   # direction at servo 0: up from straight back
-    tail_sign: float = 1.0        # +1: a negative servo angle turns the tail DOWN
-    # ---- the outline: ESTIMATES (M5) ----
+    # ---- the outline: ESTIMATES (docs/rear-up-trick.md T3, T4) ----
     rear_x: float = -88.0         # the back end of the frame
     belly_z: float = -24.0        # the underside (battery pack)
-    back_z: float = 14.0          # the top of the frame at the rear
+    back_z: float = 34.0          # the top of the frame at the rear (the tail servo, its axis 24 mm up)
     pi_rear_x: float = -55.0      # the Pi's rear edge (board, connectors)
     pi_top_z: float = 36.0        # the Pi's highest point (header pins, USB/Ethernet)
     nose_x: float = 110.0
@@ -125,14 +134,60 @@ def leg_points(g: Geometry, front: bool, shoulder: float, knee: float):
     return (hx, 0.0), (kx, kz), (fx, fz)
 
 
-def tail_dir(g: Geometry, tail: float) -> tuple[float, float]:
-    a = _rad(g.tail_zero_deg + g.tail_sign * tail)
-    return -math.cos(a), math.sin(a)
+def _tail_basis(g: Geometry):
+    """(a, u, ca, sa): the servo's axis a, the unit vector u from the axis
+    toward the tail at servo 0 (both in the mid-plane, body frame (x, z)),
+    and the cosine and sine of the cone's half-angle."""
+    ax, az = -math.cos(_rad(g.tail_axis_deg)), math.sin(_rad(g.tail_axis_deg))
+    dx, dz = -math.cos(_rad(g.tail_droop_deg)), -math.sin(_rad(g.tail_droop_deg))
+    ca = ax * dx + az * dz
+    sa = math.sqrt(max(0.0, 1.0 - ca * ca))
+    ux, uz = (dx - ca * ax) / sa, (dz - ca * az) / sa
+    return (ax, az), (ux, uz), ca, sa
+
+
+def tail_point(g: Geometry, tail: float, frac: float = 1.0) -> tuple[float, float, float]:
+    """The point ``frac`` of the way from the tail's pivot to its tip, body
+    frame (x forward, y LEFT, z up), at servo angle ``tail``: the tail turns
+    about its axis by tail_sign * tail degrees, so the tip goes round a cone
+    and is lowest at 0."""
+    (ax, az), (ux, uz), ca, sa = _tail_basis(g)
+    s = _rad(g.tail_sign * tail)
+    r = g.tail_len * frac
+    c = r * ca
+    w = r * sa
+    return (g.tail_pivot_x + c * ax + w * math.cos(s) * ux,
+            w * math.sin(s),
+            g.tail_pivot_z + c * az + w * math.cos(s) * uz)
 
 
 def tail_tip(g: Geometry, tail: float) -> tuple[float, float]:
-    dx, dz = tail_dir(g, tail)
-    return g.tail_pivot_x + g.tail_len * dx, g.tail_pivot_z + g.tail_len * dz
+    """The tip in the side view (x, z)."""
+    x, _, z = tail_point(g, tail)
+    return x, z
+
+
+def tail_cone(g: Geometry) -> dict:
+    """The sweep, for the docs: the circle the tip goes round (its radius
+    and its centre, the distance along the axis), and the tip at 0 and at
+    +-90 deg relative to the pivot and to the hind shoulder axles."""
+    (ax, az), _, ca, sa = _tail_basis(g)
+    hx = -g.body.length_mm / 2
+    t0 = tail_point(g, 0.0)
+    t90 = tail_point(g, 90.0)
+    return {"radius": g.tail_len * sa, "centre_along_axis": g.tail_len * ca,
+            "half_angle": math.degrees(math.acos(ca)),
+            "tip0_from_pivot": (t0[0] - g.tail_pivot_x, t0[2] - g.tail_pivot_z),
+            "tip0_from_hip": (t0[0] - hx, t0[2]),
+            "tip90_from_pivot": (t90[0] - g.tail_pivot_x, t90[1], t90[2] - g.tail_pivot_z)}
+
+
+def tail_touch_height(g: Geometry, phi: float, tail: float = 0.0) -> float:
+    """The height of the hind shoulder axles above the floor at which the
+    tail tip just touches it, the body pitched ``phi`` nose up."""
+    hx = -g.body.length_mm / 2
+    x, z = tail_tip(g, tail)
+    return -to_world(x - hx, z, phi)[1]
 
 
 def masses(g: Geometry, p: Pose) -> list[tuple[str, float, float, float]]:
@@ -144,10 +199,9 @@ def masses(g: Geometry, p: Pose) -> list[tuple[str, float, float, float]]:
     # that the whole robot's centre of mass moves by (com_dx, com_dz).
     frame_g = b.body.grams - g.tail_g
     total = b.total_g
-    t0x, t0z = tail_dir(g, 0.0)
-    r = g.tail_len * g.tail_com_frac
-    fx = (b.body.grams * b.body.x - g.tail_g * (g.tail_pivot_x + r * t0x)) / frame_g
-    fz = (b.body.grams * b.body.z - g.tail_g * (g.tail_pivot_z + r * t0z)) / frame_g
+    t0x, _, t0z = tail_point(g, 0.0, g.tail_com_frac)
+    fx = (b.body.grams * b.body.x - g.tail_g * t0x) / frame_g
+    fz = (b.body.grams * b.body.z - g.tail_g * t0z) / frame_g
     out.append(("frame", frame_g, fx + g.com_dx * total / frame_g, fz + g.com_dz * total / frame_g))
     out.append(("battery", b.battery.grams, b.battery.x, b.battery.z))
     out.append(("pi", b.pi.grams, b.pi.x, b.pi.z))
@@ -156,10 +210,15 @@ def masses(g: Geometry, p: Pose) -> list[tuple[str, float, float, float]]:
         tag = "front" if front else "hind"
         out.append((f"{tag}_upper", 2 * b.upper_leg_g, hx + (kx - hx) * b.upper_leg_at, hz + (kz - hz) * b.upper_leg_at))
         out.append((f"{tag}_lower", 2 * b.lower_leg_g, kx + (fx - kx) * b.lower_leg_at, kz + (fz - kz) * b.lower_leg_at))
-    dx, dz = tail_dir(g, p.tail)
-    r = g.tail_len * g.tail_com_frac
-    out.append(("tail", g.tail_g, g.tail_pivot_x + r * dx, g.tail_pivot_z + r * dz))
+    tx, _, tz = tail_point(g, p.tail, g.tail_com_frac)
+    out.append(("tail", g.tail_g, tx, tz))
     return out
+
+
+def com_y(g: Geometry, p: Pose) -> float:
+    """The centre of mass's sideways offset (mm, + left): only the tail moves it."""
+    ty = tail_point(g, p.tail, g.tail_com_frac)[1]
+    return g.tail_g * (ty - tail_point(g, 0.0, g.tail_com_frac)[1]) / g.body.total_g
 
 
 def com(g: Geometry, p: Pose) -> tuple[float, float]:
@@ -386,29 +445,55 @@ def _load_pair(g: Geometry, p: Pose, r: Rest, rear: str, x_rear: float, front: s
         shoulder = R * (Xf - Xh) - wl / 2 * (Xl - Xh) - wu / 2 * (Xu - Xh)
         out[f"{tag}_knee"] = abs(knee) / G_MM_PER_KG_CM
         out[f"{tag}_shoulder"] = abs(shoulder) / G_MM_PER_KG_CM
-    Rt = react.get(TAIL, 0.0)
-    Xp = _point_world(g, g.tail_pivot_x, g.tail_pivot_z, phi)
-    Xt = _point_world(g, *tail_tip(g, p.tail), phi)
-    wt, tx, tz = ms["tail"]
-    tail = Rt * (Xt - Xp) - wt * (_point_world(g, tx, tz, phi) - Xp)
+    tail = _tail_torque(g, p, react.get(TAIL, 0.0), phi)
     return Load(hind_shoulder=out["hind_shoulder"], hind_knee=out["hind_knee"],
                 front_shoulder=out["front_shoulder"], front_knee=out["front_knee"],
                 tail=abs(tail) / G_MM_PER_KG_CM, on_rear=on_rear, on_front=on_front)
 
 
-def lateral_margin(g: Geometry, r: Rest) -> float | None:
-    """On the hind feet and the tail (a triangle: the feet track_mm apart,
-    the tail tip on the centre line), how far the centre of mass is from
-    the triangle's side edges, mm, left-right symmetric. None for other
-    supports (on two foot pairs the support is the full track)."""
+def _tail_torque(g: Geometry, p: Pose, on_tip: float, phi: float) -> float:
+    """The torque about the tail servo's axis (g mm) from the floor pushing
+    up on the tip (``on_tip`` grams) and the tail's own weight. World up, in
+    the body frame, is (sin phi, 0, cos phi). Both forces lie in the
+    mid-plane, as does the axis, when the tail is at 0: there the servo holds
+    nothing and the load goes into its bearing; turned sideways, the load
+    pushes the tip further out (0 is the lowest point of its circle)."""
+    (ax, az), _, _, _ = _tail_basis(g)
+    up = (math.sin(_rad(phi)), 0.0, math.cos(_rad(phi)))
+    piv = (g.tail_pivot_x, 0.0, g.tail_pivot_z)
+
+    def moment(pt, f):
+        r = (pt[0] - piv[0], pt[1] - piv[1], pt[2] - piv[2])
+        F = tuple(f * u for u in up)
+        m = (r[1] * F[2] - r[2] * F[1], r[2] * F[0] - r[0] * F[2], r[0] * F[1] - r[1] * F[0])
+        return m[0] * ax + m[2] * az
+
+    return moment(tail_point(g, p.tail), on_tip) - moment(tail_point(g, p.tail, g.tail_com_frac), g.tail_g)
+
+
+def lateral_margin(g: Geometry, r: Rest, p: Pose | None = None) -> float | None:
+    """On the hind feet and the tail (a triangle on the floor: the feet
+    track_mm apart, the tail tip where the tail's angle puts it, on the
+    centre line at 0), how far the centre of mass is inside the triangle,
+    mm (the nearest edge; < 0 outside). None for other supports."""
     if {r.rear, r.front} != {TAIL, HIND_FOOT}:
         return None
-    span = r.x_front - r.x_rear
-    u = (r.x_com - r.x_rear) / span if span > 1e-6 else 0.0
-    half = g.body.track_mm / 2 * max(0.0, min(1.0, u))
-    # distance from the centre line to the side edge, perpendicular to that edge
-    edge = math.hypot(span, g.body.track_mm / 2)
-    return half * span / edge
+    ty = tail_point(g, p.tail)[1] if p is not None else 0.0
+    cy = com_y(g, p) if p is not None else 0.0
+    t = g.body.track_mm / 2
+    tri = [(r.x_front, t), (r.x_front, -t), (r.x_rear, ty)] if r.front == HIND_FOOT else \
+          [(r.x_rear, t), (r.x_rear, -t), (r.x_front, ty)]
+    c = (r.x_com, cy)
+    out = []
+    for i in range(3):
+        (x1, y1), (x2, y2) = tri[i], tri[(i + 1) % 3]
+        ox, oy = tri[(i + 2) % 3]
+        L = math.hypot(x2 - x1, y2 - y1)
+        d = ((x2 - x1) * (c[1] - y1) - (y2 - y1) * (c[0] - x1)) / L
+        side = ((x2 - x1) * (oy - y1) - (y2 - y1) * (ox - x1))
+        out.append(d if side > 0 else -d)
+    # the edge between the feet is the fore-aft margin (Rest.margin); this is the sideways one
+    return min(out[1:])
 
 
 def _seg_dist(p, q, a, b) -> float:
@@ -461,13 +546,13 @@ def follow(g: Geometry, poses: Sequence[Pose], start_phi: float = 0.0, steps: in
     prev = start if start is not None else poses[0]
     r = rest(g, prev, phi)
     phi = r.phi
-    out.append(Sample(-1, 1.0, prev, r, load(g, prev, r), lateral_margin(g, r)))
+    out.append(Sample(-1, 1.0, prev, r, load(g, prev, r), lateral_margin(g, r, prev)))
     for k, target in enumerate(poses):
         for i in range(1, steps + 1):
             s = i / steps
             p = prev.lerp(target, s)
             r = rest(g, p, phi)
             phi = r.phi
-            out.append(Sample(k, s, p, r, load(g, p, r), lateral_margin(g, r)))
+            out.append(Sample(k, s, p, r, load(g, p, r), lateral_margin(g, r, p)))
         prev = target
     return out
