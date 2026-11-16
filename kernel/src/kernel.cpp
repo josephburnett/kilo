@@ -258,6 +258,12 @@ boolean CKernel::Initialize (void)
 	m_pUpdater = new KernelUpdater (new u8[KernelImageMax], KernelImageMax, *m_pBootCard, m_Clock, *m_pLog);
 	m_pMind->host ().attach_updater (*m_pUpdater);
 
+	// The walk recorder (mind/record/recorder.h): every walk tick by tick,
+	// for `kilo walks --host` after the walk. Its store on the heap, once
+	// (record::kStoreBytes, about 20 minutes of walking or more); RAM only,
+	// so a power cut loses it (kernel/README.md "Walk recordings").
+	m_pMind->attach_recorder (new u8[record::kStoreBytes], record::kStoreBytes);
+
 	// The clock reads nearly the same at every boot, so the core's
 	// clock-based seed would repeat (seq, type) pairs inside the body's
 	// 500 ms de-dup window after a quick reboot of the mind. The hardware

@@ -234,6 +234,9 @@ int main(int argc, char** argv) {
     logf(log, LogLevel::Info, "kernel updates go to %s (--card)", card);
   }
   mind.set_tap(&window);
+  // The walk recorder's store, on the heap, once (as on the Pi): every walk
+  // tick by tick, for `kilo walks --host`.
+  mind.attach_recorder(new uint8_t[record::kStoreBytes], record::kStoreBytes);
   if (listen != nullptr) {
     if (!listener.open(listen)) {
       logf(log, LogLevel::Error, "%s", listener.error());
