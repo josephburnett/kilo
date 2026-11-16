@@ -456,6 +456,9 @@ def cmd_walks(args: argparse.Namespace, hl: HostLink) -> int:
         return EXIT_OK
     if args.fetch == "all":
         chosen = [w for w in walks if not w.flags & P.WalkFlags.RECORDING]
+        for w in walks:  # not an error with `all`: it is fetched next time
+            if w.flags & P.WalkFlags.RECORDING:
+                print(f"walk {w.id}: still being recorded; fetch it once it has ended", file=sys.stderr)
     else:
         try:
             want = int(args.fetch)

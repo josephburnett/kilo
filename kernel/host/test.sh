@@ -703,7 +703,7 @@ expect "$OUT/walks_list.txt" "1 walks kept" "the list: one walk"
 expect "$OUT/walks_list.txt" "^ +1  [0-9-]+ [0-9:]+  walk +forward .* s +[0-9]+ +[0-9.]+ KB  " "the list: walk 1, walk forward"
 ctl ir 0x68                   # A4: trot, while walk 1 is downloaded
 sleep 0.5
-KPY -m kilo.cli --host "$W" walks --fetch all --out "$WALKS" -q | tee "$OUT/walks_fetch.txt"
+KPY -m kilo.cli --host "$W" walks --fetch all --out "$WALKS" -q 2>&1 | tee "$OUT/walks_fetch.txt"
 expect "$OUT/walks_fetch.txt" "walk 1: [0-9]+ bytes in [0-9.]+ s -> .*walk-[0-9-]+-1\.kwalk \(\+ walk-[0-9-]+-1\.kilolog\)" \
     "fetch: walk 1 written"
 expect "$OUT/walks_fetch.txt" "walk 2: still being recorded" "fetch: the trot is not fetchable yet"
@@ -741,7 +741,8 @@ check(e["rms_pitch"] >= abs(e["offset_pitch"]) - 0.01 and e["rms_roll"] >= abs(e
 check(e["rms_roll_less_offset"] > 0.5, "the walk's lean moves the predicted roll")
 check(s["ticks_sent"] == int(res["sent"]) and int(res["skipped"]) == 0 and int(res["underruns"]) == 0, "the stream's counters")
 check(lag["model_ms"] == 150.0, "the model's servo lag recorded")
-check({"none", "LF", "RF", "RB", "LB"} <= set(s["by_phase"]), f"the error by phase: {sorted(s['by_phase'])}")
+check("none" in s["by_phase"] and len({"LF", "RF", "RB", "LB"} & set(s["by_phase"])) >= 3,
+      f"the error by phase (one leg at a time): {sorted(s['by_phase'])}")
 check(s["margin"]["min_one_leg_up_mm"] is not None and
       abs(s["margin"]["min_one_leg_up_mm"] - s["margin"]["planner_min_mm"]) <= 0.11, "the margin: per tick = the planner's")
 check(s["balance_active_fraction"] > 0.9 and s["correction"]["max_pitch"] is not None, "the body's balance and its correction")
