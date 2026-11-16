@@ -494,7 +494,8 @@ and the mind kernel does the same (`kernel/mind/remote/`, a port of
 | A4 | 0x68 | trot: walk forward in it, or change the walk to it |
 | B4 | 0x98 | crawl: likewise |
 | C4 | 0xB0 | walk: likewise |
-| rows 1-3 | | nothing (logged as ignored) |
+| B2 | 0x38 | rear up (the trick `rear_up`, docs/rear-up-trick.md); pressed again while it plays, it comes down (TRICK_STOP over 1.5 s to STAND); refused below 7400 mV |
+| rows 1-3 but B2 | | nothing (logged as ignored) |
 
 **The gait and turn keys make Kilo walk: use the remote with Kilo on the
 floor only, never on a desk.** The remote keeps a gait (trot at start), a
