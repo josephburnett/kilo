@@ -13,6 +13,9 @@ today, and so what works here:
                                                    e.g. the netboot loader); the body gets REST first
     kilo update --host IP [--image PATH] [--force] [--wait S]   write a new kernel onto the mind's SD card;
                                                    it reboots into it, and this waits for it to come back
+    kilo walks --host IP [--json]                  the walks the mind recorded (in RAM, since it started)
+    kilo walks --host IP --fetch [N|all] [--out DIR]   download them: DIR/walk-<time>-<id>.kwalk and .kilolog,
+                                                   and print each one's summary (kilo log walk FILE.kwalk)
 
 ``--host`` may also follow the command (``kilo status --host IP``). Every
 other command prints that it is not available over --host yet.
@@ -41,6 +44,7 @@ from typing import Any
 
 from kilo import hostkey
 from kilo.hostlink import REBOOT_CLOSE_WAIT_S, HostError, HostKeyRefused, HostLink, HostRefused, has_kernel_marker
+from kilo.logs import walkrec
 from kilo.protocol import kilo_protocol as P
 
 EXIT_OK, EXIT_ERR = 0, 1
@@ -198,7 +202,7 @@ def _run_for(duration: float | None, hl: HostLink) -> int:
 
 def _unavailable(what: str) -> int:
     print(f"kilo {what}: not available over --host yet (the C++ mind serves status, posture, monitor, log, flash, "
-          "reboot, update)",
+          "reboot, update, walks)",
           file=sys.stderr)
     return EXIT_ERR
 
@@ -404,8 +408,97 @@ def _prepare_flash(args: argparse.Namespace) -> int | None:
     return None
 
 
+def _walk_when(info: Any, uptime_ms: int, now: float) -> float:
+    """A walk's start as wall time: now less the mind's uptime since it."""
+    return now - max(0, uptime_ms - info.start_ms) / 1000.0
+
+
+def _walk_row(info: Any, when: float) -> str:
+    d = walkrec.info_dict(info)
+    flags = d["flags"]
+    state = "recording" if "RECORDING" in flags else d.get("end") or "-"
+    if "TRUNCATED" in flags:
+        state += " (TRUNCATED: it outgrew the store)"
+    return (f"{info.id:4d}  {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(when))}  {d.get('gait', '?'):6s} "
+            f"{d.get('dir', '?'):8s} {d.get('speed', '?'):>7s}  {info.duration_ms / 1000:7.1f} s  {info.feet:6d}  "
+            f"{info.bytes / 1024:8.1f} KB  {state}")
+
+
+def cmd_walks(args: argparse.Namespace, hl: HostLink) -> int:
+    """`kilo walks --host IP [--fetch [N|all] --out DIR] [--json]`: the walks
+    the mind recorded (kernel/mind/record/), and their download: a .kwalk
+    (the raw recording) and a .kilolog (its frames, for kilo log
+    summary|replay|plot) per walk, then the walk's summary (kilo log walk)."""
+    st = hl.status()
+    now = time.time()
+    try:
+        walks = hl.walks()
+    except HostRefused as e:
+        if e.code in (P.HostResultCode.UNSUPPORTED, P.HostResultCode.UNKNOWN_TYPE):
+            print(f"kilo walks: this mind (build {st.mind_build:08x}) does not record walks ({e.code_name})",
+                  file=sys.stderr)
+            return EXIT_ERR
+        raise
+    store = hl.walk_store
+    if args.fetch is None:
+        if args.json:
+            print(json.dumps([dict(walkrec.info_dict(w), start_wall=round(_walk_when(w, st.uptime_ms, now), 3))
+                              for w in walks], indent=1))
+            return EXIT_OK
+        print(f"mind build {st.mind_build:08x}, up {st.uptime_ms / 1000:.0f} s: {len(walks)} walks kept, "
+              f"{store.used / 1048576:.2f} of {store.capacity / 1048576:.2f} MB used"
+              + (f", {store.dropped_walks} older walks dropped for room" if store.dropped_walks else "")
+              + (f", walk {store.recording} being recorded" if store.recording else ""))
+        if walks:
+            print("  id  started (this laptop's clock)  gait   dir        speed  duration   ticks        size  end")
+            for w in walks:
+                print(_walk_row(w, _walk_when(w, st.uptime_ms, now)))
+        return EXIT_OK
+    if args.fetch == "all":
+        chosen = [w for w in walks if not w.flags & P.WalkFlags.RECORDING]
+    else:
+        try:
+            want = int(args.fetch)
+        except ValueError:
+            print(f"kilo walks: --fetch {args.fetch!r}: a walk id or all", file=sys.stderr)
+            return EXIT_ERR
+        chosen = [w for w in walks if w.id == want]
+        if not chosen:
+            print(f"kilo walks: no walk {want} on the mind (kept: {', '.join(str(w.id) for w in walks) or 'none'})",
+                  file=sys.stderr)
+            return EXIT_ERR
+    out = Path(args.out).expanduser()
+    out.mkdir(parents=True, exist_ok=True)
+    status = EXIT_OK
+    for w in chosen:
+        if w.flags & P.WalkFlags.RECORDING:
+            print(f"walk {w.id}: still being recorded; fetch it once it has ended", file=sys.stderr)
+            status = EXIT_ERR
+            continue
+        when = _walk_when(w, st.uptime_ms, now)
+        stem = out / f"walk-{time.strftime('%Y%m%d-%H%M%S', time.localtime(when))}-{w.id}"
+        t = time.monotonic()
+        try:
+            data = hl.fetch_walk(w.id)
+        except (HostError, HostRefused) as e:
+            print(f"walk {w.id}: {e}", file=sys.stderr)
+            status = EXIT_ERR
+            continue
+        took = time.monotonic() - t
+        meta = {"walk": walkrec.info_dict(w), "mind": hl.address, "mind_build": f"{st.mind_build:08x}",
+                "fetched_wall": round(now, 3), "start_wall": round(when, 3), "format": P.HOST_WALK_FORMAT}
+        kw = walkrec.write_file(stem.with_suffix(".kwalk"), meta, data)
+        rec = walkrec.parse_records(data, meta)
+        rec.meta["path"] = str(kw)
+        kl = walkrec.to_kilolog(rec, stem.with_suffix(".kilolog"))
+        print(f"walk {w.id}: {len(data)} bytes in {took:.1f} s -> {kw} (+ {kl.name})", flush=True)
+        if not args.quiet:
+            print(walkrec.format_summary(walkrec.summarize(rec)), flush=True)
+    return status
+
+
 HOST_COMMANDS = {"status": cmd_status, "posture": cmd_posture, "monitor": cmd_monitor, "log": cmd_log,
-                 "flash": cmd_flash, "reboot": cmd_reboot, "update": cmd_update}
+                 "flash": cmd_flash, "reboot": cmd_reboot, "update": cmd_update, "walks": cmd_walks}
 
 
 def parse_log_argv(argv: list[str], host: str | None, key: str | None = None) -> argparse.Namespace:

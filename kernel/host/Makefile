@@ -132,10 +132,14 @@ $(B)/bench_planner_double: tests/bench_planner.cpp $(BENCH_DBL_OBJS)
 # The host channel's Noise handshake and records (as the kernel's boot bench).
 $(B)/bench_noise: tests/bench_noise.cpp $(CORE_OBJS)
 	$(CXX) $(CXXFLAGS) $< $(CORE_OBJS) -o $@
-bench: $(B)/bench_planner $(B)/bench_planner_double $(B)/bench_noise
+# The walk recorder's per-tick cost and a host pass during a walk download.
+$(B)/bench_walks: tests/bench_walks.cpp $(CORE_OBJS)
+	$(CXX) $(CXXFLAGS) $< $(CORE_OBJS) -o $@
+bench: $(B)/bench_planner $(B)/bench_planner_double $(B)/bench_noise $(B)/bench_walks
 	$(B)/bench_planner
 	$(B)/bench_planner_double
 	$(B)/bench_noise
+	$(B)/bench_walks
 
 # ---- freestanding check -----------------------------------------------------
 # Only the compiler's own headers (stdint.h, stddef.h, stdarg.h), no libc's;

@@ -12,10 +12,11 @@
     kilo flash --host IP [--persist] | --sd MOUNT   [--image body.bin [--manifest body.json]]   (a C++ mind, P4)
     kilo reboot --host IP[:PORT]   restart a C++ mind (the Pi: back to its SD card's boot, e.g. the netboot loader)
     kilo update --host IP[:PORT] [--image kernel7.img] [--force] [--wait S]   a new kernel onto the mind's SD card
+    kilo walks --host IP[:PORT] [--fetch [N|all] [--out DIR]]   the walks the mind recorded; download them
     kilo vbody [--fall-after S] [--no-keys]
     kilo run [--port P] [--socket PATH] [--log] [--kilolog [FILE]] [--behaviour] [--remote] [--balance [KP]]
     kilo daemon [status|stop]
-    kilo log summary|replay|plot FILE ...
+    kilo log summary|replay|plot|walk FILE ...   (walk: a .kwalk from kilo walks --fetch)
     kilo --kilolog [FILE] COMMAND ...    (also: kilo monitor --percepts; kilo.cli_tools)
     kilo --override posture|balance|trick ...   (through a daemon whose behaviour runner is active)
     kilo --host IP[:PORT] status|posture|monitor|flash|reboot|update ...; kilo log --host IP   (a C++ mind: kilo.cli_host)
@@ -85,7 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--direct", action="store_true", help="never use the daemon: open the port directly")
     p.add_argument("--host", metavar="IP[:PORT]",
                    help=f"talk to a C++ mind over its host channel (port {P.HOST_PORT}; kilo.cli_host): "
-                        "status, posture, monitor, log, flash, reboot, update; needs this laptop's key "
+                        "status, posture, monitor, log, flash, reboot, update, walks; needs this laptop's key "
                         "(kilo key init)")
     p.add_argument("--key", metavar="PATH", default=None,
                    help="this laptop's private key for --host (default $KILO_HOST_KEY, else "
@@ -184,6 +185,23 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--wait", type=float, default=30.0, metavar="S",
                    help="seconds to wait for the mind to come back after its reboot and show its build "
                         "(default 30; 0: do not wait)")
+
+    s = sub.add_parser(
+        "walks", help="the walks a C++ mind recorded, over --host: list them, or download them (--fetch) for "
+                      "kilo log walk",
+        usage="kilo walks --host IP[:PORT] [--json] | --fetch [N|all] [--out DIR] [--quiet]",
+        description="The mind records every walk in RAM (from 2 s before its setup to 2 s after its end): every "
+                    "body link frame both ways, each planned tick, the planner's counters and the walk's "
+                    "parameters. Without --fetch: the list. --fetch downloads one walk (its id) or all, each as "
+                    "DIR/walk-<time>-<id>.kwalk (the raw recording: kilo log walk FILE) and .kilolog (its frames: "
+                    "kilo log summary|plot FILE), and prints its summary. The recordings live in the mind's RAM: "
+                    "switching Kilo off loses them.")
+    s.add_argument("--fetch", nargs="?", const="all", default=None, metavar="N|all",
+                   help="download walk N, or every walk that has ended (the default with no value)")
+    s.add_argument("--out", default="~/kilo-logs/walks", metavar="DIR",
+                   help="where --fetch writes (default ~/kilo-logs/walks)")
+    s.add_argument("--json", action="store_true", help="the list as JSON")
+    s.add_argument("--quiet", "-q", action="store_true", help="--fetch: no summary per walk")
 
     s = sub.add_parser("eeprom", help="read the body's EEPROM (EEPROM_READ)")
     es = s.add_subparsers(dest="eeprom_cmd", required=True, metavar="ACTION")
@@ -800,6 +818,13 @@ def cmd_reboot(args: argparse.Namespace) -> int:
     return EXIT_ERR
 
 
+def cmd_walks(args: argparse.Namespace) -> int:
+    """`kilo walks` without --host: only a C++ mind records walks (kilo.cli_host)."""
+    print("kilo walks: needs --host IP[:PORT] (the walks a C++ mind recorded: the Circle kernel or kilo-mind-host); "
+          "a downloaded walk: kilo log walk FILE.kwalk", file=sys.stderr)
+    return EXIT_ERR
+
+
 def cmd_key(args: argparse.Namespace) -> int:
     """`kilo key init|show`: this laptop's key for the host channel (kilo.hostkey)."""
     from kilo import hostkey
@@ -996,7 +1021,8 @@ LINK_COMMANDS = {"status": cmd_status, "monitor": cmd_monitor, "posture": cmd_po
                  "cal": cmd_cal, "param": cmd_param, "pca": cmd_pca, "eeprom": cmd_eeprom}
 # Commands that manage the port (or the daemon) themselves: cmd(args).
 PORT_COMMANDS = {"flash": cmd_flash, "vbody": cmd_vbody, "run": cmd_run, "daemon": cmd_daemon,
-                 "log": cmd_log, "reboot": cmd_reboot, "update": cmd_update, "key": cmd_key}
+                 "log": cmd_log, "reboot": cmd_reboot, "update": cmd_update, "walks": cmd_walks,
+                 "key": cmd_key}
 # Link-command modes that must send nothing, so they cannot share the daemon's port.
 SILENT_MODES = {"monitor": ("passive", "--passive"), "posture": ("then_watch", "--then-watch"),
                 "trick": ("then_watch", "--then-watch")}
