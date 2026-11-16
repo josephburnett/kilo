@@ -24,8 +24,14 @@ from clients are refused (``BEHAVIOUR_ACTIVE``) unless the request carries
 ``override`` (``kilo --override ...``): the runner is then paused (its
 behaviours halted, nothing ticked) until that client's hold ends, and
 resumes re-asserting its own goals. ``trick_stop``, ``stop_walk`` and
-``release`` are always allowed. The IR remote is ignored while the runner is
-active.
+``release`` are always allowed.
+
+The IR remote (kilo.daemon.remote_ir). Its A5 starts the runner at run time
+(``_start_behaviour_from_pool``; ``--behaviour`` keeps its meaning: off
+unless given), and its B6, A7 and C7 stop it (``_stop_behaviour_from_pool``:
+the stop event, then the thread joined, so the runner's ``root.halt()`` has
+cancelled what it ran); every other key is ignored while it runs. Each start
+is a fresh ``run_behaviour`` call with its own stop event.
 """
 
 from __future__ import annotations
@@ -61,6 +67,8 @@ class BehaviourMixin:
             log.warning("behaviour runner not started: %s", e)
             return
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        if self.behaviour_stop.is_set():  # a run before this one was stopped (the remote's B6 / A7 / C7)
+            self.behaviour_stop = threading.Event()
         args = (self.client, self.client.state, self.behaviour_stop, self.log_dir)
         kwargs: dict[str, Any] = {}
         try:
@@ -73,6 +81,9 @@ class BehaviourMixin:
             pass
         self.behaviour_state = "running"
         self._behaviour_started_at = time.monotonic()
+        # a stamp from a run before this one is not a tick of this one
+        self._behaviour_stamp0 = self.link.alive_stamps.get("mind") if self.link is not None else None
+        self._runner_stamping = True
         if inspect.iscoroutinefunction(run_behaviour):
             async def runner() -> None:
                 try:
@@ -111,6 +122,23 @@ class BehaviourMixin:
             await self.loop.run_in_executor(None, self._behaviour_thread.join, 5.0)
             if self._behaviour_thread.is_alive():
                 log.warning("behaviour runner did not stop within 5 s")
+        self._behaviour_task = self._behaviour_thread = None
+        if self.behaviour_state == "running":
+            self.behaviour_state = "stopped"
+
+    def _start_behaviour_from_pool(self) -> str | None:
+        """Pool thread (the remote's A5): start the runner on the loop (it
+        logs its seed and log file itself). Raises when it did not start."""
+        async def start() -> None:
+            self._start_behaviour()
+        asyncio.run_coroutine_threadsafe(start(), self.loop).result(5.0)
+        if not self.behaviour_active:
+            raise LinkError(f"behaviour runner not started: {self.behaviour_state}")
+        return None
+
+    def _stop_behaviour_from_pool(self) -> None:
+        """Pool thread (the remote's B6 / A7 / C7): stop the runner and wait for it."""
+        asyncio.run_coroutine_threadsafe(self._stop_behaviour(), self.loop).result(10.0)
 
     def _stamp_liveness(self) -> None:
         """Stamp the link's liveness for the daemon loop; with a behaviour
@@ -119,6 +147,8 @@ class BehaviourMixin:
         link = self.link
         if self.behaviour_active and self._behaviour_started_at is not None:
             last = link.alive_stamps.get("mind")
+            if last is not None and last == self._behaviour_stamp0:
+                last = None
             if last is None:
                 ok = time.monotonic() - self._behaviour_started_at < RUNNER_START_GRACE_S
                 idle = time.monotonic() - self._behaviour_started_at
