@@ -358,10 +358,11 @@ every leg home first (strides to 0, a step each, as a stop), then starts
 the new pattern from its first lift. For the walk and the crawl, before every lift
 the planner solves for the smallest move of the body (a fore-aft shift of
 every foot, a roll and a little pitch by making legs longer or shorter)
-that puts the centre of mass at least 10 mm inside the triangle of the
+that puts the centre of mass at least 14 mm inside the triangle of the
 three feet that stay down, at lift-off and at touchdown, and moves the body
-there during the shift: done a servo lag before the lift, held until the
-foot is down, dropping a side no faster than gravity can follow. That solve
+there during the shift: done a servo lag before the lift (since 2026-11-15:
+the lift starts 60 ms before it is done, §11), held until the foot is down,
+dropping a side no faster than gravity can follow. That solve
 is spread over the swing before the slot, a few pieces a tick (on this
 desktop Planner.next() costs at most ~0.3 ms a tick, where one tick at each
 walk slot's start cost 2.7 ms, 43 ms on the Pi 2); after a change
@@ -418,4 +419,64 @@ catch holds it; the 14 mm margin now the default keeps every direction within 3�
 caught up with no underrun; a slower servo (200 ms) and a tilted IMU show
 in the error estimates (lag +40..60 ms, the offset). The real body is the
 next test.
+
+## 11. Faster gaits (2026-11-15)
+
+The owner, after the first planned walks on the floor: "Walk and crawl are
+too slow. Placing the feet super delicately." The gaits were retuned in the
+virtual body (tests/walksim.py) and the defaults raised about 2.5 times:
+
+| pattern | before: stride, swing, cycle, default (top) | now: stride, swing, cycle, default (top) |
+|---|---|---|
+| trot | 25 mm, 150 ms, 600 ms, 55.6 (92.6) mm/s | 35 mm, 150 ms, 393 ms, 144 (152) mm/s |
+| walk | 30 mm, 500 ms, 3200 ms, 11.1 (12.0) mm/s | 40 mm, 300 ms, 2550 ms, 17.8 (21.5) mm/s |
+| crawl | 25 mm, 297 ms, 2800 ms, 10.0 (13.2) mm/s | 50 mm, 300 ms, 2550 ms, 22.2 (26.9) mm/s |
+
+The remote's levels are now 0.4, 0.7, 1, 1.1, 1.2 × the default, so level 1
+is about the old default.
+
+**What limits each gait.**
+
+- *The servos.* The body slews a joint at most 10° per 20 ms tick (500°/s,
+  `SLEW_MAX_A16`, about the servos' unloaded speed, an estimate). The
+  fastest joint of a swing is set by the foot's travel over the swing
+  time; the old trot asked up to 355°/s and kept up on the floor
+  (2026-11-14, 45 s). Every new swing stays under about 425°/s (the swinging leg carries
+  no load); the feet on the ground ask at most 150°/s (trot) and 35°/s
+  (walk, crawl).
+- *The trot* is limited by the servos alone: a longer stride or a shorter
+  swing passes 425°/s, and a longer swing leaves the body on two feet
+  longer, where it tips. Its top uses two ticks on four feet (was three).
+- *The walk and the crawl* move the body over the three feet that stay
+  down before every lift. Twice a cycle that move rolls the body from one
+  side to the other (about 17°), and a side drops no faster than gravity
+  lets it, so the move takes about 300 ms; four moves and four swings make
+  a cycle of at least 2.2 s. The speed is then the stride over that time,
+  and the stride is bounded by the legs' reach (the walk's body is 10/256
+  lower than before so that its lean does not reach past the IK) and by the
+  servos (the longer the stride, the faster the swing). The lift now starts
+  60 ms before the move ends, in its slow tail (under 1° of roll left; the
+  plan's margin counts it and stays at least 11.8 mm of the 14 asked); the
+  lean and the lift go through the same servo lag, so the old wait of a
+  servo lag after the move bought nothing the simulation could see.
+
+**What the virtual body shows** (every level, forward, back and both
+turns, servo lag 100 / 150 / 200 ms with the model at 150, the centre of
+mass 10 mm ahead or behind and 5 mm left or right with 50 g more battery,
+the IMU 1.5° and 2° off, a 60 ms stall of the stream): no fall, no
+underrun, no late FEET. The walk and the crawl stay within 3.5° of the
+plan with the exact model and within 7.2° with the model errors (their
+lean is 12-14° on purpose), with no catch and no gate hold. The trot at
+its default and top stays within 5.1°. At 75 to 140 mm/s (four-foot
+phases of 4 to 8 ticks) the trot rocks with the body's balance loop, worst
+walking backward (up to 10° off the plan, gate holds); with the balance off
+the same steps stay within 3°. The old default trot (56 mm/s) sat at the
+edge of that band too. The remote's level 2 (101 mm/s) is in it.
+
+**What it cannot show.** It is a rigid body on point feet: no foot slip,
+no servo torque sag with a low battery, no backlash, no servo that slows
+under load, and on three or four feet the body follows the legs exactly
+(a gravity-paced move is not checked against inertia). The servos' speed
+under load and their lag were never measured; a slower servo would show as
+error at the lift (the gate holds) and as catches.
 

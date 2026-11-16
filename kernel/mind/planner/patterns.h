@@ -7,7 +7,9 @@
 // The swing time is fixed per pattern; speed comes from the stride and the
 // stance time (stance = stride / speed). Slower than the longest stance the
 // stride shrinks (to STRIDE_MIN_MM); faster than the default stride at the
-// shortest shift, the speed is capped.
+// shortest shift, the speed is capped. The shortest shift: the trot's two
+// ticks on four feet; the walk's and the crawl's kLeanMoveMs (the body's
+// move over the next three feet) plus kLeanLeadMs.
 #ifndef KILO_MIND_PLANNER_PATTERNS_H
 #define KILO_MIND_PLANNER_PATTERNS_H
 #include <stdint.h>
@@ -18,8 +20,9 @@ namespace planner {
 
 constexpr real kTickMs = 20;
 constexpr real kStrideMinMm = 8;
-constexpr real kDefaultTurnMm = 20;  // per-side stride of a turn in place at the default stride
-constexpr real kLeanMoveMs = 100;    // the shortest body move between two swings (walk, crawl)
+constexpr real kTurnFrac = (real)0.8;  // a turn in place: each side's stride, this fraction of the stride
+constexpr real kLeanMoveMs = 300;      // the body's typical move between two swings (walk, crawl)
+constexpr real kLeanLeadMs = -60;      // the lift starts this long after the move's end (negative: in its tail)
 
 struct Pattern {
   const char* name;
@@ -62,18 +65,18 @@ struct Timing {
   real speed_mm_s;  // what this timing walks at with the stride
 };
 
-real shift_min_ms(const Pattern& p, real lag_ms);
+real shift_min_ms(const Pattern& p);
 // The pattern table's speed: its stride over its default stance.
 real default_speed(const Pattern& p);
 // (slowest, fastest) speed that timing() gives.
-void speed_range(const Pattern& p, real lag_ms, real* lo, real* hi);
+void speed_range(const Pattern& p, real* lo, real* hi);
 // Stride, shift and period for walking at |speed_mm_s|, clamped to speed_range().
-Timing timing(const Pattern& p, real speed_mm_s, real lag_ms = 150);
-Timing default_timing(const Pattern& p, real lag_ms = 150);
+Timing timing(const Pattern& p, real speed_mm_s);
+Timing default_timing(const Pattern& p);
 // (left, right) stride, + = the feet push the body forward: forward and back
-// both sides, left and right turn in place (kDefaultTurnMm scaled with the
-// stride), march in place.
-void side_strides(Direction d, real stride, const Pattern& p, real out[2]);
+// both sides, left and right turn in place (kTurnFrac of the stride), march
+// in place.
+void side_strides(Direction d, real stride, real out[2]);
 
 }  // namespace planner
 }  // namespace kilo

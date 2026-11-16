@@ -95,7 +95,7 @@ class Action:
     label: str = ""  # what the key does, for the log
 
 
-SPEED_FACTORS = (0.5, 0.7, 1.0, 1.4, 2.0)  # x the gait's default speed, levels 1..5 (and -1..-5 backward)
+SPEED_FACTORS = (0.4, 0.7, 1.0, 1.1, 1.2)  # x the gait's default speed, levels 1..5 (and -1..-5 backward)
 DEFAULT_LEVEL = 3  # +3: 1x, the gait's spec defaults
 _IGNORE = Action("ignore")  # a held-key repeat or another remote's key
 _NONE = Action("none", label="none")  # rows 1-3: no action
@@ -163,7 +163,7 @@ class RemoteControl:
     - B7 / B5: one level up / down, through ... -2 -1 +1 +2 ..., stopping at
       +5 and -5; during a turn the magnitude only (1..5). Not walking:
       ignored. The line shows the real mm/s (kilo.planner.patterns.timing
-      clamps: the crawl's and the walk's top two levels are the same speed).
+      clamps: the trot's top two levels are the same speed).
     - A posture key (B6 stand, A7 rest, C5 calib) first stops the walk the
       planned way (each leg steps home, STANCE) and waits for it, then stops
       a playing trick, then takes the posture.

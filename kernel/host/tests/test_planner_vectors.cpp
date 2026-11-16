@@ -109,7 +109,7 @@ int main(int argc, char** argv) {
     std::string where = scen + " line " + std::to_string(line_no);
     if (k == "sr") {
       real lo, hi;
-      speed_range(pat(f[1]), model.servo_lag_ms, &lo, &hi);
+      speed_range(pat(f[1]), &lo, &hi);
       timing_d.see(lo, num(f[2]), where);
       timing_d.see(hi, num(f[3]), where);
     } else if (k == "tm") {

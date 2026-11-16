@@ -263,7 +263,8 @@ Planner::Planner(const BodyModel& model, const PlannerConfig& cfg)
 void Planner::start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tick, real start_height) {
   tick_ = tick;
   lag_ = model_.lag_ticks(kTickMs);
-  lead_ = ceil_i(lag_ - (real)1e-9);
+  lead_ = round_i(kLeanLeadMs / kTickMs);
+  settle_ = ceil_i(lag_ - (real)1e-9);
   pattern_ = &p;
   direction_ = d;
   speed_mm_s_ = speed_mm_s < 0 ? default_speed(p) : speed_mm_s;
@@ -276,7 +277,6 @@ void Planner::start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tic
   h_ = start_height < 0 ? model_.stance_height(205) : start_height;
   s_cur_[0] = s_cur_[1] = s_tgt_[0] = s_tgt_[1] = 0;
   stance_ticks_ = stance_tgt_ = 1;
-  shift_ticks_ = 1;
   lean_ = lean_from_ = lean_to_ = Lean();
   tr_ticks_ = 1;
   k_ = -1;
@@ -302,6 +302,15 @@ void Planner::start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tic
   }
 }
 
+// plan.py _shift_for: a slot's four-foot ticks for the stance time now, so
+// the shift follows the stance time as it slews after a speed change.
+int Planner::shift_for(real stance) const {
+  real n = pattern_->n_groups;
+  real w = pattern_->swing_ms;
+  int st = round_i(((stance * kTickMs + w) / n - w) / kTickMs);
+  return st > 0 ? st : 0;
+}
+
 int Planner::swing_ticks() const {
   int w = round_i(pattern_->swing_ms / kTickMs);
   return w > 2 ? w : 2;
@@ -312,12 +321,10 @@ void Planner::apply_timing() {
   real shift = cfg_.fixed_shift ? cfg_.shift_ms : tm.shift_ms;
   real n = pattern_->n_groups;
   stance_tgt_ = (n * (shift + pattern_->swing_ms) - pattern_->swing_ms) / kTickMs;
-  int st = round_i(shift / kTickMs);
-  shift_ticks_ = st > 0 ? st : 0;
   if (stopping_ || pending_ != nullptr) {
     s_tgt_[0] = s_tgt_[1] = 0;
   } else {
-    side_strides(direction_, tm.stride_mm, *pattern_, s_tgt_);
+    side_strides(direction_, tm.stride_mm, s_tgt_);
   }
   has_next_ = false;  // the next slot's lean was solved for the old timing
 }
@@ -328,7 +335,7 @@ void Planner::set_speed(real speed_mm_s) {
   if (has_job_) {  // this slot is still waiting for its lean: solve it for the new shift
     new_job(&job_, k_, xg_, s_cur_, stance_ticks_, lean_from_, h_);
   } else if (t_ < S_) {  // still in the shift: a new length, never shorter than its lean needs
-    int a = t_ + 1, b = tr_ticks_ + (leaning() ? lead_ : 0), c = shift_ticks_;
+    int a = t_ + 1, b = tr_ticks_ + (leaning() ? lead_ : 0), c = shift_for(stance_ticks_);
     int m = a > b ? a : b;
     S_ = m > c ? m : c;
   }
@@ -394,13 +401,13 @@ void Planner::start_slot() {
   if (finishing_) {
     lean_to_ = Lean();
     int mt = move_ticks(lean_from_, lean_to_, h_);
-    tr_ticks_ = lead_ + 5 > mt ? lead_ + 5 : mt;
-    S_ = tr_ticks_ + lead_;
+    tr_ticks_ = settle_ + 5 > mt ? settle_ + 5 : mt;
+    S_ = tr_ticks_ + settle_;
     return;
   }
-  S_ = shift_ticks_;
+  S_ = shift_for(stance_ticks_);
   if (leaning() && !skip_) {
-    if (had_next && next_job_.matches(pattern_, k_, xg_, s_cur_, stance_ticks_, shift_ticks_, lean_from_)) {
+    if (had_next && next_job_.matches(pattern_, k_, xg_, s_cur_, stance_ticks_, S_, lean_from_)) {
       job_ = next_job_;
     } else {  // something changed since it was solved (a command, a catch): solved now, the slot waits
       new_job(&job_, k_, xg_, s_cur_, stance_ticks_, lean_from_, h_);
@@ -412,9 +419,9 @@ void Planner::start_slot() {
     int tr = 0;
     if (lean_to_ != lean_from_) {  // out of a leaning pattern: level first, as fast as gravity lets
       tr = move_ticks(lean_from_, lean_to_, h_);
-      if (tr + lead_ > S_) S_ = tr + lead_;
+      if (tr + settle_ > S_) S_ = tr + settle_;
     }
-    int a = S_ - (tr ? lead_ : 0);
+    int a = S_ - (tr ? settle_ : 0);
     int m = tr > 1 ? tr : 1;
     tr_ticks_ = m > a ? m : a;
   }
@@ -456,7 +463,7 @@ void Planner::new_job(LeanJob* job, int k, const real xg[kLegs], const real s[2]
   job->s[0] = s[0];
   job->s[1] = s[1];
   job->stance = stance;
-  job->shift = shift_ticks_;
+  job->shift = shift_for(stance);
   job->lean_from = lean_from;
   job->has_result = false;
   for (int leg = 0; leg < kLegs; leg++) {

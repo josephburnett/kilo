@@ -571,7 +571,7 @@ each key does):
 | A7 | sleep: the planned stop, then REST |
 | C5 | the planned stop, then the calibration posture (CALIB) |
 | A4, B4, C4 | trot, crawl, walk: walk forward in that gait from standing; change the gait while walking; the gait in use: straight forward again |
-| B7, B5 | faster, slower by one speed level (0.5, 0.7, 1, 1.4, 2 × the gait's speed); past the slowest B5 goes backward; only while walking |
+| B7, B5 | faster, slower by one speed level (0.4, 0.7, 1, 1.1, 1.2 × the gait's speed); past the slowest B5 goes backward; only while walking |
 | A6, C6 | turn left, right in place |
 | C7 | freeze: the walk aborted at once (the body settles in STANCE, powered), a trick and the behaviour runner stopped; then only B6 and A7 act |
 | A5 | start the behaviour runner |

@@ -9,18 +9,22 @@ the swing. So
     period = groups x (shift + swing),   stance = period - swing.
 
 The swing time is fixed per pattern (short enough for the body's tip time
-constant on two feet, long enough for the 10 deg/tick servo slew at the
-pattern's stride and step height). Speed comes from the stride and the
-stance time: stance = stride / speed; a slower speed lengthens the shift,
-never the swing. Slower than the longest stance allows, the stride shrinks
-(down to STRIDE_MIN_MM) instead; faster than the default stride at the
-shortest shift allows, the speed is capped.
+constant on two feet, long enough for the servos: every swing's fastest
+joint stays under about 425 deg/s, 15 % above what the floor runs of
+2026-11 asked for, under the body's 500 deg/s safety slew). Speed comes
+from the stride and the stance time: stance = stride / speed; a slower
+speed lengthens the shift, never the swing. Slower than the longest stance
+allows, the stride shrinks (down to STRIDE_MIN_MM) instead; faster than
+the default stride at the shortest shift allows, the speed is capped.
 
-The shortest shift: the trot's three ticks of four-foot phase (60 ms; the
-body's balance needs three feet down to correct at all); the one-leg-at-a-
-time patterns (walk, crawl) must move the body over the next three feet
-before each lift, and finish that move a servo lag ahead of the lift
-(kilo.planner.plan), so their shift is at least the lag plus a 100 ms move.
+The shortest shift: the trot's two ticks of four-foot phase (40 ms); the
+one-leg-at-a-time patterns (walk, crawl) must move the body over the next
+three feet before each lift (kilo.planner.plan), a move that gravity paces
+(a side drops no faster than it can fall), so their shift is that move's
+typical length, LEAN_MOVE_MS, plus LEAN_LEAD_MS (negative: the lift starts
+60 ms before the move's end, in its cosine tail). A move that needs longer
+makes its slot longer (kilo.planner.plan), and the feet then travel a
+little more than the stride.
 """
 
 from __future__ import annotations
@@ -31,8 +35,9 @@ from kilo.planner.model import LB, LF, RB, RF
 
 TICK_MS = 20.0
 STRIDE_MIN_MM = 8.0
-DEFAULT_TURN_MM = 20.0   # the per-side stride of a turn in place at the pattern's default stride
-LEAN_MOVE_MS = 100.0     # the shortest move of the body between two swings (walk, crawl)
+TURN_FRAC = 0.8          # a turn in place: each side's stride, this fraction of the forward stride
+LEAN_MOVE_MS = 300.0     # the body's typical move between two swings (walk, crawl; the roll from one side to the other)
+LEAN_LEAD_MS = -60.0     # the lift starts this long after the move's end; negative: 3 ticks before it, in its tail
 
 
 @dataclass(frozen=True)
@@ -49,20 +54,24 @@ class Pattern:
     lean: bool               # one leg at a time: the body moves over the three feet that stay down
 
 
-# Walk and crawl lift LB, LF, RB, RF (the lateral sequence; the phase
-# offsets of the old tables, 128 0 64 192 /256 for LF RF RB LB); the trot
-# the diagonal pairs LF+RB, RF+LB. Swing times, strides, step heights and
-# body heights are the old tables' (walk 500 ms, crawl 297 ms, trot
-# 150 ms). The walk and the crawl now have a four-foot shift before every
-# swing (the old duty 192/256 at four legs left none), so their periods are
-# longer than the old 2000 ms.
+# Walk and crawl lift LB, LF, RB, RF (the lateral sequence); the trot the
+# diagonal pairs LF+RB, RF+LB. Since 2026-11-15 (the owner: "too slow,
+# placing the feet super delicately") every pattern is about 2.3 times as
+# fast at its default as before and its top speed 2 to 2.7 times the old
+# default: longer strides, shorter swings (walk 500 -> 300 ms, crawl 297 ->
+# 300 ms with a lower step), the walk's body 10/256 lower (the reach: its
+# longer stride with the lean's roll otherwise asks the legs for more than
+# the IK gives), the trot two ticks on four feet at its top speed instead of
+# three. The tops: trot 152, crawl 26.9, walk 21.5 mm/s (the walk and the
+# crawl: the lean's move paced by gravity, the legs' reach and the servos;
+# docs/walking-and-balance.md §10).
 PATTERNS: dict[str, Pattern] = {
-    "walk": Pattern("walk", ((LB,), (LF,), (RB,), (RF,)), swing_ms=500.0, stride_mm=30.0, step_h_mm=15.0,
-                    body_h_256=205, period_ms=3200.0, shift_min_ms=0.0, stance_max_ms=4000.0, lean=True),
-    "trot": Pattern("trot", ((LF, RB), (RF, LB)), swing_ms=150.0, stride_mm=25.0, step_h_mm=8.0,
-                    body_h_256=205, period_ms=600.0, shift_min_ms=60.0, stance_max_ms=1327.0, lean=False),
-    "crawl": Pattern("crawl", ((LB,), (LF,), (RB,), (RF,)), swing_ms=297.0, stride_mm=25.0, step_h_mm=18.0,
-                     body_h_256=179, period_ms=2800.0, shift_min_ms=0.0, stance_max_ms=4000.0, lean=True),
+    "walk": Pattern("walk", ((LB,), (LF,), (RB,), (RF,)), swing_ms=300.0, stride_mm=40.0, step_h_mm=15.0,
+                    body_h_256=195, period_ms=2550.0, shift_min_ms=0.0, stance_max_ms=4000.0, lean=True),
+    "trot": Pattern("trot", ((LF, RB), (RF, LB)), swing_ms=150.0, stride_mm=35.0, step_h_mm=8.0,
+                    body_h_256=205, period_ms=393.0, shift_min_ms=40.0, stance_max_ms=1327.0, lean=False),
+    "crawl": Pattern("crawl", ((LB,), (LF,), (RB,), (RF,)), swing_ms=300.0, stride_mm=50.0, step_h_mm=15.0,
+                     body_h_256=179, period_ms=2550.0, shift_min_ms=0.0, stance_max_ms=4000.0, lean=True),
 }
 PATTERN_NAMES = tuple(PATTERNS)
 DEFAULT_PATTERN = "trot"
@@ -93,15 +102,15 @@ class Timing:
     speed_mm_s: float  # what this timing walks at with the stride
 
 
-def shift_min_ms(p: Pattern, lag_ms: float) -> float:
+def shift_min_ms(p: Pattern) -> float:
     if p.lean:
-        return max(p.shift_min_ms, lag_ms + LEAN_MOVE_MS)
+        return max(p.shift_min_ms, LEAN_MOVE_MS + LEAN_LEAD_MS)
     return p.shift_min_ms
 
 
-def _stance_limits(p: Pattern, lag_ms: float) -> tuple[float, float]:
+def _stance_limits(p: Pattern) -> tuple[float, float]:
     n = len(p.groups)
-    lo = n * (shift_min_ms(p, lag_ms) + p.swing_ms) - p.swing_ms
+    lo = n * (shift_min_ms(p) + p.swing_ms) - p.swing_ms
     return lo, max(lo, p.stance_max_ms)
 
 
@@ -111,19 +120,19 @@ def default_speed(p: Pattern | str) -> float:
     return p.stride_mm / (p.period_ms - p.swing_ms) * 1000.0
 
 
-def speed_range(p: Pattern | str, lag_ms: float = 150.0) -> tuple[float, float]:
+def speed_range(p: Pattern | str) -> tuple[float, float]:
     """(slowest, fastest) speed in mm/s that timing() gives."""
     p = pattern(p) if isinstance(p, str) else p
-    lo, hi = _stance_limits(p, lag_ms)
+    lo, hi = _stance_limits(p)
     return STRIDE_MIN_MM / hi * 1000.0, p.stride_mm / lo * 1000.0
 
 
-def timing(p: Pattern | str, speed_mm_s: float | None = None, lag_ms: float = 150.0) -> Timing:
+def timing(p: Pattern | str, speed_mm_s: float | None = None) -> Timing:
     """Stride, shift and period for walking at ``speed_mm_s`` (default: the
     pattern's default speed), clamped to speed_range()."""
     p = pattern(p) if isinstance(p, str) else p
     n = len(p.groups)
-    st_lo, st_hi = _stance_limits(p, lag_ms)
+    st_lo, st_hi = _stance_limits(p)
     v = default_speed(p) if speed_mm_s is None else abs(float(speed_mm_s))
     stride = p.stride_mm
     stance = stride / v * 1000.0 if v > 0 else float("inf")
@@ -135,12 +144,12 @@ def timing(p: Pattern | str, speed_mm_s: float | None = None, lag_ms: float = 15
     return Timing(stride, period / n - p.swing_ms, stance, period, stride / stance * 1000.0)
 
 
-def side_strides(direction_name: str, stride: float, p: Pattern) -> tuple[float, float]:
+def side_strides(direction_name: str, stride: float) -> tuple[float, float]:
     """(left, right) stride in mm (+ = the feet push the body forward) for a direction.
 
     forward / back: the stride on both sides; left / right: turn in place,
-    one side backward and the other forward by DEFAULT_TURN_MM scaled with
-    the stride (a slower turn takes shorter steps); march: in place."""
+    one side backward and the other forward by TURN_FRAC of the stride;
+    march: in place."""
     d = direction(direction_name)
     if d == "forward":
         return stride, stride
@@ -148,5 +157,5 @@ def side_strides(direction_name: str, stride: float, p: Pattern) -> tuple[float,
         return -stride, -stride
     if d == "march":
         return 0.0, 0.0
-    t = DEFAULT_TURN_MM * stride / p.stride_mm
+    t = TURN_FRAC * stride
     return (-t, t) if d == "left" else (t, -t)

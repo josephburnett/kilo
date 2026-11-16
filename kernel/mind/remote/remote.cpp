@@ -8,7 +8,7 @@
 namespace kilo {
 namespace remote {
 
-const double kSpeedFactors[kSpeedSteps] = {0.5, 0.7, 1.0, 1.4, 2.0};
+const double kSpeedFactors[kSpeedSteps] = {0.4, 0.7, 1.0, 1.1, 1.2};
 
 namespace {
 constexpr uint64_t kTrickStopWaitUs = 2000000;  // TRICK_STOP's ACK and the TRICK_DONE it brings

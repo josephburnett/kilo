@@ -96,8 +96,10 @@ daemon log.
 
 ## 5. Tuning knobs (mind/kilo/planner/plan.py PlannerConfig, model.py)
 
-- Leaves the plan toward the lifting leg: raise `margin_mm` (14) or
-  `servo_lag_ms` (150) if the lean arrives late.
+- Leaves the plan toward the lifting leg: raise `margin_mm` (14), or, if
+  the lean arrives late, make `LEAN_LEAD_MS` (patterns.py, -60: the lift
+  60 ms before the lean's move ends) 0 or positive; the remote's lower
+  levels are the slower gaits.
 - Lift gate holds too often (the walk stutters): raise `gate_deg` (5).
 - Catches fire in a normal walk: raise `catch_deg` (7).
 - The walk's lean looks excessive: lower `margin_mm` once the masses are

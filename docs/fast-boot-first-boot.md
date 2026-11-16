@@ -343,8 +343,8 @@ Kilo to finish moving before the next:
 2. **A7** (column A, top row). Kilo lies down. The log shows
    `remote A7 (0xA2, sleep): posture rest`.
 3. Get ready to catch Kilo. Press **A4** (column A, row 4): Kilo trots
-   forward. The log shows
-   `remote A4 (0x68, trot): walk forward (trot) 55.6 mm/s`.
+   forward, fast (about 30 cm in two seconds). The log shows
+   `remote A4 (0x68, trot): walk forward (trot) 144.0 mm/s`.
 4. After about two seconds, press **B6**. Kilo stops and stands. The log
    shows `remote B6 (0x02, stand): posture stand`.
 5. Press **A7** to let him lie down again.
