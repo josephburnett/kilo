@@ -387,9 +387,12 @@ could stall while the loop runs.
 **Who drives.** A laptop client holding control (`CONTROL take=1`) pauses
 the behaviour runner and silences the remote: Python refuses client goals
 while the runner is active unless `--override` pauses it, and a controller
-is that override here. With the runner active the remote is ignored, as
-in `remote_ir.py`. `MindConfig` defaults are the daemon's: remote and
-behaviour off (the Pi's `KILO_RUN_ARGS` turn on `--remote --balance 0.99`).
+is that override here. The remote's A5 starts the runner at run time;
+while it runs, B6, A7 and C7 stop it (`Runner::stop()` halts the running
+behaviour, which cancels its trick) and its other keys are ignored, as in
+`remote_ir.py`. `MindConfig` defaults are the daemon's: remote and
+behaviour off (the Pi's `KILO_RUN_ARGS` turn on `--remote --balance 0.99`),
+so without `--behaviour` the runner is off until A5.
 
 `kilo-mind-host` takes `--remote`, `--behaviour`, `--seed N` and
 `--balance KP` besides its P1/P2 flags.
@@ -480,23 +483,37 @@ returns); here a trick that ends DONE succeeds.
 
 ## Remote
 
-`remote/` ports `kilo/ir.py`: the key table and map (keys named by grid,
-`remote/keys.h`) and `RemoteControl`, driving the walker, the postures and
-the trick player as `kilo run --remote` does. Direction keys walk with the
-selected pattern and speed; pattern and speed keys change a walk in
-progress; a posture or trick key makes the planned stop and waits for it,
-stops a playing trick, and for a trick from LIMP takes STAND and waits 1 s;
-C7 toggles the balance. The daemon's blocking waits are phases of `poll()`
-and keys that come meanwhile queue (4), as its lock queues them. Repeats and
-other remotes' keys are ignored; there is no shutdown key (Python has none).
+`remote/` ports `kilo/ir.py`: the key table and map (keys named by grid:
+columns A-C left to right, rows 1-7 from the bottom; `remote/keys.h`) and
+`RemoteControl`, driving the walker, the postures, the trick player and the
+behaviour runner as `kilo run --remote` does (`remote/remote.h` says what
+each key does):
 
-What differs: log lines name a key by grid and legacy meaning, `B3 (0x18,
-sit)`, without the printed label.
+| Key | Does |
+|---|---|
+| B6 | stand and stop: the planned stop of a walk, then STAND |
+| A7 | sleep: the planned stop, then REST |
+| C5 | the planned stop, then the calibration posture (CALIB) |
+| A4, B4, C4 | trot, crawl, walk: walk forward in that gait from standing; change the gait while walking; the gait in use: straight forward again |
+| B7, B5 | faster, slower by one speed level (0.5, 0.7, 1, 1.4, 2 × the gait's speed); past the slowest B5 goes backward; only while walking |
+| A6, C6 | turn left, right in place |
+| C7 | freeze: the walk aborted at once (the body settles in STANCE, powered), a trick and the behaviour runner stopped; then only B6 and A7 act |
+| A5 | start the behaviour runner |
+| rows 1-3 | nothing (logged as ignored) |
+
+The daemon's blocking waits are phases of `poll()` and keys that come
+meanwhile queue (4), as its lock queues them; C7 does not queue: it cancels
+the action under way and drops the keys behind it (each logged). Repeats and
+other remotes' keys are ignored; there is no shutdown key (Python has none).
+Every key leaves one line, `remote B6 (0x02, stand): posture stand`, naming
+the key by grid and by what it does.
 
 Integration (`kernel/host/test.sh`): `python -m kilo.vbody.core --control
 FIFO` takes `ir CODE`, `att P R`, `batt MV` and `imu ...` lines
 (`CoreBody.serve_control`; the harness has no IR decoder, so IR_KEY frames
-are made in Python), and the script plays hi to TRICK_DONE, trots, turns,
-stands after the planned stop and rests by IR keys, idles the behaviour
+are made in Python), and the script by IR keys stands, trots, speeds up
+and slows down, turns, stands after the planned stop, freezes a trot (the
+walk aborted, the virtual body settling in STANCE), rests, takes the
+calibration posture and starts and stops the behaviour runner, idles the behaviour
 runner 5 s at 10 Hz, and tilts and drops the virtual body for perception
 and the fallen branch.

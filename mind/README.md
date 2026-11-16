@@ -453,60 +453,73 @@ and stops within 0.1 s of SIGTERM; `$KILO_PERSONALITY` (in
 
 **IR remote.** The body decodes the Petoi IR remote (NEC, on the NyBoard's
 receiver at D4) and relays every key as `EVENT IR_KEY` (arg = the NEC
-command byte, `| 0x100` for a held-key repeat; HELLO caps bit `IR`). `kilo
-monitor` shows it as `IR_KEY 2 (0x18, sit)` (`... repeat` while held), the
-passive timeline as `EVENT IR_KEY ...`, and `kilo vbody` sends digits 0-9
-from its keyboard. The key table is `kilo.ir.KEYS` (from the legacy
-`src/infrared.h`). `kilo run --remote` (off by default, like `--behaviour`;
-on the Pi add it to `KILO_RUN_ARGS` in `~/.config/kilo/env`) acts on the
-keys through the daemon's own BodyClient:
+command byte, `| 0x100` for a held-key repeat; HELLO caps bit `IR`). Keys
+are named by where they sit: columns A, B, C from left to right, rows 1 to 7
+from the bottom to the top (B7 is the middle key of the top row). `kilo
+monitor` shows a key as `IR_KEY B6 (0x02, stand)` (`... repeat` while held),
+the passive timeline as `EVENT IR_KEY ...`. The key table is `kilo.ir.KEYS`
+(from the legacy `src/infrared.h`). `kilo run --remote` (off by default,
+like `--behaviour`; on the Pi add it to `KILO_RUN_ARGS` in
+`~/.config/kilo/env`) acts on the keys through the daemon's own BodyClient,
+and the mind kernel does the same (`kernel/mind/remote/`, a port of
+`kilo.ir`). The owner's map (2026-11-15):
 
-| Key | Command | Legacy | `--remote` |
-|---|---|---|---|
-| CH- | 0xA2 | rest | posture rest |
-| CH | 0x62 | forward | walk forward (the selected pattern's stride) |
-| CH+ | 0xE2 | gyro toggle | balance on/off (SET_BALANCE; Kp from `--balance`, else the default) |
-| \|<< | 0x22 | left | turn left in place (turn 20 mm) |
-| >>\| | 0x02 | stand | posture stand |
-| >\|\| | 0xC2 | right | turn right in place |
-| - | 0xE0 | pause/limp | posture limp |
-| + | 0xA8 | backward | walk backward |
-| EQ | 0x90 | calibrate | slower (one speed step down) |
-| 0 | 0x68 | stepping | march in place (stride 0) |
-| 100+ | 0x98 | crawl | select crawl |
-| 200+ | 0xB0 | walk | select walk |
-| 1 | 0x30 | trot | select trot (the default) |
-| 2 | 0x18 | sit | posture sit |
-| 3 | 0x7A | stretch | trick stretch |
-| 4 | 0x10 | hi | trick hi |
-| 5 | 0x38 | push-up | trick push_up |
-| 6 | 0x5A | pee | trick pee |
-| 7 | 0x42 | wash face | trick wash_face |
-| 8 | 0x4A | butt-up | trick butt_up |
-| 9 | 0x52 | last skill | faster (one speed step up) |
+| Key | Command | `--remote` |
+|---|---|---|
+| A7 | 0xA2 | sleep: stop a walk the planned way, then posture rest |
+| B7 | 0x62 | faster: one speed level up (only while walking) |
+| C7 | 0xE2 | freeze: abort the walk, stop a trick and the behaviour runner; then only B6 and A7 act |
+| A6 | 0x22 | turn left in place (from standing: start the turn in the selected gait at 1×) |
+| B6 | 0x02 | stand and stop: stop a walk the planned way, then posture stand |
+| C6 | 0xC2 | turn right in place |
+| A5 | 0xE0 | start the behaviour runner |
+| B5 | 0xA8 | slower: one speed level down, past the slowest into backward |
+| C5 | 0x90 | the calibration posture (CALIB), after stopping a walk the planned way |
+| A4 | 0x68 | trot: walk forward in it, or change the walk to it |
+| B4 | 0x98 | crawl: likewise |
+| C4 | 0xB0 | walk: likewise |
+| rows 1-3 | | nothing (logged as ignored) |
 
-**The direction keys make Kilo walk: use the remote with Kilo on the floor
-only, never on a desk.** A direction key (B7 forward, B5 back, A6 / C6
-turn left / right, A4 march) walks with the selected pattern (A3 trot, C4
-walk, B4 crawl) and keeps walking until another key, like the legacy
-firmware; a pattern key while walking changes the walk (after every leg
-has stepped home, up to ~5.5 s out of the walk), otherwise it only selects. C5 / C1 (EQ / 9) step the
-speed down / up through 0.5, 0.7, 1, 1.4 and 2 × the pattern's default
-speed (start: 1; the step is kept across patterns and walks, and stops at
-the ends), clamped like `kilo walk --speed` (the trot's 2× is its 93 mm/s
-cap, the walk's is 12 mm/s); while walking the speed changes at once. A
-posture or trick key first stops the walk the planned way and waits for it
-(each leg steps home, STANCE), then takes the posture or the trick; A5
-(`-`, limp) does that too, then goes limp.
-Repeats (a held key) are ignored. A trick key uploads the trick if the body
-does not hold it (cached, as `kilo trick play`), stops a playing trick
-first, and takes STAND first from LIMP; a posture key also stops a playing
-trick. What the remote sets is held like the daemon's idle latch: no idle
-REST/LIMP over it, it stays until the next key or a client goal. Keys are
-logged and ignored while the behaviour runner is active, while the port is
-released for flashing, and while a client holds the posture, a trick or a
-walk (the balance key: while a client holds SET_BALANCE; the daemon side is
-`kilo/daemon/remote_ir.py`). `kilo daemon` shows `remote on, last key ...`.
+**The gait and turn keys make Kilo walk: use the remote with Kilo on the
+floor only, never on a desk.** The remote keeps a gait (trot at start), a
+speed level and a heading. Levels +1 to +5 walk forward at 0.5, 0.7, 1, 1.4
+and 2 × the gait's default speed, −1 to −5 backward at the same factors;
+there is no level 0, so from +1 B5 goes to −1 (backward at 0.5×), and from
+−1 B7 goes to +1. B7 stops at +5, B5 at −5; while turning they change only
+the magnitude (1 to 5). The speeds are clamped like `kilo walk --speed`
+(the trot's 2× is its 93 mm/s cap, the walk's 1.4× and 2× are both 12 mm/s,
+the crawl's 13.2 mm/s), and the log line shows the real speed. B7 and B5
+while not walking do nothing.
+
+A gait key while standing walks forward in that gait at +3 (1×). While
+walking it changes the gait (after every leg has stepped home, up to ~5.5 s
+out of the walk), keeping the level and the heading; the gait already in use
+brings Kilo back to straight forward at the current magnitude (from a turn
+or from backward), and does nothing when he already walks straight forward.
+Every stop (B6, A7, C5, C7, a walk that ended by itself) puts the level back
+to +3 and the heading to straight. A posture key first stops the walk the
+planned way and waits for it (each leg steps home, STANCE), then stops a
+playing trick, then takes the posture. C7 ends the walk at once instead (no
+planned stop): the body holds the last pose for `link.feet_hold_ticks`
+(100 ms), sets the swing feet down to the ground and stays in STANCE with
+the servos powered (EVENT GAIT_STOPPED arg 1); no LIMP is sent, and the
+daemon's idle REST/LIMP timeline stays off. Until B6 or A7, every other key
+is logged as `ignored (frozen: B6 or A7 to go on)`. A posture key still
+waiting for a planned stop when C7 comes gives up (`cancelled`). A5 starts
+the behaviour runner (after stopping a walk and a trick): while it runs, B6,
+A7 and C7 stop it and then do their own action, A5 again does nothing, and
+the other keys are ignored; `--behaviour` still starts it at boot, and
+without it the runner is off until A5.
+
+Repeats (a held key) are ignored. Every key leaves one line in the daemon's
+log, `remote <grid> (0x.., <what the key does>): <outcome>`, for example
+`remote A4 (0x68, trot): walk forward (trot) 55.6 mm/s` or `remote B5
+(0xA8, slower): speed -0.5x (walk 5.6 mm/s back)`. What the remote sets is
+held like the daemon's idle latch: no idle REST/LIMP over it, it stays until
+the next key or a client goal. Keys are logged and ignored while the port is
+released for flashing and while a client holds the posture, a trick or a
+walk (the daemon side is `kilo/daemon/remote_ir.py`). `kilo daemon` shows
+`remote on, last key ...`.
 
 **Balance by default.** `kilo run --balance [KP]` (off by default) latches
 SET_BALANCE on with the given Kp (default 0.5, the firmware's; 0.99 levels
@@ -516,8 +529,8 @@ balance off). Nobody owns it, like the idle latch: Kilo wakes up balancing
 whenever it stands or sits, and walks with the same gains (correcting what
 the plan did not predict). The body switches balance off on every epoch bump (a fall, the
 watchdog, LOW battery, a reboot; P1 finding B1) and the link's 5 Hz refresh
-switches it back on within about 200 ms. The remote's CH+ toggles it off and on again with that
-Kp; a client's `kilo balance off` holds it off until the client goes away.
+switches it back on within about 200 ms. A client's `kilo balance off` holds it off until the
+client goes away (the remote has no balance key).
 `kilo daemon` shows `balance on by default (Kp ...)`. On the Pi:
 `KILO_RUN_ARGS=--remote --balance 0.99` in `~/.config/kilo/env` (the owner's choice, 2026-10-11).
 
