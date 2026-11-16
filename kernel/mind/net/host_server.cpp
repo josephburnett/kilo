@@ -27,6 +27,8 @@ const char* name_of(uint8_t type) {
     case KILO_HOST_MSG_FLASH_COMMIT: return "FLASH_COMMIT";
     case KILO_HOST_MSG_UPDATE_BEGIN: return "UPDATE_BEGIN";
     case KILO_HOST_MSG_UPDATE_COMMIT: return "UPDATE_COMMIT";
+    case KILO_HOST_MSG_WALK_LIST: return "WALK_LIST";
+    case KILO_HOST_MSG_WALK_FETCH: return "WALK_FETCH";
     default: return "?";
   }
 }
@@ -365,6 +367,10 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
     }
     case KILO_HOST_MSG_UPDATE_COMMIT:
       return update_commit(i, f.seq);
+    case KILO_HOST_MSG_WALK_LIST:
+      return walk_list(i, f.seq, p, now);
+    case KILO_HOST_MSG_WALK_FETCH:
+      return walk_fetch(i, f.seq, p);
     default:
       return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UNSUPPORTED, name_of(f.type));
   }
@@ -604,6 +610,99 @@ void HostServer::update_reboot() {
   reboot_ = true;
 }
 
+// ---- walk recordings ------------------------------------------------------------
+
+void HostServer::walk_list(uint32_t i, uint8_t seq, const uint8_t* p, uint64_t now) {
+  if (walks_ == nullptr)
+    return result(i, seq, KILO_HOST_MSG_WALK_LIST, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no walk recorder on this mind");
+  uint32_t after;
+  mem_copy(&after, p, sizeof after);
+  kilo_host_walk_info_t w;
+  mem_zero(&w, sizeof w);
+  const record::WalkStore& st = *walks_;
+  w.kept = (uint16_t)st.kept();
+  w.recording = st.recording_id();
+  w.capacity = st.capacity();
+  w.used = st.used();
+  w.dropped_walks = st.dropped_walks();
+  w.dropped_records = st.dropped_records();
+  uint32_t len = KILO_HOST_WALK_INFO_MIN_LEN;
+  const record::WalkEntry* e = st.after(after);
+  if (e != nullptr) {
+    w.found = 1;
+    w.id = e->id;
+    w.start_ms = e->start_us > start_us_ ? (uint32_t)((e->start_us - start_us_) / 1000u) : 0;
+    uint64_t end = e->end_us != 0 ? e->end_us : now;
+    w.duration_ms = end > e->start_us ? (uint32_t)((end - e->start_us) / 1000u) : 0;
+    w.bytes = e->size;
+    w.records = e->records;
+    w.feet = e->feet;
+    w.flags = e->flags;
+    mem_copy(w.text, e->text, e->text_len);
+    len += e->text_len;
+  }
+  reply(i, seq, &w, len, KILO_HOST_MSG_WALK_INFO);
+}
+
+void HostServer::walk_fetch(uint32_t i, uint8_t seq, const uint8_t* p) {
+  const uint8_t type = KILO_HOST_MSG_WALK_FETCH;
+  if (walks_ == nullptr) return result(i, seq, type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no walk recorder on this mind");
+  kilo_host_walk_fetch_t q;
+  mem_copy(&q, p, sizeof q);
+  Client& c = clients_[i];
+  if (q.id == 0) {
+    c.fetch_on = false;
+    return result(i, seq, type, KILO_HOST_RESULT_CODE_OK, "stopped");
+  }
+  const record::WalkEntry* e = walks_->find(q.id);
+  char why[60];
+  if (e == nullptr) {
+    format(why, sizeof why, "no walk %u in the store", (unsigned)q.id);
+    return result(i, seq, type, KILO_HOST_RESULT_CODE_BAD_ARG, why);
+  }
+  if (e->flags & KILO_WALK_FLAGS_RECORDING) {
+    format(why, sizeof why, "walk %u is still being recorded", (unsigned)q.id);
+    return result(i, seq, type, KILO_HOST_RESULT_CODE_BAD_ARG, why);
+  }
+  if (q.offset > e->size) {
+    format(why, sizeof why, "offset %u past the walk's %u bytes", (unsigned)q.offset, (unsigned)e->size);
+    return result(i, seq, type, KILO_HOST_RESULT_CODE_BAD_ARG, why);
+  }
+  c.fetch_on = true;
+  c.fetch_id = q.id;
+  c.fetch_off = q.offset;
+  result(i, seq, type, KILO_HOST_RESULT_CODE_OK);
+}
+
+// The fetching client's next chunks, as far as its send ring has room (a
+// slow laptop waits, nothing is dropped), then END or GONE.
+void HostServer::pump_fetch(uint32_t i) {
+  Client& c = clients_[i];
+  uint32_t chunks = walks_->recording_id() != 0 ? kFetchChunksRecording : kFetchChunks;
+  for (uint32_t k = 0; k < chunks && c.fetch_on; k++) {
+    if (room(i) < KILO_HOST_WALK_DATA_MAX_LEN + kHostOverhead) return;
+    kilo_host_walk_data_t d;
+    d.id = c.fetch_id;
+    d.offset = c.fetch_off;
+    uint32_t total = 0;
+    int32_t n = walks_->read(c.fetch_id, c.fetch_off, d.data, sizeof d.data, &total);
+    d.total = total;
+    d.status = n < 0 ? KILO_WALK_DATA_STATUS_GONE : n == 0 ? KILO_WALK_DATA_STATUS_END : KILO_WALK_DATA_STATUS_DATA;
+    uint32_t len = KILO_HOST_WALK_DATA_MIN_LEN + (n > 0 ? (uint32_t)n : 0u);
+    if (!enqueue(i, KILO_HOST_MSG_WALK_DATA, c.out_seq, &d, len)) return;
+    c.out_seq++;
+    if (n <= 0) {
+      c.fetch_on = false;
+      if (n == 0) stats_.walk_fetches++;
+      else logf(log_, LogLevel::Warn, "host: client %d: walk %u dropped from the store during its download", (int)i,
+                (unsigned)c.fetch_id);
+      return;
+    }
+    c.fetch_off += (uint32_t)n;
+    stats_.walk_bytes_sent += (uint32_t)n;
+  }
+}
+
 // ---- streams --------------------------------------------------------------------
 
 void HostServer::pump_bridge() {
@@ -652,6 +751,7 @@ void HostServer::streams(uint64_t now) {
         stats_.telem_skipped++;
       }
     }
+    if (c.fetch_on && walks_ != nullptr) pump_fetch(i);
     while (c.log_on) {
       if (c.log_seq < ring_.first_seq()) c.log_seq = ring_.first_seq();  // overwritten: the seq gap tells
       const LogEntry* e = ring_.get(c.log_seq);

@@ -138,16 +138,19 @@ const char* Walker::start(const WalkGoal& goal) {
   uint64_t now = clock_.now_us();
   if (phase_ == WalkPhase::Streaming && !planner_.stopping()) {
     update(goal);
+    mark(WalkMark::Change);
     return nullptr;
   }
   if (phase_ == WalkPhase::SetStream || phase_ == WalkPhase::Stance) {  // not streaming yet: walk this instead
     goal_ = goal;
+    mark(WalkMark::Change);
     return nullptr;
   }
   if (phase_ == WalkPhase::Streaming) {  // a planned stop under way: after it (or after kStartWaitUs)
     queued_ = true;
     queued_goal_ = goal;
     queued_at_ = now;
+    mark(WalkMark::Queued);
     return nullptr;
   }
   const char* err = check_can_walk();
@@ -166,7 +169,9 @@ void Walker::update(const WalkGoal& goal) {
 void Walker::stop() {
   queued_ = false;
   if (phase_ == WalkPhase::Streaming) {
+    bool was = planner_.stopping();
     planner_.stop();
+    if (!was) mark(WalkMark::Stop);
   } else if (phase_ != WalkPhase::Idle) {  // not streaming yet: no walk at all
     end("stopped before the stream started", true);
     teardown(false);
@@ -191,6 +196,7 @@ void Walker::begin_setup(const WalkGoal& goal, uint64_t now) {
   stream_req_sent_ = false;
   phase_ = WalkPhase::SetStream;
   phase_at_ = now;
+  mark(WalkMark::Setup);
   setup_step(now);
 }
 
@@ -276,6 +282,7 @@ bool Walker::begin_stream(uint64_t now) {
   int v10 = round_i(planner_.timing().speed_mm_s * 10);
   logf(log_, LogLevel::Info, "walk %s %s at %d.%d mm/s", goal_.pattern->name, direction_name(goal_.direction),
        v10 / 10, v10 % 10);
+  mark(WalkMark::Stream);
   return true;
 }
 
@@ -286,6 +293,10 @@ void Walker::end(const char* why, bool ok) {
   ok_ = ok;
   logf(log_, ok ? LogLevel::Info : LogLevel::Warn, "walk ended: %s (sent %u skipped %u underruns %u)", ended_,
        (unsigned)stats_.sent, (unsigned)stats_.skipped, (unsigned)stats_.underruns);
+  // The walk's summary (kept in the RAM log: Info): what the planner and the
+  // error tracker made of it. A walk that ended in its setup has none.
+  if (phase_ == WalkPhase::Streaming) log_status(LogLevel::Info);
+  mark(WalkMark::End);
 }
 
 void Walker::teardown(bool streamed) {
@@ -407,16 +418,19 @@ bool Walker::wake(uint64_t now) {
     const TickPlan& tp = planner_.next();
     if ((int64_t)tp.tick <= cur) {
       stats_.skipped++;
+      if (obs_ != nullptr) obs_->on_walk_tick(*this, tp, false);
       continue;
     }
     behind++;
     kilo_feet_t f;
     pack_feet((uint8_t)epoch_, tp, &f);
-    if (link_.send_stream(KILO_MSG_FEET, (const uint8_t*)&f, sizeof f)) {
+    bool sent = link_.send_stream(KILO_MSG_FEET, (const uint8_t*)&f, sizeof f);
+    if (sent) {
       stats_.sent++;
       Pred& p = pred_[f.tick % kPred];
       p = {true, f.tick, {tp.pitch, tp.roll}};
     }
+    if (obs_ != nullptr) obs_->on_walk_tick(*this, tp, sent);
   }
   if (behind > stats_.max_behind) stats_.max_behind = behind;
   if (planner_.done() && !handover_) {

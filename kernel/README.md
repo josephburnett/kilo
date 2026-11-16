@@ -55,7 +55,7 @@ images link (`lib`, `usb`, `input`, `fs`, `sched`, `net`, and the addons
 
 | Output | What | Size |
 |---|---|---|
-| `build/kernel7.img` | the mind kernel | 591,140 bytes with one key (`KILO_BODY_SERIAL=auto`: about 250 bytes less) |
+| `build/kernel7.img` | the mind kernel | 607,140 bytes with one key (`KILO_BODY_SERIAL=auto`: about 250 bytes less) |
 | `build/netboot/kernel7.img` | the network loader | 305,420 bytes |
 
 Of the mind kernel, the SD card (FatFs about 23 KB, the SD driver about
@@ -65,7 +65,8 @@ sources were in the image before the kernel used them; composing the
 `Mind` changed its size by less than 1 KB. The keys (Monocypher, all of
 it linked: about 55 KB; the Noise layer and the secure host server, about
 13 KB) took the image from 522,532 to 591,140 bytes; each authorized key
-adds 72 bytes.
+adds 72 bytes. The walk recorder ("Walk recordings") took it from 594,916
+to 607,140 bytes.
 
 The build needs at least one laptop key in `keys/authorized_keys` ("Who may
 talk to Kilo: keys"), or `KILO_AUTHORIZED_KEYS=FILE`; without one it stops
@@ -270,7 +271,8 @@ reboot                            after a laptop's REBOOT: 200 ms more passes (t
 CScheduler::usSleep(1000)         the net task runs here
 ```
 
-Where the memory is: the `Mind` (87 KB: the log ring 11 KB, the host
+Where the memory is: the walk recorder's store (8 MB, "Walk recordings"),
+the `Mind` (87 KB: the log ring 11 KB, the host
 server's five connections 36 KB (each 4 KB of frames to send, a 1 KB
 record each way and its Noise state), perception's windows 17 KB, the
 behaviour runner 6 KB), the network slots (`CircleListener`, 40 KB of
@@ -612,8 +614,9 @@ Everything `kilo-mind-host` serves on the laptop, from the same `Mind`:
 `kilo status`, `kilo monitor` (TELEM), `kilo log` (the ring, Circle's lines
 included), `kilo posture NAME [--for S]` (REST when the controller lets go
 or goes silent), `kilo flash --host`, `kilo reboot --host`, `kilo update
---host` ("Updating the kernel over the network") and the raw bridge
-(`kilo.link` over TCP; everything on the link pauses).
+--host` ("Updating the kernel over the network"), `kilo walks --host`
+("Walk recordings") and the raw bridge (`kilo.link` over TCP; everything on
+the link pauses).
 
 `kilo reboot --host IP` takes control and sends `REBOOT`: the mind latches
 REST, answers OK, and 200 ms later the kernel returns `ShutdownReboot`
@@ -900,6 +903,55 @@ POSTURE, PARAM_SET, REBOOT, the bridge and a body flash are refused
 `UPDATING` meanwhile, and an update is refused `FLASHING` while a body
 flash runs or its `--persist` image waits for the card.
 
+### Walk recordings
+
+The mind records every walk in RAM (`mind/record/`, `mind/README.md` "Walk
+recordings"): every body link frame both ways from 2 s before the walk's
+setup to 2 s after its end, each planned tick, the planner's counters and
+the walk's parameters, with the mind's clock in microseconds. `Initialize`
+allocates the store once on Circle's heap (`record::kStoreBytes`, 8 MB);
+at about 92 bytes a walk tick it holds about 30 minutes of walking, the
+oldest walks dropped whole when it is full. The log says `walk recorder:
+8152 KB for records, 128 walks at most` at start. After a walk, with the
+cable in: `kilo walks --host IP` lists the walks, `kilo walks --host IP
+--fetch --out DIR` downloads them and `kilo log walk FILE.kwalk` analyses
+one (`docs/fast-boot-first-boot.md` "After a walk").
+
+**Nothing survives switching Kilo off.** Writing finished walks to the SD
+card was considered and left out, because it cannot be done safely
+without measurements that only the Pi can make:
+
+- The card is written only while the link is paused (`KernelStore`,
+  `platform.h`): Circle's SD driver busy-waits, so each write stalls the
+  main loop. A kernel update accepts that (the body's watchdog stops it,
+  REST after 1.5 s, and the Pi reboots anyway). A walk saved after it ended
+  must not trip the watchdog: every stall must stay well under its 500 ms
+  (the link's heartbeat goes after 100 ms of silence). How long Kilo's card
+  takes for a 16 KB slice, and its worst case (an SD card's own garbage
+  collection can take hundreds of milliseconds on one write), has never
+  been measured ("Not yet tested on hardware": the slices' time).
+- A 20-minute walk is about 5.5 MB: at a few KB a pass that is a thousand
+  or more stalls, during which the owner may switch Kilo off (half a file
+  on the card).
+- `CBootCard` has one `KernelStore` file open at a time, shared with the
+  updater; the seam has no directory listing, so bounding the files kept
+  (count and bytes) needs a fixed set of slot names or a listing call.
+
+What it would take: (1) measure on the Pi, with the body resting, the time
+of `f_write` for 1, 4 and 16 KB slices on Kilo's card, many times, and the
+worst case; (2) if the worst case stays under about 100 ms, a `WalkSaver`
+in the core that runs only while the walker, the trick player and any
+flash or update are idle, writes one slice per pass (sized from (1)),
+through a second file object in `CBootCard` (or exclusion with the
+updater: `UPDATE_BEGIN` refused while saving), into fixed names
+`walk00.kwk`..`walk15.kwk` (never `kernel7.*`, `config.txt`, the
+firmware's files or `body.*`), the oldest replaced, total bytes bounded,
+a manifest written last so a cut file is never read as whole; (3) at boot,
+after the boot flash check, read them back into the RAM store so `kilo
+walks --host` serves them as today; (4) the ACT LED showing that a save is
+running, so the owner waits before switching off. Until then: plug the
+cable in before switching Kilo off.
+
 ### mDNS
 
 With an address (DHCP or the link-local fallback), the net task starts a
@@ -940,6 +992,13 @@ toolchain's hard-float `libm` (`thumb/v7ve+simd/hard`) is a wrapper around
 `-fno-math-errno` would inline `vsqrt.f32`).
 
 ### Not yet tested on hardware
+
+The walk recorder: the 8 MB store on Circle's heap, its cost per pass on
+the Cortex-A7 while walking (the loop line's `mind.poll`), a download over
+the cable during a walk and after it (`kilo walks --host`), and the
+recordings of a real walk (the IMU's real attitude against the plan: the
+virtual body's IMU is scripted, so the lag and the error by phase have
+only been checked on synthetic data, `mind/tests/test_walks.py`).
 
 All of it: nothing here has run on a Pi. In particular: the netboot loader
 on the 2 B; Circle's USB host finding the CH343 behind the LAN9514 hub and

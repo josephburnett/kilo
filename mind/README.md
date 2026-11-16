@@ -143,6 +143,8 @@ kilo log summary|replay|plot FILE ...   # log tools (same as python -m kilo.logs
 kilo --kilolog status        # any command: raw wire frames to ~/kilo-logs/kilo-<time>.kilolog.gz
 kilo --host 169.254.75.73 status   # a C++ mind (the Circle kernel) over Ethernet: see below
 kilo log --host 169.254.75.73      # its RAM log: the last 20 lines, then live (--lines N, --level, --duration)
+kilo walks --host 169.254.75.73    # the walks it recorded; --fetch [N|all] --out DIR downloads them (see Logs)
+kilo log walk FILE.kwalk           # one walk: predicted vs measured, per tick (--csv, --plot) and summed up
 ```
 
 Global options: `--port`, `--baud`, `--log` / `--log-file FILE` (JSON-lines
@@ -168,7 +170,8 @@ never overwritten), `kilo key show` prints the line for
 `kernel/keys/authorized_keys`; `--key PATH` or `$KILO_HOST_KEY` picks
 another key file (`kilo.hostkey`). The handshake and the encrypted records
 are `kilo.hostsecure`, on the `noiseprotocol` package. It serves `status`, `posture NAME [--transition T] [--for
-S]`, `monitor [--rate HZ] [--duration S] [--json]` and `kilo log --host`;
+S]`, `monitor [--rate HZ] [--duration S] [--json]`, `kilo log --host`,
+`flash`, `reboot`, `update` and `walks` (the walk recordings, see Logs);
 every other command says it is not available over --host yet. `posture`
 takes control of the mind (one controller at a time; other clients only
 watch) and gives it back at the end, and the mind then latches REST, as the
@@ -995,6 +998,62 @@ writer holds its TX lock) never wait for the disk. The default
 file is `~/kilo-logs/kilo-<time>.kilolog.gz` (the daemon: in `--log-dir`).
 Through a daemon, `kilo --kilolog CMD` notes that the daemon does the logging.
 
+### Walk recordings from a C++ mind
+
+The mind (the Circle kernel, or `kilo-mind-host`) records every walk in RAM
+from 2 s before it starts to 2 s after it ends: every body link frame both
+ways with its own clock in microseconds, each tick the planner planned,
+the planner's counters and the walk's parameters as the planner had them
+(kernel/mind/README.md "Walk recordings"). It keeps about 30 minutes of
+walking, dropping the oldest walks when full, and loses everything when
+Kilo is switched off. The idea is to walk Kilo with the IR remote and the
+cable unplugged, then plug it in and fetch:
+
+```sh
+kilo walks --host 169.254.75.73              # id, start (this laptop's clock), gait, dir, speed, duration, ticks, size, end
+kilo walks --host 169.254.75.73 --fetch      # every walk that has ended -> ~/kilo-logs/walks/ (--out DIR), with a summary each
+kilo walks --host 169.254.75.73 --fetch 3    # just walk 3
+kilo log walk ~/kilo-logs/walks/walk-20261115-203141-1.kwalk [--csv w1.csv] [--plot w1.png] [--json]
+kilo log summary ~/kilo-logs/walks/walk-20261115-203141-1.kilolog   # the usual tools on the same frames
+```
+
+`--fetch` writes two files per walk: `walk-<time>-<id>.kwalk`, the
+recording exactly as the mind sent it behind a small JSON header (what
+`kilo log walk` reads; `kilo/logs/walkrec.py` has the format), and
+`walk-<time>-<id>.kilolog`, the same frames as a `.kilolog` (ms stamps),
+which `kilo log summary|replay|plot` read as they read the daemon's.
+A download never disturbs the walk being recorded: the mind sends it only
+as fast as the laptop reads, one small chunk a pass while a walk is on.
+A walk still being recorded cannot be fetched yet.
+
+`kilo log walk` joins, for every body tick, what the plan predicted (the
+FEET frame's pitch and roll: the attitude a servo lag after the feet move)
+with what the body reported for that tick (TELEMETRY), and prints:
+
+- the error, measured minus predicted, per axis: RMS, the largest, and the
+  mean, which is the constant offset (the IMU mounted off level, or a mass
+  where the model does not have it); the RMS less that offset is what the
+  model gets wrong as the body moves;
+- the servo lag: as the mind's error tracker estimates it (relative to the
+  model's `servo_lag_ms`, + = the servos are slower), and outright, from the
+  attitude the plan gives without any lag against the measured one;
+- the error by gait phase (which legs are in the air), with the body's mean
+  correction in each;
+- the time the body held its corrections (BALANCE_HELD), the correction's
+  mean and largest, the smallest stability margin with one leg up, how far
+  ahead each FEET frame arrived, the planner's holds, catches and waits, and
+  the walk's parameters and changes.
+
+`--csv` writes the per-tick table (tick, time, mode, legs in the air,
+support planned and reported, held, balance, predicted / measured /
+error / no-lag plan / reference / correction for pitch and roll, margin,
+FEET sent and TELEMETRY times, lead, feet queued, rates) for modelling the
+error elsewhere; `--plot` draws predicted against measured, the error and
+the correction, held and the legs in the air (matplotlib; CSV without it).
+On the virtual body the IMU is scripted (a fixed attitude), so there the
+lag and the phases say nothing about real servos; `kernel/host/test.sh`
+checks the arithmetic with a scripted tilt.
+
 ## Behaviour
 
 `kilo/behaviour/` is the P3 mind (§5): a small behaviour-tree engine under a
@@ -1205,7 +1264,7 @@ kilo/body/client.py         BodyClient: postures, balance, head, walking, pose, 
 kilo/planner/               walking: body model, patterns and speed, the step planner, error estimates, the FEET stream
 kilo/log.py                 JSON-lines logger thread
 kilo/perception/            ultrasonic + IMU detectors, Percepts aggregator, SharedPercepts, ring buffer
-kilo/logs/                  log reader (JSONL, .kilolog), summary/replay/plot (kilo log, python -m kilo.logs)
+kilo/logs/                  log reader (JSONL, .kilolog, .kwalk), summary/replay/plot/walk (kilo log, python -m kilo.logs)
 kilo/tricks/                trick model, legacy importer, library/*.json (generated), player timing
 kilo/behaviour/             behaviour tree, drives, utility selector, personality.yaml, runner (run_behaviour)
 kilo/cli_trick.py           `kilo trick` (registered by one line in cli.py)
@@ -1213,7 +1272,7 @@ kilo/cli_head.py            `kilo look` (registered by one line in cli.py)
 kilo/cli_walk.py            `kilo walk`, `kilo pose` (registered by one line in cli.py)
 kilo/cli.py                 the `kilo` command
 kilo/cli_tools.py           `kilo log`, `--kilolog`, `monitor --percepts`, `kilo daemon` link lines
-kilo/cli_host.py            `kilo --host`: status, posture, monitor, log against a C++ mind
+kilo/cli_host.py            `kilo --host`: status, posture, monitor, log, flash, reboot, update, walks against a C++ mind
 kilo/hostlink.py            the host channel client (TCP to the C++ mind) and BridgeTransport (kilo.link over the raw bridge)
 kilo/hostsecure.py          the host channel's secure layer: the hello, the Noise KN handshake, records (noiseprotocol)
 kilo/hostkey.py             this laptop's key file for --host: `kilo key init|show`, --key, $KILO_HOST_KEY

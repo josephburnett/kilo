@@ -4,9 +4,12 @@
     python -m kilo.logs replay FILE [--json] [--with-body-events]
     python -m kilo.logs plot FILE --fields pitch,roll[,dist,batt,rate_pitch,mode,balance...]
                               [--out PATH.png|PATH.csv] [--csv]
+    python -m kilo.logs walk FILE.kwalk [--csv OUT.csv] [--plot OUT.png] [--json]
 
 FILE is a link JSONL log (``kilo --log``), a ``kilo monitor`` JSONL capture,
-or a ``.kilolog`` (optionally ``.gz``).
+a ``.kilolog`` (optionally ``.gz``), or a walk recording (``.kwalk``, from
+``kilo walks --host IP --fetch``; kilo.logs.walkrec). ``walk`` analyses one
+walk recording: predicted against measured attitude, tick by tick.
 """
 
 from __future__ import annotations
@@ -33,11 +36,37 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--fields", default="pitch,roll", help="comma-separated (default pitch,roll)")
     pl.add_argument("--out", help="output .png or .csv (default next to the log)")
     pl.add_argument("--csv", action="store_true", help="write CSV even if matplotlib is available")
+    wk = sub.add_parser("walk", help="a walk recording (.kwalk): predicted vs measured, per tick and summed up")
+    wk.add_argument("file")
+    wk.add_argument("--csv", metavar="OUT", help="write the per-tick table as CSV")
+    wk.add_argument("--plot", metavar="OUT", help="plot predicted vs measured, error, correction, held (PNG)")
+    wk.add_argument("--json", action="store_true", help="the summary as JSON")
     return p
+
+
+def walk_main(args: argparse.Namespace) -> int:
+    from kilo.logs import walkrec
+
+    try:
+        w = walkrec.load(args.file)
+    except (OSError, ValueError) as e:
+        print(f"cannot read {args.file}: {e}", file=sys.stderr)
+        return 1
+    rows = walkrec.tick_table(w)
+    s = walkrec.summarize(w, rows)
+    print(json.dumps(s, indent=1) if args.json else walkrec.format_summary(s))
+    if args.csv:
+        print(f"wrote {walkrec.write_csv(rows, args.csv)} ({len(rows)} ticks)", file=sys.stderr)
+    if args.plot:
+        _, note = walkrec.plot(rows, args.plot, title=str(args.file))
+        print(note, file=sys.stderr)
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.cmd == "walk":
+        return walk_main(args)
     try:
         data = reader.load(args.file)
     except (OSError, ValueError) as e:

@@ -670,4 +670,92 @@ expect "$OUT/host_pc.log" "event FELL arg=2" "the body's fall reflex"
 expect "$OUT/host_pc.log" "behaviour: fallen \(safety\)" "the fallen safety branch"
 # ---- end P3 ---------------------------------------------------------------------------------------
 
+# ---- walk recordings (kernel/mind/record/): walk by the remote, fetch over --host, analyse ----------
+# The virtual body's IMU is scripted: it reports a fixed tilt (ctl att 4 -3) whatever the legs do,
+# so measured - predicted must be that tilt less the prediction, tick by tick, and its mean the
+# offset. A second walk (trot) runs while the first is downloaded: it must lose nothing.
+echo "== walk recordings: a walk (C4) by the remote, kilo walks --host (list, fetch during a trot), kilo log walk"
+start_ctl_body "$OUT/vbody_walks.log"
+trap stop_body EXIT
+WALKS="$OUT/walks"
+rm -rf "$WALKS"
+run_mind "$OUT/host_walks.log" --remote --balance 0.99 --seed 3 --authorized-keys "$KEYS" --listen 127.0.0.1:0 --duration 40
+trap 'kill $MIND_PID 2>/dev/null || true; stop_body' EXIT
+WPORT=""
+for _ in $(seq 1 50); do
+    WPORT="$(grep -o 'listening on port [0-9]*' "$OUT/host_walks.log" | grep -o '[0-9]*$' || true)"
+    [ -n "$WPORT" ] && break
+    sleep 0.1
+done
+[ -n "$WPORT" ] || { echo "FAILED: kilo-mind-host did not listen"; cat "$OUT/host_walks.log"; exit 1; }
+W="127.0.0.1:$WPORT"
+sleep 1
+ctl ir 0x02                   # B6: stand
+sleep 1
+ctl att 4 -3                  # the IMU reports nose down 4, left side up 3 (degrees) from now on
+ctl ir 0xB0                   # C4: walk (one leg at a time: the plan leans, its prediction moves)
+sleep 6
+ctl ir 0x02                   # B6: the planned stop, then stand
+for _ in $(seq 1 60); do grep -q "walk ended" "$OUT/host_walks.log" && break; sleep 0.25; done
+sleep 2.5                     # the recording's post-roll
+KPY -m kilo.cli --host "$W" walks | tee "$OUT/walks_list.txt"
+expect "$OUT/walks_list.txt" "1 walks kept" "the list: one walk"
+expect "$OUT/walks_list.txt" "^ +1  [0-9-]+ [0-9:]+  walk +forward .* s +[0-9]+ +[0-9.]+ KB  " "the list: walk 1, walk forward"
+ctl ir 0x68                   # A4: trot, while walk 1 is downloaded
+sleep 0.5
+KPY -m kilo.cli --host "$W" walks --fetch all --out "$WALKS" -q 2>&1 | tee "$OUT/walks_fetch.txt"
+expect "$OUT/walks_fetch.txt" "walk 1: [0-9]+ bytes in [0-9.]+ s -> .*walk-[0-9-]+-1\.kwalk \(\+ walk-[0-9-]+-1\.kilolog\)" \
+    "fetch: walk 1 written"
+expect "$OUT/walks_fetch.txt" "walk 2: still being recorded" "fetch: the trot is not fetchable yet"
+sleep 1.5
+ctl ir 0x02                   # B6: stop the trot
+wait_mind "$OUT/host_walks.log"
+stop_body
+trap - EXIT
+grep -E "walk recorder|walk (walk|trot) |walk ended|walk error|loop: " "$OUT/host_walks.log" | grep -v "loop: " | sed 's/^/   /'
+expect "$OUT/host_walks.log" "walk recorder: [0-9]+ KB for records, 128 walks at most" "the recorder's store"
+expect "$OUT/host_walks.log" "I walk ended: stopped \(sent [0-9]+ skipped 0 underruns 0\)" \
+    "the trot during the download: no tick skipped, no underrun"
+expect "$OUT/host_walks.log" "I walk walk forward .* holds [0-9]+ catches [0-9]+ waits [0-9]+ min margin [0-9.]+ mm" \
+    "the walk's summary line"
+expect "$OUT/host_walks.log" "I walk error: [0-9]+ samples offset pitch" "the tracker's summary line"
+KWALK="$(ls "$WALKS"/walk-*-1.kwalk)"
+KPY -m kilo.cli log walk "$KWALK" --csv "$OUT/walk1.csv" | tee "$OUT/walk1_summary.txt"
+KPY -m kilo.cli log walk "$KWALK" --json > "$OUT/walk1.json"
+KPY -m kilo.cli log summary "${KWALK%.kwalk}.kilolog" > "$OUT/walk1_kilolog.txt"
+expect "$OUT/walk1_kilolog.txt" "gait: walking [0-9.]+s, 1 GAIT_STOPPED" "kilo log summary reads the .kilolog"
+expect "$OUT/walk1_kilolog.txt" "model error: offset pitch \+4\.[0-9]" "kilo log summary: the same offset"
+"$PYTHON" - "$OUT/walk1.json" "$OUT/walk1.csv" <<'EOF'
+import csv, json, sys
+s = json.load(open(sys.argv[1]))
+e, lag, res = s["error"], s["lag"], s["result"]
+rows = list(csv.DictReader(open(sys.argv[2])))
+def check(cond, what):
+    if not cond:
+        print(f"FAILED: kilo log walk: {what}\n{json.dumps(s, indent=1)[:3000]}"); sys.exit(1)
+check(e["samples"] >= 250, f"{e['samples']} GAIT ticks with a prediction")
+check(abs(e["meas_mean_pitch"] - 4.0) < 1e-6 and abs(e["meas_mean_roll"] + 3.0) < 1e-6, "measured = the scripted tilt")
+check(abs(e["offset_pitch"] - (4.0 - e["pred_mean_pitch"])) <= 0.011 and
+      abs(e["offset_roll"] - (-3.0 - e["pred_mean_roll"])) <= 0.011, "offset = measured - predicted, on average")
+check(e["rms_pitch"] >= abs(e["offset_pitch"]) - 0.01 and e["rms_roll"] >= abs(e["offset_roll"]) - 0.01, "rms >= |offset|")
+check(e["rms_roll_less_offset"] > 0.5, "the walk's lean moves the predicted roll")
+check(s["ticks_sent"] == int(res["sent"]) and int(res["skipped"]) == 0 and int(res["underruns"]) == 0, "the stream's counters")
+check(lag["model_ms"] == 150.0, "the model's servo lag recorded")
+check("none" in s["by_phase"] and len({"LF", "RF", "RB", "LB"} & set(s["by_phase"])) >= 3,
+      f"the error by phase (one leg at a time): {sorted(s['by_phase'])}")
+check(s["margin"]["min_one_leg_up_mm"] is not None and
+      abs(s["margin"]["min_one_leg_up_mm"] - s["margin"]["planner_min_mm"]) <= 0.11, "the margin: per tick = the planner's")
+check(s["balance_active_fraction"] > 0.9 and s["correction"]["max_pitch"] is not None, "the body's balance and its correction")
+check(40 <= s["lead_ms"]["min"] <= s["lead_ms"]["max"] <= 200, f"FEET ahead of their tick: {s['lead_ms']}")
+check(s["config"]["margin_mm"] and s["masses"]["battery_g"] and s["stream"]["pattern"] == "walk", "the parameters in use")
+gait = [r for r in rows if r["mode"] == "GAIT" and r["err_pitch"]]
+check(len(gait) == e["samples"] and all(abs(float(r["meas_pitch"]) - float(r["pred_pitch"]) - float(r["err_pitch"])) < 1e-3
+                                        for r in gait), "the CSV: err = meas - pred on every row")
+print(f"   kilo log walk: {e['samples']} ticks, offset pitch {e['offset_pitch']:+.2f} roll {e['offset_roll']:+.2f} "
+      f"(the tilt less the mean prediction {e['pred_mean_pitch']:+.2f} / {e['pred_mean_roll']:+.2f}), "
+      f"rms {e['rms_pitch']:.2f} / {e['rms_roll']:.2f}, margin {s['margin']['min_one_leg_up_mm']} mm, "
+      f"lead {s['lead_ms']['min']}-{s['lead_ms']['max']} ms, {len(rows)} CSV rows")
+EOF
+grep "loop: " "$OUT/host_walks.log" | awk '{for(i=1;i<=NF;i++) if($i=="max") m=($(i+1)>m?$(i+1):m)} END {print "   mind.poll max over the run: " m " us"}'
+
 echo "== all kernel host tests passed"

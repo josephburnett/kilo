@@ -29,6 +29,11 @@
 //   the loop). On DONE: REST latched, the DONE status sent, then
 //   reboot_requested(), as for REBOOT. A flash and an update exclude each
 //   other (FLASHING, UPDATING).
+// - the walk recordings, with a WalkStore attached (attach_walks()):
+//   WALK_LIST answers WALK_INFO, one walk per request; WALK_FETCH streams a
+//   walk to its client as WALK_DATA, a few chunks a pass and only into room
+//   in that client's send ring (kFetchChunks, one a pass while a walk is
+//   recorded), then END. Any client: they only read.
 //
 // Who may connect (kernel/README.md "Who may talk to Kilo: keys", the spec's
 // [host] comments): every connection starts with a clear hello naming the
@@ -66,6 +71,7 @@
 #include "net/noise.h"
 #include "platform.h"
 #include "platform_net.h"
+#include "record/store.h"
 #include "update/updater.h"
 #include "util/logring.h"
 
@@ -77,6 +83,11 @@ class HostServer {
   static constexpr uint32_t kSlots = kHostSlots;  // the listener's slots: kMaxClients + 1 (see above)
   static constexpr uint32_t kTxBytes = 4096;  // per client: about 25 TELEM, or a log tail of 24 long lines
   static constexpr uint32_t kRecordBytes = 2 + KILO_HOST_RECORD_MAX + noise::kTagLen;  // a whole record on the wire
+  // WALK_DATA chunks queued per client per pass: 8 (1.6 KB, what two
+  // records seal), 1 while a walk is being recorded (the walk's passes stay
+  // as they were but for one 213-byte frame).
+  static constexpr uint32_t kFetchChunks = 8;
+  static constexpr uint32_t kFetchChunksRecording = 1;
 
   struct Stats {
     uint32_t accepted;
@@ -100,6 +111,8 @@ class HostServer {
     uint32_t flash_bytes_rx;   // FLASH_DATA bytes taken into the image
     uint32_t update_status_sent;
     uint32_t update_bytes_rx;  // UPDATE_DATA bytes taken into the image
+    uint32_t walk_bytes_sent;  // WALK_DATA bytes queued
+    uint32_t walk_fetches;     // WALK_DATA END sent: whole walks downloaded
   };
 
   // mind_build: STATUS.mind_build (the git hash, 0 = unknown). The link and
@@ -120,6 +133,9 @@ class HostServer {
   // they are answered UNSUPPORTED (kilo-mind-host without --card). poll()
   // then polls it.
   void attach_updater(KernelUpdater& updater);
+  // Serve WALK_LIST and WALK_FETCH from this store (it outlives the
+  // server). Without one they are answered UNSUPPORTED.
+  void attach_walks(const record::WalkStore& walks) { walks_ = &walks; }
   // The laptops' public keys a connection may name (they outlive the
   // server), and the source of the ephemeral keys. Without them (or with
   // no keys) every hello is refused: fail closed.
@@ -192,6 +208,9 @@ class HostServer {
     bool log_on;
     uint32_t log_seq;          // the next line to send
     uint8_t log_min;
+    bool fetch_on;             // WALK_FETCH: sending walk fetch_id from fetch_off
+    uint32_t fetch_id;
+    uint32_t fetch_off;
   };
 
   void accept(uint64_t now);
@@ -222,6 +241,9 @@ class HostServer {
   void drop_update(const char* why);
   void update_status();
   void update_reboot();
+  void walk_list(uint32_t i, uint8_t seq, const uint8_t* p, uint64_t now);
+  void walk_fetch(uint32_t i, uint8_t seq, const uint8_t* p);
+  void pump_fetch(uint32_t i);
   // Write out what is sealed, sealing at most a few records per call (all:
   // until the ring is empty or the connection takes no more, for an OK that
   // must leave now).
@@ -267,6 +289,8 @@ class HostServer {
   KernelUpdater* updater_ = nullptr;
   int32_t update_client_ = -1;   // the client receiving, then the one UPDATE_STATUS goes to
   uint32_t update_sent_ = 0;     // the updater's changes() last sent
+
+  const record::WalkStore* walks_ = nullptr;  // attach_walks()
 };
 
 }  // namespace kilo

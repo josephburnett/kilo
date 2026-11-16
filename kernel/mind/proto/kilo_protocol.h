@@ -340,6 +340,20 @@ enum kilo_update_error {
     KILO_UPDATE_ERROR_CARD_BROKEN = 9,
 };
 
+enum kilo_walk_data_status {
+    KILO_WALK_DATA_STATUS_DATA = 0,
+    KILO_WALK_DATA_STATUS_END = 1,
+    KILO_WALK_DATA_STATUS_GONE = 2,
+};
+
+enum kilo_walk_record {
+    KILO_WALK_RECORD_RX = 1,
+    KILO_WALK_RECORD_TX = 2,
+    KILO_WALK_RECORD_PLAN = 3,
+    KILO_WALK_RECORD_PLANNER = 4,
+    KILO_WALK_RECORD_MARK = 5,
+};
+
 /* ---- Bit flags (masks) ---- */
 #define KILO_TELEMETRY_FLAGS_BALANCE_ACTIVE (1u << 0)
 #define KILO_TELEMETRY_FLAGS_IMU_FAULT (1u << 1)
@@ -395,6 +409,11 @@ enum kilo_update_error {
 
 #define KILO_UPDATE_FLAGS_FORCE (1u << 0)
 
+#define KILO_WALK_FLAGS_RECORDING (1u << 0)
+#define KILO_WALK_FLAGS_ENDED_OK (1u << 1)
+#define KILO_WALK_FLAGS_TRUNCATED (1u << 2)
+#define KILO_WALK_FLAGS_STREAMED (1u << 3)
+
 /* ---- Shared element structs ---- */
 typedef struct KILO_PACKED kilo_keyframe_s {
     uint8_t dur; /* tick; range 1..255; ticks from the previous frame */
@@ -417,6 +436,55 @@ typedef struct KILO_PACKED kilo_note_s {
 KILO_STATIC_ASSERT(sizeof(kilo_note_t) == 2, kilo_sa_note_size);
 KILO_STATIC_ASSERT(offsetof(kilo_note_t, note) == 0, kilo_sa_note_note);
 KILO_STATIC_ASSERT(offsetof(kilo_note_t, dur_10ms) == 1, kilo_sa_note_dur_10ms);
+
+typedef struct KILO_PACKED kilo_walk_record_header_s {
+    uint8_t kind; /* enum walk_record */
+    uint8_t len; /* B; payload bytes after this header */
+    uint32_t t_us; /* us; mind time since the walk's t0 (its first MARK: t0_us) */
+} kilo_walk_record_header_t;
+#define KILO_WALK_RECORD_HEADER_SIZE 6u
+KILO_STATIC_ASSERT(sizeof(kilo_walk_record_header_t) == 6, kilo_sa_walk_record_header_size);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_record_header_t, kind) == 0, kilo_sa_walk_record_header_kind);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_record_header_t, len) == 1, kilo_sa_walk_record_header_len);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_record_header_t, t_us) == 2, kilo_sa_walk_record_header_t_us);
+
+typedef struct KILO_PACKED kilo_walk_plan_s {
+    uint32_t tick; /* tick; the body tick, unwrapped (FEET.tick is its low 16 bits) */
+    uint8_t sent; /* 1 = written as FEET; 0 = already past when planned (skipped), or the link did not take it */
+    uint8_t lifting; /* bit i: leg i in the air (swinging) this tick */
+    uint8_t support; /* flags support_flags: the feet on the ground */
+    int16_t margin; /* 0.1 mm; the centre of mass inside the polygon of the feet down (- = outside); -32768 = none. The planner's min_margin counts ticks with one leg up only */
+    int16_t plan_pitch; /* a16; the attitude these feet give, no servo lag */
+    int16_t plan_roll; /* a16 */
+    int16_t pitch; /* a16; predicted at this tick, servo lag included (FEET.pitch before its clamp) */
+    int16_t roll; /* a16 */
+} kilo_walk_plan_t;
+#define KILO_WALK_PLAN_SIZE 17u
+KILO_STATIC_ASSERT(sizeof(kilo_walk_plan_t) == 17, kilo_sa_walk_plan_size);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_plan_t, tick) == 0, kilo_sa_walk_plan_tick);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_plan_t, sent) == 4, kilo_sa_walk_plan_sent);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_plan_t, lifting) == 5, kilo_sa_walk_plan_lifting);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_plan_t, support) == 6, kilo_sa_walk_plan_support);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_plan_t, margin) == 7, kilo_sa_walk_plan_margin);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_plan_t, plan_pitch) == 9, kilo_sa_walk_plan_plan_pitch);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_plan_t, plan_roll) == 11, kilo_sa_walk_plan_plan_roll);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_plan_t, pitch) == 13, kilo_sa_walk_plan_pitch);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_plan_t, roll) == 15, kilo_sa_walk_plan_roll);
+
+typedef struct KILO_PACKED kilo_walk_planner_s {
+    uint32_t tick; /* tick; the tick being planned */
+    uint32_t holds; /* ticks a lift waited because the body was off the plan by more than gate_deg */
+    uint32_t catches; /* swinging legs landed at once: the body tipped toward them by catch_deg */
+    uint32_t waits; /* ticks a slot waited for its lean's solve to finish */
+    int16_t min_margin; /* 0.1 mm; the smallest margin so far; -32768 = none yet */
+} kilo_walk_planner_t;
+#define KILO_WALK_PLANNER_SIZE 18u
+KILO_STATIC_ASSERT(sizeof(kilo_walk_planner_t) == 18, kilo_sa_walk_planner_size);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_planner_t, tick) == 0, kilo_sa_walk_planner_tick);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_planner_t, holds) == 4, kilo_sa_walk_planner_holds);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_planner_t, catches) == 8, kilo_sa_walk_planner_catches);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_planner_t, waits) == 12, kilo_sa_walk_planner_waits);
+KILO_STATIC_ASSERT(offsetof(kilo_walk_planner_t, min_margin) == 16, kilo_sa_walk_planner_min_margin);
 
 typedef struct KILO_PACKED kilo_host_link_stats_s {
     uint32_t frames_rx;
@@ -1339,6 +1407,11 @@ enum kilo_param_id {
 #define KILO_HOST_UPDATE_MAX_IMAGE 4194304UL
 #define KILO_HOST_UPDATE_CHUNK_MAX 200u
 #define KILO_HOST_UPDATE_MARKER "KILO-MIND-KERNEL-1"
+#define KILO_HOST_WALK_FORMAT 1u
+#define KILO_HOST_WALK_TEXT_MAX 120u
+#define KILO_HOST_WALK_CHUNK_MAX 200u
+#define KILO_HOST_WALK_PREROLL_MS 2000u
+#define KILO_HOST_WALK_POSTROLL_MS 2000u
 
 enum kilo_host_msg_id {
     KILO_HOST_MSG_STATUS_REQ = 0x01,
@@ -1359,11 +1432,15 @@ enum kilo_host_msg_id {
     KILO_HOST_MSG_UPDATE_BEGIN = 0x48,
     KILO_HOST_MSG_UPDATE_DATA = 0x49,
     KILO_HOST_MSG_UPDATE_COMMIT = 0x4A,
+    KILO_HOST_MSG_WALK_LIST = 0x50,
+    KILO_HOST_MSG_WALK_FETCH = 0x51,
     KILO_HOST_MSG_RESULT = 0x80,
     KILO_HOST_MSG_STATUS = 0x81,
     KILO_HOST_MSG_TELEM = 0x82,
     KILO_HOST_MSG_LOG_LINE = 0x83,
     KILO_HOST_MSG_BRIDGE_RX = 0x84,
+    KILO_HOST_MSG_WALK_INFO = 0x85,
+    KILO_HOST_MSG_WALK_DATA = 0x86,
     KILO_HOST_MSG_FLASH_STATUS = 0xC0,
     KILO_HOST_MSG_UPDATE_STATUS = 0xC1,
 };
@@ -1508,6 +1585,24 @@ KILO_STATIC_ASSERT(offsetof(kilo_host_update_data_t, data) == 4, kilo_sa_host_up
 /* host 0x4A UPDATE_COMMIT: command. Check the received image (size, CRC-32, and unless FORCE host.update_marker) and install it on the SD card. RESULT OK: writing has started, UPDATE_STATUS follows to this client until DONE (then the mind reboots into it: REST to the body, the connection drops) or FAILED; IMAGE_BAD: the image is dropped, an UPDATE_STATUS FAILED says why. */
 #define KILO_HOST_UPDATE_COMMIT_LEN 0u
 
+/* host 0x50 WALK_LIST: command. Answered by WALK_INFO: the oldest recorded walk with an id above `after` (0: the oldest kept), or found 0. Any client; a client lists every walk by asking again with the id it got. */
+#define KILO_HOST_WALK_LIST_LEN 4u
+typedef struct KILO_PACKED kilo_host_walk_list_s {
+    uint32_t after; /* a walk id; 0 = from the oldest */
+} kilo_host_walk_list_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_walk_list_t) == 4, kilo_sa_host_walk_list_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_list_t, after) == 0, kilo_sa_host_walk_list_after);
+
+/* host 0x51 WALK_FETCH: command. Send walk `id`'s recording to this client from `offset`, as WALK_DATA frames, as fast as its connection takes them (never more than host.walk_chunk_max a frame, a few frames a pass; one a pass while a walk is being recorded). RESULT OK, then the data, then one WALK_DATA END (or GONE). BAD_ARG: no such walk, or it is still RECORDING, or offset past its end. id 0 stops this client's fetch (RESULT OK). A new WALK_FETCH replaces the one running. Any client. */
+#define KILO_HOST_WALK_FETCH_LEN 8u
+typedef struct KILO_PACKED kilo_host_walk_fetch_s {
+    uint32_t id;
+    uint32_t offset; /* B; bytes of the recording already received (a resumed fetch) */
+} kilo_host_walk_fetch_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_walk_fetch_t) == 8, kilo_sa_host_walk_fetch_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_fetch_t, id) == 0, kilo_sa_host_walk_fetch_id);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_fetch_t, offset) == 4, kilo_sa_host_walk_fetch_offset);
+
 /* host 0x80 RESULT: event. The answer to a command without a reply message of its own, and to any refused command: its seq, its type, a code and a short reason. */
 #define KILO_HOST_RESULT_MIN_LEN 2u
 #define KILO_HOST_RESULT_MAX_LEN 62u
@@ -1603,6 +1698,60 @@ typedef struct KILO_PACKED kilo_host_bridge_rx_s {
 KILO_STATIC_ASSERT(sizeof(kilo_host_bridge_rx_t) == 200, kilo_sa_host_bridge_rx_size);
 KILO_STATIC_ASSERT(offsetof(kilo_host_bridge_rx_t, data) == 0, kilo_sa_host_bridge_rx_data);
 
+/* host 0x85 WALK_INFO: event, reply to WALK_LIST. One recorded walk (found 1) and the store's state. text: ASCII `gait=NAME dir=NAME speed=MM_S end=REASON`, end last (the reason may hold spaces; empty while recording). */
+#define KILO_HOST_WALK_INFO_MIN_LEN 48u
+#define KILO_HOST_WALK_INFO_MAX_LEN 168u
+typedef struct KILO_PACKED kilo_host_walk_info_s {
+    uint8_t found; /* 0: no walk after `after` (the fields below the store's are zero) */
+    uint16_t kept; /* walks in the store now */
+    uint32_t recording; /* the id being recorded now, 0 = none */
+    uint32_t capacity; /* B; the store's bytes for records */
+    uint32_t used; /* B */
+    uint32_t dropped_walks; /* oldest walks dropped to make room, since the mind started */
+    uint32_t dropped_records; /* records lost by walks that outgrew the store (TRUNCATED) */
+    uint32_t id; /* 1.. in the order recorded, since the mind started */
+    uint32_t start_ms; /* ms; mind uptime at the walk's setup */
+    uint32_t duration_ms; /* ms; setup to the end (so far, while recording) */
+    uint32_t bytes; /* B; the recording's size: what WALK_FETCH sends */
+    uint32_t records;
+    uint32_t feet; /* FEET frames sent */
+    uint8_t flags; /* flags walk_flags */
+    uint8_t text[120]; /* 0..120 B, length implied */
+} kilo_host_walk_info_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_walk_info_t) == 168, kilo_sa_host_walk_info_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_info_t, found) == 0, kilo_sa_host_walk_info_found);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_info_t, kept) == 1, kilo_sa_host_walk_info_kept);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_info_t, recording) == 3, kilo_sa_host_walk_info_recording);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_info_t, capacity) == 7, kilo_sa_host_walk_info_capacity);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_info_t, used) == 11, kilo_sa_host_walk_info_used);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_info_t, dropped_walks) == 15, kilo_sa_host_walk_info_dropped_walks);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_info_t, dropped_records) == 19, kilo_sa_host_walk_info_dropped_records);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_info_t, id) == 23, kilo_sa_host_walk_info_id);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_info_t, start_ms) == 27, kilo_sa_host_walk_info_start_ms);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_info_t, duration_ms) == 31, kilo_sa_host_walk_info_duration_ms);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_info_t, bytes) == 35, kilo_sa_host_walk_info_bytes);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_info_t, records) == 39, kilo_sa_host_walk_info_records);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_info_t, feet) == 43, kilo_sa_host_walk_info_feet);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_info_t, flags) == 47, kilo_sa_host_walk_info_flags);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_info_t, text) == 48, kilo_sa_host_walk_info_text);
+
+/* host 0x86 WALK_DATA: stream. Part of a walk's recording, to the client that sent WALK_FETCH: the records (walk_record_header, then the payload) as bytes, offset counting from the recording's first byte. The last one is END (or GONE: the store dropped the walk; fetch it again, it is not there any more). */
+#define KILO_HOST_WALK_DATA_MIN_LEN 13u
+#define KILO_HOST_WALK_DATA_MAX_LEN 213u
+typedef struct KILO_PACKED kilo_host_walk_data_s {
+    uint32_t id;
+    uint32_t offset; /* B */
+    uint32_t total; /* B; the recording's size */
+    uint8_t status; /* enum walk_data_status */
+    uint8_t data[200]; /* 0..200 B, length implied */
+} kilo_host_walk_data_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_walk_data_t) == 213, kilo_sa_host_walk_data_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_data_t, id) == 0, kilo_sa_host_walk_data_id);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_data_t, offset) == 4, kilo_sa_host_walk_data_offset);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_data_t, total) == 8, kilo_sa_host_walk_data_total);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_data_t, status) == 12, kilo_sa_host_walk_data_status);
+KILO_STATIC_ASSERT(offsetof(kilo_host_walk_data_t, data) == 13, kilo_sa_host_walk_data_data);
+
 /* host 0xC0 FLASH_STATUS: stream. Progress of a flash, to the client that committed it: on every phase change and page, last DONE or FAILED. */
 #define KILO_HOST_FLASH_STATUS_LEN 21u
 typedef struct KILO_PACKED kilo_host_flash_status_s {
@@ -1689,6 +1838,10 @@ static inline uint8_t kilo_host_payload_len_check(uint8_t type, uint16_t len)
         return (len >= 5u && len <= 204u) ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_UPDATE_COMMIT:
         return len == 0u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_WALK_LIST:
+        return len == 4u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_WALK_FETCH:
+        return len == 8u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_RESULT:
         return (len >= 2u && len <= 62u) ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_STATUS:
@@ -1699,6 +1852,10 @@ static inline uint8_t kilo_host_payload_len_check(uint8_t type, uint16_t len)
         return (len >= 9u && len <= 168u) ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_BRIDGE_RX:
         return (len >= 1u && len <= 200u) ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_WALK_INFO:
+        return (len >= 48u && len <= 168u) ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_WALK_DATA:
+        return (len >= 13u && len <= 213u) ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_FLASH_STATUS:
         return len == 21u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_UPDATE_STATUS:
@@ -1726,6 +1883,8 @@ static inline uint8_t kilo_host_msg_kind(uint8_t type)
     case KILO_HOST_MSG_FLASH_COMMIT:
     case KILO_HOST_MSG_UPDATE_BEGIN:
     case KILO_HOST_MSG_UPDATE_COMMIT:
+    case KILO_HOST_MSG_WALK_LIST:
+    case KILO_HOST_MSG_WALK_FETCH:
         return KILO_KIND_COMMAND;
     case KILO_HOST_MSG_KEEPALIVE:
     case KILO_HOST_MSG_BRIDGE_TX:
@@ -1734,11 +1893,13 @@ static inline uint8_t kilo_host_msg_kind(uint8_t type)
     case KILO_HOST_MSG_TELEM:
     case KILO_HOST_MSG_LOG_LINE:
     case KILO_HOST_MSG_BRIDGE_RX:
+    case KILO_HOST_MSG_WALK_DATA:
     case KILO_HOST_MSG_FLASH_STATUS:
     case KILO_HOST_MSG_UPDATE_STATUS:
         return KILO_KIND_STREAM;
     case KILO_HOST_MSG_RESULT:
     case KILO_HOST_MSG_STATUS:
+    case KILO_HOST_MSG_WALK_INFO:
         return KILO_KIND_EVENT;
     default:
         return KILO_KIND_UNKNOWN;
@@ -1751,6 +1912,8 @@ static inline uint8_t kilo_host_query_reply(uint8_t type)
     switch (type) {
     case KILO_HOST_MSG_STATUS_REQ:
         return KILO_HOST_MSG_STATUS;
+    case KILO_HOST_MSG_WALK_LIST:
+        return KILO_HOST_MSG_WALK_INFO;
     default:
         return 0u;
     }

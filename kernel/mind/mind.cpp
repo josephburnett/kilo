@@ -35,13 +35,28 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
       body_(*this),
       runner_(body_, personality(cfg), log_, cfg.seed),
       runner_hook_(*this),
-      remote_(link_, walker_, player_, clock, log_) {
+      remote_(link_, walker_, player_, clock, log_),
+      recorder_(clock, link_) {
   link_.set_listener(this);
+  link_.set_quiet_log(&log_.status());  // a held IR key's repeats: not into the ring unless a laptop reads it
   remote_.set_behaviour(&runner_hook_);
   if (cfg.random != nullptr) host_.set_keys(cfg.authorized_keys, cfg.authorized_key_count, *cfg.random);
   runner_.set_clock(seconds, this);
   runner_.set_percept_source(&body_);
   runner_.set_paused(paused, this);
+}
+
+void Mind::attach_recorder(uint8_t* storage, uint32_t bytes) {
+  recorder_.attach(storage, bytes, cfg_.mind_build);
+  if (!recorder_.attached()) {
+    logf(log_, LogLevel::Warn, "walk recorder: %u bytes is too small: walks are not recorded", (unsigned)bytes);
+    return;
+  }
+  link_.set_frame_tap(&recorder_);
+  walker_.set_observer(&recorder_);
+  host_.attach_walks(recorder_.store());
+  logf(log_, LogLevel::Info, "walk recorder: %u KB for records, %u walks at most", (unsigned)(recorder_.store().capacity() >> 10),
+       (unsigned)record::WalkStore::kMaxWalks);
 }
 
 void Mind::start() {
@@ -79,6 +94,7 @@ void Mind::poll() {
   stamping_ = liveness(now);
   if (stamping_) link_.mark_alive();
   if (listener_ != nullptr) host_.poll();
+  recorder_.poll();  // a walk's post-roll ends, also while the link is paused
   if (host_.link_paused()) {  // the bridge or the flasher has the UART: the link and everything on it pause
     paused_ = true;
     return;
@@ -137,7 +153,8 @@ void Mind::on_telemetry(const kilo_telemetry_t& t) {
   const perception::PerceptEvents& ev = percepts_.update(t, (double)link_.state().telemetry_at_us / 1e6);
   for (int i = 0; i < ev.n; i++) {
     const perception::PerceptEvent& e = ev.e[i];
-    logf(log_, LogLevel::Info, "percept %s%s%s", perception::percept_name(e.kind),
+    // Status: a hand near the sensor makes these several times a second (in the ring while a laptop reads it)
+    logf(log_.status(), LogLevel::Info, "percept %s%s%s", perception::percept_name(e.kind),
          e.direction != perception::TiltDirection::None ? " " : "", perception::tilt_direction_name(e.direction));
   }
   if (tap_ != nullptr) tap_->on_telemetry(t);
@@ -175,8 +192,8 @@ void Mind::ir_key(const kilo_event_t& e) {
   char text[48];
   remote::describe(arg, text, sizeof text);
   const remote::Key* key = remote::action_for(arg);
-  if (key == nullptr) {  // a held-key repeat or another remote's key
-    logf(log_, LogLevel::Debug, "remote %s: ignored", text);
+  if (key == nullptr) {  // a held-key repeat (status: every ~110 ms while held) or another remote's key
+    logf(remote::key_repeat(arg) ? log_.status() : log_, LogLevel::Debug, "remote %s: ignored", text);
     return;
   }
   if (key->kind == remote::Kind::Ignore) {  // rows 1-3

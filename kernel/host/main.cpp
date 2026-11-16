@@ -93,6 +93,14 @@ struct Window : LinkListener {
     overruns = 0;
     max_load = 0;
     max_gap_us = 0;
+    polls = 0;
+    poll_us = 0;
+    poll_max_us = 0;
+  }
+  void add_poll(uint64_t us) {
+    polls++;
+    poll_us += us;
+    if (us > poll_max_us) poll_max_us = us;
   }
 
   Clock& clock_;
@@ -102,6 +110,9 @@ struct Window : LinkListener {
   uint32_t overruns = 0;  // TELEMETRY with the OVERRUN flag (a body tick overran)
   uint8_t max_load = 0;   // TELEMETRY.tick_load, 100 us units
   uint64_t max_gap_us = 0;
+  uint32_t polls = 0;  // mind.poll() calls, their time and the longest (the kernel's "loop" line)
+  uint64_t poll_us = 0;
+  uint64_t poll_max_us = 0;
 };
 
 void log_stats(Log& log, const SerialLink& link, const Window& w) {
@@ -120,6 +131,8 @@ void log_stats(Log& log, const SerialLink& link, const Window& w) {
          w.max_load % 10u, w.overruns, w.frames);
   logf(log, LogLevel::Info, "commands %u retries %u timeouts %u nacks %u dup acks %u unmatched acks %u tx short %u",
        s.commands, s.retries, s.timeouts, s.nacks, s.dup_acks, s.unmatched_acks, s.tx_short);
+  logf(log, LogLevel::Info, "loop: %u passes, mind.poll max %u mean %u us", w.polls, (unsigned)w.poll_max_us,
+       (unsigned)(w.polls ? w.poll_us / w.polls : 0));
 }
 
 int usage() {
@@ -234,6 +247,9 @@ int main(int argc, char** argv) {
     logf(log, LogLevel::Info, "kernel updates go to %s (--card)", card);
   }
   mind.set_tap(&window);
+  // The walk recorder's store, on the heap, once (as on the Pi): every walk
+  // tick by tick, for `kilo walks --host`.
+  mind.attach_recorder(new uint8_t[record::kStoreBytes], record::kStoreBytes);
   if (listen != nullptr) {
     if (!listener.open(listen)) {
       logf(log, LogLevel::Error, "%s", listener.error());
@@ -257,7 +273,9 @@ int main(int argc, char** argv) {
   int status = 0;
   SerialLink& link = mind.link();
   while (!g_stop && clock.now_us() < end) {
+    uint64_t t_poll = clock.now_us();
     mind.poll();
+    window.add_poll(clock.now_us() - t_poll);
     if (!link.connected()) {
       logf(log, LogLevel::Error, "port %s failed", port);
       status = 1;

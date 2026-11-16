@@ -4,12 +4,13 @@
 // Linux: the body link (P1), the laptop interface over Ethernet (P2), the
 // walker, the trick player, perception, the IR remote and the behaviour
 // runner (P3, the runner off unless built with KILO_BEHAVIOUR=1),
-// flashing the body from the laptop or the SD card (P4), and writing a new
-// kernel onto the SD card from the laptop (`kilo update --host`).
+// flashing the body from the laptop or the SD card (P4), writing a new
+// kernel onto the SD card from the laptop (`kilo update --host`), and the
+// walk recorder (every walk tick by tick in RAM, `kilo walks --host`).
 //
 // Initialize: the screen (or nothing), interrupts, timer, then the Mind
 // (so every line is in its ring), the body link's Serial, the flasher, the
-// kernel updater, mind.start() (the link connects: HELLO_REQ), the planner bench and last
+// kernel updater, the walk recorder's store, mind.start() (the link connects: HELLO_REQ), the planner bench and last
 // the net task. Then one pass every 1 ms:
 //
 //   mind.poll()        stamp liveness, serve the laptop (and poll the
@@ -257,6 +258,12 @@ boolean CKernel::Initialize (void)
 	// the first write. On DONE the host server asks for the reboot below.
 	m_pUpdater = new KernelUpdater (new u8[KernelImageMax], KernelImageMax, *m_pBootCard, m_Clock, *m_pLog);
 	m_pMind->host ().attach_updater (*m_pUpdater);
+
+	// The walk recorder (mind/record/recorder.h): every walk tick by tick,
+	// for `kilo walks --host` after the walk. Its store on the heap, once
+	// (record::kStoreBytes, about 20 minutes of walking or more); RAM only,
+	// so a power cut loses it (kernel/README.md "Walk recordings").
+	m_pMind->attach_recorder (new u8[record::kStoreBytes], record::kStoreBytes);
 
 	// The clock reads nearly the same at every boot, so the core's
 	// clock-based seed would repeat (seq, type) pairs inside the body's

@@ -12,6 +12,8 @@ Formats, detected from the content:
   with ``tick``, ``mode``, ``pitch_deg``, ``roll_deg``, ``batt_mv``... and no
   ``kind``. Time is ``t`` if present, else ``tick / TICK_HZ``.
 - **.kilolog** raw frames (``kilo.logs.kilolog``), optionally gzipped.
+- **.kwalk** a C++ mind's walk recording (``kilo walks --fetch``;
+  ``kilo.logs.walkrec``): its TELEMETRY and EVENTs, t from the recording's t0.
 
 Times in the result are seconds relative to the first record.
 """
@@ -272,6 +274,10 @@ def _rebase(data: LogData) -> None:
 def load(path: str | os.PathLike) -> LogData:
     """Read a log of any supported format."""
     p = Path(path)
+    from kilo.logs import walkrec
+
+    if walkrec.is_kwalk(p):
+        return walkrec.to_logdata(walkrec.load(p), p)
     if kilolog.is_kilolog(p):
         return _read_kilolog(p)
     return _read_jsonl(p)

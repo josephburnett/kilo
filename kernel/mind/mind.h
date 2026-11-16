@@ -11,8 +11,10 @@
 //   Runner       the behaviour layer at 10 Hz, when enabled (behaviour/)
 //   RemoteControl  EVENT IR_KEY -> actions, when enabled (remote/)
 //   HostServer   the laptop interface, when the platform has a Listener (net/)
+//   WalkRecorder every walk tick by tick, with storage from attach_recorder() (record/)
 //
-//   static Mind mind(serial, clock, platform_log, &listener, cfg);  // ~60 KB: static
+//   static Mind mind(serial, clock, platform_log, &listener, cfg);  // ~90 KB: static
+//   mind.attach_recorder(storage, record::kStoreBytes);  // the walk recorder's 8 MB, once
 //   mind.start();                // the port is open: HELLO_REQ
 //   for (;;) mind.poll();        // a few ms apart; never blocks
 //
@@ -49,6 +51,7 @@
 #include "planner/walker.h"
 #include "platform.h"
 #include "platform_net.h"
+#include "record/recorder.h"
 #include "remote/remote.h"
 #include "tricks/player.h"
 #include "util/logring.h"
@@ -87,6 +90,10 @@ class Mind final : public LinkListener {
   // A second LinkListener for the platform (statistics windows); the Mind
   // keeps the link's own.
   void set_tap(LinkListener* tap) { tap_ = tap; }
+  // Record every walk into this block (record::kStoreBytes, allocated once by
+  // the platform; it outlives the Mind), served to the laptop as WALK_LIST /
+  // WALK_FETCH. Before start(). Without it nothing is recorded.
+  void attach_recorder(uint8_t* storage, uint32_t bytes);
 
   LogRing& log() { return log_; }
   SerialLink& link() { return link_; }
@@ -95,6 +102,7 @@ class Mind final : public LinkListener {
   perception::Percepts& percepts() { return percepts_; }
   remote::RemoteControl& remote() { return remote_; }
   HostServer& host() { return host_; }
+  record::WalkRecorder& recorder() { return recorder_; }
   behaviour::Runner& runner() { return runner_; }
   bool behaviour_active() const { return behaviour_on_ && !runner_.stopped(); }
   bool poweroff_requested() const { return runner_.poweroff_requested(); }
@@ -172,6 +180,7 @@ class Mind final : public LinkListener {
   behaviour::Runner runner_;
   RunnerHook runner_hook_;
   remote::RemoteControl remote_;
+  record::WalkRecorder recorder_;
   LinkListener* tap_ = nullptr;
 
   // the snapshot's last EVENTs (BodyState.events)

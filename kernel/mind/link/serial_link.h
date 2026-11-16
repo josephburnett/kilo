@@ -67,6 +67,18 @@ class LinkListener {
   ~LinkListener() = default;
 };
 
+// Every frame the link handles, both ways, as it crossed the UART (the walk
+// recorder, record/recorder.h; Python: the KilologWriter the link writes
+// to). rx: a frame that decoded (CRC good), before the link acts on it; tx:
+// a frame written whole. now: the poll's time (rx), the write's (tx).
+class FrameTap {
+ public:
+  virtual void on_frame(bool tx, uint8_t type, uint8_t seq, const uint8_t* payload, uint8_t len, uint64_t now) = 0;
+
+ protected:
+  ~FrameTap() = default;
+};
+
 // The one command in flight (Python's _Pending plus request()'s result).
 enum class RequestState : uint8_t {
   Idle,      // none yet
@@ -95,6 +107,11 @@ class SerialLink {
   SerialLink(Serial& serial, Clock& clock, Log& log, const LinkConfig& cfg = LinkConfig());
 
   void set_listener(LinkListener* listener) { listener_ = listener; }
+  void set_frame_tap(FrameTap* tap) { tap_ = tap; }
+  // Where the lines that repeat many times a second go (EVENT IR_KEY of a
+  // held key): the Mind's LogRing::status(), so they do not flood its ring.
+  // Null (the default): the log the link was given.
+  void set_quiet_log(Log* quiet) { quiet_ = quiet; }
 
   // The port is open (Python _connect): ask who is there, hold motion goals
   // until the body is heard. The owner opens the device; the link calls
@@ -163,6 +180,8 @@ class SerialLink {
   Log& log_;
   LinkConfig cfg_;
   LinkListener* listener_ = nullptr;
+  FrameTap* tap_ = nullptr;
+  Log* quiet_ = nullptr;
 
   BodyState state_;
   LinkStats stats_ = {};

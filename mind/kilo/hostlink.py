@@ -16,12 +16,15 @@ in protocol/spec.toml ``[host]`` and ``[[host_messages]]``; the dataclasses
     hl.flash(image, manifest, on_status)        # P4: flash the body through the mind (controller)
     hl.update(kernel_image, progress=...)       # write a new mind kernel onto its SD card (controller)
     hl.reboot()                                 # restart the mind (controller): OK, then it goes away
+    hl.walks()                                  # [P.HostWalkInfo]: the walks the mind recorded (any client)
+    hl.fetch_walk(3, progress=...)              # walk 3's recording, bytes (WALK_FETCH, WALK_DATA)
     hl.close()                                  # the mind latches REST if this was the controller
 
 Every command gets exactly one reply carrying its seq (STATUS for
-STATUS_REQ, RESULT otherwise); ``command()`` raises ``HostRefused`` for a
-RESULT whose code is not OK. TELEM, LOG_LINE, BRIDGE_RX, FLASH_STATUS and
-UPDATE_STATUS arrive on the reader thread and go to the handlers.
+STATUS_REQ, WALK_INFO for WALK_LIST, RESULT otherwise); ``command()`` raises
+``HostRefused`` for a RESULT whose code is not OK. TELEM, LOG_LINE,
+BRIDGE_RX, FLASH_STATUS, UPDATE_STATUS and WALK_DATA arrive on the reader
+thread and go to the handlers.
 
 Every byte goes through the secure layer (kilo.hostsecure): the hello
 with this laptop's public key, the Noise KN handshake, then records. A
@@ -56,6 +59,8 @@ REBOOT_CLOSE_WAIT_S = 2.0
 # A whole kernel update after UPDATE_COMMIT: up to host.update_max_image (4 MB)
 # written to the SD card and read back. A 512 KB kernel takes seconds.
 UPDATE_TIMEOUT_S = 120.0
+# A walk download: no WALK_DATA for this long is a mind that stopped sending.
+WALK_IDLE_TIMEOUT_S = 5.0
 
 
 def has_kernel_marker(image: bytes) -> bool:
@@ -133,6 +138,8 @@ class HostLink:
         self.on_bridge: Callable[[bytes], None] | None = None
         self.on_flash: Callable[[Any], None] | None = None
         self.on_update: Callable[[Any], None] | None = None
+        self._walk: dict[str, Any] | None = None  # the download fetch_walk() runs
+        self.walk_store: Any = None  # the last WALK_INFO with found 0: the store's state
         self._flash_last: Any = None
         self._update_last: Any = None
         self._flash_cond = threading.Condition()
@@ -301,6 +308,75 @@ class HostLink:
                     raise HostError(f"no end of the update within {timeout:g} s")
                 self._flash_cond.wait(min(left, 0.2))
 
+    def walks(self) -> list[Any]:
+        """Every walk the mind has recorded, oldest first (P.HostWalkInfo with
+        found 1; each also carries the store's state). WALK_LIST, one walk a
+        request; the last answer (found 0) is kept as ``walk_store``. A mind
+        without a recorder: HostRefused (UNSUPPORTED, or UNKNOWN_TYPE from an
+        older mind)."""
+        out, after = [], 0
+        while True:
+            r = self.command(P.HostWalkList(after=after))
+            if not isinstance(r, P.HostWalkInfo):
+                raise HostError(f"WALK_LIST: unexpected reply {type(r).__name__}")
+            if not r.found:
+                self.walk_store = r
+                return out
+            out.append(r)
+            after = r.id
+
+    def fetch_walk(self, walk_id: int, progress: Callable[[int, int], None] | None = None,
+                   idle_timeout: float = WALK_IDLE_TIMEOUT_S) -> bytes:
+        """Walk ``walk_id``'s recording: its records (kilo.logs.walkrec reads
+        them). ``progress(received, total)`` after each chunk. Raises
+        HostRefused (BAD_ARG: no such walk, or still recording), HostError
+        (the mind dropped the walk meanwhile: GONE; a gap; no data for
+        ``idle_timeout`` s; the connection lost)."""
+        st: dict[str, Any] = {"id": walk_id, "buf": bytearray(), "total": None, "end": None, "error": None,
+                              "progress": progress, "last": time.monotonic()}
+        with self._flash_cond:
+            self._walk = st
+        try:
+            self.command(P.HostWalkFetch(id=walk_id, offset=0))
+            with self._flash_cond:
+                while st["end"] is None:
+                    if self._closed.is_set():
+                        raise HostError(self.error or "connection closed during the download")
+                    if time.monotonic() - st["last"] > idle_timeout:
+                        raise HostError(f"walk {walk_id}: no data for {idle_timeout:g} s "
+                                        f"({len(st['buf'])} of {st['total']} bytes)")
+                    self._flash_cond.wait(0.2)
+            if st["error"]:
+                raise HostError(st["error"])
+            return bytes(st["buf"])
+        finally:
+            with self._flash_cond:
+                self._walk = None
+
+    def _on_walk_data(self, m: Any) -> None:
+        with self._flash_cond:
+            st = self._walk
+            if st is None or m.id != st["id"] or st["end"] is not None:
+                return
+            st["last"] = time.monotonic()
+            st["total"] = m.total
+            if m.status == P.WalkDataStatus.GONE:
+                st["error"] = f"walk {m.id} was dropped from the mind's store during the download (it needed room)"
+                st["end"] = "gone"
+            elif m.offset != len(st["buf"]):
+                st["error"] = f"walk {m.id}: data at offset {m.offset}, expected {len(st['buf'])}"
+                st["end"] = "gap"
+            elif m.status == P.WalkDataStatus.END:
+                if m.total != len(st["buf"]):
+                    st["error"] = f"walk {m.id}: END after {len(st['buf'])} of {m.total} bytes"
+                st["end"] = "end"
+            else:
+                st["buf"] += m.data
+            self._flash_cond.notify_all()
+            cb, got = st["progress"], len(st["buf"])
+        if cb is not None and m.status == P.WalkDataStatus.DATA:
+            cb(got, m.total)
+
     def reboot(self) -> Any:
         """REBOOT (controller only: take control first): the RESULT OK, or
         HostRefused. The mind then restarts; see wait_closed()."""
@@ -386,6 +462,8 @@ class HostLink:
             with self._flash_cond:
                 self._flash_last = msg
                 self._flash_cond.notify_all()
+        elif isinstance(msg, P.HostWalkData):
+            self._on_walk_data(msg)
         elif isinstance(msg, P.HostUpdateStatus):
             if self.on_update is not None:
                 self.on_update(msg)

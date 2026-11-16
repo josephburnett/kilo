@@ -57,6 +57,8 @@ TESTS += test_update
 # P3: tricks, perception, behaviour, remote and the Mind (their block is at the end;
 # TESTS must be complete here, before `check:` reads it for its prerequisites).
 TESTS += test_tricks test_perception test_behaviour test_remote test_mind
+# The walk recorder (record/): its store, the recorder in the Mind, what the RAM log keeps.
+TESTS += test_record
 
 .PHONY: all check bench freestanding clean
 all: $(B)/kilo-mind-host $(B)/walk-demo
@@ -130,10 +132,14 @@ $(B)/bench_planner_double: tests/bench_planner.cpp $(BENCH_DBL_OBJS)
 # The host channel's Noise handshake and records (as the kernel's boot bench).
 $(B)/bench_noise: tests/bench_noise.cpp $(CORE_OBJS)
 	$(CXX) $(CXXFLAGS) $< $(CORE_OBJS) -o $@
-bench: $(B)/bench_planner $(B)/bench_planner_double $(B)/bench_noise
+# The walk recorder's per-tick cost and a host pass during a walk download.
+$(B)/bench_walks: tests/bench_walks.cpp $(CORE_OBJS)
+	$(CXX) $(CXXFLAGS) $< $(CORE_OBJS) -o $@
+bench: $(B)/bench_planner $(B)/bench_planner_double $(B)/bench_noise $(B)/bench_walks
 	$(B)/bench_planner
 	$(B)/bench_planner_double
 	$(B)/bench_noise
+	$(B)/bench_walks
 
 # ---- freestanding check -----------------------------------------------------
 # Only the compiler's own headers (stdint.h, stddef.h, stdarg.h), no libc's;
@@ -176,8 +182,8 @@ clean:
 # the drives' arousal decay needs exp, their optional gaussian noise log, sin
 # and cos (GCC fuses the pair into sincos). Circle links libm, which has them.
 ALLOWED += exp log sin cos sincos
-# The remote and the Mind use the planner's float types: the double-planner
-# builds (the vector test's twin, the bench) leave them out (their recipes
-# expand these at run time).
-DBL_OBJS := $(filter-out $(B)/san/mind/remote/% $(B)/san/mind/mind.o,$(DBL_OBJS))
-BENCH_DBL_OBJS := $(filter-out $(B)/obj/mind/remote/% $(B)/obj/mind/mind.o,$(BENCH_DBL_OBJS))
+# The remote, the walk recorder and the Mind use the planner's float types:
+# the double-planner builds (the vector test's twin, the bench) leave them out
+# (their recipes expand these at run time).
+DBL_OBJS := $(filter-out $(B)/san/mind/remote/% $(B)/san/mind/record/recorder.o $(B)/san/mind/mind.o,$(DBL_OBJS))
+BENCH_DBL_OBJS := $(filter-out $(B)/obj/mind/remote/% $(B)/obj/mind/record/recorder.o $(B)/obj/mind/mind.o,$(BENCH_DBL_OBJS))

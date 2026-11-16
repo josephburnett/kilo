@@ -62,3 +62,8 @@ MIND_SRCS += \
 	mind/remote/keys.cpp \
 	mind/remote/remote.cpp \
 	mind/mind.cpp
+
+# Walk recordings (record/): every walk tick by tick in RAM, for WALK_LIST / WALK_FETCH.
+MIND_SRCS += \
+	mind/record/store.cpp \
+	mind/record/recorder.cpp

@@ -328,6 +328,20 @@ class UpdateError(enum.IntEnum):
     CARD_BROKEN = 9
 
 
+class WalkDataStatus(enum.IntEnum):
+    DATA = 0
+    END = 1
+    GONE = 2
+
+
+class WalkRecord(enum.IntEnum):
+    RX = 1
+    TX = 2
+    PLAN = 3
+    PLANNER = 4
+    MARK = 5
+
+
 class TelemetryFlags(enum.IntFlag):
     BALANCE_ACTIVE = 1 << 0
     IMU_FAULT = 1 << 1
@@ -404,6 +418,13 @@ class UpdateFlags(enum.IntFlag):
     FORCE = 1 << 0
 
 
+class WalkFlags(enum.IntFlag):
+    RECORDING = 1 << 0
+    ENDED_OK = 1 << 1
+    TRUNCATED = 1 << 2
+    STREAMED = 1 << 3
+
+
 LEN_OK = 0
 LEN_BAD = 1
 LEN_UNKNOWN_TYPE = 2
@@ -469,6 +490,141 @@ class Note:
         kw: dict = {}
         kw['note'] = v[0]
         kw['dur_10ms'] = v[1]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        if len(data) != cls._FMT.size:
+            raise PayloadError(f'{cls.__name__}: length {len(data)} != {cls._FMT.size}')
+        return cls._from_fixed(cls._FMT.unpack(bytes(data)))
+
+
+@dataclass
+class WalkRecordHeader:
+    SIZE: ClassVar[int] = 6
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BBI')
+    kind: int = 0  # enum walk_record
+    len: int = 0  # B; payload bytes after this header
+    t_us: int = 0  # us; mind time since the walk's t0 (its first MARK: t0_us)
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.kind)
+        v.append(self.len)
+        v.append(self.t_us)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['kind'] = v[0]
+        kw['len'] = v[1]
+        kw['t_us'] = v[2]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        if len(data) != cls._FMT.size:
+            raise PayloadError(f'{cls.__name__}: length {len(data)} != {cls._FMT.size}')
+        return cls._from_fixed(cls._FMT.unpack(bytes(data)))
+
+
+@dataclass
+class WalkPlan:
+    SIZE: ClassVar[int] = 17
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<IBBBhhhhh')
+    tick: int = 0  # tick; the body tick, unwrapped (FEET.tick is its low 16 bits)
+    sent: int = 0  # 1 = written as FEET; 0 = already past when planned (skipped), or the link did not take it
+    lifting: int = 0  # bit i: leg i in the air (swinging) this tick
+    support: int = 0  # flags support_flags: the feet on the ground
+    margin: int = 0  # 0.1 mm; the centre of mass inside the polygon of the feet down (- = outside); -32768 = none. The planner's min_margin counts ticks with one leg up only
+    plan_pitch: int = 0  # a16; the attitude these feet give, no servo lag
+    plan_roll: int = 0  # a16
+    pitch: int = 0  # a16; predicted at this tick, servo lag included (FEET.pitch before its clamp)
+    roll: int = 0  # a16
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.tick)
+        v.append(self.sent)
+        v.append(self.lifting)
+        v.append(self.support)
+        v.append(self.margin)
+        v.append(self.plan_pitch)
+        v.append(self.plan_roll)
+        v.append(self.pitch)
+        v.append(self.roll)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['tick'] = v[0]
+        kw['sent'] = v[1]
+        kw['lifting'] = v[2]
+        kw['support'] = v[3]
+        kw['margin'] = v[4]
+        kw['plan_pitch'] = v[5]
+        kw['plan_roll'] = v[6]
+        kw['pitch'] = v[7]
+        kw['roll'] = v[8]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        if len(data) != cls._FMT.size:
+            raise PayloadError(f'{cls.__name__}: length {len(data)} != {cls._FMT.size}')
+        return cls._from_fixed(cls._FMT.unpack(bytes(data)))
+
+
+@dataclass
+class WalkPlanner:
+    SIZE: ClassVar[int] = 18
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<IIIIh')
+    tick: int = 0  # tick; the tick being planned
+    holds: int = 0  # ticks a lift waited because the body was off the plan by more than gate_deg
+    catches: int = 0  # swinging legs landed at once: the body tipped toward them by catch_deg
+    waits: int = 0  # ticks a slot waited for its lean's solve to finish
+    min_margin: int = 0  # 0.1 mm; the smallest margin so far; -32768 = none yet
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.tick)
+        v.append(self.holds)
+        v.append(self.catches)
+        v.append(self.waits)
+        v.append(self.min_margin)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['tick'] = v[0]
+        kw['holds'] = v[1]
+        kw['catches'] = v[2]
+        kw['waits'] = v[3]
+        kw['min_margin'] = v[4]
         kw.update(extra)
         return cls(**kw)
 
@@ -2844,6 +3000,11 @@ HOST_FLASH_BAUD = 115200
 HOST_UPDATE_MAX_IMAGE = 4194304
 HOST_UPDATE_CHUNK_MAX = 200
 HOST_UPDATE_MARKER = 'KILO-MIND-KERNEL-1'
+HOST_WALK_FORMAT = 1
+HOST_WALK_TEXT_MAX = 120
+HOST_WALK_CHUNK_MAX = 200
+HOST_WALK_PREROLL_MS = 2000
+HOST_WALK_POSTROLL_MS = 2000
 
 
 class HostMsgId(enum.IntEnum):
@@ -2865,11 +3026,15 @@ class HostMsgId(enum.IntEnum):
     UPDATE_BEGIN = 0x48
     UPDATE_DATA = 0x49
     UPDATE_COMMIT = 0x4A
+    WALK_LIST = 0x50
+    WALK_FETCH = 0x51
     RESULT = 0x80
     STATUS = 0x81
     TELEM = 0x82
     LOG_LINE = 0x83
     BRIDGE_RX = 0x84
+    WALK_INFO = 0x85
+    WALK_DATA = 0x86
     FLASH_STATUS = 0xC0
     UPDATE_STATUS = 0xC1
 
@@ -3619,6 +3784,89 @@ class HostUpdateCommit:
 
 
 @dataclass
+class HostWalkList:
+    """host 0x50 WALK_LIST (command). Answered by WALK_INFO: the oldest recorded walk with an id above `after` (0: the oldest kept), or found 0. Any client; a client lists every walk by asking again with the id it got."""
+    ID: ClassVar[int] = 0x50
+    NAME: ClassVar[str] = 'WALK_LIST'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = True
+    REPLY: ClassVar[int | None] = 0x85
+    MIN_LEN: ClassVar[int] = 4
+    MAX_LEN: ClassVar[int] = 4
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<I')
+    after: int = 0  # a walk id; 0 = from the oldest
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.after)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['after'] = v[0]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostWalkFetch:
+    """host 0x51 WALK_FETCH (command). Send walk `id`'s recording to this client from `offset`, as WALK_DATA frames, as fast as its connection takes them (never more than host.walk_chunk_max a frame, a few frames a pass; one a pass while a walk is being recorded). RESULT OK, then the data, then one WALK_DATA END (or GONE). BAD_ARG: no such walk, or it is still RECORDING, or offset past its end. id 0 stops this client's fetch (RESULT OK). A new WALK_FETCH replaces the one running. Any client."""
+    ID: ClassVar[int] = 0x51
+    NAME: ClassVar[str] = 'WALK_FETCH'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 8
+    MAX_LEN: ClassVar[int] = 8
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<II')
+    id: int = 0
+    offset: int = 0  # B; bytes of the recording already received (a resumed fetch)
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.id)
+        v.append(self.offset)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['id'] = v[0]
+        kw['offset'] = v[1]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
 class HostResult:
     """host 0x80 RESULT (event). The answer to a command without a reply message of its own, and to any refused command: its seq, its type, a code and a short reason."""
     ID: ClassVar[int] = 0x80
@@ -3900,6 +4148,142 @@ class HostBridgeRx:
 
 
 @dataclass
+class HostWalkInfo:
+    """host 0x85 WALK_INFO (event). One recorded walk (found 1) and the store's state. text: ASCII `gait=NAME dir=NAME speed=MM_S end=REASON`, end last (the reason may hold spaces; empty while recording)."""
+    ID: ClassVar[int] = 0x85
+    NAME: ClassVar[str] = 'WALK_INFO'
+    KIND: ClassVar[Kind] = Kind.EVENT
+    DIR: ClassVar[str] = 'mind_to_client'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 48
+    MAX_LEN: ClassVar[int] = 168
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BHIIIIIIIIIIIB')
+    found: int = 0  # 0: no walk after `after` (the fields below the store's are zero)
+    kept: int = 0  # walks in the store now
+    recording: int = 0  # the id being recorded now, 0 = none
+    capacity: int = 0  # B; the store's bytes for records
+    used: int = 0  # B
+    dropped_walks: int = 0  # oldest walks dropped to make room, since the mind started
+    dropped_records: int = 0  # records lost by walks that outgrew the store (TRUNCATED)
+    id: int = 0  # 1.. in the order recorded, since the mind started
+    start_ms: int = 0  # ms; mind uptime at the walk's setup
+    duration_ms: int = 0  # ms; setup to the end (so far, while recording)
+    bytes: int = 0  # B; the recording's size: what WALK_FETCH sends
+    records: int = 0
+    feet: int = 0  # FEET frames sent
+    flags: int = 0  # flags walk_flags
+    text: bytes = b''  # 0..120 B
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.found)
+        v.append(self.kept)
+        v.append(self.recording)
+        v.append(self.capacity)
+        v.append(self.used)
+        v.append(self.dropped_walks)
+        v.append(self.dropped_records)
+        v.append(self.id)
+        v.append(self.start_ms)
+        v.append(self.duration_ms)
+        v.append(self.bytes)
+        v.append(self.records)
+        v.append(self.feet)
+        v.append(self.flags)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['found'] = v[0]
+        kw['kept'] = v[1]
+        kw['recording'] = v[2]
+        kw['capacity'] = v[3]
+        kw['used'] = v[4]
+        kw['dropped_walks'] = v[5]
+        kw['dropped_records'] = v[6]
+        kw['id'] = v[7]
+        kw['start_ms'] = v[8]
+        kw['duration_ms'] = v[9]
+        kw['bytes'] = v[10]
+        kw['records'] = v[11]
+        kw['feet'] = v[12]
+        kw['flags'] = v[13]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        tail = bytes(self.text)
+        if not 0 <= len(tail) <= 120:
+            raise PayloadError('text: 0..120 bytes, got %d' % len(tail))
+        try:
+            return self._FMT.pack(*self._fixed_values()) + tail
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data[:48]), text=data[48:])
+
+
+@dataclass
+class HostWalkData:
+    """host 0x86 WALK_DATA (stream). Part of a walk's recording, to the client that sent WALK_FETCH: the records (walk_record_header, then the payload) as bytes, offset counting from the recording's first byte. The last one is END (or GONE: the store dropped the walk; fetch it again, it is not there any more)."""
+    ID: ClassVar[int] = 0x86
+    NAME: ClassVar[str] = 'WALK_DATA'
+    KIND: ClassVar[Kind] = Kind.STREAM
+    DIR: ClassVar[str] = 'mind_to_client'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 13
+    MAX_LEN: ClassVar[int] = 213
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<IIIB')
+    id: int = 0
+    offset: int = 0  # B
+    total: int = 0  # B; the recording's size
+    status: int = 0  # enum walk_data_status
+    data: bytes = b''  # 0..200 B
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.id)
+        v.append(self.offset)
+        v.append(self.total)
+        v.append(self.status)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['id'] = v[0]
+        kw['offset'] = v[1]
+        kw['total'] = v[2]
+        kw['status'] = v[3]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        tail = bytes(self.data)
+        if not 0 <= len(tail) <= 200:
+            raise PayloadError('data: 0..200 bytes, got %d' % len(tail))
+        try:
+            return self._FMT.pack(*self._fixed_values()) + tail
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data[:13]), data=data[13:])
+
+
+@dataclass
 class HostFlashStatus:
     """host 0xC0 FLASH_STATUS (stream). Progress of a flash, to the client that committed it: on every phase change and page, last DONE or FAILED."""
     ID: ClassVar[int] = 0xC0
@@ -4043,11 +4427,15 @@ HOST_MESSAGES: dict[int, type] = {
     0x48: HostUpdateBegin,
     0x49: HostUpdateData,
     0x4A: HostUpdateCommit,
+    0x50: HostWalkList,
+    0x51: HostWalkFetch,
     0x80: HostResult,
     0x81: HostStatus,
     0x82: HostTelem,
     0x83: HostLogLine,
     0x84: HostBridgeRx,
+    0x85: HostWalkInfo,
+    0x86: HostWalkData,
     0xC0: HostFlashStatus,
     0xC1: HostUpdateStatus,
 }
@@ -4092,6 +4480,10 @@ def host_payload_len_status(msg_type: int, payload: bytes) -> int:
         return LEN_OK if 5 <= n <= 204 else LEN_BAD
     if msg_type == 0x4A:
         return LEN_OK if n == 0 else LEN_BAD
+    if msg_type == 0x50:
+        return LEN_OK if n == 4 else LEN_BAD
+    if msg_type == 0x51:
+        return LEN_OK if n == 8 else LEN_BAD
     if msg_type == 0x80:
         return LEN_OK if 2 <= n <= 62 else LEN_BAD
     if msg_type == 0x81:
@@ -4102,6 +4494,10 @@ def host_payload_len_status(msg_type: int, payload: bytes) -> int:
         return LEN_OK if 9 <= n <= 168 else LEN_BAD
     if msg_type == 0x84:
         return LEN_OK if 1 <= n <= 200 else LEN_BAD
+    if msg_type == 0x85:
+        return LEN_OK if 48 <= n <= 168 else LEN_BAD
+    if msg_type == 0x86:
+        return LEN_OK if 13 <= n <= 213 else LEN_BAD
     if msg_type == 0xC0:
         return LEN_OK if n == 21 else LEN_BAD
     if msg_type == 0xC1:

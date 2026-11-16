@@ -1243,6 +1243,30 @@ not_held = -32768
 # other (FLASHING, UPDATING); while the update writes, POSTURE, PARAM_SET,
 # REBOOT and the bridge get UPDATING.
 #
+# Walk recordings (kernel/mind/record/): the mind keeps, in RAM, every walk
+# since it started: each body link frame both ways (TELEMETRY, EVENT, JOINTS
+# in; FEET, goals, commands, HEARTBEAT out) from host.walk_preroll_ms before
+# the walk's setup to host.walk_postroll_ms after its end, each planned tick
+# (walk_plan), the planner's counters when they move (walk_planner), and
+# MARK lines: the walk's parameters at its start (pattern, speeds, the
+# planner config, the body model), every change, the end (reason, counters,
+# the error tracker's estimate). Each record is a walk_record_header (kind,
+# len, t_us since the walk's t0) and its payload; host.walk_format numbers
+# that layout. When the store is full the oldest whole walks go (counted in
+# WALK_INFO.dropped_walks); a walk that alone outgrows it keeps its start and
+# its end and drops what came between (TRUNCATED). WALK_LIST lists them, one
+# per request; WALK_FETCH streams one in WALK_DATA chunks that wait for room
+# in the client's send ring (a slow laptop slows the download, never the
+# link). Any client may list and fetch (they only read); nothing survives a
+# power cut (kernel/README.md "Walk recordings": the SD card is not written).
+# A walk being recorded is not fetchable (RECORDING), and while one is
+# recorded a download goes at one chunk a pass.
+#
+# Version: host.version changes when a message's layout or meaning changes.
+# New message types do not bump it: a mind without them answers RESULT
+# UNKNOWN_TYPE, which a client reports as "not supported by this mind"
+# (WALK_* came after version 2 so).
+#
 # Addressing (decided in P2): on a direct cable nothing serves DHCP. The mind
 # asks DHCP for host.dhcp_timeout_ms; with no lease it takes the fixed
 # link-local address host.fallback_ip/host.fallback_prefix (169.254.75.73,
@@ -1278,6 +1302,11 @@ flash_baud = 115200            # optiboot's UART rate (the link's is link.baud)
 update_max_image = 4194304     # B: the largest mind kernel UPDATE_BEGIN.image_size may give (the Circle kernel's buffer, 4 MB)
 update_chunk_max = 200         # UPDATE_DATA data bytes per frame (as FLASH_DATA)
 update_marker = "KILO-MIND-KERNEL-1"  # must be in an image UPDATE_COMMIT installs unless FORCE: the mind kernel embeds it (kernel/src/kernel.cpp), the netboot loader does not
+walk_format = 1                # the walk recording's record layout (WALK_DATA bytes; the first MARK says "walk ... format=1"); bump on any change
+walk_text_max = 120            # WALK_INFO text bytes
+walk_chunk_max = 200           # WALK_DATA data bytes per frame
+walk_preroll_ms = 2000         # a recording starts with this much of the link's traffic before the walk's setup
+walk_postroll_ms = 2000        # ... and runs on this long after the walk ended
 
 [enums.host_result_code]       # RESULT.code
 OK = 0
@@ -1378,6 +1407,53 @@ CARD_BROKEN = 9                # kernel7.img moved away, the new one not install
 
 [flags.update_flags]           # UPDATE_BEGIN.flags
 FORCE = 0                      # skip the host.update_marker check: install any image (e.g. the netboot loader back)
+
+[flags.walk_flags]             # WALK_INFO.flags
+RECORDING = 0                  # still being recorded (the walk, or its host.walk_postroll_ms): not fetchable yet
+ENDED_OK = 1                   # the walk ended as asked (the planned stop, the remote's freeze)
+TRUNCATED = 2                  # it outgrew the store: records after the store filled were dropped (its end is kept)
+STREAMED = 3                   # FEET went out (else it ended in its setup)
+
+[enums.walk_data_status]       # WALK_DATA.status
+DATA = 0                       # data at offset
+END = 1                        # no data: offset == total, the whole walk is sent
+GONE = 2                       # no data: the walk was dropped (the store needed room) before it was all sent
+
+[enums.walk_record]            # walk_record_header.kind: the records of a walk recording
+RX = 1                         # a body link frame the mind received: type u8, seq u8, then its payload
+TX = 2                         # a body link frame the mind wrote (FEET, goals, commands, HEARTBEAT): type, seq, payload
+PLAN = 3                       # walk_plan: one tick the planner planned, sent as FEET or skipped
+PLANNER = 4                    # walk_planner: the planner's hold, catch or wait counters moved
+MARK = 5                       # ASCII "word key=value ...": walk, setup, stream, config, model, change, stop, end, result
+
+[structs.walk_record_header]   # 6 B before each record's payload (WALK_DATA's bytes are these records, in order)
+fields = [
+  { name = "kind", type = "u8", note = "enum walk_record" },
+  { name = "len", type = "u8", unit = "B", note = "payload bytes after this header" },
+  { name = "t_us", type = "u32", unit = "us", note = "mind time since the walk's t0 (its first MARK: t0_us)" },
+]
+
+[structs.walk_plan]            # 17 B: PLAN, what the planner made of one tick (the FEET frame carries the rest)
+fields = [
+  { name = "tick", type = "u32", unit = "tick", note = "the body tick, unwrapped (FEET.tick is its low 16 bits)" },
+  { name = "sent", type = "u8", note = "1 = written as FEET; 0 = already past when planned (skipped), or the link did not take it" },
+  { name = "lifting", type = "u8", note = "bit i: leg i in the air (swinging) this tick" },
+  { name = "support", type = "u8", note = "flags support_flags: the feet on the ground" },
+  { name = "margin", type = "i16", unit = "0.1 mm", note = "the centre of mass inside the polygon of the feet down (- = outside); -32768 = none. The planner's min_margin counts ticks with one leg up only" },
+  { name = "plan_pitch", type = "i16", unit = "a16", note = "the attitude these feet give, no servo lag" },
+  { name = "plan_roll", type = "i16", unit = "a16" },
+  { name = "pitch", type = "i16", unit = "a16", note = "predicted at this tick, servo lag included (FEET.pitch before its clamp)" },
+  { name = "roll", type = "i16", unit = "a16" },
+]
+
+[structs.walk_planner]         # 18 B: PLANNER, written when a counter moved (at most once per planned tick)
+fields = [
+  { name = "tick", type = "u32", unit = "tick", note = "the tick being planned" },
+  { name = "holds", type = "u32", note = "ticks a lift waited because the body was off the plan by more than gate_deg" },
+  { name = "catches", type = "u32", note = "swinging legs landed at once: the body tipped toward them by catch_deg" },
+  { name = "waits", type = "u32", note = "ticks a slot waited for its lean's solve to finish" },
+  { name = "min_margin", type = "i16", unit = "0.1 mm", note = "the smallest margin so far; -32768 = none yet" },
+]
 
 [structs.host_link_stats]      # 80 B: the mind's link counters (kernel/mind/link/stats.h; kilo/body/state.py LinkStats)
 fields = [
@@ -1589,6 +1665,28 @@ doc = "Check the received image (size, CRC-32, and unless FORCE host.update_mark
 fields = []
 
 [[host_messages]]
+name = "WALK_LIST"
+id = 0x50
+dir = "client_to_mind"
+kind = "command"
+query = true
+doc = "Answered by WALK_INFO: the oldest recorded walk with an id above `after` (0: the oldest kept), or found 0. Any client; a client lists every walk by asking again with the id it got."
+fields = [
+  { name = "after", type = "u32", note = "a walk id; 0 = from the oldest" },
+]
+
+[[host_messages]]
+name = "WALK_FETCH"
+id = 0x51
+dir = "client_to_mind"
+kind = "command"
+doc = "Send walk `id`'s recording to this client from `offset`, as WALK_DATA frames, as fast as its connection takes them (never more than host.walk_chunk_max a frame, a few frames a pass; one a pass while a walk is being recorded). RESULT OK, then the data, then one WALK_DATA END (or GONE). BAD_ARG: no such walk, or it is still RECORDING, or offset past its end. id 0 stops this client's fetch (RESULT OK). A new WALK_FETCH replaces the one running. Any client."
+fields = [
+  { name = "id", type = "u32" },
+  { name = "offset", type = "u32", unit = "B", note = "bytes of the recording already received (a resumed fetch)" },
+]
+
+[[host_messages]]
 name = "RESULT"
 id = 0x80
 dir = "mind_to_client"
@@ -1663,6 +1761,45 @@ kind = "stream"
 doc = "Bytes the body's UART received, to the controller while the bridge is open."
 fields = [
   { name = "data", type = "bytes", min = 1, max = 200 },
+]
+
+[[host_messages]]
+name = "WALK_INFO"
+id = 0x85
+dir = "mind_to_client"
+kind = "event"
+reply_to = "WALK_LIST"
+doc = "One recorded walk (found 1) and the store's state. text: ASCII `gait=NAME dir=NAME speed=MM_S end=REASON`, end last (the reason may hold spaces; empty while recording)."
+fields = [
+  { name = "found", type = "u8", note = "0: no walk after `after` (the fields below the store's are zero)" },
+  { name = "kept", type = "u16", note = "walks in the store now" },
+  { name = "recording", type = "u32", note = "the id being recorded now, 0 = none" },
+  { name = "capacity", type = "u32", unit = "B", note = "the store's bytes for records" },
+  { name = "used", type = "u32", unit = "B" },
+  { name = "dropped_walks", type = "u32", note = "oldest walks dropped to make room, since the mind started" },
+  { name = "dropped_records", type = "u32", note = "records lost by walks that outgrew the store (TRUNCATED)" },
+  { name = "id", type = "u32", note = "1.. in the order recorded, since the mind started" },
+  { name = "start_ms", type = "u32", unit = "ms", note = "mind uptime at the walk's setup" },
+  { name = "duration_ms", type = "u32", unit = "ms", note = "setup to the end (so far, while recording)" },
+  { name = "bytes", type = "u32", unit = "B", note = "the recording's size: what WALK_FETCH sends" },
+  { name = "records", type = "u32" },
+  { name = "feet", type = "u32", note = "FEET frames sent" },
+  { name = "flags", type = "u8", flags = "walk_flags" },
+  { name = "text", type = "bytes", min = 0, max = 120 },
+]
+
+[[host_messages]]
+name = "WALK_DATA"
+id = 0x86
+dir = "mind_to_client"
+kind = "stream"
+doc = "Part of a walk's recording, to the client that sent WALK_FETCH: the records (walk_record_header, then the payload) as bytes, offset counting from the recording's first byte. The last one is END (or GONE: the store dropped the walk; fetch it again, it is not there any more)."
+fields = [
+  { name = "id", type = "u32" },
+  { name = "offset", type = "u32", unit = "B" },
+  { name = "total", type = "u32", unit = "B", note = "the recording's size" },
+  { name = "status", type = "u8", enum = "walk_data_status" },
+  { name = "data", type = "bytes", min = 0, max = 200 },
 ]
 
 [[host_messages]]
