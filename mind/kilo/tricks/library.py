@@ -1,8 +1,9 @@
-"""The first-version trick library (§5), stored as JSON in tricks/library/.
+"""The trick library, stored as JSON in tricks/library/.
 
-The files are generated from src/InstinctNybble.h by
-`python -m kilo.tricks.import_legacy` and committed; edit the importer (or
-author new tricks by hand), not the generated files.
+The first-version tricks (§5) are generated from src/InstinctNybble.h by
+`python -m kilo.tricks.import_legacy`; the authored ones (AUTHORED) by
+their design modules (`python -m kilo.tricks.rear_up`). The files are
+committed; edit the importer or the design module, not the JSON.
 """
 
 from __future__ import annotations
@@ -33,6 +34,11 @@ FIRST_VERSION = {
 }
 LEGACY_ALIASES = {legacy: name for name, legacy in FIRST_VERSION.items()}
 
+# Tricks written for Kilo (no legacy skill): name -> the module that generates the JSON.
+AUTHORED = {
+    "rear_up": "kilo.tricks.rear_up",
+}
+
 
 def path_for(name: str) -> Path:
     return LIBRARY_DIR / f"{name}.json"
@@ -40,11 +46,16 @@ def path_for(name: str) -> Path:
 
 def resolve(name: str) -> str:
     """Kilo name for `name`, which may also be a legacy token (`up`, `wsf`)."""
-    if name in FIRST_VERSION:
+    if name in FIRST_VERSION or name in AUTHORED:
         return name
     if name in LEGACY_ALIASES:
         return LEGACY_ALIASES[name]
     raise KeyError(f"no trick {name!r} in the library")
+
+
+def legacy_name(name: str) -> str:
+    """The legacy token of a library trick ("" for an authored one)."""
+    return FIRST_VERSION.get(resolve(name), "")
 
 
 def load(name: str) -> Trick:
@@ -52,8 +63,9 @@ def load(name: str) -> Trick:
 
 
 def names() -> list[str]:
-    return list(FIRST_VERSION)
+    """Every trick: the first version (§5 order), then the authored ones."""
+    return list(FIRST_VERSION) + list(AUTHORED)
 
 
 def load_all() -> dict[str, Trick]:
-    return {n: load(n) for n in FIRST_VERSION}
+    return {n: load(n) for n in names()}
