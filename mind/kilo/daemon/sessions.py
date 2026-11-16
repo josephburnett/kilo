@@ -29,9 +29,8 @@ Balance by default (``--balance [KP]``, off by default; the owner's request
 2026-10-11: Kilo wakes up balancing). The daemon latches SET_BALANCE enable
 with the default gains (Kp as given, default kilo.body.client.BALANCE_KP)
 at start and after a port release, owned by nobody like the idle latch. A
-client's balance hold that ends goes back to the default (on) instead of off;
-the remote's CH+ key toggles it off until the next CH+ or the next client
-hold that ends. ``daemon`` reports ``balance_default`` (the Kp, or None).
+client's balance hold that ends goes back to the default (on) instead of off
+(the remote has no balance key since 2026-11-15). ``daemon`` reports ``balance_default`` (the Kp, or None).
 SET_BALANCE is not an epoch goal on the mind's side (the link keeps it
 latched and refreshes it at 5 Hz across a reboot or an epoch bump), but the
 body clears ``bal.enable`` on every epoch bump (body.cpp ``body_epoch_bump``,

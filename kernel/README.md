@@ -624,8 +624,8 @@ pull the Pi's power; on the production card, the mind kernel again. The
 CLI prints `REBOOT: OK (rebooting)`; a Pi that reboots sends no FIN, so
 the CLI waits 2 s for a close and is done either way. Params (`PARAM_*`) answer
 UNSUPPORTED. There is still no walk or trick command over `--host`: walks
-and tricks come from the IR remote (and from the behaviour runner when it
-is built in). A laptop client holding control (`kilo posture`) silences
+come from the IR remote, tricks only from the behaviour runner (built in,
+or started by the remote's A5). A laptop client holding control (`kilo posture`) silences
 the remote and pauses the runner meanwhile. A walk the raw bridge or a
 flash cut off is aborted when the pause ends.
 
@@ -744,8 +744,8 @@ no settings file on the card, so they are compiled in (`src/kernel.cpp`):
 | `mind_build` | `KILO_BUILD` | `STATUS.mind_build`, the commit's 8 hex digits |
 | `remote` | on | `--remote`: the IR remote drives Kilo; logged `IR remote on` |
 | `balance_kp` | 0.99 | `--balance 0.99`: SET_BALANCE on at start, logged `balance on by default (Kp 253/256)` |
-| `behaviour` | off; `make -C kernel KILO_BEHAVIOUR=1` turns it on | the daemon's default. With it on, the remote is ignored while the runner is active, and the kernel logs `Kilo mind, build ... (behaviour runner on)` |
-| `seed` | 32 bits from the hardware RNG | the behaviour runner logs it (`seed N`), so a run can be replayed on the laptop |
+| `behaviour` | off; `make -C kernel KILO_BEHAVIOUR=1` turns it on | the daemon's default; the remote's A5 starts the runner at run time either way. While it runs, the remote's keys other than B6, A7 and C7 (which stop it) are ignored. Built in, the kernel logs `Kilo mind, build ... (behaviour runner on)` |
+| `seed` | 32 bits from the hardware RNG | the behaviour runner logs it (`seed N`, at boot or in the remote's A5 line), so a run can be replayed on the laptop |
 | `stats_period_ms` | 1000 | a STATS_REQ to the body each second, logged `body STATS: ...`, as `kilo-mind-host` does |
 
 The runner's wind-down ends in a poweroff, which the daemon ran through

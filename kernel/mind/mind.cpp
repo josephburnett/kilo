@@ -3,6 +3,7 @@
 #include "remote/client.h"
 #include "remote/keys.h"
 #include "tricks/library.h"
+#include "util/fmt.h"
 #include "util/log.h"
 #include "util/mem.h"
 
@@ -33,8 +34,10 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
       player_(link_, clock, log_),
       body_(*this),
       runner_(body_, personality(cfg), log_, cfg.seed),
-      remote_(link_, walker_, player_, clock, log_, cfg.remote_cfg) {
+      runner_hook_(*this),
+      remote_(link_, walker_, player_, clock, log_) {
   link_.set_listener(this);
+  remote_.set_behaviour(&runner_hook_);
   if (cfg.random != nullptr) host_.set_keys(cfg.authorized_keys, cfg.authorized_key_count, *cfg.random);
   runner_.set_clock(seconds, this);
   runner_.set_percept_source(&body_);
@@ -49,6 +52,8 @@ void Mind::start() {
     logf(log_, LogLevel::Info, "balance on by default (Kp %d/256)%s", (int)(cfg_.balance_kp * 256 + 0.5),
          ok ? "" : ": refused");
   }
+  behaviour_on_ = cfg_.behaviour;
+  runner_started_us_ = started_us_;
   if (cfg_.behaviour)
     logf(log_, LogLevel::Info, "behaviour runner: seed %u, personality %s", (unsigned)cfg_.seed,
          personality(cfg_).name);
@@ -60,7 +65,7 @@ bool Mind::liveness(uint64_t now) {
   if (!behaviour_active()) return true;
   double last;
   bool ok;
-  if (!runner_.last_tick(&last)) ok = now - started_us_ < kRunnerStartGraceUs;
+  if (!runner_.last_tick(&last)) ok = now - runner_started_us_ < kRunnerStartGraceUs;
   else ok = (double)now / 1e6 - last < (double)kRunnerStallUs / 1e6;
   if (ok != stamping_)
     logf(log_, LogLevel::Warn, ok ? "behaviour runner ticking again: stamping liveness"
@@ -89,7 +94,7 @@ void Mind::poll() {
   walker_.poll();
   player_.poll();
   if (cfg_.remote) remote_.poll();
-  if (cfg_.behaviour) runner_.poll((double)clock_.now_us() / 1e6);
+  if (behaviour_on_) runner_.poll((double)clock_.now_us() / 1e6);
 }
 
 void Mind::stats(uint64_t now) {
@@ -170,12 +175,12 @@ void Mind::ir_key(const kilo_event_t& e) {
   char text[48];
   remote::describe(arg, text, sizeof text);
   const remote::Key* key = remote::action_for(arg);
-  if (key == nullptr) {
+  if (key == nullptr) {  // a held-key repeat or another remote's key
     logf(log_, LogLevel::Debug, "remote %s: ignored", text);
     return;
   }
-  if (behaviour_active()) {
-    logf(log_, LogLevel::Info, "remote %s: ignored (behaviour runner active)", text);
+  if (key->kind == remote::Kind::Ignore) {  // rows 1-3
+    logf(log_, LogLevel::Info, "remote %s: ignored (no action on this key)", text);
     return;
   }
   if (host_controls()) {
@@ -184,6 +189,26 @@ void Mind::ir_key(const kilo_event_t& e) {
   }
   remote_.perform(*key, arg);
 }
+
+// ---- the behaviour runner, as the remote starts and stops it --------------------------------
+
+bool Mind::RunnerHook::start(const char** what) {
+  Mind& m = m_;
+  *what = nullptr;
+  if (m.behaviour_active()) return true;
+  if (m.runner_.poweroff_requested()) {
+    *what = "the wind-down asked for poweroff";
+    return false;
+  }
+  if (m.behaviour_on_) m.runner_.restart();  // stopped before (by the remote): a fresh run
+  m.behaviour_on_ = true;
+  m.runner_started_us_ = m.clock_.now_us();
+  format(what_, sizeof what_, "seed %u, personality %s", (unsigned)m.cfg_.seed, personality(m.cfg_).name);
+  *what = what_;  // in the remote's line (one line per key)
+  return true;
+}
+
+void Mind::RunnerHook::stop() { m_.runner_.stop(); }
 
 // ---- the behaviour layer's body -------------------------------------------------------------
 

@@ -80,7 +80,14 @@ class Runner {
   const TickRecord& step();
   // Tick when due on the hz grid; true when it ticked. now in seconds.
   bool poll(double now);
-  void stop() { stopped_ = true; }
+  // Stop ticking; the running behaviour is halted (its trick cancelled), as
+  // run()'s finally does in Python.
+  void stop();
+  // After stop(): tick again from a fresh start (the IR remote's A5). The
+  // drives and the RNG go on; the cached goals are forgotten (re-asserted),
+  // the body's events so far count as seen, and last_tick() is false until
+  // the first tick of the new run. Not after a wind-down's poweroff.
+  void restart();
   // Ask for a clean wind-down (rest, then poweroff).
   void request_shutdown() { ctx_.data.shutdown_requested = true; }
   bool stopped() const { return stopped_; }
@@ -115,6 +122,7 @@ class Runner {
 
   TickRecord rec_ = {};
   uint32_t ticks_ = 0;
+  uint32_t run_ticks_ = 0;  // since the last start (restart())
   uint32_t overruns_ = 0;
   bool stopped_ = false;
   bool poweroff_done_ = false;

@@ -35,8 +35,10 @@
 // Who drives the body: the laptop's controller (CONTROL take=1) owns it;
 // the remote is ignored and the behaviour runner paused meanwhile (Python
 // refuses client goals while the runner is active unless --override pauses
-// it: a host controller is that override). With the runner active the
-// remote is ignored (remote_ir.py).
+// it: a host controller is that override). The runner runs from the start
+// with MindConfig.behaviour, and the remote's A5 starts it at run time;
+// while it runs, the remote's B6, A7 and C7 stop it (then do their own
+// action) and its other keys are ignored (remote/remote.h, remote_ir.py).
 #ifndef KILO_MIND_MIND_H
 #define KILO_MIND_MIND_H
 #include <stdint.h>
@@ -56,11 +58,10 @@ namespace kilo {
 struct MindConfig {
   uint32_t mind_build = 0;      // STATUS.mind_build (the git hash's first 8 hex digits)
   bool remote = false;          // kilo run --remote (the Pi's KILO_RUN_ARGS turns it on)
-  bool behaviour = false;       // kilo run --behaviour
+  bool behaviour = false;       // kilo run --behaviour (the remote's A5 starts the runner too)
   double balance_kp = -1;       // >= 0: SET_BALANCE on with this Kp from the start (kilo run --balance KP)
   uint64_t seed = 0;            // the behaviour RNG's seed (logged)
   const behaviour::Personality* personality = nullptr;  // null: behaviour::kPersonality
-  remote::RemoteConfig remote_cfg;
   uint32_t stats_period_ms = 0;  // > 0: STATS_REQ this often, the answer logged ("body STATS: ...")
   // The laptop interface's keys (net/host_server.h set_keys(); they outlive
   // the Mind) and the source of its ephemeral keys. Without a Random every
@@ -95,7 +96,7 @@ class Mind final : public LinkListener {
   remote::RemoteControl& remote() { return remote_; }
   HostServer& host() { return host_; }
   behaviour::Runner& runner() { return runner_; }
-  bool behaviour_active() const { return cfg_.behaviour && !runner_.stopped(); }
+  bool behaviour_active() const { return behaviour_on_ && !runner_.stopped(); }
   bool poweroff_requested() const { return runner_.poweroff_requested(); }
   // A laptop's controller sent REBOOT (and has its OK): restart the platform.
   bool reboot_requested() const { return host_.reboot_requested(); }
@@ -132,6 +133,18 @@ class Mind final : public LinkListener {
    private:
     Mind& m_;
   };
+  // the remote's A5 / B6 / A7 / C7 (remote.h)
+  class RunnerHook final : public remote::BehaviourHook {
+   public:
+    explicit RunnerHook(Mind& m) : m_(m) {}
+    bool active() override { return m_.behaviour_active(); }
+    bool start(const char** what) override;
+    void stop() override;
+
+   private:
+    Mind& m_;
+    char what_[48] = {};
+  };
   class NoListener final : public Listener {
    public:
     int32_t accept() override { return -1; }
@@ -157,6 +170,7 @@ class Mind final : public LinkListener {
   perception::Percepts percepts_;
   Body body_;
   behaviour::Runner runner_;
+  RunnerHook runner_hook_;
   remote::RemoteControl remote_;
   LinkListener* tap_ = nullptr;
 
@@ -166,6 +180,8 @@ class Mind final : public LinkListener {
   uint32_t event_count_ = 0;
 
   uint64_t started_us_ = 0;
+  bool behaviour_on_ = false;     // the runner was started (by the config or by A5)
+  uint64_t runner_started_us_ = 0;  // ...at this time: the first tick's grace runs from here
   bool stamping_ = true;
   bool paused_ = false;  // the last pass found the UART taken (bridge or flasher)
   bool stats_asked_ = false;

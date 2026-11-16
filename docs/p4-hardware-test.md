@@ -73,14 +73,14 @@ to reach 90 % of 10°, are the servo lag and rise time. Compare with the
 
 In this order, each from a stand, ready to catch:
 
-1. Trot forward 6 s: `kilo walk forward --for 6` (or A3 then B7 on the
+1. Trot forward 6 s: `kilo walk forward --for 6` (or A4 on the
    remote; B6 stops). Expected: as yesterday or better.
-2. Walk forward 8 s: `kilo walk forward --pattern walk --for 8` (or C4,
-   B7). Expected: a visible lean away from each lifting leg, the body
+2. Walk forward 8 s: `kilo walk forward --pattern walk --for 8` (or C4 on
+   the remote). Expected: a visible lean away from each lifting leg, the body
    within a few degrees of the plan, no fall. `kilo walk` prints the model
    error (offset, lag, largest error) at the end: note them.
-3. Crawl forward 8 s: `--pattern crawl` (or B4, B7).
-4. Speed: during a trot, C1 twice (faster), C5 twice (slower). The change
+3. Crawl forward 8 s: `--pattern crawl` (or B4).
+4. Speed: during a trot, B7 twice (faster), B5 twice (slower). The change
    is gradual.
 5. Walk backward and a turn: `kilo walk back --pattern walk --for 8`,
    `kilo walk left --for 6`.

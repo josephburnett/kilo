@@ -127,6 +127,7 @@ class Daemon(OpsMixin, ClientsMixin, HoldsMixin, BehaviourMixin, RemoteIRMixin, 
         # behaviour runner liveness and pause (--override)
         self.runner_stall_s = RUNNER_STALL_S
         self._behaviour_started_at: float | None = None
+        self._behaviour_stamp0: float | None = None
         self._runner_stamping = True
         self.behaviour_paused = threading.Event()
         # log directory size cap

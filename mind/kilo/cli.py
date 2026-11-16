@@ -264,7 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--balance", nargs="?", const=BALANCE_KP, type=float, default=None, metavar="KP",
                    help=f"balance on by default: latch SET_BALANCE with this Kp (default {BALANCE_KP}; "
                         "0.99 levels the whole slope) at start, after a client's balance hold and after a "
-                        "port release; the remote's CH+ toggles it")
+                        "port release")
     s.add_argument("--idle-posture", choices=("rest", "limp", "none"), default="rest",
                    help="what the daemon latches when a client's hold ends (default rest, then limp)")
     s.add_argument("--idle-limp", type=float, default=10.0, metavar="S",
@@ -987,7 +987,7 @@ def cmd_daemon(args: argparse.Namespace) -> int:
     if "remote" in info:
         print(f"remote      {info['remote']}")
     if info.get("balance_default") is not None:
-        print(f"balance     on by default (Kp {info['balance_default']:.2f}); off only via CH+ or a client")
+        print(f"balance     on by default (Kp {info['balance_default']:.2f}); off only while a client holds it off")
     print(f"frame log   {info['log_file'] or '-'}")
     return EXIT_OK
 

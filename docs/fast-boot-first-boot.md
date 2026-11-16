@@ -340,12 +340,20 @@ Kilo to finish moving before the next:
 1. **B6** (column B, row 6). Kilo stands up. The log shows
    `remote B6 (0x02, stand): posture stand`.
 2. **A7** (column A, top row). Kilo lies down. The log shows
-   `remote A7 (0xA2, rest): posture rest`.
-3. Get ready to catch Kilo. Press **B7** (column B, top row): Kilo walks
-   forward. The log shows `remote B7 (0x62, forward): walk forward (trot)`.
+   `remote A7 (0xA2, sleep): posture rest`.
+3. Get ready to catch Kilo. Press **A4** (column A, row 4): Kilo trots
+   forward. The log shows
+   `remote A4 (0x68, trot): walk forward (trot) 55.6 mm/s`.
 4. After about two seconds, press **B6**. Kilo stops and stands. The log
    shows `remote B6 (0x02, stand): posture stand`.
 5. Press **A7** to let him lie down again.
+
+What the other keys do, for later: **B7** faster and **B5** slower while
+walking (B5 past the slowest walks backward), **A6** and **C6** turn left and
+right, **B4** crawl and **C4** walk (the two slower gaits), **C5** the
+calibration posture, **A5** Kilo's own behaviour (B6 or A7 ends it), and
+**C7** freeze: Kilo stops where he is, feet on the ground, and ignores
+every key except B6 and A7. The keys in rows 1 to 3 do nothing.
 
 If a key does nothing and no `remote` line appears, the key did not reach
 the mind: note which key. If the line says `ignored (a laptop client holds

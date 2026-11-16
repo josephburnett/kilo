@@ -7,15 +7,37 @@ IR_KEY with ``arg = command | 0x100`` for a held-key repeat (docs/architecture.m
 written MSB first as the IRremote library did), and so do the legacy meanings
 (its K00..K62 skill tokens), kept here for reference.
 
-``ACTIONS`` is what ``kilo run --remote`` does with a key (the owner's map,
-2026-10-11); ``action_for`` turns an IR_KEY arg into one.
+Keys are named by grid, as the owner reads the remote: columns A B C left to
+right, rows 1-7 bottom to top (B7 is the top middle). ``ACTIONS`` is what
+``kilo run --remote`` does with a key (the owner's map, 2026-11-15);
+``action_for`` turns an IR_KEY arg into one. The mind kernel's remote
+(kernel/mind/remote/) is a port of this module and keeps the same map:
+
+====  ======  =========================================================
+Key   Code    ``--remote``
+====  ======  =========================================================
+A7    0xA2    sleep: stop a walk the planned way, then posture rest
+B7    0x62    faster: one speed level up (only while walking)
+C7    0xE2    freeze: abort the walk, stop a trick and the behaviour runner;
+              then only B6 and A7 act
+A6    0x22    turn left (from standing: start the turn at 1x)
+B6    0x02    stand and stop: stop a walk the planned way, then posture stand
+C6    0xC2    turn right
+A5    0xE0    behaviour: start the behaviour runner
+B5    0xA8    slower: one speed level down, past the slowest into backward
+C5    0x90    the calibration posture (CALIB), after stopping a walk
+A4    0x68    trot: start walking forward in it, or change to it
+B4    0x98    crawl
+C4    0xB0    walk
+A3-C1         nothing (logged as ignored)
+====  ======  =========================================================
 """
 
 from __future__ import annotations
 
-import time
+import threading
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 REPEAT = 0x100
 
@@ -23,14 +45,14 @@ REPEAT = 0x100
 @dataclass(frozen=True)
 class Key:
     command: int   # NEC command byte
-    label: str     # what is printed on the key
+    label: str     # what is printed on the key (the legacy table's name for it; not shown to the owner)
     legacy: str    # what the legacy firmware did with it
     grid: str = ""  # where the key is: column A B C left to right, row 1-7 bottom to top (B7 = top middle)
 
 
 # The remote's 21 keys, row by row from the top as on the remote (and in
 # src/infrared.h). The owner refers to keys by grid position (the icons on
-# the keys are not legible), so every message names a key as e.g. "B7".
+# the keys are not legible), so every message names a key by grid, e.g. "B7".
 KEYS: tuple[Key, ...] = (
     Key(0xA2, "CH-", "rest"),
     Key(0x62, "CH", "forward"),
@@ -66,172 +88,276 @@ def split(arg: int) -> tuple[int, bool]:
     return arg & 0xFF, bool(arg & REPEAT)
 
 
-def describe(arg: int) -> str:
-    """``B3 (2 0x18, sit)``, ``B3 (2 0x18, sit) repeat``; ``? (0x45)`` for another remote's key."""
-    cmd, rep = split(arg)
-    k = BY_COMMAND.get(cmd)
-    s = f"{k.grid} ({k.label} 0x{cmd:02X}, {k.legacy})" if k else f"? (0x{cmd:02X})"
-    return s + (" repeat" if rep else "")
-
-
 @dataclass(frozen=True)
 class Action:
-    kind: str        # "posture" | "trick" | "balance_toggle" | "walk" | "gait_pattern" | "speed" | "ignore"
-    name: str = ""   # the posture or trick name, the walk direction, the gait pattern, slower / faster
+    kind: str        # "posture" | "gait" | "turn" | "speed" | "freeze" | "behaviour" | "none" | "ignore"
+    name: str = ""   # the posture, the gait pattern, the turn (left / right), faster / slower
+    label: str = ""  # what the key does, for the log
 
 
-# kilo run --remote. The direction keys walk with the selected pattern until
-# another key, like the legacy firmware (by grid: B7 forward, B5 back, A6 / C6
-# turn left / right, A4 march); A3 / C4 / B4 select trot / walk / crawl; C5
-# (EQ, calibrate) and C1 (9, last skill) step the speed down and up
-# (SPEED_FACTORS of the pattern's default speed; kilo.planner.patterns.timing).
-WALK_DIRECTIONS = ("forward", "backward", "left", "right", "march")
-SPEED_FACTORS = (0.5, 0.7, 1.0, 1.4, 2.0)
-DEFAULT_SPEED_STEP = 2  # 1.0: the pattern's spec defaults
-_IGNORE = Action("ignore")
+SPEED_FACTORS = (0.5, 0.7, 1.0, 1.4, 2.0)  # x the gait's default speed, levels 1..5 (and -1..-5 backward)
+DEFAULT_LEVEL = 3  # +3: 1x, the gait's spec defaults
+_IGNORE = Action("ignore")  # a held-key repeat or another remote's key
+_NONE = Action("none", label="none")  # rows 1-3: no action
 ACTIONS: dict[str, Action] = {
-    "CH-": Action("posture", "rest"),
-    ">>|": Action("posture", "stand"),
-    "-": Action("posture", "limp"),
-    "2": Action("posture", "sit"),
-    "3": Action("trick", "stretch"),
-    "4": Action("trick", "hi"),
-    "5": Action("trick", "push_up"),
-    "6": Action("trick", "pee"),
-    "7": Action("trick", "wash_face"),
-    "8": Action("trick", "butt_up"),
-    "CH+": Action("balance_toggle"),
-    "CH": Action("walk", "forward"),
-    "+": Action("walk", "backward"),
-    "|<<": Action("walk", "left"),
-    ">||": Action("walk", "right"),
-    "0": Action("walk", "march"),
-    "100+": Action("gait_pattern", "crawl"),
-    "200+": Action("gait_pattern", "walk"),
-    "1": Action("gait_pattern", "trot"),
-    "EQ": Action("speed", "slower"),
-    "9": Action("speed", "faster"),
+    "A7": Action("posture", "rest", "sleep"),
+    "B7": Action("speed", "faster", "faster"),
+    "C7": Action("freeze", "", "freeze"),
+    "A6": Action("turn", "left", "turn left"),
+    "B6": Action("posture", "stand", "stand"),
+    "C6": Action("turn", "right", "turn right"),
+    "A5": Action("behaviour", "", "behaviour"),
+    "B5": Action("speed", "slower", "slower"),
+    "C5": Action("posture", "calib", "calibration posture"),
+    "A4": Action("gait", "trot", "trot"),
+    "B4": Action("gait", "crawl", "crawl"),
+    "C4": Action("gait", "walk", "walk"),
 }
+ACTIONS.update({k.grid: _NONE for k in KEYS if k.grid not in ACTIONS})
+
+FROZEN = "ignored (frozen: B6 or A7 to go on)"
+CANCELLED = "cancelled (C7 froze Kilo)"
+
+
+def describe(arg: int) -> str:
+    """``B6 (0x02, stand)``, ``B6 (0x02, stand) repeat``; ``? (0x45)`` for another remote's key."""
+    cmd, rep = split(arg)
+    k = BY_COMMAND.get(cmd)
+    s = f"{k.grid} (0x{cmd:02X}, {ACTIONS[k.grid].label})" if k else f"? (0x{cmd:02X})"
+    return s + (" repeat" if rep else "")
 
 
 def action_for(arg: int) -> Action:
     """What ``--remote`` does with an IR_KEY arg. Repeats (a held key) and
-    unknown keys are ignored."""
+    unknown keys are ``ignore``; rows 1-3 are ``none``."""
     cmd, rep = split(arg)
     k = BY_COMMAND.get(cmd)
     if rep or k is None:
         return _IGNORE
-    return ACTIONS.get(k.label, _IGNORE)
+    return ACTIONS[k.grid]
+
+
+def _stop_key(action: Action) -> bool:
+    """B6 and A7: the keys that end a freeze and stop the behaviour runner."""
+    return action.kind == "posture" and action.name in ("stand", "rest")
 
 
 class RemoteControl:
     """Carries out ``--remote`` actions through a BodyClient (blocking: the
-    daemon runs ``perform`` in its thread pool, one at a time).
+    daemon runs ``perform`` in its thread pool, one at a time, and ``freeze``
+    beside it). Every call returns the one line the daemon logs.
 
-    A posture or trick key first stops a trick that is playing (the body
-    would otherwise put the trick's end posture over a new posture, or refuse
-    the new trick BUSY); a trick key from LIMP takes STAND first (a trick
-    cannot start from LIMP), as ``kilo trick play --posture stand`` would.
-    Tricks go through ``BodyClient.start_trick`` (uploads when the body does
-    not hold the trick yet, cached otherwise) and are not waited for.
+    State: the gait (trot at start), a signed speed level (+1..+5 forward at
+    SPEED_FACTORS x the gait's default speed, -1..-5 backward; no level 0)
+    and the heading (straight, left, right). Every stop (B6, A7, C5, C7, a
+    walk that ended by itself) puts the level back to +3 and the heading
+    straight.
 
-    Walking: a direction key walks (``BodyClient.walk``, the planner's FEET
-    stream) with the selected pattern (default trot) at the selected speed
-    (SPEED_FACTORS[speed_step] x the pattern's default speed, clamped by the
-    planner) until another key; the pattern keys select trot / walk / crawl
-    and the speed keys step the speed down / up (stopping at the ends): both
-    change a walk in progress at once (a pattern after every leg has
-    stepped home). A posture or trick key first stops the walk the planned way
-    (each leg steps home, Kilo stands in STANCE) and waits for it.
+    - A gait key (A4 trot, B4 crawl, C4 walk): not walking, walk forward in
+      it at +3. Walking in another gait: change the gait (after every leg has
+      stepped home), level and heading kept. Walking in that gait: straight
+      forward at the level's magnitude (from a turn or from backward);
+      already straight forward, nothing changes.
+    - A6 / C6: turn left / right at the level's magnitude; not walking, start
+      the turn in the selected gait at 1x.
+    - B7 / B5: one level up / down, through ... -2 -1 +1 +2 ..., stopping at
+      +5 and -5; during a turn the magnitude only (1..5). Not walking:
+      ignored. The line shows the real mm/s (kilo.planner.patterns.timing
+      clamps: the crawl's and the walk's top two levels are the same speed).
+    - A posture key (B6 stand, A7 rest, C5 calib) first stops the walk the
+      planned way (each leg steps home, STANCE) and waits for it, then stops
+      a playing trick, then takes the posture.
+    - C7 (``freeze``): abort the walk (no planned stop: the body holds the
+      last pose for link.feet_hold_ticks, settles the swing feet to the
+      ground and stays in STANCE, powered), stop a trick and the behaviour
+      runner; then every key but B6 and A7 is ignored until one of them.
+      An action under way when C7 comes (a posture key waiting for the
+      planned stop) returns ``cancelled`` instead of its posture.
+    - A5: start the behaviour runner (``behaviour.start()``) after stopping
+      a walk and a trick. While it runs, B6, A7 and C7 stop it first
+      (``behaviour.stop()``) and then do their own action, A5 does nothing
+      and the other keys are ignored.
+
+    ``behaviour``: an object with ``active()``, ``start()`` (returns a detail
+    for the line, or None; raises when it cannot start) and ``stop()``
+    (blocks until the runner has stopped); None: A5 fails.
     """
 
-    def __init__(self, client: Any, settle_s: float = 1.0, sleep: Callable[[float], None] = time.sleep,
-                 balance_kp: float | None = None):
-        from kilo.body.client import BALANCE_KP
-
+    def __init__(self, client: Any, behaviour: Any = None):
         self.client = client
-        self.settle_s = settle_s  # the default posture move is 0.5 s
-        self.sleep = sleep
-        self.balance_kp = BALANCE_KP if balance_kp is None else balance_kp  # CH+ on: the daemon's --balance Kp
+        self.behaviour = behaviour
         self.pattern = "trot"
-        self.speed_step = DEFAULT_SPEED_STEP  # index into SPEED_FACTORS, kept across patterns and walks
-        self.direction: str | None = None  # the walk the remote started, None when not walking
+        self.level = DEFAULT_LEVEL
+        self.heading = "straight"
+        self.frozen = False
+        self._walking = False  # the remote started the walk going on
+        self._freezes = 0
+        self._freeze_lock = threading.Lock()
 
-    def balance_enabled(self) -> bool:
-        g = self.client.link.goals().get("SET_BALANCE")
-        return bool(g is not None and g.fields.get("enable"))
+    # ---- state ---------------------------------------------------------------------------
+    def direction(self) -> str:
+        """The walk's direction for the level and heading: forward, back, left or right."""
+        if self.heading != "straight":
+            return self.heading
+        return "forward" if self.level > 0 else "back"
 
-    def walking(self) -> bool:
+    def speed_mm_s(self) -> float:
+        """The speed asked for: the level's factor of the gait's default speed (a magnitude)."""
+        from kilo.planner.patterns import default_speed
+
+        return SPEED_FACTORS[abs(self.level) - 1] * default_speed(self.pattern)
+
+    def body_walking(self) -> bool:
         st = self.client.walk_status()
         return bool(st is not None and st.get("active")) or self.client.state.mode == "GAIT"
 
+    def walking(self) -> bool:
+        """The remote's own walk is going on; once it has ended the level and heading start over."""
+        st = self.client.walk_status()
+        if self._walking and st is not None and st.get("active"):
+            return True
+        if self._walking:
+            self._reset()
+        return False
+
+    def _reset(self) -> None:
+        self._walking = False
+        self.level = DEFAULT_LEVEL
+        self.heading = "straight"
+
+    def _walk_text(self, suffix: str = "") -> str:
+        from kilo.planner.patterns import timing
+
+        v = timing(self.pattern, self.speed_mm_s()).speed_mm_s
+        return f"walk {self.direction()} ({self.pattern}) {v:.1f} mm/s{suffix}"
+
+    def _go(self) -> str:
+        try:
+            self.client.walk(self.direction(), self.pattern, self.speed_mm_s())
+        except Exception:
+            self._reset()
+            raise
+        self._walking = True
+        return self._walk_text()
+
     def _stop_walking(self) -> None:
-        if self.walking():
+        if self.body_walking():
             from kilo.planner.walker import stop_timeout
 
             st = self.client.walk_status() or {}
             self.client.stop_walk(wait_s=stop_timeout(st.get("period_ms")))
-        self.direction = None
 
-    def speed_mm_s(self) -> float:
-        """The speed asked for: the step's factor of the pattern's default speed."""
-        from kilo.planner.patterns import default_speed
-
-        return SPEED_FACTORS[self.speed_step] * default_speed(self.pattern)
-
-    def _walk(self, direction: str) -> None:
-        if self.client.state.mode == "TRICK":
-            self.client.stop_trick()
-        self.client.walk(direction, self.pattern, self.speed_mm_s())
-        self.direction = direction
-
-    def _rewalk(self) -> bool:
-        """Change the remote's walk to the current pattern and speed, if it walks."""
-        st = self.client.walk_status()
-        if self.direction is not None and st is not None and st.get("active"):
-            self._walk(self.direction)
-            return True
-        return False
-
+    # ---- keys ----------------------------------------------------------------------------
     def perform(self, action: Action) -> str:
+        if action.kind == "freeze":
+            return self.freeze()
+        gen = self._freezes
+        note = ""
+        if self.frozen:
+            if not _stop_key(action):
+                return FROZEN
+            self.frozen = False
+            note = "unfrozen, "
+        b = self.behaviour
+        if b is not None and b.active():
+            if action.kind == "behaviour":
+                return "behaviour runner already running"
+            if not _stop_key(action):
+                return "ignored (behaviour runner active)"
+            b.stop()
+            note = "behaviour runner stopped, "
+        return note + self._act(action, gen)
+
+    def _act(self, action: Action, gen: int) -> str:
         c = self.client
-        if action.kind == "walk":
-            self._walk(action.name)
-            return f"walk {action.name} ({self.pattern})"
-        if action.kind == "gait_pattern":
+        if action.kind in ("posture", "behaviour"):
+            self._reset()
+            self._stop_walking()
+            if self._freezes != gen:
+                return CANCELLED
+            if c.state.mode == "TRICK":
+                c.stop_trick()
+            if action.kind == "posture":
+                c.posture(action.name)
+                return f"posture {action.name}"
+            if self.behaviour is None:
+                return "behaviour runner failed: no behaviour runner"
+            detail = self.behaviour.start()
+            return "behaviour runner started" + (f" ({detail})" if detail else "")
+        if action.kind == "gait":
+            if self.walking():
+                same = action.name == self.pattern
+                was = (self.level, self.heading)
+                self.pattern = action.name
+                if same:  # that gait already: straight forward at the level's magnitude
+                    self.heading = "straight"
+                    self.level = abs(self.level)
+                    if (self.level, self.heading) == was:
+                        return self._walk_text(": unchanged")
+                return self._go()
+            self._reset()
             self.pattern = action.name
-            if self._rewalk():
-                return f"walk {self.direction} ({self.pattern})"
-            return f"pattern {self.pattern}"
+            if c.state.mode == "TRICK":
+                c.stop_trick()
+            return self._go()
+        if action.kind == "turn":
+            if self.walking():
+                if self.heading == action.name:
+                    return self._walk_text(": unchanged")
+                self.heading = action.name
+                self.level = abs(self.level)
+                return self._go()
+            self._reset()
+            self.heading = action.name
+            if c.state.mode == "TRICK":
+                c.stop_trick()
+            return self._go()
         if action.kind == "speed":
             from kilo.planner.patterns import timing
 
-            step = self.speed_step + (1 if action.name == "faster" else -1)
-            self.speed_step = min(max(step, 0), len(SPEED_FACTORS) - 1)
-            text = (f"speed {SPEED_FACTORS[self.speed_step]:g}x ({self.pattern} "
-                    f"{timing(self.pattern, self.speed_mm_s()).speed_mm_s:.0f} mm/s)")
-            return (f"walk {self.direction} " if self._rewalk() else "") + text
-        if action.kind == "posture":
-            self._stop_walking()
-            if c.state.mode == "TRICK":
-                c.stop_trick()
-            c.posture(action.name)
-            return f"posture {action.name}"
-        if action.kind == "trick":
-            from kilo.tricks import library
+            if not self.walking():
+                return "ignored (not walking)"
+            up = action.name == "faster"
+            n = len(SPEED_FACTORS)
+            lv = self.level
+            if self.heading != "straight":  # a turn: the magnitude only
+                lv = min(lv + 1, n) if up else max(lv - 1, 1)
+            elif up:
+                lv = 1 if lv == -1 else min(lv + 1, n)
+            else:
+                lv = -1 if lv == 1 else max(lv - 1, -n)
+            end = ""
+            if lv == self.level:
+                end = (": already the fastest" if up else ": already the slowest" if self.heading != "straight"
+                       else ": already the fastest back")
+            self.level = lv
+            if not end:
+                self._go()
+            f = SPEED_FACTORS[abs(lv) - 1]
+            v = timing(self.pattern, self.speed_mm_s()).speed_mm_s
+            return f"speed {'-' if lv < 0 else ''}{f:g}x ({self.pattern} {v:.1f} mm/s {self.direction()}){end}"
+        return "ignored (no action on this key)"
 
-            t = library.load(action.name)
-            self._stop_walking()
-            mode = c.state.mode
-            if mode == "TRICK":
+    def freeze(self) -> str:
+        """C7: at once (beside an action under way, which then returns ``cancelled``)."""
+        with self._freeze_lock:
+            if self.frozen:
+                return FROZEN
+            self.frozen = True  # first: an action under way and the keys after it see it
+            self._freezes += 1
+            c = self.client
+            trick = c.state.mode == "TRICK"
+            parts = []
+            w = getattr(c, "_walker", None)
+            if w is not None and w.active:  # no planned stop: the body holds, settles, stays in STANCE
+                w.abort()
+                parts.append("walk aborted")
+            b = self.behaviour
+            if b is not None and b.active():
+                b.stop()
+                parts.append("behaviour runner stopped")
+            if trick:
                 c.stop_trick()
-            elif mode == "LIMP":
-                c.posture("stand")
-                self.sleep(self.settle_s)
-            c.start_trick(t)
-            return f"trick {action.name}"
-        if action.kind == "balance_toggle":
-            on = not self.balance_enabled()
-            c.set_balance(on, kp=self.balance_kp)
-            return f"balance {'on' if on else 'off'}"
-        return action.kind
+                parts.append("trick stopped")
+            self._reset()
+            return f"frozen ({', '.join(parts) or 'holding the posture'}): only B6 or A7 act now"

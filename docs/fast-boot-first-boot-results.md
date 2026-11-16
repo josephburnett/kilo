@@ -90,7 +90,7 @@ one from start-up, `work max 55 us`.
 | One `loop` line from `kilo log --host` | |
 | `kilo posture stand --for 5`: did Kilo stand, hold, then lie down? What did the laptop print? | |
 | Remote (step 9), Kilo on the floor: B6 stood up? A7 lay down? | |
-| Remote: B7 walked forward? B6 after two seconds stopped him and he stood? | |
+| Remote: A4 trotted forward? B6 after two seconds stopped him and he stood? | |
 | Remote: the `remote ...` lines from `kilo log --host` | |
 | Screen used? What it showed (serial chosen, first HELLO time, telemetry/s, decode errors) | |
 | Boot probe (scope on pin 40): power-on to rising edge, rising to falling edge | |

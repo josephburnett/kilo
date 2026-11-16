@@ -173,11 +173,11 @@ void Walker::stop() {
   }
 }
 
-void Walker::abort() {
+void Walker::abort(const char* why, bool asked) {
   queued_ = false;
   if (phase_ == WalkPhase::Idle) return;
   bool streamed = phase_ == WalkPhase::Streaming;
-  end("aborted", false);
+  end(why, asked);
   teardown(streamed);
 }
 
