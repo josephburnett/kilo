@@ -576,35 +576,60 @@ wait_mind() {  # wait_mind <log>: it must exit 0
     wait "$MIND_PID" || { echo "FAILED: kilo-mind-host exit status $?"; cat "$1"; exit 1; }
 }
 
-echo "== P3 integration: IR keys from the virtual body -> trick, trot, turn, stand, rest (--remote)"
+echo "== P3 integration: IR keys from the virtual body -> stand, trot, faster, slower, turn, stand, freeze, rest, calibration posture, behaviour (--remote)"
 start_ctl_body "$OUT/vbody_ir.log"
 trap stop_body EXIT
-run_mind "$OUT/host_ir.log" --remote --duration 14
+run_mind "$OUT/host_ir.log" --remote --seed 3 --duration 21
 sleep 1
-ctl ir 0x10                   # A2: hi (from LIMP: STAND, 1 s, then the trick)
-sleep 3.5
-ctl ir 0x30; ctl ir 0x62      # A3: trot; B7: forward
+ctl ir 0x02                   # B6: stand (from LIMP)
+sleep 1
+ctl ir 0x68                   # A4: trot forward at 1x
 sleep 2
+ctl ir 0x62                   # B7: faster (1.4x)
+sleep 0.5
+ctl ir 0xA8                   # B5: slower (1x)
+sleep 0.5
 ctl ir 0x22                   # A6: turn left
 sleep 1
+ctl ir 0x18                   # B3: row 3, nothing
 ctl ir 0x02                   # B6: stand (the planned stop, then the posture)
 sleep 4
+ctl ir 0x68                   # A4: trot forward again, at 1x
+sleep 2
+ctl ir 0xE2                   # C7: freeze (the walk aborted, the body settles in STANCE)
+sleep 1
+ctl ir 0x62                   # B7: ignored while frozen
+sleep 0.3
 ctl ir 0xA2                   # A7: rest
+sleep 1.5
+ctl ir 0x90                   # C5: the calibration posture
+sleep 1.5
+ctl ir 0xE0                   # A5: the behaviour runner
+sleep 1.5
+ctl ir 0x02                   # B6: stops the runner, stands
 wait_mind "$OUT/host_ir.log"
 stop_body
 trap - EXIT
-grep -E "remote|trick|walk" "$OUT/host_ir.log"
-expect "$OUT/host_ir.log" "trick hi: uploaded \(id [0-9]+, 6 frames" "the trick uploaded"
-expect "$OUT/host_ir.log" "remote A2 \(0x10, hi\): trick hi" "A2 started hi"
-expect "$OUT/host_ir.log" "trick hi: TRICK_DONE DONE after [0-9]+ ms \(expected 111 ticks\)" "hi played to TRICK_DONE"
-expect "$OUT/host_ir.log" "remote A3 \(0x30, trot\): pattern trot" "A3 selected trot"
-expect "$OUT/host_ir.log" "remote B7 \(0x62, forward\): walk forward \(trot\)" "B7 walked"
+grep -E "remote|trick|walk|behaviour" "$OUT/host_ir.log"
+expect "$OUT/host_ir.log" "remote B6 \(0x02, stand\): posture stand" "B6 stood"
+expect "$OUT/host_ir.log" "remote A4 \(0x68, trot\): walk forward \(trot\) 55\.6 mm/s" "A4 walked"
 expect "$OUT/host_ir.log" "walk trot forward at 55\.6 mm/s" "the trot started"
-expect "$OUT/host_ir.log" "remote A6 \(0x22, left\): walk left \(trot\)" "A6 turned"
+expect "$OUT/host_ir.log" "remote B7 \(0x62, faster\): speed 1\.4x \(trot 77\.8 mm/s forward\)" "B7 sped up"
+expect "$OUT/host_ir.log" "remote B5 \(0xA8, slower\): speed 1x \(trot 55\.6 mm/s forward\)" "B5 slowed"
+expect "$OUT/host_ir.log" "remote A6 \(0x22, turn left\): walk left \(trot\) 55\.6 mm/s" "A6 turned"
+expect "$OUT/host_ir.log" "remote B3 \(0x18, none\): ignored \(no action on this key\)" "B3 did nothing"
 expect "$OUT/host_ir.log" "walk ended: stopped" "the planned stop"
-expect "$OUT/host_ir.log" "remote B6 \(0x02, stand\): posture stand" "B6 stood after the stop"
-expect "$OUT/host_ir.log" "remote A7 \(0xA2, rest\): posture rest" "A7 rested"
-if grep -Eq "decode errors [1-9]|remote .*failed" "$OUT/host_ir.log"; then echo "FAILED: errors"; exit 1; fi
+expect "$OUT/host_ir.log" "remote C7 \(0xE2, freeze\): frozen \(walk aborted\): only B6 or A7 act now" "C7 froze"
+expect "$OUT/host_ir.log" "I walk ended: aborted \\(C7 freeze\\)" "the freeze aborted the walk"
+expect "$OUT/host_ir.log" "remote B7 \(0x62, faster\): ignored \(frozen: B6 or A7 to go on\)" "B7 ignored while frozen"
+expect "$OUT/host_ir.log" "remote A7 \(0xA2, sleep\): unfrozen, posture rest" "A7 rested"
+expect "$OUT/host_ir.log" "remote C5 \(0x90, calibration posture\): posture calib" "C5 took the calibration posture"
+expect "$OUT/host_ir.log" "remote A5 \(0xE0, behaviour\): behaviour runner started" "A5 started the runner"
+expect "$OUT/host_ir.log" "behaviour: idle \(free\)" "the runner ran"
+expect "$OUT/host_ir.log" "remote B6 \(0x02, stand\): behaviour runner stopped, posture stand" "B6 stopped the runner"
+if grep -Eq "decode errors [1-9]|remote .*failed|no longer stamping" "$OUT/host_ir.log"; then echo "FAILED: errors"; exit 1; fi
+grep -q "event GAIT_STOPPED arg=1" "$OUT/host_ir.log" &&
+    echo "   the freeze: the body settled after the FEET underrun (GAIT_STOPPED arg 1)"
 
 echo "== P3 integration: the behaviour runner idles for 5 s (--behaviour)"
 start_body "$OUT/vbody_bh.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u -m kilo.vbody.core

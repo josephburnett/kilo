@@ -297,7 +297,7 @@ int main(int argc, char** argv) {
     status = 1;
   }
   log_stats(log, link, window);
-  if (cfg.behaviour)
+  if (cfg.behaviour || mind.runner().ticks() > 0)  // from the start, or the remote's A5
     logf(log, LogLevel::Info, "behaviour: %u ticks, %u overruns%s", (unsigned)mind.runner().ticks(),
          (unsigned)mind.runner().overruns(), mind.poweroff_requested() ? ", poweroff requested" : "");
   listener.close();
