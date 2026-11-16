@@ -78,8 +78,10 @@ class RemoteIRMixin:
         if owner is not None:
             log.info("remote %s: ignored (client %d holds the body)", text, owner.id)
             return
-        if action.kind in ("posture", "gait", "turn", "freeze"):
+        if action.kind in ("posture", "gait", "turn", "freeze", "trick"):
             # held like the idle latch: no owner, and no idle timeline over it
+            # (for a trick above all: the timeline's LIMP stage would drop
+            # Kilo mid-trick)
             self.goal_owner["WALK" if action.kind in ("gait", "turn") else "SET_POSTURE"] = None
             self.idle_since = self.idle_stage = None
         self.remote_last = text

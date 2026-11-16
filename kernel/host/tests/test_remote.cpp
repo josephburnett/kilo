@@ -2,7 +2,8 @@
 // RemoteControl on the real link, walker and trick player over a scripted
 // body: the posture keys (B6, A7, C5), the gait keys (A4, B4, C4), the turn
 // keys (A6, C6), the speed ladder (B7, B5) through zero into backward, the
-// freeze (C7) and the behaviour key (A5) on a fake runner.
+// freeze (C7), the behaviour key (A5) on a fake runner and the rear-up key
+// (B2: start, the toggle, the slow stop, the battery guard).
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -41,8 +42,9 @@ void test_key_table() {
     CHECK(action_for(k.command) == &k && action_for((uint16_t)(k.command | kRepeat)) == nullptr);
     if (k.kind == Kind::Posture) CHECKF(posture_code(k.name) >= 0, "posture %s", k.name);
     if (k.kind == Kind::Gait) CHECKF(planner::find_pattern(k.name) != nullptr, "gait %s", k.name);
-    // rows 1-3 do nothing
-    CHECKF((k.grid[1] <= '3') == (k.kind == Kind::Ignore), "%s", k.grid);
+    if (k.kind == Kind::Trick) CHECKF(tricks::find_trick(k.name) != nullptr, "trick %s", k.name);
+    // rows 1-3 do nothing, but B2
+    CHECKF((k.grid[1] <= '3' && std::strcmp(k.grid, "B2") != 0) == (k.kind == Kind::Ignore), "%s", k.grid);
   }
   CHECK(cmds.size() == 21 && grids.size() == 21);
   CHECK(action_for(0x45) == nullptr);
@@ -54,7 +56,8 @@ void test_key_table() {
   } want[] = {{"A7", Kind::Posture, "rest"},  {"B7", Kind::Speed, "faster"},  {"C7", Kind::Freeze, ""},
               {"A6", Kind::Turn, "left"},     {"B6", Kind::Posture, "stand"}, {"C6", Kind::Turn, "right"},
               {"A5", Kind::Behaviour, ""},    {"B5", Kind::Speed, "slower"},  {"C5", Kind::Posture, "calib"},
-              {"A4", Kind::Gait, "trot"},     {"B4", Kind::Gait, "crawl"},    {"C4", Kind::Gait, "walk"}};
+              {"A4", Kind::Gait, "trot"},     {"B4", Kind::Gait, "crawl"},    {"C4", Kind::Gait, "walk"},
+              {"B2", Kind::Trick, "rear_up"}};
   for (const auto& w : want) {
     const Key* k = action_for(cmd_of(w.grid));
     CHECKF(k != nullptr && k->kind == w.kind && std::strcmp(k->name, w.name) == 0, "%s", w.grid);
@@ -372,6 +375,70 @@ void test_behaviour_key() {
   CHECK(r.log.has("remote A5 (0xE0, behaviour): behaviour runner started"));
 }
 
+uint8_t stop_ticks_sent(const Rig& r) {
+  std::vector<Sent> s = r.body.of(KILO_MSG_TRICK_STOP);
+  return s.empty() ? 0xFF : s.back().payload[0];
+}
+
+void test_rear_up_key() {
+  const tricks::Trick* t = tricks::find_trick("rear_up");
+  CHECK(t != nullptr && t->stop_ticks == 75 && t->legacy[0] == '\0' && tricks::find_trick("") == nullptr);
+  {
+    Rig r;
+    LAST_IS(r, "B2", "trick rear_up started (19 s; B2 again, B6 or C7 bring it down)");
+    CHECK(r.body.count(KILO_MSG_TRICK_PLAY) == 1 && r.player.busy());
+    CHECK(r.log.has("remote B2 (0x38, rear up): trick rear_up started"));
+    r.body.mode = KILO_MODE_TRICK;
+    r.run_ms(40);
+    // pressed again while it plays: down, over the trick's stop_ticks
+    LAST_IS(r, "B2", "trick stopped: coming down");
+    CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1 && stop_ticks_sent(r) == 75);
+  }
+  {  // B6 while it plays: TRICK_STOP over 75 ticks, the crossfade waited for, then STAND
+    Rig r;
+    r.key("B2");
+    r.body.mode = KILO_MODE_TRICK;
+    r.run_ms(40);
+    r.key("B6", 40);
+    CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1 && stop_ticks_sent(r) == 75 && r.remote.busy());
+    r.body.mode = KILO_MODE_IDLE;
+    r.body.event(KILO_EVENT_TRICK_DONE, (int16_t)((KILO_TRICK_DONE_REASON_STOPPED << 8) | r.player.result().trick_id));
+    r.run_ms(1400);  // the 1.5 s crossfade (+0.1 s) is not over yet
+    CHECK(r.remote.busy() && r.posture_goal() != KILO_POSTURE_STAND);
+    r.run_ms(400);
+    CHECK(!r.remote.busy() && r.posture_goal() == KILO_POSTURE_STAND && std::strcmp(r.remote.last(), "posture stand") == 0);
+  }
+  {  // C7 while it plays: stopped the same way (it comes down), frozen; B2 does not unfreeze
+    Rig r;
+    r.key("B2");
+    r.body.mode = KILO_MODE_TRICK;
+    r.run_ms(40);
+    LAST_IS(r, "C7", "frozen (trick stopped): only B6 or A7 act now");
+    CHECK(stop_ticks_sent(r) == 75);
+    LAST_IS(r, "B2", "ignored (frozen: B6 or A7 to go on)");
+  }
+  {  // walking: the planned stop first, then the trick
+    Rig r;
+    r.key("A4", 800);
+    CHECK(r.walker.active());
+    CHECK(std::strncmp(r.key_done("B2"), "trick rear_up started", 21) == 0 && !r.walker.active());
+    r.run_ms(100);  // the player's TRICK_COMMIT, then TRICK_PLAY
+    CHECKF(r.body.count(KILO_MSG_TRICK_PLAY) == 1 && r.remote.level() == 3, "plays %zu level %d",
+           r.body.count(KILO_MSG_TRICK_PLAY), r.remote.level());
+  }
+  {  // a flat pack, USB power: refused, nothing moves
+    Rig r;
+    r.body.batt_mv = 7300;
+    r.run_ms(40);
+    LAST_IS(r, "B2", "rear_up refused: battery 7300 mV (needs 7400)");
+    r.body.batt_mv = 0;
+    r.body.flags |= KILO_TELEMETRY_FLAGS_NO_BATTERY;
+    r.run_ms(40);
+    LAST_IS(r, "B2", "rear_up refused: on USB power (no battery)");
+    CHECK(r.body.count(KILO_MSG_TRICK_PLAY) == 0 && r.body.count(KILO_MSG_TRICK_COMMIT) == 0);
+  }
+}
+
 void test_keys_queue() {
   Rig r;
   r.key("A4", 800);
@@ -395,6 +462,7 @@ int main() {
   test_turn_keys();
   test_freeze();
   test_behaviour_key();
+  test_rear_up_key();
   test_keys_queue();
   return report("remote");
 }

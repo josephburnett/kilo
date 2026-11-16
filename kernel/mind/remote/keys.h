@@ -11,7 +11,8 @@
 //   A6 0x22 turn left         B6 0x02 stand and stop    C6 0xC2 turn right
 //   A5 0xE0 behaviour         B5 0xA8 slower, then back C5 0x90 calibration posture
 //   A4 0x68 trot              B4 0x98 crawl             C4 0xB0 walk
-//   A3 0x30, B3 0x18, C3 0x7A, A2 0x10, B2 0x38, C2 0x5A, A1 0x42, B1 0x4A,
+//                             B2 0x38 rear up (trick rear_up; again: down)
+//   A3 0x30, B3 0x18, C3 0x7A, A2 0x10, C2 0x5A, A1 0x42, B1 0x4A,
 //   C1 0x52: nothing (logged as ignored)
 //
 // The legacy meaning (src/infrared.h) is kept for reference. There is no
@@ -25,14 +26,14 @@ namespace remote {
 
 constexpr uint16_t kRepeat = 0x100;
 
-enum class Kind : uint8_t { Ignore, Posture, Gait, Speed, Turn, Freeze, Behaviour };
+enum class Kind : uint8_t { Ignore, Posture, Gait, Speed, Turn, Freeze, Behaviour, Trick };
 
 struct Key {
   uint8_t command;     // NEC command byte
   const char* grid;    // "B7"
   const char* legacy;  // what the legacy firmware did with it
   Kind kind;           // what the mind does (ir.py ACTIONS)
-  const char* name;    // the posture, the gait pattern, the turn ("left"), or "faster" / "slower"
+  const char* name;    // the posture, the gait pattern, the turn ("left"), "faster" / "slower", or the trick
   const char* label;   // what the key does, for the log ("stand", "faster", "none")
 };
 
@@ -43,7 +44,7 @@ const Key* key_for(uint8_t command);
 // ir.py split(): the command byte and whether it is a held-key repeat.
 inline uint8_t key_command(uint16_t arg) { return (uint8_t)(arg & 0xFF); }
 inline bool key_repeat(uint16_t arg) { return (arg & kRepeat) != 0; }
-// ir.py action_for(): the key's entry (rows 1-3 too, Kind::Ignore), or null
+// ir.py action_for(): the key's entry (rows 1-3 too, Kind::Ignore but B2), or null
 // for a held-key repeat or a key of another remote.
 const Key* action_for(uint16_t arg);
 // "B6 (0x02, stand)", "B6 (0x02, stand) repeat", "? (0x45)" (ir.py describe()).

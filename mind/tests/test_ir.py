@@ -68,6 +68,7 @@ EXPECTED = {
     "A6": ("turn", "left"), "B6": ("posture", "stand"), "C6": ("turn", "right"),
     "A5": ("behaviour", ""), "B5": ("speed", "slower"), "C5": ("posture", "calib"),
     "A4": ("gait", "trot"), "B4": ("gait", "crawl"), "C4": ("gait", "walk"),
+    "B2": ("trick", "rear_up"),
 }
 
 
@@ -76,16 +77,20 @@ def test_key_map():
     for k in ir.KEYS:
         a = ir.action_for(k.command)
         assert (a.kind, a.name) == EXPECTED.get(k.grid, ("none", "")), k.grid
-        assert (a.kind == "none") == (int(k.grid[1]) <= 3)  # rows 1-3 do nothing
+        assert (a.kind == "none") == (int(k.grid[1]) <= 3 and k.grid != "B2")  # rows 1-3 do nothing but B2
         assert ir.action_for(k.command | ir.REPEAT).kind == "ignore"  # held keys do nothing
     assert ir.action_for(0x45).kind == "ignore"  # another remote
     from kilo.planner.patterns import PATTERNS
+
+    from kilo.tricks import library
 
     for a in ir.ACTIONS.values():
         if a.kind == "posture":
             assert a.name in consts.POSTURES
         if a.kind == "gait":
             assert a.name in PATTERNS
+        if a.kind == "trick":
+            assert a.name in library.names()
 
 
 class FakeWalker:
@@ -104,9 +109,19 @@ class FakeWalker:
 class FakeClient:
     def __init__(self, mode="IDLE"):
         self.calls = []
-        self.state = SimpleNamespace(mode=mode)
+        self.state = SimpleNamespace(mode=mode, flags=set(), batt_mv=8000)
         self.status = None
         self._walker = FakeWalker(self)
+        self.started = None
+
+    def start_trick(self, trick, mirror=False, speed=1.0):
+        self.calls.append(("start_trick", trick.name))
+        self.started = trick
+        self.state.mode = "TRICK"
+        return 1, 0
+
+    def started_trick(self):
+        return self.started
 
     def walk(self, direction, pattern, speed_mm_s):
         self.calls.append(("walk", direction, pattern, round(speed_mm_s, 1)))
@@ -123,8 +138,9 @@ class FakeClient:
     def posture(self, name):
         self.calls.append(("posture", name))
 
-    def stop_trick(self):
+    def stop_trick(self, transition_ticks=None):
         self.calls.append(("stop_trick",))
+        self.state.mode = "IDLE"
 
 
 class FakeRunner:
@@ -264,6 +280,40 @@ def test_remote_freeze():
     # a trick playing: stopped
     c, rc, key = rig("TRICK")
     assert key("C7") == "frozen (trick stopped): only B6 or A7 act now" and c.calls == [("stop_trick",)]
+
+
+def test_remote_rear_up_key(monkeypatch):
+    slept = []
+    monkeypatch.setattr(ir.time, "sleep", slept.append)
+    c, rc, key = rig()
+    assert key("B2") == "trick rear_up started (19 s; B2 again, B6 or C7 bring it down)"
+    assert c.calls == [("start_trick", "rear_up")] and c.started.stop_ticks == 75
+    # pressed again while it plays: it comes down (TRICK_STOP over its stop_ticks, from the client)
+    assert key("B2") == "trick stopped: coming down" and c.calls[-1] == ("stop_trick",) and slept == []
+    # B6 while it plays: stopped, the 1.5 s crossfade waited for, then STAND
+    key("B2")
+    assert key("B6") == "posture stand" and c.calls[-2:] == [("stop_trick",), ("posture", "stand")]
+    assert slept == [pytest.approx(75 * 0.02 + 0.1)]
+    # C7 while it plays: stopped (it comes down), frozen; B2 is not a way out of a freeze
+    key("B2")
+    assert key("C7") == "frozen (trick stopped): only B6 or A7 act now" and c.calls[-1] == ("stop_trick",)
+    assert key("B2") == "ignored (frozen: B6 or A7 to go on)"
+    # walking: the planned stop first, then the trick
+    c, rc, key = rig()
+    key("A4")
+    n = len(c.calls)
+    assert key("B2").startswith("trick rear_up started")
+    assert c.calls[n:] == [("stop_walk",), ("start_trick", "rear_up")] and rc.level == 3
+    # a flat pack or USB power: refused, nothing moves
+    for flags, mv, why in ((set(), 7300, "battery 7300 mV (needs 7400)"), ({"no_battery"}, 0, "on USB power (no battery)"),
+                           (set(), None, "battery None mV (needs 7400)")):
+        c, rc, key = rig()
+        c.state.flags, c.state.batt_mv = flags, mv
+        assert key("B2") == f"rear_up refused: {why}" and c.calls == []
+    # the behaviour runner active: ignored like every key but the stop keys
+    c, rc, key = rig()
+    key("A5")
+    assert key("B2") == "ignored (behaviour runner active)"
 
 
 def test_remote_freeze_cancels_a_posture_key_waiting_for_the_planned_stop():
