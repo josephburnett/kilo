@@ -614,7 +614,7 @@ grep -E "remote|trick|walk|behaviour" "$OUT/host_ir.log"
 expect "$OUT/host_ir.log" "remote B6 \(0x02, stand\): posture stand" "B6 stood"
 expect "$OUT/host_ir.log" "remote A4 \(0x68, trot\): walk forward \(trot\) 144\.0 mm/s" "A4 walked"
 expect "$OUT/host_ir.log" "walk trot forward at 144\.0 mm/s" "the trot started"
-expect "$OUT/host_ir.log" "remote B7 \(0x62, faster\): speed 1\.1x \(trot 152\.2 mm/s forward\)" "B7 sped up"
+expect "$OUT/host_ir.log" "remote B7 \(0x62, faster\): speed 1\.15x \(trot 165\.6 mm/s forward\)" "B7 sped up"
 expect "$OUT/host_ir.log" "remote B5 \(0xA8, slower\): speed 1x \(trot 144\.0 mm/s forward\)" "B5 slowed"
 expect "$OUT/host_ir.log" "remote A6 \(0x22, turn left\): walk left \(trot\) 144\.0 mm/s" "A6 turned"
 expect "$OUT/host_ir.log" "remote B3 \(0x18, none\): ignored \(no action on this key\)" "B3 did nothing"
@@ -738,11 +738,11 @@ check(abs(e["meas_mean_pitch"] - 4.0) < 1e-6 and abs(e["meas_mean_roll"] + 3.0) 
 check(abs(e["offset_pitch"] - (4.0 - e["pred_mean_pitch"])) <= 0.011 and
       abs(e["offset_roll"] - (-3.0 - e["pred_mean_roll"])) <= 0.011, "offset = measured - predicted, on average")
 check(e["rms_pitch"] >= abs(e["offset_pitch"]) - 0.01 and e["rms_roll"] >= abs(e["offset_roll"]) - 0.01, "rms >= |offset|")
-check(e["rms_roll_less_offset"] > 0.5, "the walk's lean moves the predicted roll")
+check({"RF+LB", "LF+RB"} <= set(s["by_phase"]), f"the walk's diagonal couplets: {sorted(s['by_phase'])}")
 check(s["ticks_sent"] == int(res["sent"]) and int(res["skipped"]) == 0 and int(res["underruns"]) == 0, "the stream's counters")
-check(lag["model_ms"] == 150.0, "the model's servo lag recorded")
+check(lag["model_ms"] == 50.0 and float(s["model"]["servo_tau_ms"]) == 70.0, "the model's servo response recorded")
 check("none" in s["by_phase"] and len({"LF", "RF", "RB", "LB"} & set(s["by_phase"])) >= 3,
-      f"the error by phase (one leg at a time): {sorted(s['by_phase'])}")
+      f"the error by phase (a leg alone before and after each couplet): {sorted(s['by_phase'])}")
 check(s["margin"]["min_one_leg_up_mm"] is not None and
       abs(s["margin"]["min_one_leg_up_mm"] - s["margin"]["planner_min_mm"]) <= 0.11, "the margin: per tick = the planner's")
 check(s["balance_active_fraction"] > 0.9 and s["correction"]["max_pitch"] is not None, "the body's balance and its correction")

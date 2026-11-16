@@ -8,7 +8,7 @@
 //
 // The remote's state: the gait (trot at start), a signed speed level and
 // the heading (straight, left, right). Levels +1..+5 walk forward at 0.4,
-// 0.7, 1, 1.1, 1.2 x the gait's default speed (kSpeedFactors), -1..-5
+// 0.7, 1, 1.15, 1.25 x the gait's default speed (kSpeedFactors), -1..-5
 // backward at the same factors; there is no level 0. Every stop (B6, A7, C5, C7, a walk that
 // ended by itself) puts the level back to +3 (1x) and the heading straight.
 //

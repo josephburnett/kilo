@@ -45,6 +45,24 @@ inline real m_inf() { return __builtin_inff(); }
 #endif
 
 constexpr real kPi = (real)3.14159265358979323846;
+// e^x without libm (the freestanding core allows only the trigonometric
+// float functions): halve x into [-0.5, 0.5], a 12-term series, square back.
+// Relative error under 1e-7 for |x| < 8; the planner takes it once a walk
+// (BodyModel::response_alpha).
+inline real m_exp(real x) {
+  int n = 0;
+  while ((x > (real)0.5 || x < (real)-0.5) && n < 16) {
+    x /= 2;
+    n++;
+  }
+  real s = 1, t = 1;
+  for (int i = 1; i < 12; i++) {
+    t *= x / (real)i;
+    s += t;
+  }
+  while (n-- > 0) s *= s;
+  return s;
+}
 inline real radians(real deg) { return deg * (kPi / (real)180.0); }
 inline real degrees(real rad) { return rad * ((real)180.0 / kPi); }
 

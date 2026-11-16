@@ -41,6 +41,7 @@ constexpr real kAttMaxDeg = 30;         // FEET pitch / roll: the body refuses a
 constexpr real kStrideSlewMm = (real)0.5;
 constexpr real kHeightSlewMm = (real)0.5;
 constexpr real kRecentredMm = (real)1.5;  // a stopping leg this close to its target does not step again
+constexpr real kSwitchSlackMm = (real)4.0;  // a pattern change: every foot within the new half stride plus this
 constexpr real kStanceSlew = (real)0.02;
 constexpr int kLeanUnitsPerTick = 4;      // units of a lean solve per tick
 
@@ -199,9 +200,11 @@ class Planner {
 
   void set_speed(real speed_mm_s);
   void set_direction(Direction d);
-  // Change the pattern: every leg steps home, then the new one starts from
-  // its first group. The walking pattern cancels a change under way; ignored
-  // once stopping.
+  // Change the pattern. Between the walk and the trot (both fixed cadence)
+  // directly, at the first slot start where the strides, the feet and the
+  // height allow (plan.py _switch_ok); into or out of the crawl every leg
+  // steps home first, then the new one starts from its first group. The
+  // walking pattern cancels a change under way; ignored once stopping.
   void set_pattern(const Pattern& p);
   void stop();
   // The body's latest error: measured - predicted - the steady offset (degrees).
@@ -220,7 +223,8 @@ class Planner {
   bool done() const { return done_; }
   uint32_t tick() const { return tick_; }
   int lead() const { return lead_; }      // the lift after the lean's move, ticks (negative: before its end)
-  int settle() const { return settle_; }  // a level-out done this long (the servo lag) before what follows
+  int settle() const { return settle_; }  // a level-out done this long (the servos' response) before what follows
+  int couple_ticks() const;                // a group's second leg lifts this many ticks after its first
   const Pattern& pattern() const { return *pattern_; }
   const Pattern* pending_pattern() const { return pending_; }
   Direction direction() const { return direction_; }
@@ -241,6 +245,11 @@ class Planner {
  private:
   bool leaning() const { return pattern_->lean && cfg_.lean; }
   int shift_for(real stance) const;
+  int span() const;            // a slot's ticks from the first lift to the last touchdown
+  int offset(int leg) const;   // the tick after the shift at which this leg of the slot's group lifts
+  bool direct_change() const;  // the change under way goes straight over (both patterns fixed cadence)
+  bool switch_ok(const Pattern& p) const;
+  int first_group() const;
   bool home() const;
   void apply_timing();
   void start_slot();
@@ -282,14 +291,16 @@ class Planner {
   real swing_[kLegs] = {};  // per leg: x at lift-off
   bool skip_ = false;
   bool caught_[kLegs] = {};
-  int caught_j_[kLegs] = {};
+  int caught_j_[kLegs] = {};  // the slot tick (after the shift) of the catch
   real caught_lift_[kLegs] = {};
   bool stopping_ = false;
   bool finishing_ = false;
   bool done_ = false;
   real err_[2] = {};
   Attitude prev_att_ = {0, 0};
-  real lag_ = 0;
+  real lag_ = 0;    // the servos' dead time, ticks
+  real alpha_ = 1;  // their first-order response's step per tick
+  Attitude resp_ = {0, 0};  // the predicted attitude: the plan's, delayed, through the response
   int hist_n_ = 0;
   Attitude att_hist_[kHistMax] = {};
   bool has_job_ = false;   // this slot's lean while it is still being solved (the slot waits)

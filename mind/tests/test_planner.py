@@ -201,7 +201,7 @@ def test_the_walk_lifts_a_hind_leg_then_its_diagonal_fore_leg():
     assert run[i:i + 6] == [(LB,), (LB, RF), (RF,), (RB,), (RB, LF), (LF,)]
     lb = [t.tick for t in ticks if LB in t.lifting]
     rf = [t.tick for t in ticks if RF in t.lifting]
-    assert rf[0] - lb[0] == 3 and lb[6] - lb[0] == 6  # 60 ms later; 7 ticks in the air (the last one down)
+    assert rf[0] - lb[0] == 3 and lb[6] - lb[0] == 6 and lb[7] - lb[0] > 7  # 60 ms later; 7 ticks up of the 8
 
 
 @pytest.mark.parametrize("name", ("crawl",))

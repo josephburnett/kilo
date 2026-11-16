@@ -253,6 +253,7 @@ void WalkRecorder::on_walk_mark(const planner::Walker& w, planner::WalkMark mark
       g.fixed("length_mm", m.length_mm, 1);
       g.fixed("track_mm", m.track_mm, 1);
       g.fixed("servo_lag_ms", m.servo_lag_ms, 1);
+      g.fixed("servo_tau_ms", m.servo_tau_ms, 1);
       g.fixed("slew_deg_per_tick", m.slew_deg_per_tick, 1);
       g.fixed("reach_frac", m.reach_frac, 3);
       g.fixed("knee_max_deg", m.knee_max_deg, 1);

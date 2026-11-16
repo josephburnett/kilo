@@ -183,20 +183,20 @@ void test_posture_keys() {
 void test_gait_keys() {
   Rig r;
   // not walking: a gait key starts walking forward in it at 1x
-  LAST_IS(r, "C4", "walk forward (walk) 17.8 mm/s");
+  LAST_IS(r, "C4", "walk forward (walk) 80.0 mm/s");
   r.run_ms(800);
   CHECK(r.walker.active() && r.dir() == planner::Direction::Forward && r.remote.level() == 3);
   CHECK(std::strcmp(r.walker.planner().pattern().name, "walk") == 0);
-  CHECK(r.log.has("remote C4 (0xB0, walk): walk forward (walk) 17.8 mm/s"));
+  CHECK(r.log.has("remote C4 (0xB0, walk): walk forward (walk) 80.0 mm/s"));
   // the same gait again: nothing (no restart, the speed kept)
   size_t feet = r.body.count(KILO_MSG_FEET);
-  LAST_IS(r, "C4", "walk forward (walk) 17.8 mm/s: unchanged");
+  LAST_IS(r, "C4", "walk forward (walk) 80.0 mm/s: unchanged");
   CHECK(r.walker.active() && r.body.count(KILO_MSG_FEET) > feet);
   // another gait while walking: changed, the level kept
   r.key("B7");  // +4
-  LAST_IS(r, "A4", "walk forward (trot) 152.2 mm/s");  // 1.1x is past the trot's top: clamped
+  LAST_IS(r, "A4", "walk forward (trot) 165.6 mm/s");  // 1.15x
   CHECK(r.remote.level() == 4 && std::strcmp(r.remote.pattern(), "trot") == 0);
-  LAST_IS(r, "B4", "walk forward (crawl) 24.4 mm/s");
+  LAST_IS(r, "B4", "walk forward (crawl) 25.6 mm/s");
   // backward, then the gait in use: forward again at the level's magnitude
   for (int i = 0; i < 5; i++) r.key("B5");  // +4 +3 +2 +1 -1 -2
   CHECK(r.remote.level() == -2);
@@ -224,33 +224,31 @@ void test_speed_ladder() {
   CHECK(r.log.has("remote B7 (0x62, faster): ignored (not walking)"));
   r.key("A4", 800);
   CHECK(r.walker.active());
-  // down from 1x through zero into backward (since 2026-11-15 the slowest level is about the old
-  // default, trot 55.6 mm/s)
+  // down from 1x through zero into backward (since 2026-11-16 the levels are 0.4, 0.7, 1, 1.15,
+  // 1.25 x the default: the trot 58 to 180 mm/s, inside its 42..184)
   LAST_IS(r, "B5", "speed 0.7x (trot 100.8 mm/s forward)");
   LAST_IS(r, "B5", "speed 0.4x (trot 57.6 mm/s forward)");
   LAST_IS(r, "B5", "speed -0.4x (trot 57.6 mm/s back)");
   CHECK(r.remote.level() == -1 && r.dir() == planner::Direction::Back);
   LAST_IS(r, "B5", "speed -0.7x (trot 100.8 mm/s back)");
   LAST_IS(r, "B5", "speed -1x (trot 144.0 mm/s back)");
-  LAST_IS(r, "B5", "speed -1.1x (trot 152.2 mm/s back)");  // the trot's cap
-  LAST_IS(r, "B5", "speed -1.2x (trot 152.2 mm/s back)");
-  LAST_IS(r, "B5", "speed -1.2x (trot 152.2 mm/s back): already the fastest back");
-  CHECK(r.remote.level() == -5 && std::fabs(r.speed() - 152.2) < 0.05);
+  LAST_IS(r, "B5", "speed -1.15x (trot 165.6 mm/s back)");
+  LAST_IS(r, "B5", "speed -1.25x (trot 180.0 mm/s back)");
+  LAST_IS(r, "B5", "speed -1.25x (trot 180.0 mm/s back): already the fastest back");
+  CHECK(r.remote.level() == -5 && std::fabs(r.speed() - 180.0) < 0.05);
   // and up again, through zero into forward, to the top
   for (int i = 0; i < 4; i++) r.key("B7");
   CHECK(r.remote.level() == -1);
   LAST_IS(r, "B7", "speed 0.4x (trot 57.6 mm/s forward)");
   CHECK(r.dir() == planner::Direction::Forward);
   for (int i = 0; i < 3; i++) r.key("B7");
-  LAST_IS(r, "B7", "speed 1.2x (trot 152.2 mm/s forward)");
-  LAST_IS(r, "B7", "speed 1.2x (trot 152.2 mm/s forward): already the fastest");
+  LAST_IS(r, "B7", "speed 1.25x (trot 180.0 mm/s forward)");
+  LAST_IS(r, "B7", "speed 1.25x (trot 180.0 mm/s forward): already the fastest");
   CHECK(r.remote.level() == 5);
-  // a level the planner clamps to the same speed (the trot's top two): the level moves, the log shows
-  // the real mm/s
-  LAST_IS(r, "B5", "speed 1.1x (trot 152.2 mm/s forward)");
+  LAST_IS(r, "B5", "speed 1.15x (trot 165.6 mm/s forward)");
   LAST_IS(r, "B5", "speed 1x (trot 144.0 mm/s forward)");
-  CHECK(r.log.has("remote B5 (0xA8, slower): speed 1.1x (trot 152.2 mm/s forward)"));
-  LAST_IS(r, "C4", "walk forward (walk) 17.8 mm/s");
+  CHECK(r.log.has("remote B5 (0xA8, slower): speed 1.15x (trot 165.6 mm/s forward)"));
+  LAST_IS(r, "C4", "walk forward (walk) 80.0 mm/s");
 }
 
 void test_turn_keys() {
@@ -273,15 +271,15 @@ void test_turn_keys() {
   CHECK(r.remote.heading() == Heading::Straight && r.dir() == planner::Direction::Forward);
   // another gait during a turn: the turn goes on in it
   r.key("C6");
-  LAST_IS(r, "C4", "walk right (walk) 12.4 mm/s");
+  LAST_IS(r, "C4", "walk right (walk) 56.0 mm/s");
   // backward, then a turn: the turn at the magnitude, then the gait key forward
   r.key("C4");
   r.key("B5");
   r.key("B5");  // +2: +1, -1
   CHECK(r.remote.level() == -1);
-  LAST_IS(r, "A6", "walk left (walk) 7.1 mm/s");
+  LAST_IS(r, "A6", "walk left (walk) 32.0 mm/s");
   CHECK(r.remote.level() == 1);
-  LAST_IS(r, "C4", "walk forward (walk) 7.1 mm/s");
+  LAST_IS(r, "C4", "walk forward (walk) 32.0 mm/s");
 }
 
 void test_freeze() {
@@ -381,8 +379,8 @@ void test_keys_queue() {
   CHECK(r.remote.busy());
   for (int i = 0; i < 3000 && r.remote.busy(); i++) r.pass();
   CHECK(r.log.has("remote B6 (0x02, stand): posture stand") &&
-        r.log.has("remote C4 (0xB0, walk): walk forward (walk) 17.8 mm/s") &&
-        std::strcmp(r.remote.last(), "speed 1.1x (walk 19.6 mm/s forward)") == 0);
+        r.log.has("remote C4 (0xB0, walk): walk forward (walk) 80.0 mm/s") &&
+        std::strcmp(r.remote.last(), "speed 1.15x (walk 92.0 mm/s forward)") == 0);
 }
 
 }  // namespace
