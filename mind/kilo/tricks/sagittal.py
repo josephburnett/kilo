@@ -21,15 +21,15 @@ Frames and conventions:
 - Legs as body/src/core/ik.h: theta1 from straight down (+ = foot forward),
   theta2 the knee bend; OpenCat angles: front shoulder = -theta1, front knee
   = 90 - theta2; back shoulder = -theta1, back knee = -(theta2 + 90).
-- The tail (kilo.tricks.sagittal.tail_point; MEASURED by the owner
-  2026-11-16, the reading of the numbers is an INTERPRETATION, see
-  docs/rear-up-trick.md §2): a straight 94 mm lever whose servo turns it
-  LEFT AND RIGHT, not up and down. The servo's axis lies in the body's
-  mid-plane and points backward and up, ``tail_axis_deg`` (40) above
-  straight back; at servo 0 the tail points backward and ``tail_droop_deg``
-  (18) below straight back. The tip therefore sweeps a cone about the axis
-  (58 deg half-angle: a circle of radius 80 mm whose centre is 50 mm along
-  the axis), LOWEST at 0 and rising to either side. In the side view the
+- The tail (kilo.tricks.sagittal.tail_point; MEASURED and described by the
+  owner 2026-11-16, docs/rear-up-trick.md section 2): a straight 94 mm lever
+  whose servo turns it LEFT AND RIGHT, not up and down. The servo's axis
+  lies in the body's mid-plane, tipped 40 deg back from vertical, so it
+  points backward and up ``tail_axis_deg`` (50) above straight back; at
+  servo 0 the tail points backward and ``tail_droop_deg`` (18) below
+  straight back. The tip therefore sweeps a cone about the axis (68 deg
+  half-angle: a circle of radius 87 mm whose centre is 35 mm along the
+  axis), LOWEST at 0 and rising to either side. In the side view the
   tail is a strut that cannot be driven down; turning it moves the tip
   sideways (``tail_sign``: +1 if a positive servo angle swings the tip to
   the left, +y; NOT KNOWN) and up.
@@ -80,7 +80,7 @@ class Geometry:
     tail_pivot_z: float = 24.0    # ...and 24 mm above them
     tail_len: float = 94.0        # pivot to the tip, straight line
     tail_droop_deg: float = 18.0  # at servo 0 the tail points this far below straight back
-    tail_axis_deg: float = 40.0   # the servo's axis points backward and this far up (INTERPRETATION)
+    tail_axis_deg: float = 50.0   # the servo's axis: tipped 40 deg back from vertical, 50 up from straight back
     tail_sign: float = 1.0        # +1: a positive servo angle swings the tip LEFT (+y). NOT KNOWN
     tail_g: float = 6.0           # the moving part (taken out of the frame's lump): ESTIMATE
     tail_com_frac: float = 0.5

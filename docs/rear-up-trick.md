@@ -156,24 +156,30 @@ length. So to model where the tip of the tail is (goes left and right)
 sweeps back and forth along an arc around a center point ~50mm above the
 axis of the motor."
 
-**How the model reads it.** This is my interpretation; please confirm it
-(question T1 below).
+Then, describing the angles: "If the motor shaft was pointing straight up,
+then tip it 40 degrees down (toward the back), that's where it sits. And
+same for the tail. If it was sticking straight out level pointing straight
+back, then you tip it down toward the ground to 18 degrees, that's where it
+is."
+
+**What the model takes from that.**
 
 - The tail's pivot (where the servo's axis meets the middle of the body) is
   24 mm above and 9 mm behind the axles of the hind legs, with Kilo level.
 - The servo's axis lies in the middle of the body (in the plane of the
-  spine) and points backward and up, 40 degrees above straight back.
+  spine), tipped 40 degrees back from vertical: it points backward and up,
+  50 degrees above straight back.
 - With the tail straight back (servo at 0), the tail points backward and 18
   degrees below straight back.
-- So the tail and the axis are 58 degrees apart. Turning the servo swings
+- So the tail and the axis are 68 degrees apart. Turning the servo swings
   the tail round the axis like the side of a cone: the tip goes round a
-  circle of 80 mm radius whose centre is 50 mm along the axis from the
-  pivot. That 50 mm matches your "~50 mm", which is why I chose this
-  reading.
+  circle of 87 mm radius whose centre is 35 mm along the axis from the
+  pivot. (Your "~50 mm" was a rough figure; the model uses the angles.)
 - The tip is lowest with the tail straight back: 89 mm behind and 29 mm
   below the pivot (98 mm behind and 5 mm below the hind axles). Turned 90
-  degrees to either side, it is 80 mm to the side and 32 mm above the pivot.
-  The tail cannot be driven down; it can only move the tip sideways and up.
+  degrees to either side, it is 87 mm to the side, 23 mm behind and 27 mm
+  above the pivot. The tail cannot be driven down; it can only move the tip
+  sideways and up.
 - With the tail straight back, the servo itself holds nothing while the tip
   is on the floor: the push of the floor goes through the servo's shaft and
   bearing, not round it. Turned aside under load, the floor's push tries to
@@ -186,13 +192,12 @@ numbers), `tail_point` and `tail_cone` (the sweep).
 posture stand`, or B6), servos on. "The hind axles" are the screws the
 upper hind legs turn on.
 
-**T1. Is the reading above right?** In particular: does the tail point
-down at 0 (18 degrees below straight back, its tip lower than its root), and
-does its tip rise as it swings to either side? Watch it go from stand to
-sit (`kilo --host 192.168.88.28 posture sit`): in sit the tail is at -60,
-so the tip should be well to one side and higher than in stand. If the tail
-at 0 points *up*, or the tip goes *down* as it swings, tell me before
-switching B2 on.
+**T1. A last look at the tail.** Your description settles the geometry;
+this is only a check that the model moves the same way. Watch the tail go
+from stand to sit (`kilo --host 192.168.88.28 posture sit`): in sit the
+tail is at -60, so its tip should be well to one side and higher than in
+stand (the model: 76 mm to the side, 28 mm higher). If the tip goes *down*
+as it swings, tell me before switching B2 on.
 
 **T2. Which side is "left".** In sit (tail at -60), is the tip to Kilo's
 left or its right (as Kilo sees it, facing forward)? The trick does not
@@ -211,12 +216,12 @@ front, 36 mm above. In the hold it is 86 mm above the floor.)
 
 **T5. In sit, what touches the floor**: the hind feet, the rear end, the
 front feet? (The model says the four feet, with the rear end 3 mm up and
-the tail tip 24 mm up.)
+the tail tip 26 mm up.)
 
 **T6. The tail's weight**, only if it comes off easily: grams. (Estimate:
 6 g. It changes almost nothing.)
 
-How each changes the design: T1 decides whether the tail is a strut at all.
+How each changes the design: T1 confirms the tail is a strut.
 T3 and T4 say how far Kilo is from landing on its rear end or its Pi. T5
 checks the model against Kilo in a pose it already knows. New numbers go
 into `kilo.tricks.sagittal.Geometry`, then `python -m kilo.tricks.rear_up`
@@ -359,7 +364,7 @@ triangle of the two hind feet (65 mm apart) and the tail tip.
 **The ranges checked** (the gate the test holds the design to): the centre
 of mass 10 mm forward or back and 10 mm up or down; the tail 91-97 mm long,
 13-23 degrees down at 0, its pivot within 3 mm of the measurement either
-way, its axis 35-45 degrees; the rear end within 4 mm of the estimate.
+way, its axis 45-55 degrees above straight back; the rear end within 4 mm of the estimate.
 Every end of every range, and every corner of the centre of mass with the
 tail's length and droop; played from STAND and from SIT, and cut short half
 way to and at each keyframe: 840 runs. Over these:
@@ -381,7 +386,7 @@ way to and at each keyframe: 840 runs. Over these:
 **Wider.** With every corner of the centre of mass and of the tail's
 length, droop and pivot together (64 corners), the paws stay down in 7 of
 them, always the same way (the centre of mass forward and low, the tail
-drooping). If the reading of the measurements is off by more (the tail
+drooping). If the measurements are off by more than that (the tail
 85-103 mm, 8-28 degrees, its pivot 8 mm either way), the paws stay down in
 more corners and, in two corners where the centre of mass is also 10 mm
 back, cutting the trick short while the hind feet step lands the rear from
@@ -396,7 +401,7 @@ repo):
 |---|---|---|---|
 | hind shoulder | 1.33 | on the tripod at 24-28 degrees (keyframes 3-5) | 44 % |
 | hind knee | 0.61 | the same | 20 % |
-| tail | 0.65 | cut short early: the tail swings aside towards SIT while its tip is still loaded | 22 % |
+| tail | 0.67 | cut short early: the tail swings aside towards SIT while its tip is still loaded | 22 % |
 | front shoulder | 0.48 | the paws pressed on the floor at the top, in a corner where they cannot come up | 16 % |
 | front knee | 0.28 | | 9 % |
 
@@ -426,16 +431,17 @@ tail". In this trick the tail balances Kilo by being the third leg. Swinging
 it sideways to correct a sideways lean does very little:
 
 - The tail weighs about 6 g. Swung 20 degrees, it moves Kilo's centre of
-  mass sideways by about half a millimetre.
-- On the floor, swinging it 20 degrees moves the tip 27 mm sideways, but the
-  centre of mass sits close to the hind feet, so the sideways margin
-  changes by only about 3 mm. And the sideways margin is already 28 mm: the
-  risk is forward, not sideways.
-- It costs margin where it matters: turned aside, the tip rises (5 mm at 20
-  degrees), the rear sinks, the pitch drops about 2 degrees and the centre
-  of mass moves 2 mm towards the hind feet.
+  mass sideways by a quarter of a millimetre.
+- On the floor, swinging it 20 degrees moves the tip 30 mm sideways. That
+  narrows the triangle on one side (the sideways margin there drops from 28
+  to 23 mm) and widens it on the other: it moves where Kilo can lean, it
+  does not push Kilo back upright. And the sideways margin is already
+  28 mm: the risk is forward, not sideways.
+- It also changes the pitch: turned aside, the tip moves forward and up
+  (5 mm at 20 degrees), and in the model Kilo settles 1.7 degrees further
+  nose up.
 - The tip would have to slide sideways on the floor under load, and the
-  servo would then hold the floor's push (0.1 kg cm at 20 degrees).
+  servo would then hold the floor's push (0.09 kg cm at 20 degrees).
 
 So I do not propose it. What would help more, without new firmware: at the
 top, the mind streams FEET (the foot positions the body turns into joint

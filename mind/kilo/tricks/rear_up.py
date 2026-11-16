@@ -251,8 +251,8 @@ def build(g: S.Geometry | None = None) -> Trick:
 # a ruler and a protractor give around the owner's measurements of
 # 2026-11-16 (+-3 mm, +-5 deg), and the outline (still ESTIMATES) +-4 mm.
 # The tail's axis angle only matters when the tail turns, which the trick
-# does not. PLAUSIBLE is wider, for the case that the reading of the tail
-# measurements (docs/rear-up-trick.md section 2) is off; --report shows it.
+# does not. PLAUSIBLE is wider, for the case that the tail
+# measurements (docs/rear-up-trick.md section 2) are off; --report shows it.
 RANGES = {
     "com_dx": (-10.0, 10.0),
     "com_dz": (-10.0, 10.0),
@@ -260,7 +260,7 @@ RANGES = {
     "tail_droop_deg": (13.0, 23.0),
     "tail_pivot_x": (-73.5, -67.5),
     "tail_pivot_z": (21.0, 27.0),
-    "tail_axis_deg": (35.0, 45.0),
+    "tail_axis_deg": (45.0, 55.0),
     "rear_x": (-92.0, -84.0),
     "belly_z": (-28.0, -20.0),
 }

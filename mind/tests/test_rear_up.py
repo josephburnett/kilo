@@ -54,18 +54,19 @@ def test_rolls_follow_the_centre_of_mass():
     assert 25 < r.phi < 32 and {r.rear, r.front} == {S.HIND_FOOT, S.FRONT_FOOT} and r.clear[S.TAIL] > 15
 
 
-# ---- the tail: the owner's measurements of 2026-11-16, as read in docs/rear-up-trick.md ----------
+# ---- the tail: the owner's measurements and description of 2026-11-16 (docs/rear-up-trick.md) ---
 
 def test_tail_sweeps_a_cone_lowest_at_centre():
     c = S.tail_cone(G)
-    # 94 mm, 58 deg from its axis: a circle of 80 mm radius centred 50 mm along the axis ("~50 mm")
-    assert c["half_angle"] == pytest.approx(58.0) and c["radius"] == pytest.approx(79.7, abs=0.1)
-    assert c["centre_along_axis"] == pytest.approx(49.8, abs=0.1)
+    # the axis 40 deg back from vertical, the tail 18 deg below straight back: 68 deg apart, so
+    # the 94 mm tail's tip goes round a circle of 87 mm radius centred 35 mm along the axis
+    assert c["half_angle"] == pytest.approx(68.0) and c["radius"] == pytest.approx(87.2, abs=0.1)
+    assert c["centre_along_axis"] == pytest.approx(35.2, abs=0.1)
     # at 0: 89 mm behind and 29 mm below the pivot, so 98 mm behind and 5 mm below the hind axles
     assert c["tip0_from_pivot"] == pytest.approx((-89.4, -29.0), abs=0.1)
     assert c["tip0_from_hip"] == pytest.approx((-98.4, -5.0), abs=0.1)
-    # at 90 deg: 80 mm to the side and 32 mm ABOVE the pivot
-    assert c["tip90_from_pivot"][1:] == pytest.approx((79.7, 32.0), abs=0.1)
+    # at 90 deg: 87 mm to the side, 23 mm behind and 27 mm ABOVE the pivot
+    assert c["tip90_from_pivot"] == pytest.approx((-22.6, 87.2, 27.0), abs=0.1)
     # the tip is lowest at 0, rises the same either way, and moves sideways (which side is left is not known)
     z = {t: S.tail_point(G, t)[2] for t in (-90, -60, -30, -10, 0, 10, 30, 60, 90)}
     assert min(z, key=z.get) == 0
@@ -74,7 +75,7 @@ def test_tail_sweeps_a_cone_lowest_at_centre():
         assert S.tail_point(G, t)[1] == pytest.approx(-S.tail_point(G, -t)[1]) and S.tail_point(G, t)[1] > 0
     assert S.tail_point(G.with_(tail_sign=-1), 30)[1] < 0
     # the axis angle does not move the tip at 0 (only the sweep)
-    assert S.tail_tip(G.with_(tail_axis_deg=30), 0) == pytest.approx(S.tail_tip(G, 0))
+    assert S.tail_tip(G.with_(tail_axis_deg=40), 0) == pytest.approx(S.tail_tip(G, 0))
 
 
 def test_tail_touch_height():

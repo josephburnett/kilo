@@ -12,7 +12,7 @@ Foam or cardboard over the Pi: yes / no   Tail firmly on its servo: yes / no
 
 | | Answer | In the model |
 |---|---|---|
-| T1 the reading is right: at 0 the tail points back and down, its tip rises as it swings either way | | yes (18 deg down, axis 40 deg up) |
+| T1 from stand to sit, the tail tip swings to one side and rises | | yes (76 mm aside, 28 mm up at -60) |
 | T2 in sit (tail -60), the tip is on Kilo's left / right | | not known |
 | T3 frame's bottom back corner: behind the hind axles / below them, mm | | 27 / 24 (estimate) |
 | T4 Pi: back edge behind (+) or ahead (-) of the hind axles / highest point above them, mm | | -6 / 36 (estimate) |
