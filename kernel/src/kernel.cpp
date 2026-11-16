@@ -65,6 +65,13 @@
 #define KILO_BEHAVIOUR 0
 #endif
 
+// The remote's rear-up key, B2 (docs/rear-up-trick.md "The B2 switch"):
+// off, B2 does nothing, until the owner has done the staged trials.
+// make -C kernel KILO_REAR_UP=1 turns it on.
+#ifndef KILO_REAR_UP
+#define KILO_REAR_UP 0
+#endif
+
 using namespace kilo;
 
 // This image's identity for `kilo update --host`: the kernel updater
@@ -203,6 +210,7 @@ boolean CKernel::Initialize (void)
 	Config.mind_build = (uint32_t) KILO_BUILD;
 	Config.remote = RemoteOn;
 	Config.behaviour = KILO_BEHAVIOUR != 0;
+	Config.rear_up_key = KILO_REAR_UP != 0;
 	Config.balance_kp = BalanceKp;
 	// The behaviour RNG's seed: 32 bits, so that the logged seed (the
 	// runner logs it as %u) replays the same choices.
@@ -219,8 +227,9 @@ boolean CKernel::Initialize (void)
 	m_Watch.m_pLog = m_pLog;
 	m_pMind->set_tap (&m_Watch);
 
-	logf (*m_pLog, LogLevel::Info, "Kilo mind, build %08x%s (%s)", (unsigned) KILO_BUILD,
-	      KILO_BEHAVIOUR ? " (behaviour runner on)" : "", KiloMindKernelMarker);
+	logf (*m_pLog, LogLevel::Info, "Kilo mind, build %08x%s%s (%s)", (unsigned) KILO_BUILD,
+	      KILO_BEHAVIOUR ? " (behaviour runner on)" : "", KILO_REAR_UP ? " (rear-up key B2 on)" : "",
+	      KiloMindKernelMarker);
 	for (unsigned i = 0; i < kAuthorizedKeyCount; i++)
 	{
 		char Fingerprint[17];

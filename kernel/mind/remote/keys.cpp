@@ -28,9 +28,18 @@ const Key kKeyTable[kKeys] = {
     {0x52, "C1", "last skill", Kind::Ignore, "", "none"},
 };
 
+namespace {
+// B2 with the rear-up key off: a row 1-3 key that does nothing.
+const Key kRearUpOff = {0x38, "B2", "push-up", Kind::Ignore, "", "none"};
+bool g_rear_up_key = false;
+}  // namespace
+
+void set_rear_up_key(bool on) { g_rear_up_key = on; }
+bool rear_up_key() { return g_rear_up_key; }
+
 const Key* key_for(uint8_t command) {
   for (const Key& k : kKeyTable)
-    if (k.command == command) return &k;
+    if (k.command == command) return (k.kind == Kind::Trick && !g_rear_up_key) ? &kRearUpOff : &k;
   return nullptr;
 }
 

@@ -153,7 +153,7 @@ void RemoteControl::freeze(const Key& key, uint16_t arg) {
     part("behaviour runner stopped");
   }
   if (trick) {
-    stop_trick();  // over its stop_ticks: rear_up comes down to STAND
+    stop_trick();  // over its stop_ticks: rear_up comes down to SIT
     part("trick stopped");
   }
   if (n == 8) part("holding the posture");

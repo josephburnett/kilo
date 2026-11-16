@@ -52,6 +52,10 @@ void test_remote_through_the_mind() {
   CHECK(r.log.has("remote A7 (0xA2, sleep) repeat: ignored") && r.log.has("remote ? (0x45): ignored"));
   CHECK(r.log.has("remote B3 (0x18, none): ignored (no action on this key)") &&
         r.log.has("remote A2 (0x10, none): ignored (no action on this key)"));
+  // B2 with the rear-up key off (the default, MindConfig::rear_up_key): like rows 1-3
+  r.body.event(KILO_EVENT_IR_KEY, 0x38);
+  r.run_ms(40);
+  CHECK(r.log.has("remote B2 (0x38, none): ignored (no action on this key)") && r.body.count(KILO_MSG_TRICK_BEGIN) == 0);
   r.body.event(KILO_EVENT_IR_KEY, 0xA2);  // A7: rest
   r.run_ms(40);
   CHECK(r.posture_goal() == KILO_POSTURE_REST);
@@ -60,6 +64,19 @@ void test_remote_through_the_mind() {
   off.body.event(KILO_EVENT_IR_KEY, 0x02);
   off.run_ms(40);
   CHECK(off.posture_goal() == -1);
+  // the rear-up key on (KILO_REAR_UP=1, kilo-mind-host --rear-up): B2 goes to the remote
+  {
+    MindConfig on;
+    on.remote = true;
+    on.rear_up_key = true;
+    Rig up(on);
+    CHECK(remote::rear_up_key());
+    up.body.event(KILO_EVENT_IR_KEY, 0x38);
+    up.run_ms(40);
+    CHECK(up.log.has("remote B2 (0x38, rear up): ") && !up.log.has("B2 (0x38, rear up): ignored"));
+  }
+  Rig after{MindConfig()};  // the next Mind's config sets it again
+  CHECK(!remote::rear_up_key());
 }
 
 void test_behaviour_through_the_mind() {
