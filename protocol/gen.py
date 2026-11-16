@@ -284,6 +284,14 @@ def validate_host(spec: dict) -> None:
         raise SpecError("host: UPDATE_BEGIN image_size range != [1, host.update_max_image]")
     if not isinstance(h["update_marker"], str) or not h["update_marker"].isascii() or '"' in h["update_marker"]:
         raise SpecError("host: update_marker must be a plain ASCII string")
+    wi = next(m for m in spec["host_messages"] if m["name"] == "WALK_INFO")
+    if wi["fields"][-1]["max"] != h["walk_text_max"]:
+        raise SpecError("host: WALK_INFO text max != host.walk_text_max")
+    wd = next(m for m in spec["host_messages"] if m["name"] == "WALK_DATA")
+    if wd["fields"][-1]["max"] != h["walk_chunk_max"]:
+        raise SpecError("host: WALK_DATA data max != host.walk_chunk_max")
+    if struct_size(spec, "walk_record_header") != 6:
+        raise SpecError("host: walk_record_header is kind u8, len u8, t_us u32 (6 B)")
 
 
 def field_range(spec: dict, msg: str, name: str) -> tuple[int, int]:

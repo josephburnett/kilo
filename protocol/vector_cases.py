@@ -346,6 +346,23 @@ def host_frame_cases():
         ("update_status_not_a_kernel", "UPDATE_STATUS", 0,
          {"phase": 7, "error": 5, "received": 1000, "image_size": 1000, "done": 0, "crc32": 0x12345678,
           "card_crc32": 0}, "FAILED: no marker"),
+        ("walk_list_first", "WALK_LIST", 17, {"after": 0}, "from the oldest walk kept"),
+        ("walk_list_next", "WALK_LIST", 18, {"after": 3}, "the walk after id 3"),
+        ("walk_info_found", "WALK_INFO", 17,
+         {"found": 1, "kept": 2, "recording": 0, "capacity": 6291456, "used": 145000, "dropped_walks": 0,
+          "dropped_records": 0, "id": 1, "start_ms": 12345, "duration_ms": 8040, "bytes": 72000, "records": 1900,
+          "feet": 380, "flags": 0b1010,
+          "text": b"gait=trot dir=forward speed=55.6 end=stopped".hex()}, "a whole walk, ended as asked, streamed"),
+        ("walk_info_none", "WALK_INFO", 18,
+         {"found": 0, "kept": 2, "recording": 3, "capacity": 6291456, "used": 145000, "dropped_walks": 0,
+          "dropped_records": 0, "id": 0, "start_ms": 0, "duration_ms": 0, "bytes": 0, "records": 0, "feet": 0,
+          "flags": 0, "text": ""}, "no walk after 3 (3 is being recorded)"),
+        ("walk_fetch", "WALK_FETCH", 19, {"id": 1, "offset": 0}, "walk 1 from its start"),
+        ("walk_fetch_stop", "WALK_FETCH", 20, {"id": 0, "offset": 0}, "stop this client's fetch"),
+        ("walk_data", "WALK_DATA", 0, {"id": 1, "offset": 400, "total": 72000, "status": 0, "data": "05" * 200},
+         "a full chunk"),
+        ("walk_data_end", "WALK_DATA", 0, {"id": 1, "offset": 72000, "total": 72000, "status": 1, "data": ""},
+         "the end"),
     ]
 
 
