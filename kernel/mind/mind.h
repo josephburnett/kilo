@@ -13,7 +13,8 @@
 //   HostServer   the laptop interface, when the platform has a Listener (net/)
 //   WalkRecorder every walk tick by tick, with storage from attach_recorder() (record/)
 //
-//   static Mind mind(serial, clock, platform_log, &listener, cfg);  // ~60 KB: static
+//   static Mind mind(serial, clock, platform_log, &listener, cfg);  // ~90 KB: static
+//   mind.attach_recorder(storage, record::kStoreBytes);  // the walk recorder's 8 MB, once
 //   mind.start();                // the port is open: HELLO_REQ
 //   for (;;) mind.poll();        // a few ms apart; never blocks
 //

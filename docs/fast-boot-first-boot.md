@@ -6,7 +6,8 @@ P1 to P4 of docs/fast-boot.md: the Pi says hello to Kilo's board and
 keeps the link alive, with no Linux, the laptop talks to the Pi over the
 network cable (`kilo status`, `kilo log`, `kilo posture`), Kilo answers
 the IR remote (step 9), and, as an optional last step, the Pi rewrites
-Kilo's board firmware itself (`kilo flash --host`, step 12).
+Kilo's board firmware itself (`kilo flash --host`, step 12); after a walk,
+the laptop downloads what the mind recorded of it (step 14).
 
 Nothing here is timed. Every step waits for you, and you can stop at any
 step and carry on later. Write what you see in
@@ -504,7 +505,65 @@ of `kernel/build/card/netboot/` (the loader) or `kernel/build/card/kernel/`
 partition, replacing what is there. `kernel7.old`, if the card has one, is
 the kernel from before the update: renaming it to `kernel7.img` also works.
 
-### 14. Finish
+### 14. Optional: after a walk: plug the cable in, fetch, analyse
+
+The mind remembers every walk, tick by tick, while it runs, so you can walk
+Kilo with the remote and no cable, then look at what happened. Words used:
+
+- **Walk recording**: what the mind wrote down during one walk: every
+  message between the Pi and Kilo's board (each 20 ms tick: where the plan
+  put each foot, the tilt the plan expected, the tilt the board measured,
+  and the correction the board's own balance loop added), plus the walk's
+  settings. Kept in the Pi's memory, about 30 minutes of walking; the
+  oldest walks go first when it is full.
+- **Predicted** tilt: what the plan expected the body's pitch and roll to
+  be at that tick. **Measured**: what Kilo's IMU (the tilt sensor) said.
+  The **error** is measured minus predicted.
+
+**Switching Kilo off loses the recordings** (they are in memory only, not on
+the card). So plug the cable in before you switch Kilo off.
+
+1. Kilo on the floor, the cable unplugged. Walk him with the remote as in
+   step 9 (A4 trot, C4 walk or B4 crawl, then B6 to stop). Each walk, from
+   a gait key to its stop, is one recording.
+2. With Kilo still on, plug the network cable in and wait for the Pi's
+   address (step 4; on a direct cable it is `169.254.75.73`).
+3. List the walks:
+
+   ```
+   ~/OpenCat/.venv/bin/kilo walks --host 192.168.88.Y
+   ```
+
+   One line per walk: its number, when it started (the laptop's clock),
+   the gait, direction, speed in mm/s, how long it lasted, how many ticks
+   were sent, its size and how it ended (`stopped` is the normal end).
+4. Download them:
+
+   ```
+   ~/OpenCat/.venv/bin/kilo walks --host 192.168.88.Y --fetch --out ~/kilo-logs/walks
+   ```
+
+   For each walk it writes `walk-<date>-<time>-<number>.kwalk` (the
+   recording) and a `.kilolog` beside it, and prints a summary. A walk
+   that is still running is skipped: fetch it again after it ends.
+5. Look at one walk again later, and save its tick-by-tick table:
+
+   ```
+   ~/OpenCat/.venv/bin/kilo log walk ~/kilo-logs/walks/walk-....kwalk --csv walk.csv --plot walk.png
+   ```
+
+   What the summary says: the **error** per axis (`rms`: the typical size;
+   `max`: the worst tick; `offset`: the average, a constant tilt such as a
+   sensor that is not mounted level), the **lag** (how much later than the
+   plan the body tilts), the error **by phase** (which legs were in the
+   air), how long the board **held** its corrections, and the smallest
+   **margin** (how far inside its feet the body's weight stayed, in mm).
+
+Copy the `kilo walks` list and each walk's summary into the results, and
+keep the `.kwalk` files. If `kilo walks` says the mind does not record
+walks, the Pi runs an older kernel: update it (step 13).
+
+### 15. Finish
 
 Power the Pi off. Way A: unplug the USB cable from the Pi before you switch
 Kilo off.

@@ -27,6 +27,8 @@ platform.h        the seams: Serial (non-blocking bytes, tx_free), Clock (us), L
 platform_net.h    the network seams: Listener (accept into a fixed slot) and Conn (non-blocking TCP stream)
 util/fmt, log     a small printf (%d %u %x %s %c %%, width, '0') and log lines through Log
 util/logring      the RAM log: a Log sink keeping the last 64 lines, for `kilo log --host` (status lines only while a laptop reads it)
+record/store      the walk recordings in RAM: a byte ring of whole walks and their index (oldest walks dropped whole)
+record/recorder   every walk tick by tick into the store: link frames both ways, planned ticks, parameters, the end
 net/host_frame    the laptop channel's framing: len u16 | type | seq | payload | crc16
 net/host_server   the laptop interface (P2): commands, telemetry and log streams, the raw bridge
 link/serial_link  the link state machine: a port of mind/kilo/link/serial_link.py
@@ -116,6 +118,7 @@ for (;;) {
 | Raw bridge | `BRIDGE_TX`/`BRIDGE_RX`: UART bytes, the link paused | the controller |
 | Flash (P4) | `FLASH_BEGIN`, `FLASH_DATA`, `FLASH_COMMIT` -> `RESULT`; `FLASH_STATUS` until DONE or FAILED (ids 0x40-0x42, 0xC0) | the controller; see "Flashing" |
 | Kernel update | `UPDATE_BEGIN`, `UPDATE_DATA`, `UPDATE_COMMIT` -> `RESULT`; `UPDATE_STATUS` until DONE (then the reboot) or FAILED (ids 0x48-0x4A, 0xC1) | the controller; see "Updating the kernel" |
+| Walk recordings | `WALK_LIST` -> `WALK_INFO` (one walk a request); `WALK_FETCH` -> `RESULT`, then `WALK_DATA` until END (or GONE) | any client; see "Walk recordings" |
 
 Who may connect (`kernel/README.md` "Who may talk to Kilo: keys" for the
 whole story; the spec's `[host]` comments for the bytes): every
@@ -355,6 +358,78 @@ marker, checks `kernel7.img`, `kernel7.old` and that `kernel7.new` is gone,
 and the exit status 3; `tests/test_update.cpp` runs every store failure
 against an in-memory card (`tests/fake_store.h`).
 
+## Walk recordings
+
+`record/` keeps every walk in RAM, tick by tick, so that the model's error
+can be studied after the walk (the owner walks Kilo with the IR remote and
+the cable unplugged, then plugs it in): `kilo walks --host IP` lists the
+walks, `kilo walks --host IP --fetch` downloads them, `kilo log walk
+FILE.kwalk` analyses one (`mind/README.md`).
+
+What a recording holds, from 2 s before the walk's setup to 2 s after its
+end (`KILO_HOST_WALK_PREROLL_MS`, `_POSTROLL_MS`):
+
+- every body link frame both ways, as it crossed the UART, with the mind's
+  clock in microseconds (`SerialLink::set_frame_tap()`): TELEMETRY (50 Hz
+  in a walk: measured pitch and roll and their rates, the body's reference
+  `ref_*` and correction `corr_*`, support, flags such as BALANCE_HELD,
+  `feet_queued`, `tick_load`), EVENTs, JOINTS if they are streamed; FEET
+  (each foot's x and z, the predicted pitch and roll, support), goals,
+  commands, HEARTBEAT;
+- each planned tick (`walk_plan`, through the Walker's `WalkObserver`): the
+  attitude the feet give without the servo lag, the prediction before its
+  clamp, the stability margin, the legs in the air, whether it was sent;
+- the planner's hold, catch and wait counters when they move
+  (`walk_planner`);
+- `MARK` lines, `word key=value ...`: `walk` (id, format, t0 on the mind's
+  clock, mind and body builds), `setup` (what was asked), `stream` (the
+  first tick and the timing the planner chose: speed, stride, period,
+  shift, stance, swing), `config` (the `PlannerConfig` in use), `model` and
+  `masses` (the `BodyModel` in use), `change` / `timing` / `stop` / `queued`
+  as they happen, and at the end `result` (sent, skipped, underruns, holds,
+  catches, waits, min margin), `error` (the tracker's offset, lag, spike,
+  mean correction) and `end` (ok, reason). The parameters are read from
+  the planner, never assumed.
+
+Each record is a `kilo_walk_record_header_t` (kind, len, t_us since the
+walk's t0) and its payload; the kinds and structs are in
+`protocol/spec.toml` ([host] "Walk recordings", `walk_*`).
+
+**The store** (`record/store`) is one block the platform allocates once at
+start (`record::kStoreBytes`, 8 MB: `Mind::attach_recorder()`, before
+`start()`); the index of up to 128 walks and an 18 KB pre-roll ring are
+carved from it, the rest (8.35 MB, the log's `walk recorder: 8152 KB for records`) holds records. A walk tick costs about
+92 bytes (TELEMETRY 43, FEET 24, PLAN 23, the 5 Hz goal refresh), so the
+store holds about 30 minutes of walking (`test_record`'s 20-minute fill).
+When a record does not fit, the oldest walks go, whole; a walk that alone
+outgrows the store keeps its start and its end (2 KB stay free for the end
+lines) and drops what came between (`TRUNCATED`, counted). A walk being
+recorded is not fetchable. Nothing survives a power cut: the SD card is not
+written (`kernel/README.md` "Walk recordings").
+
+**The download** (`HostServer`): `WALK_DATA` chunks of 200 bytes go only
+into room in that client's 4 KB send ring, so a laptop that reads slowly
+slows its download and is never dropped for it, and the link is never
+touched: 8 chunks a pass, 1 while a walk is being recorded. On this laptop
+(`make -C kernel/host bench`, `bench_walks`) a pass that downloads costs
+24 us at 1.6 KB a pass, 3.5 us at the one-chunk rate, against 0.1 us idle;
+a walk tick's recording 0.08 us. Downloading during a walk is allowed: at
+one chunk a pass it adds a few microseconds to a pass (some tens on the
+Cortex-A7, estimated), far below the walker's own wake, and `test.sh`
+trots the virtual body through a download with no tick skipped and no
+underrun.
+
+**The RAM log** keeps what matters: lines that come many times a second
+go through `LogRing::status()`, which puts them into the 64-line ring only
+while a laptop reads the log (`kilo log --host`): a held IR key's EVENT
+lines (`event IR_KEY 0x01xx`, every ~110 ms) and its `repeat: ignored`
+lines, and the percept lines (`percept approaching`, ...). A first press,
+another remote's key, and what the remote did with a key stay in the ring.
+At the end of every walk that streamed, the walker logs its summary in two
+lines at Info (`walk trot forward 55.6 mm/s stride ... holds .. catches ..
+waits .. min margin .. mm`, `walk error: N samples offset pitch .. roll ..
+deg, lag .., spike .. deg`).
+
 ## The Mind
 
 `mind.h` puts the whole core in one object, so a platform's main loop is
@@ -362,7 +437,8 @@ a few lines (`kernel/host/main.cpp`):
 
 ```cpp
 MindConfig cfg;                       // remote, behaviour, balance_kp, seed, stats_period_ms ...
-static Mind mind(serial, clock, platform_log, &listener, cfg);  // ~70 KB: static; listener null = no laptop
+static Mind mind(serial, clock, platform_log, &listener, cfg);  // ~90 KB: static; listener null = no laptop
+mind.attach_recorder(new uint8_t[record::kStoreBytes], record::kStoreBytes);  // walk recordings (8 MB)
 mind.start();                         // the port is open: start goals, HELLO_REQ
 for (;;) mind.poll();                 // a few ms apart; never blocks
 ```

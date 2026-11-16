@@ -4,12 +4,13 @@
 // Linux: the body link (P1), the laptop interface over Ethernet (P2), the
 // walker, the trick player, perception, the IR remote and the behaviour
 // runner (P3, the runner off unless built with KILO_BEHAVIOUR=1),
-// flashing the body from the laptop or the SD card (P4), and writing a new
-// kernel onto the SD card from the laptop (`kilo update --host`).
+// flashing the body from the laptop or the SD card (P4), writing a new
+// kernel onto the SD card from the laptop (`kilo update --host`), and the
+// walk recorder (every walk tick by tick in RAM, `kilo walks --host`).
 //
 // Initialize: the screen (or nothing), interrupts, timer, then the Mind
 // (so every line is in its ring), the body link's Serial, the flasher, the
-// kernel updater, mind.start() (the link connects: HELLO_REQ), the planner bench and last
+// kernel updater, the walk recorder's store, mind.start() (the link connects: HELLO_REQ), the planner bench and last
 // the net task. Then one pass every 1 ms:
 //
 //   mind.poll()        stamp liveness, serve the laptop (and poll the
