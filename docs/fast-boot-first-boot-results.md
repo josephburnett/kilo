@@ -3,6 +3,24 @@
 Runs of docs/fast-boot-first-boot.md. Newest first. Copy the block below
 for each run and fill in what you saw; "don't know" is a fine answer.
 
+## 2026-11-15, run 4: the recorder and the faster gaits on the floor
+
+Build 457e180f installed with `kilo update --host` (back after 15.2 s). The owner walked Kilo by remote with the cable out, plugged it back in with Kilo still on; `kilo walks --host 192.168.88.28 --fetch all` brought three recordings (0.44 of 7.96 MB used), analysed with `kilo log walk`. Files: `~/kilo-logs/walks/walk-20261115-2135*.kwalk` on rtb.
+
+| | Walk 1 (50 s) | Walk 2 (10 s) | Walk 3 (36 s) |
+|---|---|---|---|
+| Gaits | crawl 22.2 -> 26.7 mm/s, walk 21.3, trot for the last ~10 s | trot, turning left, 144 mm/s | walk 17.8 -> 21.3 mm/s, then crawl |
+| End | stopped; 0 skipped, 0 underruns, 0 holds, 0 catches, 72 waits | stopped; 0 / 0 / 0 / 0, 0 waits | stopped; 0 / 0 / 0 / 0, 53 waits |
+| Pitch, measured - predicted | offset +1.68 deg, rms 0.74 less the offset, max +4.31 | offset +1.70, rms 0.75, max +3.88 | offset +2.00, rms 0.39, max +4.25 |
+| Roll, measured - predicted | offset +0.54, rms 2.51, max +6.06 | offset +0.25, rms 2.09, max +5.19 | offset +0.06, rms 2.90, max -8.56 |
+| Servo lag from the roll (model 150 ms) | 140 ms (r 0.953) | - | 140 ms (r 0.961) |
+| Body's correction, largest | pitch -2.06, roll -5.5 deg | pitch -2.5, roll 2.5 | pitch -1.44, roll -4.88 |
+| Smallest margin with one leg up | 12.4 mm (as planned) | - | 12.4 mm (as planned) |
+
+Roll error by the leg in the air (walks 1 and 3): LB +2.4 to +2.6 deg, RB -2.7 to -2.9, LF +2.1 to +2.7, RF -0.5 to -1.1: the body rolls toward a lifted rear leg by about 2.7 deg more than planned.
+
+The owner: "Walking is still really slow."
+
 ## 2026-11-15, run 3
 
 Kilo assembled, on battery, LAN cable in. The card still held the netboot loader; the Pi came up at 192.168.88.28.
