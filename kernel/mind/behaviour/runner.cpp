@@ -28,8 +28,26 @@ Runner::Runner(BodyIface& body, const Personality& cfg, Log& log, uint64_t seed,
   ctx_.drives = Drives::from_personality(cfg);
 }
 
+void Runner::stop() {
+  if (stopped_) return;
+  stopped_ = true;
+  lib_.root().halt();
+}
+
+void Runner::restart() {
+  if (!stopped_ || poweroff_done_) return;
+  stopped_ = false;
+  started_ = false;  // poll()'s grid starts again at the next poll
+  has_last_now_ = false;  // no drive update across the stopped time
+  has_key_ = false;
+  ctx_.data.forget_goals();
+  be_primed_ = false;
+  logged_choice_ = -2;
+  run_ticks_ = 0;
+}
+
 bool Runner::last_tick(double* t) const {
-  if (ticks_ == 0) return false;
+  if (run_ticks_ == 0) return false;
   *t = last_tick_at_;
   return true;
 }
@@ -110,6 +128,7 @@ const TickRecord& Runner::step() {
   ctx_.state = snap;
   if (paused) {
     ticks_++;
+    run_ticks_++;
     rec_ = TickRecord();
     rec_.t = ctx_.clock != nullptr ? ctx_.clock(ctx_.clock_arg) : ctx_.now;
     rec_.tick = ticks_;
@@ -137,6 +156,7 @@ const TickRecord& Runner::step() {
   lib_.root().tick(ctx_);
   ctx_.end_tick();
   ticks_++;
+  run_ticks_++;
   last_tick_at_ = now;
   rec_ = TickRecord();
   rec_.t = now;

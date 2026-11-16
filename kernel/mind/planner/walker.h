@@ -120,8 +120,9 @@ class Walker {
   // The planned stop (each leg steps home, the body levels, then STANCE).
   void stop();
   // End the stream now, without the planned stop: the body holds the last
-  // pose, then settles on its own.
-  void abort();
+  // pose, then settles on its own. why: the end's reason; asked: the
+  // owner meant it (the remote's freeze): logged as Info, ended_ok().
+  void abort(const char* why = "aborted", bool asked = false);
   // The walk's work: setup, the 20 ms stream wakes, teardown. Never blocks.
   void poll();
 
