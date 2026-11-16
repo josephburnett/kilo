@@ -5,6 +5,7 @@
 // controller, observers refused, REST on release, close and keepalive
 // timeout), TELEM rate, the log tail, the raw bridge both ways, out-of-step
 // streams and back-pressure.
+#include <algorithm>
 #include <cstdlib>
 #include <deque>
 #include <fstream>
@@ -537,6 +538,159 @@ void test_slow_client_dropped() {
   CHECK(!a.open && r.server.clients() == 0);
 }
 
+// ---- walk recordings (WALK_LIST, WALK_FETCH) -------------------------------------------
+
+void fill_walk(record::WalkStore& s, uint32_t records, uint8_t salt) {
+  s.open(0);
+  uint8_t p[60];
+  for (uint32_t i = 0; i < records; i++) {
+    for (uint32_t k = 0; k < sizeof p; k++) p[k] = (uint8_t)(i + k + salt);
+    s.append(KILO_WALK_RECORD_RX, i * 20000, p, sizeof p);
+  }
+}
+
+std::vector<uint8_t> store_bytes(const record::WalkStore& s, uint32_t id) {
+  std::vector<uint8_t> out(s.find(id)->size);
+  uint32_t total;
+  CHECK(s.read(id, 0, out.data(), (uint32_t)out.size(), &total) == (int32_t)out.size());
+  return out;
+}
+
+kilo_host_walk_info_t walk_list(Rig& r, FakeConn& c, uint32_t after, uint8_t seq) {
+  c.send(KILO_HOST_MSG_WALK_LIST, seq, &after, sizeof after);
+  r.pass();
+  kilo_host_walk_info_t w;
+  std::memset(&w, 0, sizeof w);
+  for (const HostFrame& f : c.take())
+    if (f.type == KILO_HOST_MSG_WALK_INFO && f.seq == seq) std::memcpy(&w, f.payload, f.len);
+  return w;
+}
+
+void test_walks() {
+  Rig r;
+  FakeConn& a = r.connect(0);
+  r.pass();
+  a.take();
+  // no store attached: UNSUPPORTED
+  uint32_t zero = 0;
+  a.send(KILO_HOST_MSG_WALK_LIST, 1, &zero, 4);
+  r.pass();
+  CHECK(result_code(a.take(), 1) == KILO_HOST_RESULT_CODE_UNSUPPORTED);
+
+  std::vector<uint8_t> mem(record::WalkStore::kIndexBytes + 8 + 200000);
+  record::WalkStore st;
+  st.attach(mem.data(), (uint32_t)mem.size());
+  r.server.attach_walks(st);
+  fill_walk(st, 400, 1);  // walk 1: 400 x 66 B = 26 KB
+  const char* t1 = "gait=trot dir=forward speed=55.6 end=stopped";
+  std::memcpy(st.current()->text, t1, std::strlen(t1));
+  st.current()->text_len = (uint8_t)std::strlen(t1);
+  st.current()->end_us = st.current()->start_us + 8000000;
+  st.close();
+  fill_walk(st, 10, 2);  // walk 2: still being recorded
+
+  kilo_host_walk_info_t w = walk_list(r, a, 0, 2);
+  CHECKF(w.found == 1 && w.id == 1 && w.kept == 2 && w.recording == 2, "found %u id %u kept %u rec %u", w.found,
+         (unsigned)w.id, w.kept, (unsigned)w.recording);
+  CHECKF(w.bytes == 400u * 66u && w.records == 400 && w.duration_ms == 8000, "%u B %u records %u ms",
+         (unsigned)w.bytes, (unsigned)w.records, (unsigned)w.duration_ms);
+  CHECK(w.found == 1 && w.id == 1 && w.kept == 2 && w.recording == 2 && w.bytes == 400u * 66u && w.records == 400 &&
+        w.duration_ms == 8000 && w.capacity == st.capacity() && w.used == st.used() &&
+        std::memcmp(w.text, t1, std::strlen(t1)) == 0 && !(w.flags & KILO_WALK_FLAGS_RECORDING));
+  w = walk_list(r, a, 1, 3);
+  CHECK(w.found == 1 && w.id == 2 && (w.flags & KILO_WALK_FLAGS_RECORDING));
+  w = walk_list(r, a, 2, 4);
+  CHECK(w.found == 0 && w.kept == 2 && w.recording == 2);
+
+  kilo_host_walk_fetch_t q = {2, 0};
+  a.send(KILO_HOST_MSG_WALK_FETCH, 5, &q, sizeof q);  // still being recorded
+  q = {9, 0};
+  a.send(KILO_HOST_MSG_WALK_FETCH, 6, &q, sizeof q);  // no such walk
+  q = {1, 400u * 66u + 1};
+  a.send(KILO_HOST_MSG_WALK_FETCH, 7, &q, sizeof q);  // past its end
+  r.pass();
+  std::vector<HostFrame> fs = a.take();
+  CHECK(result_code(fs, 5) == KILO_HOST_RESULT_CODE_BAD_ARG && result_code(fs, 6) == KILO_HOST_RESULT_CODE_BAD_ARG &&
+        result_code(fs, 7) == KILO_HOST_RESULT_CODE_BAD_ARG && count(fs, KILO_HOST_MSG_WALK_DATA) == 0);
+
+  // walk 1, while walk 2 is recorded: one chunk a pass
+  std::vector<uint8_t> want = store_bytes(st, 1), got;
+  q = {1, 0};
+  a.send(KILO_HOST_MSG_WALK_FETCH, 8, &q, sizeof q);
+  bool end = false;
+  size_t max_per_pass = 0;
+  for (int k = 0; k < 2000 && !end; k++) {
+    r.pass();
+    fs = a.take();
+    if (k == 0) CHECK(result_code(fs, 8) == KILO_HOST_RESULT_CODE_OK);
+    max_per_pass = std::max(max_per_pass, count(fs, KILO_HOST_MSG_WALK_DATA));
+    for (const HostFrame& f : fs) {
+      if (f.type != KILO_HOST_MSG_WALK_DATA) continue;
+      kilo_host_walk_data_t d;
+      std::memcpy(&d, f.payload, f.len);
+      CHECK(d.id == 1 && d.total == want.size() && d.offset == got.size());
+      if (d.status == KILO_WALK_DATA_STATUS_END) end = true;
+      else got.insert(got.end(), d.data, d.data + (f.len - KILO_HOST_WALK_DATA_MIN_LEN));
+    }
+  }
+  CHECK(end && got == want && max_per_pass == 1 && r.server.stats().walk_fetches == 1);
+
+  // walk 2 ends: kFetchChunks a pass, and a client that stops reading only
+  // stalls its download (it is not dropped, nothing is lost)
+  st.close();
+  got.clear();
+  end = false;
+  a.write_room = 0;
+  a.send(KILO_HOST_MSG_WALK_FETCH, 9, &q, sizeof q);
+  for (int k = 0; k < 50; k++) r.pass();
+  CHECK(a.open && r.server.clients() == 1);
+  a.write_room = -1;
+  max_per_pass = 0;
+  for (int k = 0; k < 2000 && !end; k++) {
+    r.pass();
+    fs = a.take();
+    max_per_pass = std::max(max_per_pass, count(fs, KILO_HOST_MSG_WALK_DATA));
+    for (const HostFrame& f : fs) {
+      if (f.type != KILO_HOST_MSG_WALK_DATA) continue;
+      kilo_host_walk_data_t d;
+      std::memcpy(&d, f.payload, f.len);
+      CHECK(d.offset == got.size());
+      if (d.status == KILO_WALK_DATA_STATUS_END) end = true;
+      else got.insert(got.end(), d.data, d.data + (f.len - KILO_HOST_WALK_DATA_MIN_LEN));
+    }
+  }
+  CHECKF(end && got == want && max_per_pass > 1 && max_per_pass <= HostServer::kFetchChunks + 20, "per pass %zu",
+         max_per_pass);  // the stalled ring drains in its first passes
+
+  // the walk is dropped from the store during its download: GONE
+  a.send(KILO_HOST_MSG_WALK_FETCH, 10, &q, sizeof q);
+  r.pass();
+  a.take();
+  for (uint32_t i = 0; i < 10; i++) {  // the store makes room: walk 1 goes
+    fill_walk(st, 400, (uint8_t)(10 + i));
+    st.close();
+  }
+  CHECK(st.find(1) == nullptr);
+  bool gone = false;
+  for (int k = 0; k < 50 && !gone; k++) {
+    r.pass();
+    for (const HostFrame& f : a.take())
+      if (f.type == KILO_HOST_MSG_WALK_DATA && f.payload[12] == KILO_WALK_DATA_STATUS_GONE) gone = true;
+  }
+  CHECK(gone);
+  // id 0 stops a fetch
+  q = {st.after(0)->id, 0};
+  a.send(KILO_HOST_MSG_WALK_FETCH, 11, &q, sizeof q);
+  kilo_host_walk_fetch_t stop = {0, 0};
+  a.send(KILO_HOST_MSG_WALK_FETCH, 12, &stop, sizeof stop);
+  r.pass();
+  fs = a.take();
+  CHECK(result_code(fs, 12) == KILO_HOST_RESULT_CODE_OK);
+  r.pass();
+  r.pass();
+  CHECK(count(a.take(), KILO_HOST_MSG_WALK_DATA) == 0);
+}
+
 // ---- the secure layer (net/host_secure.cpp) -------------------------------------------
 
 // Passes until c has the mind's answer (and message 2 when OK), at most max.
@@ -779,6 +933,7 @@ int main(int argc, char** argv) {
   test_bridge();
   test_reboot();
   test_slow_client_dropped();
+  test_walks();
   test_handshake_and_records();
   test_one_x25519_per_pass();
   test_no_hello_timeout();
