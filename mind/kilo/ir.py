@@ -29,13 +29,18 @@ C5    0x90    the calibration posture (CALIB), after stopping a walk
 A4    0x68    trot: start walking forward in it, or change to it
 B4    0x98    crawl
 C4    0xB0    walk
-A3-C1         nothing (logged as ignored)
+B2    0x38    rear up (trick ``rear_up``, docs/rear-up-trick.md): stop a walk
+              the planned way, then sit up on the haunches, hold, come
+              down; pressed again while it plays, it comes down at once
+              (TRICK_STOP over the trick's stop_ticks, 1.5 s, to STAND)
+A3-C1         nothing (logged as ignored), but B2
 ====  ======  =========================================================
 """
 
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -90,8 +95,8 @@ def split(arg: int) -> tuple[int, bool]:
 
 @dataclass(frozen=True)
 class Action:
-    kind: str        # "posture" | "gait" | "turn" | "speed" | "freeze" | "behaviour" | "none" | "ignore"
-    name: str = ""   # the posture, the gait pattern, the turn (left / right), faster / slower
+    kind: str        # "posture" | "gait" | "turn" | "speed" | "freeze" | "behaviour" | "trick" | "none" | "ignore"
+    name: str = ""   # the posture, the gait pattern, the turn (left / right), faster / slower, the trick
     label: str = ""  # what the key does, for the log
 
 
@@ -112,11 +117,17 @@ ACTIONS: dict[str, Action] = {
     "A4": Action("gait", "trot", "trot"),
     "B4": Action("gait", "crawl", "crawl"),
     "C4": Action("gait", "walk", "walk"),
+    "B2": Action("trick", "rear_up", "rear up"),
 }
 ACTIONS.update({k.grid: _NONE for k in KEYS if k.grid not in ACTIONS})
 
 FROZEN = "ignored (frozen: B6 or A7 to go on)"
 CANCELLED = "cancelled (C7 froze Kilo)"
+# rear_up holds Kilo's weight on two servos per hind leg for seconds: below
+# this pack voltage (TELEMETRY batt_mv, filtered) B2 refuses, so that the
+# body's low-battery reflex (REST from wherever Kilo is, docs/rear-up-trick.md)
+# does not fire half way up. Also refused on USB power (no_battery).
+TRICK_MIN_MV = 7400
 
 
 def describe(arg: int) -> str:
@@ -177,6 +188,15 @@ class RemoteControl:
       a walk and a trick. While it runs, B6, A7 and C7 stop it first
       (``behaviour.stop()``) and then do their own action, A5 does nothing
       and the other keys are ignored.
+    - B2 (``trick``): not playing a trick, stop a walk the planned way and
+      start the trick (``start_trick``: the key returns at once, the trick
+      plays on). While a trick plays (mode TRICK), B2 stops it: the toggle,
+      so a second press brings rear_up down. Refused below TRICK_MIN_MV or
+      on USB power.
+    - Stopping a trick (B2, B6, A7, C5, a gait key, C7) sends TRICK_STOP over
+      the trick's ``stop_ticks`` (BodyClient.stop_trick); a key that then
+      takes a posture or walks waits that long first, so the crossfade down
+      finishes before the next move starts.
 
     ``behaviour``: an object with ``active()``, ``start()`` (returns a detail
     for the line, or None; raises when it cannot start) and ``stop()``
@@ -268,15 +288,49 @@ class RemoteControl:
             note = "behaviour runner stopped, "
         return note + self._act(action, gen)
 
+    def _stop_trick(self, settle: bool = True) -> None:
+        """TRICK_STOP over the trick's stop_ticks; with ``settle``, wait
+        until its crossfade to the end posture is over."""
+        c = self.client
+        t = c.started_trick() if hasattr(c, "started_trick") else None
+        c.stop_trick()
+        ticks = getattr(t, "stop_ticks", 0) or 0
+        if settle and ticks:
+            time.sleep(ticks * 0.02 + 0.1)
+
+    def _trick(self, action: Action, gen: int) -> str:
+        c = self.client
+        if c.state.mode == "TRICK":  # the toggle: a second press brings it down
+            self._stop_trick(settle=False)
+            return "trick stopped: coming down"
+        self._reset()
+        self._stop_walking()
+        if self._freezes != gen:
+            return CANCELLED
+        st = c.state
+        if "no_battery" in st.flags:
+            return f"{action.name} refused: on USB power (no battery)"
+        mv = st.batt_mv
+        if mv is None or mv < TRICK_MIN_MV:
+            return f"{action.name} refused: battery {mv} mV (needs {TRICK_MIN_MV})"
+        from kilo.tricks import library
+
+        trick = library.load(action.name)
+        c.start_trick(trick)
+        secs = (trick.duration_ticks or 0) * 0.02
+        return f"trick {action.name} started ({secs:.0f} s; B2 again, B6 or C7 bring it down)"
+
     def _act(self, action: Action, gen: int) -> str:
         c = self.client
+        if action.kind == "trick":
+            return self._trick(action, gen)
         if action.kind in ("posture", "behaviour"):
             self._reset()
             self._stop_walking()
             if self._freezes != gen:
                 return CANCELLED
             if c.state.mode == "TRICK":
-                c.stop_trick()
+                self._stop_trick()
             if action.kind == "posture":
                 c.posture(action.name)
                 return f"posture {action.name}"
@@ -298,7 +352,7 @@ class RemoteControl:
             self._reset()
             self.pattern = action.name
             if c.state.mode == "TRICK":
-                c.stop_trick()
+                self._stop_trick()
             return self._go()
         if action.kind == "turn":
             if self.walking():
@@ -310,7 +364,7 @@ class RemoteControl:
             self._reset()
             self.heading = action.name
             if c.state.mode == "TRICK":
-                c.stop_trick()
+                self._stop_trick()
             return self._go()
         if action.kind == "speed":
             from kilo.planner.patterns import timing
@@ -357,7 +411,7 @@ class RemoteControl:
                 b.stop()
                 parts.append("behaviour runner stopped")
             if trick:
-                c.stop_trick()
+                self._stop_trick(settle=False)  # over its stop_ticks: rear_up comes down to STAND
                 parts.append("trick stopped")
             self._reset()
             return f"frozen ({', '.join(parts) or 'holding the posture'}): only B6 or A7 act now"

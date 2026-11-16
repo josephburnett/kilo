@@ -24,7 +24,7 @@ uint32_t timer_ticks(const Trick& t, uint8_t speed) {
 }
 
 void test_library_matches_python() {
-  CHECK(kLibrarySize == 13);
+  CHECK(kLibrarySize == 14);  // the 13 first-version tricks, then the authored rear_up
   for (uint32_t i = 0; i < kLibrarySize; i++) {
     const Trick& t = kLibrary[i];
     const char* p = trick_problem(t);
@@ -42,6 +42,9 @@ void test_library_matches_python() {
   CHECK(find_trick("stand") == find_trick("up") && find_trick("up") != nullptr);
   CHECK(find_trick("wsf") != nullptr && std::strcmp(find_trick("wsf")->name, "wash_face") == 0);
   CHECK(find_trick("nope") == nullptr);
+  const Trick* ru = find_trick("rear_up");  // authored: no legacy token, a slow stop, STAND at the end
+  CHECK(ru != nullptr && ru->legacy[0] == '\0' && ru->stop_ticks == 75 && ru->end_posture == KILO_POSTURE_STAND);
+  CHECK(ru->flags == 0 && find_trick("") == nullptr && find_trick("stand")->stop_ticks == 0);
   const Trick* s = find_trick("stretch");  // test_trick_id_and_header_carry_expected_attitude
   kilo_trick_begin_t b;
   trick_begin(*s, 9, &b);
@@ -61,7 +64,7 @@ void test_timing() {
   for (int i = 0; i < 6; i++) CHECK(phase_ticks(10, speeds[i]) == want[i]);
   CHECK(phase_ticks(0, 64) == 0);
   // play_order(4, 1, 2, 3) == [0, 1, 2, 1, 2, 1, 2, 3]: 2 + 3x(4 + 4) + 7 ticks
-  Trick t = {"t", "t", 4, 1, 2, 3, 0x0001, 0, KILO_POSTURE_STAND, 0, 0, kFrames4};
+  Trick t = {"t", "t", 4, 1, 2, 3, 0x0001, 0, KILO_POSTURE_STAND, 0, 0, kFrames4, 0};
   uint32_t n = 0;
   CHECK(trick_problem(t) == nullptr);
   CHECK(total_ticks(t, 64, &n) && n == 2 + 3 * 8 + 7 && timer_ticks(t, 64) == n);
@@ -70,7 +73,7 @@ void test_timing() {
   t.repeats = 0;
   CHECK(total_ticks(t, 64, &n) && n == 2 + 8 + 7 && timer_ticks(t, 64) == n);
   // test_player_forever: Player([2, 3], [0, 1], 0, 1, 255)
-  Trick f = {"f", "f", 2, 0, 1, kRepeatForever, 0x0001, 0, KILO_POSTURE_STAND, 0, 0, kFrames4 + 1};
+  Trick f = {"f", "f", 2, 0, 1, kRepeatForever, 0x0001, 0, KILO_POSTURE_STAND, 0, 0, kFrames4 + 1, 0};
   CHECK(!total_ticks(f, 64, &n));
   KeyframeTimer p(f);
   bool ended = false;
@@ -87,7 +90,7 @@ void test_timing() {
   bad.n_frames = 25;
   CHECK(trick_problem(bad) != nullptr);
   kilo_keyframe_t over[1] = {{2, 0, 1, {-128, 50, -128, -128, -128, -128, -128, -128, -128, -128, -128}}};
-  Trick o = {"o", "o", 1, 0, 0, 0, 0x0002, 0, KILO_POSTURE_STAND, 0, 0, over};
+  Trick o = {"o", "o", 1, 0, 0, 0, 0x0002, 0, KILO_POSTURE_STAND, 0, 0, over, 0};
   CHECK(trick_problem(o) != nullptr);  // head tilt 50 > 45
   over[0].ang[1] = 45;
   CHECK(trick_problem(o) == nullptr);

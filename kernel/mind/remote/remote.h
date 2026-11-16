@@ -37,7 +37,17 @@
 // - A5: start the behaviour runner (after stopping a walk and a trick as a
 //   posture key does). While it runs, B6, A7 and C7 stop it first and then
 //   do their own action, A5 again does nothing, every other key is ignored.
-// - Rows 1-3 do nothing (Mind::ir_key logs them as ignored).
+// - B2 rear up (Kind::Trick, the trick rear_up, docs/rear-up-trick.md):
+//   not playing a trick, stop a walk the planned way, then start the trick
+//   (the key is done once TRICK_PLAY is out; the trick plays on). While a
+//   trick plays, B2 stops it: the toggle, a second press brings rear_up
+//   down. Refused below kTrickMinMv or on USB power (NO_BATTERY), so that
+//   the body's low-battery reflex does not take Kilo to REST half way up.
+// - Stopping a trick (B2, the posture keys, a walk from standing, C7) sends
+//   TRICK_STOP over the trick's stop_ticks (rear_up: 1.5 s to STAND, not
+//   the body's 0.2 s); a key that then takes a posture or walks waits for
+//   that crossfade first (Phase::Settle).
+// - Rows 1-3 but B2 do nothing (Mind::ir_key logs them as ignored).
 // Every key leaves one log line, "remote <grid> (0x.., <label>): <outcome>".
 // Which keys never reach perform() (repeats, other remotes' keys, rows 1-3,
 // a laptop client holding the body) is the owner's call (Mind::ir_key,
@@ -56,6 +66,7 @@ namespace remote {
 constexpr int kSpeedSteps = 5;
 extern const double kSpeedFactors[kSpeedSteps];  // ir.py SPEED_FACTORS
 constexpr int kDefaultLevel = 3;                  // +3: 1x, the gait's spec defaults
+constexpr uint16_t kTrickMinMv = 7400;            // ir.py TRICK_MIN_MV: B2 refuses below this pack voltage
 
 enum class Heading : uint8_t { Straight, Left, Right };
 
@@ -106,7 +117,9 @@ class RemoteControl {
   double speed_mm_s() const;
 
  private:
-  enum class Phase : uint8_t { Idle, StopWalk, StopTrick };
+  enum class Phase : uint8_t { Idle, StopWalk, StopTrick, Settle };
+  void stop_trick();  // TRICK_STOP over the trick's stop_ticks; settle_us_ for Phase::Settle
+  void start_trick();
   int mode() const;
   bool body_walking() const;
   bool walking();
@@ -144,6 +157,7 @@ class RemoteControl {
   const Key* key_ = nullptr;
   uint16_t arg_ = 0;
   uint64_t deadline_ = 0;
+  uint64_t settle_us_ = 0;  // the stopped trick's crossfade, waited for before act()
   const char* note_ = "";  // "behaviour runner stopped, ", "unfrozen, ": put before the outcome
   char text_[48] = {};
   char last_[112] = {};

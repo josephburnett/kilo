@@ -405,9 +405,11 @@ class OpsMixin:
                 self._trick_playing = None
 
     async def op_trick_stop(self, s: Any, transition_ticks: int = 0) -> None:
-        """TRICK_STOP (any client; also while the behaviour runner is active)."""
+        """TRICK_STOP (any client; also while the behaviour runner is active).
+        transition_ticks 0: the playing trick's own stop_ticks (rear_up's
+        1.5 s), else the body's default."""
         self._need_port()
-        await self._blocking(self.client.stop_trick, int(transition_ticks))
+        await self._blocking(self.client.stop_trick, int(transition_ticks) or None)
 
     async def op_shutdown(self, s: Any) -> str:
         self.loop.call_later(0.05, self.stopping.set)

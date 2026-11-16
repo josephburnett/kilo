@@ -45,7 +45,7 @@ def render() -> tuple[str, str, int]:
     h = [HEAD.rstrip("\n"), "#ifndef KILO_MIND_TRICKS_LIBRARY_GEN_H", "#define KILO_MIND_TRICKS_LIBRARY_GEN_H",
          '#include "tricks/model.h"', "", "namespace kilo {", "namespace tricks {", "",
          f"constexpr uint32_t kLibrarySize = {len(names)};",
-         "// In kilo.tricks.library.FIRST_VERSION order.",
+         "// In kilo.tricks.library.names() order: the first version, then the authored tricks.",
          "extern const Trick kLibrary[kLibrarySize];", "",
          "// What Python computes for each kLibrary entry, for the tests.",
          "struct TrickCheck {",
@@ -62,10 +62,11 @@ def render() -> tuple[str, str, int]:
     for name in names:
         t = library.load(name).validate()
         b = t.begin(0)
-        legacy = library.FIRST_VERSION[name]
+        legacy = library.legacy_name(name)
         n = len(t.frames)
-        c.append(f"// {name} (legacy {legacy}): {n} frame{'s' if n != 1 else ''}, loop {t.loop_start}..{t.loop_end} "
-                 f"x{t.repeats}, end {t.end_posture.name}")
+        c.append(f"// {name} ({'legacy ' + legacy if legacy else 'authored'}): {n} frame{'s' if n != 1 else ''}, "
+                 f"loop {t.loop_start}..{t.loop_end} x{t.repeats}, end {t.end_posture.name}"
+                 + (f", stop over {t.stop_ticks} ticks" if t.stop_ticks else ""))
         c.append(f"const kilo_keyframe_t {ident(name)}[] = {{")
         for f in t.frames:
             w = f.to_wire()
@@ -74,9 +75,9 @@ def render() -> tuple[str, str, int]:
         data_bytes += len(t.frames) * P.Keyframe.SIZE
         rows.append(f'    {{"{name}", "{legacy}", {b.n_frames}, {b.loop_start}, {b.loop_end}, {b.repeats}, '
                     f"0x{b.joint_mask:04X}, 0x{b.flags:02X}, {b.end_posture}, {b.exp_roll}, {b.exp_pitch}, "
-                    f"{ident(name)}}},")
+                    f"{ident(name)}, {t.stop_ticks}}},")
         checks.append(f"    {{0x{t.crc16():04X}, {trick_id_for(t)}, {t.duration_ticks or 0}}},  // {name}")
-    data_bytes += len(names) * (2 * 4 + 12) + len(names) * 6  # kLibrary rows (2 pointers, 12 B fields) + checks
+    data_bytes += len(names) * (3 * 4 + 13) + len(names) * 6  # kLibrary rows (3 pointers, 13 B fields) + checks
     c += ["", "}  // namespace", "", "const Trick kLibrary[kLibrarySize] = {", *rows, "};", "",
           "const TrickCheck kLibraryCheck[kLibrarySize] = {", *checks, "};", "",
           "}  // namespace tricks", "}  // namespace kilo"]

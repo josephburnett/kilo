@@ -32,8 +32,8 @@ constexpr uint8_t kSpeedMin = 16;                             // 0.25x (client.p
 extern const uint8_t kCanonical[KILO_JOINT_COUNT];
 
 struct Trick {
-  const char* name;    // the Kilo name (library.FIRST_VERSION key)
-  const char* legacy;  // the legacy token library.load() also accepts ("up", "wsf")
+  const char* name;    // the Kilo name (library.names())
+  const char* legacy;  // the legacy token library.load() also accepts ("up", "wsf"); "" for an authored trick
   uint8_t n_frames;
   uint8_t loop_start;
   uint8_t loop_end;
@@ -44,6 +44,7 @@ struct Trick {
   int8_t exp_roll;      // whole degrees, clamped to +-127
   int8_t exp_pitch;
   const kilo_keyframe_t* frames;
+  uint8_t stop_ticks;   // mind-side: TRICK_STOP's transition for this trick (0 = the body's), Trick.stop_ticks
 };
 
 // TRICK_BEGIN for trick_id.

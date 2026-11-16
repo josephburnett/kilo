@@ -73,9 +73,13 @@ class TrickPlayer {
   uint32_t start(const Trick& trick, bool mirror = false, uint8_t speed_q6 = kSpeedUnity,
                  const char** why = nullptr);
   // TRICK_STOP (client.stop_trick): the body crossfades to the trick's end
-  // posture over transition_ticks (0 = the body's default). A play still
-  // uploading or starting is abandoned (Failed "stopped").
-  void stop(uint8_t transition_ticks = 0);
+  // posture over transition_ticks (0 = the body's default; kTrickStopTicks,
+  // the default: the last started trick's own stop_ticks, as client.py's
+  // None). A play still uploading or starting is abandoned (Failed "stopped").
+  static constexpr int kTrickStopTicks = -1;
+  void stop(int transition_ticks = kTrickStopTicks);
+  // The transition a stop() with kTrickStopTicks asks for now.
+  uint8_t stop_ticks() const { return trick_ != nullptr ? trick_->stop_ticks : 0; }
   // A play not yet done is stopped on the body; nothing when none runs.
   void cancel() {
     if (busy()) stop();

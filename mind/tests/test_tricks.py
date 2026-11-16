@@ -26,7 +26,8 @@ def skills():
 
 @pytest.fixture(scope="module")
 def lib():
-    return library.load_all()
+    """The first-version (legacy) tricks; the authored ones are in test_rear_up.py."""
+    return {n: library.load(n) for n in library.FIRST_VERSION}
 
 
 def kf(angles=UP, **kw):
@@ -148,7 +149,8 @@ EXPECTED = {
 
 def test_library_contents(lib):
     assert list(lib) == list(EXPECTED)
-    assert sorted(p.stem for p in library.LIBRARY_DIR.glob("*.json")) == sorted(EXPECTED)
+    assert sorted(p.stem for p in library.LIBRARY_DIR.glob("*.json")) == sorted([*EXPECTED, *library.AUTHORED])
+    assert library.names() == [*EXPECTED, *library.AUTHORED] and list(library.load_all()) == library.names()
     for name, (leg, n, ls, le, rep, roll, pitch, end) in EXPECTED.items():
         t = lib[name]
         assert t.source["legacy_name"] == leg

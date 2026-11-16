@@ -90,23 +90,41 @@ const kilo_keyframe_t kPushUp[] = {
 const kilo_keyframe_t kButtUp[] = {
     {25, 0, 0x05, {20, 40, 0, 80, 80, -45, -45, -60, -60, -5, -5}},
 };
+// rear_up (authored): 14 frames, loop 0..0 x0, end STAND, stop over 75 ticks
+const kilo_keyframe_t kRearUp[] = {
+    {122, 0, 0x01, {0, -10, -97, 55, 55, -73, -73, 3, 3, 21, 21}},
+    {59, 0, 0x01, {0, -15, -68, 64, 64, -80, -80, 5, 5, -26, -26}},
+    {30, 0, 0x01, {0, -20, -51, 78, 78, -80, -80, -5, -5, -42, -42}},
+    {48, 0, 0x01, {0, -25, -37, 62, 62, -65, -65, 33, 33, -51, -51}},
+    {78, 0, 0x01, {0, -25, -37, 0, 0, -65, -65, 60, 60, -51, -51}},
+    {57, 0, 0x01, {0, -35, -18, 45, 45, -50, -50, 75, 75, -42, -42}},
+    {38, 100, 0x01, {0, -45, 7, 75, 75, -41, -41, 60, 60, -20, -20}},
+    {38, 0, 0x01, {0, -35, -18, 45, 45, -50, -50, 75, 75, -42, -42}},
+    {57, 0, 0x01, {0, -25, -37, 0, 0, -65, -65, 60, 60, -51, -51}},
+    {78, 0, 0x01, {0, -25, -37, 62, 62, -65, -65, 33, 33, -51, -51}},
+    {48, 0, 0x01, {0, -20, -51, 78, 78, -80, -80, -5, -5, -42, -42}},
+    {30, 0, 0x01, {0, -15, -68, 64, 64, -80, -80, 5, 5, -26, -26}},
+    {59, 0, 0x01, {0, -10, -97, 55, 55, -73, -73, 3, 3, 21, 21}},
+    {122, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
+};
 
 }  // namespace
 
 const Trick kLibrary[kLibrarySize] = {
-    {"sit", "sit", 1, 0, 0, 0, 0xFF07, 0x01, 2, 0, -30, kSit},
-    {"rest", "rest", 1, 0, 0, 0, 0xFF07, 0x01, 1, 0, 0, kRest},
-    {"stand", "up", 1, 0, 0, 0, 0xFF07, 0x01, 3, 0, 0, kStand},
-    {"stretch", "str", 1, 0, 0, 0, 0xFF07, 0x01, 3, 0, 15, kStretch},
-    {"balance", "balance", 1, 0, 0, 0, 0xFF07, 0x01, 3, 0, 0, kBalance},
-    {"hi", "hi", 6, 2, 3, 3, 0xFF07, 0x00, 3, 0, 0, kHi},
-    {"wash_face", "wsf", 6, 2, 3, 3, 0xFF07, 0x00, 2, 0, 0, kWashFace},
-    {"check_around", "ck", 3, 0, 1, 2, 0xFF07, 0x00, 3, 0, 0, kCheckAround},
-    {"sniff", "snf", 5, 2, 3, 3, 0xFF07, 0x00, 3, 0, 0, kSniff},
-    {"scratch", "scrh", 6, 3, 4, 5, 0xFF07, 0x00, 3, 0, 0, kScratch},
-    {"pee", "pee", 5, 2, 3, 2, 0xFF07, 0x00, 3, 0, 0, kPee},
-    {"push_up", "pu", 6, 1, 2, 3, 0xFF07, 0x00, 3, 0, 0, kPushUp},
-    {"butt_up", "buttUp", 1, 0, 0, 0, 0xFF07, 0x01, 3, 0, 15, kButtUp},
+    {"sit", "sit", 1, 0, 0, 0, 0xFF07, 0x01, 2, 0, -30, kSit, 0},
+    {"rest", "rest", 1, 0, 0, 0, 0xFF07, 0x01, 1, 0, 0, kRest, 0},
+    {"stand", "up", 1, 0, 0, 0, 0xFF07, 0x01, 3, 0, 0, kStand, 0},
+    {"stretch", "str", 1, 0, 0, 0, 0xFF07, 0x01, 3, 0, 15, kStretch, 0},
+    {"balance", "balance", 1, 0, 0, 0, 0xFF07, 0x01, 3, 0, 0, kBalance, 0},
+    {"hi", "hi", 6, 2, 3, 3, 0xFF07, 0x00, 3, 0, 0, kHi, 0},
+    {"wash_face", "wsf", 6, 2, 3, 3, 0xFF07, 0x00, 2, 0, 0, kWashFace, 0},
+    {"check_around", "ck", 3, 0, 1, 2, 0xFF07, 0x00, 3, 0, 0, kCheckAround, 0},
+    {"sniff", "snf", 5, 2, 3, 3, 0xFF07, 0x00, 3, 0, 0, kSniff, 0},
+    {"scratch", "scrh", 6, 3, 4, 5, 0xFF07, 0x00, 3, 0, 0, kScratch, 0},
+    {"pee", "pee", 5, 2, 3, 2, 0xFF07, 0x00, 3, 0, 0, kPee, 0},
+    {"push_up", "pu", 6, 1, 2, 3, 0xFF07, 0x00, 3, 0, 0, kPushUp, 0},
+    {"butt_up", "buttUp", 1, 0, 0, 0, 0xFF07, 0x01, 3, 0, 15, kButtUp, 0},
+    {"rear_up", "", 14, 0, 0, 0, 0xFF07, 0x00, 3, 0, 0, kRearUp, 75},
 };
 
 const TrickCheck kLibraryCheck[kLibrarySize] = {
@@ -123,6 +141,7 @@ const TrickCheck kLibraryCheck[kLibrarySize] = {
     {0x31A6, 197, 108},  // pee
     {0x0E45, 48, 169},  // push_up
     {0x06B0, 137, 25},  // butt_up
+    {0xD758, 122, 964},  // rear_up
 };
 
 }  // namespace tricks

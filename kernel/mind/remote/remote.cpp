@@ -1,6 +1,7 @@
 #include "remote/remote.h"
 #include "behaviour/tree.h"
 #include "remote/client.h"
+#include "tricks/library.h"
 #include "util/fmt.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -152,7 +153,7 @@ void RemoteControl::freeze(const Key& key, uint16_t arg) {
     part("behaviour runner stopped");
   }
   if (trick) {
-    player_.stop();
+    stop_trick();  // over its stop_ticks: rear_up comes down to STAND
     part("trick stopped");
   }
   if (n == 8) part("holding the posture");
@@ -191,6 +192,14 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
   switch (key.kind) {
     case Kind::Posture:
     case Kind::Behaviour:
+      stop_then_act(now);
+      return;
+    case Kind::Trick:
+      if (mode() == KILO_MODE_TRICK || player_.busy()) {  // the toggle: a second press brings it down
+        stop_trick();
+        done("trick stopped: coming down", false);
+        return;
+      }
       stop_then_act(now);
       return;
     case Kind::Gait: {
@@ -278,7 +287,7 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
   }
   // A walk from standing: a playing trick is stopped first (ir.py _walk)
   if (mode() == KILO_MODE_TRICK) {
-    player_.stop();
+    stop_trick();
     phase_ = Phase::StopTrick;
     deadline_ = now + kTrickStopWaitUs;
     return;
@@ -310,7 +319,7 @@ void RemoteControl::step() {
       if (walker_.active() && now < deadline_) return;
       if (walker_.active()) walker_.abort();  // client.posture() takes the legs anyway
       if (mode() == KILO_MODE_TRICK) {
-        player_.stop();
+        stop_trick();
         phase_ = Phase::StopTrick;
         deadline_ = now + kTrickStopWaitUs;
       } else {
@@ -320,9 +329,54 @@ void RemoteControl::step() {
     }
     case Phase::StopTrick:
       if (player_.busy() && now < deadline_) return;
+      if (settle_us_ != 0) {  // TRICK_DONE comes as the crossfade starts: wait for its end
+        phase_ = Phase::Settle;
+        deadline_ = now + settle_us_;
+        settle_us_ = 0;
+        return;
+      }
+      act();
+      return;
+    case Phase::Settle:
+      if (now < deadline_) return;
       act();
       return;
   }
+}
+
+void RemoteControl::stop_trick() {
+  uint8_t ticks = player_.stop_ticks();
+  player_.stop();
+  settle_us_ = ticks != 0 ? (uint64_t)ticks * KILO_TICK_MS * 1000u + 100000u : 0;  // ir.py _stop_trick
+}
+
+void RemoteControl::start_trick() {
+  const BodyState& s = link_.state();
+  char what[96];
+  if (s.has_telemetry && (s.telemetry.flags & KILO_TELEMETRY_FLAGS_NO_BATTERY) != 0) {
+    format(what, sizeof what, "%s refused: on USB power (no battery)", key_->name);
+    done(what, true);
+    return;
+  }
+  if (!s.has_telemetry || s.telemetry.batt_mv < kTrickMinMv) {
+    if (s.has_telemetry) format(what, sizeof what, "%s refused: battery %u mV (needs %u)", key_->name,
+                                (unsigned)s.telemetry.batt_mv, (unsigned)kTrickMinMv);
+    else format(what, sizeof what, "%s refused: battery None mV (needs %u)", key_->name, (unsigned)kTrickMinMv);
+    done(what, true);
+    return;
+  }
+  const tricks::Trick* t = tricks::find_trick(key_->name);
+  const char* why = "no such trick";
+  if (t == nullptr || player_.start(*t, false, tricks::kSpeedUnity, &why) == 0) {
+    format(what, sizeof what, "%s failed: %s", key_->name, why);
+    done(what, true);
+    return;
+  }
+  uint32_t ticks = 0;
+  tricks::total_ticks(*t, tricks::kSpeedUnity, &ticks);
+  format(what, sizeof what, "trick %s started (%u s; B2 again, B6 or C7 bring it down)", key_->name,
+         (unsigned)((ticks * KILO_TICK_MS + 500u) / 1000u));
+  done(what, false);
 }
 
 void RemoteControl::act() {
@@ -336,6 +390,9 @@ void RemoteControl::act() {
       done(what, !ok);
       return;
     }
+    case Kind::Trick:
+      start_trick();
+      return;
     case Kind::Behaviour: {
       why = "no behaviour runner";
       bool ok = behaviour_ != nullptr && behaviour_->start(&why);

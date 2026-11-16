@@ -59,9 +59,9 @@ uint32_t TrickPlayer::start(const Trick& trick, bool mirror, uint8_t speed_q6, c
   return result_.play;
 }
 
-void TrickPlayer::stop(uint8_t transition_ticks) {
+void TrickPlayer::stop(int transition_ticks) {
   stop_pending_ = true;
-  stop_ticks_ = transition_ticks;
+  stop_ticks_ = transition_ticks == kTrickStopTicks ? stop_ticks() : (uint8_t)transition_ticks;
   if (step_ != Step::Idle && step_ != Step::Playing) fail("stopped");  // abandoned before TRICK_PLAY was acked
 }
 
@@ -240,8 +240,8 @@ void TrickPlayer::poll() {
       if (done_seen_) {
         finish(done_reason_, now);
       } else if (timeout_us_ != 0 && now - played_at_ > timeout_us_) {
-        stop_pending_ = true;  // client.py _stop_quietly
-        stop_ticks_ = 0;
+        stop_pending_ = true;  // client.py _stop_quietly (over the trick's stop_ticks)
+        stop_ticks_ = stop_ticks();
         format(error_, sizeof error_, "no TRICK_DONE within %u ms", (unsigned)(timeout_us_ / 1000u));
         fail(error_);
       }

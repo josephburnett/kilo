@@ -526,6 +526,7 @@ class BodyClient:
             # Another process replaced the body's trick since we cached it.
             self.upload_trick(trick, force=True)
             self.link.request("TRICK_PLAY", fields)
+        self._started_trick = trick  # stop_trick() uses its stop_ticks
         return tid, n
 
     def trick_done_since(self, n: int, trick_id: int) -> Any:
@@ -581,9 +582,18 @@ class BodyClient:
         except LinkError:
             pass
 
-    def stop_trick(self, transition_ticks: int = 0) -> None:
-        """TRICK_STOP: crossfade to the end posture (0 = XFADE_TICKS)."""
+    def stop_trick(self, transition_ticks: int | None = None) -> None:
+        """TRICK_STOP: crossfade to the end posture over transition_ticks (0 =
+        the body's XFADE_TICKS). None: the stop_ticks of the trick this
+        client last started (rear_up comes down over 1.5 s, not 0.2 s), else 0."""
+        if transition_ticks is None:
+            t = getattr(self, "_started_trick", None)
+            transition_ticks = getattr(t, "stop_ticks", 0) or 0
         self.link.request("TRICK_STOP", {"transition_ticks": transition_ticks})
+
+    def started_trick(self) -> Any:
+        """The Trick this client last started (None before any)."""
+        return getattr(self, "_started_trick", None)
 
     def _count_events(self, name: str) -> int:
         code = consts.EV[name]

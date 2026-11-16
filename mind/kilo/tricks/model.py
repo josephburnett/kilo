@@ -187,6 +187,11 @@ class Trick:
     balance: bool = False
     fall_ok: bool = False
     end_posture: Posture = Posture.STAND
+    # Mind-side only (not on the wire): the transition_ticks a TRICK_STOP of
+    # this trick asks for (0 = the body's XFADE_TICKS, 0.2 s). A trick that
+    # must come down slowly when stopped (rear_up) sets it; the remotes
+    # (ir.py, kernel/mind/remote) and BodyClient.play() use it.
+    stop_ticks: int = 0
     source: dict = field(default_factory=dict, compare=False)
     notes: tuple = field(default=(), compare=False)
 
@@ -249,6 +254,8 @@ class Trick:
             out.append(f"loop {self.loop_start}..{self.loop_end} outside 0..{n - 1}")
         if not 0 <= self.repeats <= 255:
             out.append(f"repeats {self.repeats} outside 0..255")
+        if not 0 <= self.stop_ticks <= 255:
+            out.append(f"stop_ticks {self.stop_ticks} outside 0..255")
         if self.joint_mask == 0:
             out.append("no joint is driven")
         for i, f in enumerate(self.frames):
@@ -341,6 +348,7 @@ class Trick:
             "balance": self.balance,
             "fall_ok": self.fall_ok,
             "end_posture": self.end_posture.name,
+            **({"stop_ticks": self.stop_ticks} if self.stop_ticks else {}),
             "frames": [f.to_dict() for f in self.frames],
         }
 
@@ -354,6 +362,7 @@ class Trick:
                    expected_roll=exp.get("roll", 0), expected_pitch=exp.get("pitch", 0),
                    balance=d.get("balance", False), fall_ok=d.get("fall_ok", False),
                    end_posture=Posture[d.get("end_posture", "STAND")],
+                   stop_ticks=d.get("stop_ticks", 0),
                    source=d.get("source", {}), notes=tuple(d.get("notes", ())))
 
     def to_json(self) -> str:

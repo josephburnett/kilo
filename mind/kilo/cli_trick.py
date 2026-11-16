@@ -110,7 +110,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     for name in library.names():
         t = library.load(name)
         flags = ",".join(x for x, on in (("balance", t.balance), ("fall_ok", t.fall_ok)) if on) or "-"
-        print(f"{name:<13} {library.FIRST_VERSION[name]:<7} {len(t.frames):>6} {_seconds(t):>8}  {_loop(t):<12} "
+        print(f"{name:<13} {library.legacy_name(name) or '-':<7} {len(t.frames):>6} {_seconds(t):>8}  {_loop(t):<12} "
               f"{t.end_posture.name.lower():<6} {flags}")
     return EXIT_OK
 
