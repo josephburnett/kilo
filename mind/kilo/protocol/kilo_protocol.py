@@ -548,7 +548,7 @@ class WalkPlan:
     SIZE: ClassVar[int] = 17
     _FMT: ClassVar[struct.Struct] = struct.Struct('<IBBBhhhhh')
     tick: int = 0  # tick; the body tick, unwrapped (FEET.tick is its low 16 bits)
-    sent: int = 0  # 1 = written as FEET, 0 = already past when planned (skipped)
+    sent: int = 0  # 1 = written as FEET; 0 = already past when planned (skipped), or the link did not take it
     lifting: int = 0  # bit i: leg i in the air (swinging) this tick
     support: int = 0  # flags support_flags: the feet on the ground
     margin: int = 0  # 0.1 mm; the centre of mass inside the polygon of the feet down (- = outside); -32768 = none. The planner's min_margin counts ticks with one leg up only

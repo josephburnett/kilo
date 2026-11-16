@@ -1,4 +1,5 @@
 #include "link/serial_link.h"
+#include "remote/keys.h"
 #include "link/names.h"
 #include "util/fmt.h"
 #include "util/log.h"
@@ -186,6 +187,7 @@ bool SerialLink::send_frame(uint8_t type, uint8_t seq, const uint8_t* payload, u
   ever_tx_ = true;
   stats_.frames_tx++;
   stats_.bytes_tx += n;
+  if (tap_ != nullptr) tap_->on_frame(true, type, seq, payload, len, now);
   return true;
 }
 
@@ -323,6 +325,7 @@ void SerialLink::handle(uint8_t status, const kilo_frame_t& f, uint64_t now) {
     return;
   }
   stats_.frames_rx++;
+  if (tap_ != nullptr) tap_->on_frame(false, f.type, f.seq, f.payload, f.len, now);  // before what it causes
   // kilo_frame_decode checked the length of every known type: the payload
   // fills its struct exactly.
   switch (f.type) {
@@ -401,8 +404,9 @@ void SerialLink::on_event(const kilo_event_t& e) {
   state_.has_event = true;
   state_.event_count++;
   const char* ev = event_name(e.code);
-  if (e.code == KILO_EVENT_IR_KEY)
-    logf(log_, LogLevel::Info, "event IR_KEY 0x%04x epoch=%u", (unsigned)(uint16_t)e.arg, e.epoch);
+  if (e.code == KILO_EVENT_IR_KEY)  // a held key repeats every ~110 ms: those lines go to the quiet log
+    logf(remote::key_repeat((uint16_t)e.arg) && quiet_ != nullptr ? *quiet_ : log_, LogLevel::Info,
+         "event IR_KEY 0x%04x epoch=%u", (unsigned)(uint16_t)e.arg, e.epoch);
   else
     logf(log_, LogLevel::Info, "event %s arg=%d epoch=%u", ev, e.arg, e.epoch);
   int16_t prev_epoch = state_.epoch;

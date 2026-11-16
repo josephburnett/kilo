@@ -450,7 +450,7 @@ KILO_STATIC_ASSERT(offsetof(kilo_walk_record_header_t, t_us) == 2, kilo_sa_walk_
 
 typedef struct KILO_PACKED kilo_walk_plan_s {
     uint32_t tick; /* tick; the body tick, unwrapped (FEET.tick is its low 16 bits) */
-    uint8_t sent; /* 1 = written as FEET, 0 = already past when planned (skipped) */
+    uint8_t sent; /* 1 = written as FEET; 0 = already past when planned (skipped), or the link did not take it */
     uint8_t lifting; /* bit i: leg i in the air (swinging) this tick */
     uint8_t support; /* flags support_flags: the feet on the ground */
     int16_t margin; /* 0.1 mm; the centre of mass inside the polygon of the feet down (- = outside); -32768 = none. The planner's min_margin counts ticks with one leg up only */

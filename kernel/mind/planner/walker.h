@@ -29,7 +29,8 @@
 // What differs from Python: start() returns at once (the setup runs in
 // poll()); a start during a planned stop is queued and started when that
 // stop ends, or after kStartWaitUs with the old stream aborted; no per-tick
-// log records (the frame log is the host's), no gc tuning.
+// log records (a WalkObserver gets each tick: the walk recorder), no gc
+// tuning. The end of every walk that streamed logs log_status()'s two lines.
 #ifndef KILO_MIND_PLANNER_WALKER_H
 #define KILO_MIND_PLANNER_WALKER_H
 #include <stdint.h>
@@ -104,6 +105,30 @@ struct StreamStats {
   uint32_t dropped_rx;  // TELEMETRY/EVENTs dropped between two wakes (queue full)
 };
 
+class Walker;
+
+// What a walk did, as it happens (the walk recorder, record/recorder.h). The
+// observer reads the rest from the Walker (goal(), planner(), stream_stats(),
+// tracker(), ended()); it must not call back into it.
+enum class WalkMark : uint8_t {
+  Setup,   // start(): the setup began (goal() is what was asked)
+  Stream,  // the stream began: planner() has the walk's timing, config and model
+  Change,  // start() while walking or in the setup: goal() changed
+  Stop,    // stop(): the planned stop began
+  Queued,  // start() during the planned stop: it walks after it (queued_goal())
+  End,     // the walk ended (ended(), ended_ok()); its teardown follows
+};
+
+class WalkObserver {
+ public:
+  virtual void on_walk_mark(const Walker& w, WalkMark mark) = 0;
+  // Every tick the planner planned: sent as FEET, or skipped (already past).
+  virtual void on_walk_tick(const Walker& w, const TickPlan& tp, bool sent) = 0;
+
+ protected:
+  ~WalkObserver() = default;
+};
+
 class Walker {
  public:
   Walker(SerialLink& link, Clock& clock, Log& log, const BodyModel& model = BodyModel(),
@@ -125,6 +150,10 @@ class Walker {
   void abort(const char* why = "aborted", bool asked = false);
   // The walk's work: setup, the 20 ms stream wakes, teardown. Never blocks.
   void poll();
+
+  void set_observer(WalkObserver* observer) { obs_ = observer; }
+  const WalkGoal& goal() const { return goal_; }
+  const WalkGoal& queued_goal() const { return queued_goal_; }
 
   bool active() const { return phase_ != WalkPhase::Idle; }
   WalkPhase phase() const { return phase_; }
@@ -162,9 +191,14 @@ class Walker {
   void posture_stance(bool balance);
   void send_stream_divs_step();
 
+  void mark(WalkMark m) {
+    if (obs_ != nullptr) obs_->on_walk_mark(*this, m);
+  }
+
   SerialLink& link_;
   Clock& clock_;
   Log& log_;
+  WalkObserver* obs_ = nullptr;
   Planner planner_;
   ErrorTracker tracker_;
   BodyClock clock_est_;
