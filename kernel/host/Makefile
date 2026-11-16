@@ -149,13 +149,13 @@ ALLOWED := memcpy memset memcmp sinf cosf sincosf tanf atanf atan2f
 
 $(B)/free/%.o: $(KERNEL)/%.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) -std=c++17 $(FREE) -fno-exceptions -fno-rtti -fno-threadsafe-statics -I$(KERNEL)/mind -c $< -o $@
+	$(CXX) -std=c++17 $(FREE) -fno-exceptions -fno-rtti -fno-threadsafe-statics -I$(KERNEL)/mind -MMD -c $< -o $@
 $(B)/free/%.o: $(KERNEL)/%.c
 	@mkdir -p $(dir $@)
-	$(CC) -std=c99 $(FREE) -c $< -o $@
+	$(CC) -std=c99 $(FREE) -MMD -c $< -o $@
 $(B)/free/stubs.o: tests/freestanding_stubs.c
 	@mkdir -p $(dir $@)
-	$(CC) -std=c99 $(FREE) -c $< -o $@
+	$(CC) -std=c99 $(FREE) -MMD -c $< -o $@
 
 freestanding: $(FREE_OBJS) $(B)/free/stubs.o
 	ld -r -o $(B)/free/core.o $(FREE_OBJS)
