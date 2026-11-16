@@ -1,22 +1,24 @@
 // plan: the step planner, one tick of the whole body at a time. A port of
 // mind/kilo/planner/plan.py; its docstring explains the method in full
-// (docs/walking-and-balance.md §10). In short:
+// (docs/walking-and-balance.md §10, §12). In short:
 //
 // - Slots: the pattern's swing groups take turns; each slot is a four-foot
-//   shift of S ticks, then a swing of W ticks. Feet on the ground slide back
-//   at their side's stride / stance time; a swinging foot lifts on a cosine
-//   profile to half a stride ahead of its shoulder. Stride targets move at
-//   most 0.5 mm a tick, the stance time 2 % a tick. A pattern change goes
-//   through the legs' way home.
-// - The lean (walk, crawl): before each lift the body's centre of mass is
+//   shift of S ticks, then a swing of W ticks per leg (the walk's second leg
+//   couple_ticks() after its first). Feet on the ground slide back at their
+//   side's stride / stance time; a swinging foot lifts on a cosine profile
+//   to half a stride ahead of its shoulder. Stride targets move at most
+//   0.5 mm a tick, the stance time 2 % a tick. A change between the walk
+//   and the trot goes straight over at a slot start; into or out of the
+//   crawl through the legs' way home.
+// - The lean (the crawl): before each lift the body's centre of mass is
 //   moved at least margin_mm inside the three feet that stay down (a small
 //   quadratic program on the linearised model), the lift starting
 //   kLeanLeadMs after the move's end (three ticks before it, in its cosine
 //   tail; the servo lag delays the lean and the lift alike). The solve is spread over the swing before the slot, a few
 //   units of work a tick (LeanJob), so no tick carries a whole solve.
 // - Prediction: the attitude for tick t is the plane through the support
-//   feet planned a servo lag earlier; it goes in FEET as the balance's
-//   reference.
+//   feet planned, delayed by the servos' dead time and passed through their
+//   first-order response; it goes in FEET as the balance's reference.
 // - From the measured state (observe): no lift while the body is off the
 //   plan by more than gate_deg (the plan waits, up to hold_max ticks); a
 //   swinging leg lands at once when the body tips toward it by catch_deg.

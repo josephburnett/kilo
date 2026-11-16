@@ -10,19 +10,22 @@ How a tick is made (docs/walking-and-balance.md §10):
 
 - **Slots.** The pattern's swing groups take turns (kilo.planner.patterns):
   each slot is a four-foot shift of ``shift`` ticks, then a swing of
-  ``swing`` ticks. Feet on the ground slide back at their side's stride
+  ``swing`` ticks per leg (in the walk the pair's second leg lifts
+  ``couple_ticks`` after the first; before its lift and after its
+  touchdown it slides with the ground). Feet on the ground slide back at their side's stride
   speed (stride / stance time); a swinging foot lifts on a cosine profile
   (step height at mid-swing, zero speed at lift-off and touchdown) from
   where it left the ground to half a stride ahead of its shoulder. Speed and
   direction change the stride targets, which move at most 0.5 mm per tick,
   and the stance time, which moves at most 2 % per tick, with each slot's
   shift following the stance time as it is (so a slower speed never leaves
-  a swing more than a stride to carry): any change at any tick is smooth. A pattern change goes through the legs' way home: the
-  strides go to 0 and each leg steps under its shoulder (as for a stop),
-  then the new pattern starts from its first group as a walk starts (from
-  the walk, up to ~5.5 s); a second change while that runs just changes
-  where it goes.
-- **The lean (walk, crawl).** On three feet the body stands on a triangle
+  a swing more than a stride to carry): any change at any tick is smooth. A change between the walk and the
+  trot goes straight over at a slot start (``_switch_ok``); into or out
+  of the crawl through the legs' way home: the strides go to 0 and each
+  leg steps under its shoulder (as for a stop), then the new pattern
+  starts from its first group as a walk starts; a second change while
+  that runs just changes where it goes.
+- **The lean (the crawl).** On three feet the body stands on a triangle
   whose long edge runs under its middle, so before each lift the planner
   moves the centre of mass inside the triangle of the three feet that stay
   down, at least ``margin_mm`` from every edge, for the whole swing: it
@@ -39,11 +42,13 @@ How a tick is made (docs/walking-and-balance.md §10):
   units of work per tick, from where the feet will be when the slot
   starts), so no tick carries a whole solve; if something changed since (a
   command, a catch) it is solved again at the slot's start while the plan
-  waits. The trot needs none: its diagonal pairs stand on a line,
-  briefly (150 ms), and no lean helps there.
+  waits. The trot and the walk need none: their diagonal pairs stand on
+  a line, briefly (150 and 90 ms), and no lean helps there.
 - **Prediction.** The attitude for tick t is the plane through the support
-  feet the planner commanded a servo lag earlier (the body follows its
-  commands that much later). It goes in FEET as the balance's reference:
+  feet the planner commanded, delayed by the servos' dead time and passed
+  through their first-order response (BodyModel.servo_lag_ms and
+  servo_tau_ms, fitted to the floor recordings: the body follows its
+  commands that way). It goes in FEET as the balance's reference:
   the body corrects only what the plan did not predict.
 - **From the measured state.** ``observe`` gives the error the body
   reports (measured minus predicted, less the steady offset the walker

@@ -1,30 +1,33 @@
 """Gait patterns and the speed -> timing mapping (docs/walking-and-balance.md
-§3, §10; mind/README.md "Walking").
+§3, §10, §12; mind/README.md "Walking").
 
 A pattern is a sequence of swing groups: the legs that lift together, in
-order. Each group gets a slot of the cycle: a four-foot phase (the "shift":
-every foot down, the body moving over the feet that will stay down), then
-the swing. So
+order (in the walk the second leg of a pair lifts ``couple_ms`` after the
+first). Each group gets a slot of the cycle: a four-foot phase (the
+"shift": every foot down), then the swing part (``span_ms``: the swing and
+the couple), so
 
-    period = groups x (shift + swing),   stance = period - swing.
+    period = groups x (shift + span),   stance = period - swing.
 
 The swing time is fixed per pattern (short enough for the body's tip time
-constant on two feet, long enough for the servos: every swing's fastest
-joint stays under about 425 deg/s, 15 % above what the floor runs of
-2026-11 asked for, under the body's 500 deg/s safety slew). Speed comes
-from the stride and the stance time: stance = stride / speed; a slower
-speed lengthens the shift, never the swing. Slower than the longest stance
-allows, the stride shrinks (down to STRIDE_MIN_MM) instead; faster than
-the default stride at the shortest shift allows, the speed is capped.
+constant on two feet, long enough for the servos: the walk's and the
+trot's fastest joint stays under 415 deg/s at every speed, under the
+body's 500 deg/s safety slew).
 
-The shortest shift: the trot's two ticks of four-foot phase (40 ms); the
-one-leg-at-a-time patterns (walk, crawl) must move the body over the next
-three feet before each lift (kilo.planner.plan), a move that gravity paces
-(a side drops no faster than it can fall), so their shift is that move's
-typical length, LEAN_MOVE_MS, plus LEAN_LEAD_MS (negative: the lift starts
-60 ms before the move's end, in its cosine tail). A move that needs longer
-makes its slot longer (kilo.planner.plan), and the feet then travel a
-little more than the stride.
+The walk and the trot have a fixed cadence (``fixed_cadence``): their shift
+stays at its shortest, one tick, and the speed sets the stride alone, from
+STRIDE_MIN_MM to the pattern's stride. With one tick on four feet the
+body's balance loop (which holds for two ticks after every touchdown) never
+acts in them; with four to eight it rocked the trot (§11, §12).
+
+The crawl: speed from the stride and the stance time, stance = stride /
+speed; a slower speed lengthens the shift, never the swing; slower than
+the longest stance allows, the stride shrinks (down to STRIDE_MIN_MM);
+faster than its stride at the shortest shift allows, the speed is capped.
+Its shortest shift: the body's move over the next three feet before each
+lift (kilo.planner.plan), paced by gravity, LEAN_MOVE_MS, plus LEAN_LEAD_MS
+(negative: the lift starts 60 ms before the move's end, in its cosine
+tail). A move that needs longer makes its slot longer.
 """
 
 from __future__ import annotations
