@@ -68,12 +68,22 @@ void test_remote_through_the_mind() {
   {
     MindConfig on;
     on.remote = true;
-    on.rear_up_key = true;
+    on.rear_up_key = 1;
     Rig up(on);
-    CHECK(remote::rear_up_key());
+    CHECK(remote::rear_up_key() == 1);
     up.body.event(KILO_EVENT_IR_KEY, 0x38);
     up.run_ms(40);
     CHECK(up.log.has("remote B2 (0x38, rear up): ") && !up.log.has("B2 (0x38, rear up): ignored"));
+  }
+  {  // KILO_REAR_UP=3 (kilo-mind-host --rear-up=3): B2 is the third stage
+    MindConfig on;
+    on.remote = true;
+    on.rear_up_key = 3;
+    Rig up(on);
+    CHECK(remote::rear_up_key() == 3);
+    up.body.event(KILO_EVENT_IR_KEY, 0x38);
+    up.run_ms(40);
+    CHECK(up.log.has("remote B2 (0x38, rear up 3): ") && !up.log.has("B2 (0x38, rear up 3): ignored"));
   }
   Rig after{MindConfig()};  // the next Mind's config sets it again
   CHECK(!remote::rear_up_key());

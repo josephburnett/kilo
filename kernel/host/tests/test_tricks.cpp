@@ -24,7 +24,7 @@ uint32_t timer_ticks(const Trick& t, uint8_t speed) {
 }
 
 void test_library_matches_python() {
-  CHECK(kLibrarySize == 14);  // the 13 first-version tricks, then the authored rear_up
+  CHECK(kLibrarySize == 16);  // the 13 first-version tricks, then the authored rear_up's three stages
   for (uint32_t i = 0; i < kLibrarySize; i++) {
     const Trick& t = kLibrary[i];
     const char* p = trick_problem(t);
@@ -45,6 +45,14 @@ void test_library_matches_python() {
   const Trick* ru = find_trick("rear_up");  // authored: no legacy token, a slow stop, SIT at the end
   CHECK(ru != nullptr && ru->legacy[0] == '\0' && ru->stop_ticks == 75 && ru->end_posture == KILO_POSTURE_SIT);
   CHECK(ru->flags == 0 && find_trick("") == nullptr && find_trick("stand")->stop_ticks == 0);
+  const uint8_t stage_stop[2] = {100, 125};  // rear_up_2 (40 deg), rear_up_3 (54 deg): further to come down
+  const char* const stage_name[2] = {"rear_up_2", "rear_up_3"};
+  for (int i = 0; i < 2; i++) {
+    const Trick* st = find_trick(stage_name[i]);
+    CHECKF(st != nullptr && st->legacy[0] == '\0' && st->stop_ticks == stage_stop[i] &&
+               st->end_posture == KILO_POSTURE_SIT && st->flags == 0 && st->n_frames > ru->n_frames,
+           "%s", stage_name[i]);
+  }
   const Trick* s = find_trick("stretch");  // test_trick_id_and_header_carry_expected_attitude
   kilo_trick_begin_t b;
   trick_begin(*s, 9, &b);

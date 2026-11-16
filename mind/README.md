@@ -502,7 +502,7 @@ and the mind kernel does the same (`kernel/mind/remote/`, a port of
 | A4 | 0x68 | trot: walk forward in it, or change the walk to it |
 | B4 | 0x98 | crawl: likewise |
 | C4 | 0xB0 | walk: likewise |
-| B2 | 0x38 | rear up (the trick `rear_up`, docs/rear-up-trick.md); pressed again while it plays, it comes down (TRICK_STOP over 1.5 s to STAND); refused below 7400 mV |
+| B2 | 0x38 | off unless `KILO_REAR_UP=1`, `2` or `3`: rear up (the trick `rear_up`, `rear_up_2` or `rear_up_3` by that stage, docs/rear-up-trick.md); pressed again while it plays, it comes down (TRICK_STOP over 1.5 to 2.5 s to SIT); refused below 7400 mV |
 | rows 1-3 but B2 | | nothing (logged as ignored) |
 
 **The gait and turn keys make Kilo walk: use the remote with Kilo on the

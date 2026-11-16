@@ -67,9 +67,12 @@
 
 // The remote's rear-up key, B2 (docs/rear-up-trick.md "The B2 switch"):
 // off, B2 does nothing, until the owner has done the staged trials.
-// make -C kernel KILO_REAR_UP=1 turns it on.
+// make -C kernel KILO_REAR_UP=1 (or 2, 3: the stage, how high) turns it on.
 #ifndef KILO_REAR_UP
 #define KILO_REAR_UP 0
+#endif
+#if KILO_REAR_UP < 0 || KILO_REAR_UP > 3
+#error "KILO_REAR_UP must be 0, 1, 2 or 3"
 #endif
 
 using namespace kilo;
@@ -210,7 +213,7 @@ boolean CKernel::Initialize (void)
 	Config.mind_build = (uint32_t) KILO_BUILD;
 	Config.remote = RemoteOn;
 	Config.behaviour = KILO_BEHAVIOUR != 0;
-	Config.rear_up_key = KILO_REAR_UP != 0;
+	Config.rear_up_key = (uint8_t) KILO_REAR_UP;
 	Config.balance_kp = BalanceKp;
 	// The behaviour RNG's seed: 32 bits, so that the logged seed (the
 	// runner logs it as %u) replays the same choices.
@@ -227,8 +230,11 @@ boolean CKernel::Initialize (void)
 	m_Watch.m_pLog = m_pLog;
 	m_pMind->set_tap (&m_Watch);
 
+	static const char *const RearUp[] = {"", " (rear-up key B2 on: rear_up, stage 1)",
+					     " (rear-up key B2 on: rear_up_2, stage 2)",
+					     " (rear-up key B2 on: rear_up_3, stage 3)"};
 	logf (*m_pLog, LogLevel::Info, "Kilo mind, build %08x%s%s (%s)", (unsigned) KILO_BUILD,
-	      KILO_BEHAVIOUR ? " (behaviour runner on)" : "", KILO_REAR_UP ? " (rear-up key B2 on)" : "",
+	      KILO_BEHAVIOUR ? " (behaviour runner on)" : "", RearUp[KILO_REAR_UP],
 	      KiloMindKernelMarker);
 	for (unsigned i = 0; i < kAuthorizedKeyCount; i++)
 	{

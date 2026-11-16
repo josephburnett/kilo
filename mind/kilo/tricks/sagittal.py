@@ -7,7 +7,10 @@ hind feet and the tail), which the planner's model (kilo.planner.model)
 does not cover. The masses and leg geometry come from that model; the tail
 is the owner's measurement (2026-11-16, read as below); the outline of the
 frame and the Pi are ESTIMATES (docs/rear-up-trick.md section 2 lists what
-is still to measure), so every check runs over ranges of them.
+is still to measure), so every check runs over ranges of them. The owner's
+photo of Kilo standing by itself at 54 deg (PHOTO_POSE, photo_check) is a
+check on the centre of mass: it agrees with the model as it is, and rules
+out part of those ranges.
 
 Frames and conventions:
 
@@ -61,6 +64,13 @@ FRONT_FOOT, HIND_FOOT, TAIL, BUTT, HIND_KNEE, BACK, PI, NOSE, FRONT_KNEE = (
 ALLOWED = {FRONT_FOOT, HIND_FOOT, TAIL, BUTT, HIND_KNEE, FRONT_KNEE}
 FORBIDDEN = {BACK, PI, NOSE}
 TOUCH_MM = 1.0  # a point this close to the floor counts as a support
+# The feet are discs, drawn as this many points for the hull (a roll over a
+# foot goes in steps of 360/FOOT_POINTS deg; the polygon's corner is within
+# r sin(180/FOOT_POINTS) = 0.8 mm of the circle's contact). A foot on the
+# floor supports at the point under its centre, whatever the polygon's
+# corners: the margins are measured to that point (until 2026-11-16 they
+# were measured to the furthest corner within TOUCH_MM, up to 3 mm more).
+FOOT_POINTS = 24
 
 
 @dataclass(frozen=True)
@@ -116,6 +126,41 @@ class Pose:
     def astuple(self) -> tuple:
         return (self.front_shoulder, self.front_knee, self.back_shoulder, self.back_knee, self.tail,
                 self.head_pan, self.head_tilt)
+
+
+# ---- the photograph of 2026-11-16 (docs/rear-up-trick.md section 2) ---------------------------
+# The owner posed the unpowered Kilo by hand and it stood free on the two
+# hind feet and the tail tip (a pen wedged between the front of the body
+# and the hind knee kept the limp knee from folding; it touches nothing
+# else and weighs ~40 g with its centre ~5 mm ahead of the hind feet, so
+# it moves the balance point by under 1 mm). READ OFF THE PHOTO (side
+# view, ~6 px/mm at the near legs; the angles are read, not the lengths,
+# so the scale does not enter):
+# - pitch 54 deg nose up: the line through the near front and hind
+#   shoulder axles (54.1), the Pi's board (53.6) and the tail (72 deg
+#   below level less its 18 deg droop: 54) agree; the owner's "about 60"
+#   was by eye. Uncertainty +-4 deg (camera tilt and yaw).
+# - the near hind leg: the thigh 39 deg below level from the hip forward
+#   to the knee, the shank 73 deg below level from the knee forward to the
+#   foot (+-3 deg each). With the 45 and 50 mm links that puts the hip
+#   82 mm above the floor, which is exactly where the model's tail tip
+#   touches at 54 deg (82.5 mm): the tail geometry and the pitch agree.
+# - the front legs: the thigh forward and 7 deg below level, the shank
+#   up and forward (68 deg above level), the paws high in front.
+# As OpenCat angles (whole degrees): PHOTO_POSE. In the model that pose
+# rests on the tail and the hind feet at 53.6 deg with the centre of mass
+# 5.1 mm behind the hind feet: the model needs NO correction to stand
+# there. What the photo adds is a bound: the real centre of mass cannot be
+# further forward (in the world, at ~54 deg) than the hind feet, i.e. not
+# more than 5.1 mm (+ PHOTO_MARGIN_TOL for the reading) forward of the
+# model's. A centre of mass com_dx forward and com_dz up moves it
+# com_dx cos(54) - com_dz sin(54) = 0.59 com_dx - 0.81 com_dz forward, so
+# the photo rules out "forward and low" (the corner that made the first
+# design stop at 28 deg) and says nothing about "back" or "high".
+PHOTO_POSE = Pose(front_shoulder=-29, front_knee=15, back_shoulder=3, back_knee=-57, tail=0)
+PHOTO_PITCH = 54.0
+PHOTO_PITCH_TOL = 4.0     # deg: how far the model's rest pitch for PHOTO_POSE may be from the photo's
+PHOTO_MARGIN_TOL = 5.0    # mm: the reading's error on where the hind feet are under the centre of mass
 
 
 # ---- kinematics ------------------------------------------------------------------------------
@@ -234,8 +279,8 @@ def outline(g: Geometry, p: Pose) -> list[tuple[str, float, float]]:
     for front, sh, kn in ((True, p.front_shoulder, p.front_knee), (False, p.back_shoulder, p.back_knee)):
         _, (kx, kz), (fx, fz) = leg_points(g, front, sh, kn)
         foot = FRONT_FOOT if front else HIND_FOOT
-        for i in range(12):
-            a = 2 * math.pi * i / 12
+        for i in range(FOOT_POINTS):
+            a = 2 * math.pi * i / FOOT_POINTS
             pts.append((foot, fx + r * math.cos(a), fz + r * math.sin(a)))
         pts.append((FRONT_KNEE if front else HIND_KNEE, kx, kz))
     tx, tz = tail_tip(g, p.tail)
@@ -370,12 +415,17 @@ def rest(g: Geometry, p: Pose, phi_prev: float = 0.0, max_rolls: int = 12) -> Re
     # to lift, widens it; the hull edge alone would not see it).
     clear: dict = {}
     touching = []
+    centre = {}  # a foot's support: under its disc's centre
+    for front in (True, False):
+        _, _, (fx, fz) = leg_points(g, front, *((p.front_shoulder, p.front_knee) if front
+                                                 else (p.back_shoulder, p.back_knee)))
+        centre[FRONT_FOOT if front else HIND_FOOT] = to_world(fx, fz, phi)[0]
     for name, x, z in pts:
         X, Z = to_world(x, z, phi)
         h_ = round(Z - floor, 1)
         clear[name] = min(h_, clear.get(name, h_))
         if Z - floor <= TOUCH_MM:
-            touching.append((X, name))
+            touching.append((centre.get(name, X), name))
     (rxa, ra), (fxb, fb) = min(touching), max(touching)
     contacts: dict = {}
     for X, name in touching:
@@ -556,3 +606,47 @@ def follow(g: Geometry, poses: Sequence[Pose], start_phi: float = 0.0, steps: in
             out.append(Sample(k, s, p, r, load(g, p, r), lateral_margin(g, r, p)))
         prev = target
     return out
+
+
+# ---- the photograph as a check on a geometry ---------------------------------------------------
+@dataclass(frozen=True)
+class PhotoCheck:
+    """What a geometry says about the photographed pose, on the tail tip
+    and the hind feet (sagittal.tripod): the pitch, and how far the centre
+    of mass is behind the hind feet. It agrees with the photo when the
+    pitch is within PHOTO_PITCH_TOL of 54 deg and the centre of mass is no
+    more than PHOTO_MARGIN_TOL in front of the hind feet."""
+    phi: float
+    margin: float      # the centre of mass behind the hind feet, mm (< 0: in front: it would tip forward)
+    ok: bool
+
+
+def tripod(g: Geometry, p: Pose) -> tuple[float, float]:
+    """(pitch, margin) of pose p stood on the tail tip and the hind feet
+    alone, whether or not it would stay there: the pitch that puts the tail
+    tip and the bottom of the hind foot discs at the same height, and how
+    far the centre of mass is behind the point under the discs' centre
+    (mm; negative: in front, it tips forward)."""
+    _, _, (fx, fz) = leg_points(g, False, p.back_shoulder, p.back_knee)
+    tx, tz = tail_tip(g, p.tail)
+    r = g.body.foot_r_mm
+
+    def gap(phi):  # hind foot bottom height minus the tail tip's
+        return to_world(fx, fz, phi)[1] - r - to_world(tx, tz, phi)[1]
+
+    lo, hi = -30.0, 89.0
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        if (gap(lo) > 0) == (gap(mid) > 0):
+            lo = mid
+        else:
+            hi = mid
+    phi = (lo + hi) / 2
+    cx, cz = com(g, p)
+    return phi, to_world(fx, fz, phi)[0] - to_world(cx, cz, phi)[0]
+
+
+def photo_check(g: Geometry) -> PhotoCheck:
+    phi, m = tripod(g, PHOTO_POSE)
+    ok = abs(phi - PHOTO_PITCH) <= PHOTO_PITCH_TOL and m >= -PHOTO_MARGIN_TOL
+    return PhotoCheck(phi=phi, margin=m, ok=ok)

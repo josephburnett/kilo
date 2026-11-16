@@ -139,8 +139,9 @@ int usage() {
   fprintf(stderr,
           "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--authorized-keys FILE] [--reset-fifo PATH]\n"
           "                      [--card DIR] [--duration SECONDS] [--verbose] [--remote] [--behaviour] [--seed N]\n"
-          "                      [--balance KP] [--rear-up]\n"
-          "  --rear-up  the remote's B2 starts the rear_up trick (off: B2 does nothing; KILO_REAR_UP on the Pi)\n"
+          "                      [--balance KP] [--rear-up[=N]]\n"
+          "  --rear-up[=N]  the remote's B2 starts the rear_up trick at stage N (1 rear_up, the default,\n"
+          "                 2 rear_up_2, 3 rear_up_3; off: B2 does nothing; KILO_REAR_UP on the Pi)\n"
           "  --authorized-keys FILE  the laptops' public keys --listen accepts (default %s)\n"
           "  --card DIR  take kernel updates (kilo update --host) into DIR as if it were the SD card\n"
           "exit status: 0 done (a HELLO seen), 1 no HELLO or the port failed, 2 the body speaks another\n"
@@ -186,7 +187,11 @@ int main(int argc, char** argv) {
     } else if (strcmp(argv[i], "--behaviour") == 0) {
       cfg.behaviour = true;
     } else if (strcmp(argv[i], "--rear-up") == 0) {
-      cfg.rear_up_key = true;
+      cfg.rear_up_key = 1;
+    } else if (strncmp(argv[i], "--rear-up=", 10) == 0) {
+      const char* v = argv[i] + 10;
+      if (v[0] < '1' || v[0] > '3' || v[1] != '\0') return usage();
+      cfg.rear_up_key = (uint8_t)(v[0] - '0');
     } else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
       cfg.seed = strtoull(argv[++i], &end, 10);
       if (*end != '\0') return usage();

@@ -90,18 +90,21 @@ EXPECTED = {
 }
 
 
-@pytest.mark.parametrize("on", [False, True])
-def test_key_map(on):
+@pytest.mark.parametrize("stage", [0, 1, 2, 3])
+def test_key_map(stage):
     was = ir.REAR_UP_KEY
-    ir.set_rear_up_key(on)
+    ir.set_rear_up_key(stage)
     try:
-        _check_key_map(on)
+        assert ir.REAR_UP_KEY == stage
+        _check_key_map(stage)
     finally:
         ir.set_rear_up_key(was)
 
 
-def _check_key_map(on):
-    expected = dict(EXPECTED, B2=("trick", "rear_up")) if on else EXPECTED
+def _check_key_map(stage):
+    on = stage != 0
+    trick = {1: "rear_up", 2: "rear_up_2", 3: "rear_up_3"}.get(stage)
+    expected = dict(EXPECTED, B2=("trick", trick)) if on else EXPECTED
     assert set(ir.ACTIONS) == set(ir.BY_GRID)
     for k in ir.KEYS:
         a = ir.action_for(k.command)
@@ -323,8 +326,10 @@ def test_rear_up_key_is_off_by_default():
     code = "from kilo import ir; print(ir.REAR_UP_KEY, ir.action_for(0x38).kind, ir.describe(0x38))"
     env = {k: v for k, v in os.environ.items() if k != "KILO_REAR_UP"}
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
-    for val, want in ((None, "False none B2 (0x38, none)"), ("0", "False none B2 (0x38, none)"),
-                      ("1", "True trick B2 (0x38, rear up)")):
+    for val, want in ((None, "0 none B2 (0x38, none)"), ("0", "0 none B2 (0x38, none)"),
+                      ("1", "1 trick B2 (0x38, rear up)"), ("2", "2 trick B2 (0x38, rear up 2)"),
+                      ("3", "3 trick B2 (0x38, rear up 3)"), ("4", "0 none B2 (0x38, none)"),
+                      ("yes", "0 none B2 (0x38, none)")):
         e = dict(env) if val is None else dict(env, KILO_REAR_UP=val)
         out = subprocess.run([sys.executable, "-c", code], env=e, capture_output=True, text=True, check=True).stdout
         assert out.strip() == want, val
@@ -368,6 +373,23 @@ def test_remote_rear_up_key(monkeypatch, rear_up_on):
     c, rc, key = rig()
     key("A5")
     assert key("B2") == "ignored (behaviour runner active)"
+
+
+@pytest.mark.parametrize("stage,name,stop", [(2, "rear_up_2", 100), (3, "rear_up_3", 125)])
+def test_remote_rear_up_stages(monkeypatch, stage, name, stop):
+    """KILO_REAR_UP=2 or 3: the same key plays the higher stage, which comes
+    down more slowly when stopped."""
+    was = ir.REAR_UP_KEY
+    ir.set_rear_up_key(stage)
+    try:
+        monkeypatch.setattr(ir.time, "sleep", lambda s: None)
+        c, rc, key = rig()
+        assert key("B2").startswith(f"trick {name} started (")
+        assert c.calls == [("start_trick", name)] and c.started.stop_ticks == stop
+        assert key("B2") == "trick stopped: coming down" and c.calls[-1] == ("stop_trick",)
+        assert ir.describe(0x38) == f"B2 (0x38, rear up {stage})"
+    finally:
+        ir.set_rear_up_key(was)
 
 
 def test_remote_freeze_cancels_a_posture_key_waiting_for_the_planned_stop():

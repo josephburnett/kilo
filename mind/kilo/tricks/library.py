@@ -36,7 +36,10 @@ LEGACY_ALIASES = {legacy: name for name, legacy in FIRST_VERSION.items()}
 
 # Tricks written for Kilo (no legacy skill): name -> the module that generates the JSON.
 AUTHORED = {
+    # the three stages of one trick (docs/rear-up-trick.md): 28, 40 and 54 deg
     "rear_up": "kilo.tricks.rear_up",
+    "rear_up_2": "kilo.tricks.rear_up",
+    "rear_up_3": "kilo.tricks.rear_up",
 }
 
 

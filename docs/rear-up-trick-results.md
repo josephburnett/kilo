@@ -5,8 +5,9 @@ run and fill in what you saw; "don't know" is a fine answer.
 
 ## YYYY-MM-DD, run N
 
-Build (mind kernel, with `KILO_REAR_UP=1`): ...   Battery at the start: ... mV   Floor: ...
-Foam or cardboard over the Pi: yes / no   Tail firmly on its servo: yes / no
+Build (mind kernel, with `KILO_REAR_UP=1`, `2` or `3`): ...   Battery at the start: ... mV
+Floor: ...   Paper under the tail tip (stages 2, 3): yes / no
+Foam or cardboard over the Pi: yes / no   Tail firmly on its servo, straight back in stand: yes / no
 
 ### Checks and measurements (section 2)
 
@@ -19,16 +20,31 @@ Foam or cardboard over the Pi: yes / no   Tail firmly on its servo: yes / no
 | T5 in sit, what touches the floor | | the four feet (rear end 3 mm up) |
 | T6 tail weight, g | | 6 (estimate) |
 
-### Trials (section 5)
+### Stage 1 (`KILO_REAR_UP=1`, 28 degrees; section 5)
 
-| Stage | Tries | What you saw (tail tip, tail pushed aside?, rear end, sliding, leaning, rocking back, front feet light?) | Stopped because |
+| Step | Tries | What you saw (tail tip, tail pushed aside?, rear end, sliding, leaning, rocking back, front feet light?) | Stopped because |
 |---|---|---|---|
 | 1 onto the tail | | | |
 | 2 the step | | | |
 | 3 paws up: on the tripod / paws stayed down / came back down | | | |
-| 4 all the way | | top pitch from `monitor`: ... (model: -26 to -30) | |
+| 4 all the way | | top pitch from `monitor`: ... (model: -25 to -31) | |
 | 5 toggle: B2 / B6 / C7 at the top | | | |
 | 6 hands further away | | | |
 
-Hind shoulder servos after stage 4: cool / warm / too hot to hold
+### Stage 2 (`KILO_REAR_UP=2`, 40 degrees)
+
+| Step | Tries | What you saw (tail tip sliding smoothly / sticking, tail pushed aside?, hind feet, knees, tipping forward?) | Stopped because |
+|---|---|---|---|
+| 7 the rise | | | |
+| 8 all the way, then the toggle | | top pitch from `monitor`: ... (model: -37 to -43) | |
+
+### Stage 3 (`KILO_REAR_UP=3`, 54 degrees)
+
+| Step | Tries | What you saw (as stage 2; does it look like the photo? forward creep?) | Stopped because |
+|---|---|---|---|
+| 9 the rise to the top | | how far the tail tip slid: ... cm (model: about 6) | |
+| 10 all the way, the toggle and C7 at the top | | top pitch from `monitor`: ... (model: -51 to -57) | |
+| 11 hands further away | | | |
+
+Hind shoulder servos after the highest stage tried: cool / warm / too hot to hold
 Anything else:

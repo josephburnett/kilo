@@ -1,15 +1,16 @@
 """rear_up: Kilo sits back on its hind feet and its tail, front paws off the floor.
 
-    python -m kilo.tricks.rear_up            write tricks/library/rear_up.json, print the check
-    python -m kilo.tricks.rear_up --check    exit 1 if the JSON is stale or the check fails
-    python -m kilo.tricks.rear_up --report   the check over the full uncertainty grid (slow)
+    python -m kilo.tricks.rear_up            write the three stages' JSON, print their checks
+    python -m kilo.tricks.rear_up --check    exit 1 if a JSON is stale or a check fails
+    python -m kilo.tricks.rear_up --report   the checks over the full uncertainty grid (slow)
+    python -m kilo.tricks.rear_up --stage 3  only that stage
 
 The design (docs/rear-up-trick.md has the reasoning and the hardware
 procedure). Kilo cannot balance on its hind feet: they are round (a 6 mm
 disc), so a feet-only stance has no support length, and the servos answer
 too slowly to balance it actively. What works is a static TRIPOD: the hind
-feet stretched forward under the belly, the tail tip on the floor behind,
-the centre of mass between them.
+feet forward under the belly, the tail tip on the floor behind, the centre
+of mass between them.
 
 The tail (measured 2026-11-16, kilo.tricks.sagittal) turns LEFT AND RIGHT,
 not down: at servo 0 it points back and 18 deg down and its tip is at its
@@ -17,13 +18,28 @@ lowest, 98 mm behind and 5 mm below the hind shoulder axles. So the tail
 stays at 0 as a fixed strut, and the tripod is reached by tipping the body
 nose up until the tip meets the floor: that happens when the hind axles
 are 98 sin(pitch) + 5 cos(pitch) mm up (sagittal.tail_touch_height). The
-pitch is then set by how high the hind legs hold the hips. Above about 55
-deg the hind feet cannot reach far enough forward to stay ahead of the
-centre of mass, and above about 35 deg the margin left for an uncertain
-centre of mass is gone, so the hold is at 28 deg: a low sit-up, not a
-meerkat. Every keyframe and every point between keyframes is statically
-stable in sagittal's model over the ranges in RANGES, so the trick plays
-open loop with the balance off.
+pitch is then set by how high the hind legs hold the hips.
+
+THREE STAGES, one library entry each, so the trials can stop part way up
+(STAGES; the remote's B2 plays the one the build selects, KILO_REAR_UP=1,
+2 or 3). Each stage plays the one before it unchanged and then goes on:
+
+  1 rear_up    28 deg: the low sit-up (the first design)
+  2 rear_up_2  40 deg
+  3 rear_up_3  54 deg: the pose of the owner's photo (sagittal.PHOTO_POSE)
+
+The photo (2026-11-16) showed the unpowered Kilo standing free at 54 deg
+(read off the photo; the owner's "about 60" was by eye). The model
+already stands in that pose (5 mm of margin), so it needs no correction;
+what made the first design stop at 28 deg was (a) the FEET reach cap
+(0.95 of the leg's length), which does not apply to trick frames (they are
+joint angles: the body only applies the joint limits and the slew), and
+(b) the "centre of mass forward AND low" corner of the uncertainty, which
+the photo rules out (sagittal.photo_check). Every stage is checked over
+the geometries the photo allows. At the top the front paws are tucked
+(60, 20) instead of reaching forward as in the photo, which puts the
+centre of mass 6.5 mm further behind the hind feet than in the pose Kilo
+stood in by itself.
 
 The motion, from STAND (or SIT):
   0 tuck    the hind feet forward a little, the rear lower, front feet down
@@ -35,10 +51,20 @@ The motion, from STAND (or SIT):
   3 ready   they come down: the centre of mass is now behind them, so the
             front feet carry little
   4 paws    the front paws come up and forward (they hover 25 mm above the
-            floor at the hold: if the centre of mass is further forward
-            than the model, Kilo tips onto them, a short drop)
-  5 up      the hind legs lift the hips: 28 deg nose up, held 2 s
+            floor: if the centre of mass is further forward than the model,
+            Kilo tips onto them, a short drop)
+  5 up      the hind legs lift the hips: 28 deg nose up (stage 1 holds 2 s)
+  6 rise    (stages 2, 3) on the tripod, the hind legs straighten and draw
+            the feet in, slowly: 34 deg
+  7 mid     40 deg (stage 2 holds 2 s)
+  8 climb   47 deg
+  9 top     54 deg (stage 3 holds 2 s)
   then the same way down to the tuck, and SIT (the end posture).
+While the pitch grows on the tripod the distance between the hind feet and
+the tail tip shrinks (the centre of mass comes back over the hips, so the
+feet must come back with it): the tail tip, which carries a tenth of the
+weight, slides forward on the floor (about 60 mm from 24 to 54 deg) and
+back on the way down. The model lets contacts slide freely.
 
 Keyframes are given as world-space intent (Spec: body pitch, hip height or
 "on the tail", where the hind and front feet stand) and solved into joint
@@ -46,7 +72,7 @@ angles for the model's geometry, so new measurements (Geometry) re-solve
 the trick: change the defaults in kilo.tricks.sagittal.Geometry and run
 this module.
 
-The hold stays far under 70 deg nose up, so the body's fall detector (75
+Every hold stays far under 70 deg nose up, so the body's fall detector (75
 deg for 120 ms) stays armed: the trick does NOT set FALL_OK.
 """
 
@@ -55,17 +81,15 @@ from __future__ import annotations
 import argparse
 import itertools
 import math
+import os
 import sys
-from dataclasses import dataclass, field
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass, field, replace
 from typing import Sequence
-
-from kilo.planner.model import LF, RB
 
 from . import sagittal as S
 from .model import JOINT_LIMITS, Easing, Keyframe, Posture, Trick, TICK_MS
 from .library import path_for
-
-NAME = "rear_up"
 
 # The end posture, which is also where every way of cutting the trick short
 # goes (TRICK_STOP, a watchdog stop, an epoch bump): the body crossfades
@@ -78,9 +102,6 @@ NAME = "rear_up"
 # legs and turns the tail aside (its tip rises off the floor), so the rear
 # sinks and Kilo always ends sitting on its four feet.
 END = Posture.SIT
-# TRICK_STOP for this trick (the remote's toggle, C7, B6, A7): crossfade to
-# SIT over this many ticks instead of the body's 10 (0.2 s would drop it).
-STOP_TICKS = 75
 
 # The body's SIT and REST postures (body/src/core/posture.cpp; SIT's back
 # shoulders -90 are clamped to the joint limit -80 by the safety stage).
@@ -93,7 +114,17 @@ END_POSE = SIT
 # peak is pi/2 times this (63 deg/s), slow against the servos' 0.07 s/60 deg
 # and long against the 140 ms lag, so the motion stays close to static.
 MOVE_DPS = 40.0
+# On the tripod above stage 1 (the rise to 40 and 54 deg) half that: the
+# tail tip slides forward as the body rises, and the owner's hand has time.
+RISE_DPS = 20.0
 MIN_DUR = 30  # ticks (0.6 s)
+# The hind legs in trick frames: the body plays a trick's joint angles
+# with only the joint limits and the slew (core/keyframe, the arbiter's
+# safety stage); the 0.95 reach cap of core/ik.h is for FEET only. The
+# design keeps the knee bent at least this much (the leg at most 0.98 of
+# its full length), short of straight, where a forward-pointing hind knee
+# could snap through backwards. The photo's knee is bent 33 deg.
+MIN_KNEE_BEND = 25.0
 
 
 @dataclass(frozen=True)
@@ -107,7 +138,9 @@ class Spec:
     the front axles, or None for paws up in ``paws`` (OpenCat shoulder,
     knee); tail: the tail servo's angle (0: centre, its lowest point; the
     trick keeps it there); hind_lift: the hind feet this far above the
-    floor (stepping); head: (pan, tilt); hold: ticks held after arriving."""
+    floor (stepping); head: (pan, tilt); hold: ticks held after arriving
+    (when this is the stage's top); rate: the move's average joint speed,
+    deg/s."""
     name: str
     phi: float
     h: float | None
@@ -119,11 +152,19 @@ class Spec:
     hind_lift: float = 0.0
     head: tuple = (0.0, 0.0)
     hold: int = 0
+    rate: float = MOVE_DPS
 
 
 # Chosen by searching each Spec's numbers against check() (the margins and
-# the smallest rolls over the ranges); docs/rear-up-trick.md sections 1 and 6
+# the smallest rolls over the ranges); docs/rear-up-trick.md sections 1 and 7
 # have the reasoning.
+HOLD = 100  # ticks at a stage's top (2 s)
+# The front paws on the tripod, the same at every stage: tucked back near
+# the shoulders. Folded right back (80, 120) they would add 2 mm of margin
+# at 54 deg, but a forward tip would then go on over them onto the nose;
+# reaching forward as in the photo (-29, 15) costs 4 mm. At (60, 20) a
+# forward tip is caught by the paws (catch(), the check's "catch").
+PAWS = (60.0, 20.0)
 UP_SPECS = (
     Spec("tuck", phi=8, h=70, hind_dx=25, front=0, head=(0, -10)),
     # the rear down onto the tail with the hind feet still under the hips:
@@ -132,9 +173,47 @@ UP_SPECS = (
     # on the tail and the front feet, the hind feet step forward in the air
     Spec("step", phi=24, h=None, hind_dx=78, hind_lift=10, front=-6, head=(0, -20)),
     Spec("ready", phi=24, h=None, hind_dx=78, front=-6, head=(0, -20)),
-    Spec("paws", phi=24, h=None, hind_dx=78, front=None, paws=(60.0, 20.0), head=(0, -25)),
-    Spec("up", phi=28, h=None, hind_dx=78, front=None, paws=(60.0, 20.0), head=(0, -30), hold=100),
+    Spec("paws", phi=24, h=None, hind_dx=78, front=None, paws=PAWS, head=(0, -25)),
+    Spec("up", phi=28, h=None, hind_dx=78, front=None, paws=PAWS, head=(0, -30), hold=HOLD),
+    # stages 2 and 3: up on the tripod, the hind legs straighten and draw
+    # the feet in as the centre of mass comes back over the hips; at 40 and
+    # 54 deg the feet are as far forward as MIN_KNEE_BEND lets them (the
+    # top: the knee bent 26 deg, the photo's 33 deg)
+    Spec("rise", phi=34, h=None, hind_dx=72, front=None, paws=PAWS, head=(0, -30), rate=RISE_DPS),
+    Spec("mid", phi=40, h=None, hind_dx=68, front=None, paws=PAWS, head=(0, -30), hold=HOLD, rate=RISE_DPS),
+    Spec("climb", phi=47, h=None, hind_dx=60, front=None, paws=PAWS, head=(0, -30), rate=RISE_DPS),
+    Spec("top", phi=54, h=None, hind_dx=52, front=None, paws=PAWS, head=(0, -30), hold=HOLD, rate=RISE_DPS),
 )
+
+
+@dataclass(frozen=True)
+class Stage:
+    """One library entry: the way up to UP_SPECS[top], held there, and down."""
+    number: int
+    name: str
+    top: int            # index into UP_SPECS of the held frame
+    stop_ticks: int     # TRICK_STOP's crossfade to SIT, ticks
+    margin_min: float   # the tripod margin at the hold the check holds it to, mm (worst over the ranges)
+
+
+# TRICK_STOP for these tricks (the remote's toggle, C7, B6, A7): crossfade
+# to SIT over stop_ticks instead of the body's 10 (0.2 s would drop it).
+STAGES = (
+    Stage(1, "rear_up", top=5, stop_ticks=75, margin_min=5.0),
+    Stage(2, "rear_up_2", top=7, stop_ticks=100, margin_min=5.0),
+    Stage(3, "rear_up_3", top=9, stop_ticks=125, margin_min=3.0),
+)
+NAMES = tuple(st.name for st in STAGES)
+
+
+def stage(n) -> Stage:
+    """A stage by number (1..3), library name, or itself."""
+    if isinstance(n, Stage):
+        return n
+    for st in STAGES:
+        if n in (st.number, st.name):
+            return st
+    raise KeyError(f"no rear_up stage {n!r}")
 
 
 class DesignError(ValueError):
@@ -143,11 +222,19 @@ class DesignError(ValueError):
 
 def _leg(g: S.Geometry, front: bool, dxw: float, dzw: float, phi: float) -> tuple[float, float]:
     """The foot's disc centre at world offset (dxw, dzw) from its shoulder
-    axle -> OpenCat (shoulder, knee), through the planner model's IK."""
+    axle -> OpenCat (shoulder, knee): the planner model's IK (core/ik.h)
+    without its 0.95 reach cap (trick frames are joint angles), the knee
+    bent at least MIN_KNEE_BEND."""
     xb, zb = S.to_world(dxw, dzw, -phi)
-    if not g.body.reachable(xb, -zb):
+    b = g.body
+    l1, l2 = b.l1_mm, b.l2_mm
+    d = math.hypot(xb, zb)
+    d_max = math.sqrt(l1 * l1 + l2 * l2 + 2 * l1 * l2 * math.cos(math.radians(MIN_KNEE_BEND)))
+    if not (b.min_reach_mm - 1e-6 <= d <= d_max + 1e-6 and zb < 0):
         raise DesignError(f"foot ({xb:.0f}, {zb:.0f}) mm out of reach")
-    t1, t2 = g.body.ik(LF if front else RB, xb, -zb)
+    c = min(1.0, max(-1.0, (d * d - l1 * l1 - l2 * l2) / (2 * l1 * l2)))
+    t2 = math.atan2(math.sqrt(1.0 - c * c) * (1.0 if front else -1.0), c)
+    t1 = math.atan2(xb, -zb) - math.atan2(l2 * math.sin(t2), l1 + l2 * math.cos(t2))
     sh = -math.degrees(t1)
     kn = 90.0 - math.degrees(t2) if front else -(math.degrees(t2) + 90.0)
     return sh, kn
@@ -190,22 +277,31 @@ def solve(spec: Spec, g: S.Geometry | None = None) -> S.Pose:
     return p
 
 
-def up_poses(g: S.Geometry | None = None) -> list[S.Pose]:
-    return [solve(s, g) for s in UP_SPECS]
+def up_specs(st=1) -> tuple:
+    """The way up for a stage: UP_SPECS to its top, only the top held."""
+    st = stage(st)
+    return tuple(replace(s, hold=s.hold if i == st.top else 0) for i, s in enumerate(UP_SPECS[:st.top + 1]))
 
 
-def sequence(g: S.Geometry | None = None) -> tuple[list[S.Pose], list[int]]:
-    """The whole motion's poses and holds: up, the hold, the same way down, SIT."""
-    ups = up_poses(g)
-    holds = [s.hold for s in UP_SPECS]
+def up_poses(g: S.Geometry | None = None, st=1) -> list:
+    return [solve(s, g) for s in up_specs(st)]
+
+
+def sequence(g: S.Geometry | None = None, st=1) -> tuple[list, list, list]:
+    """The whole motion's poses, holds and move rates: up, the hold, the
+    same way down (each move back as slow as the move up it reverses), SIT."""
+    specs = up_specs(st)
+    ups = [solve(s, g) for s in specs]
+    holds = [s.hold for s in specs]
+    rates = [s.rate for s in specs]
     downs = ups[-2::-1]
-    poses = ups + downs + [END_POSE]
-    return poses, holds + [0] * len(downs) + [0]
+    down_rates = rates[:0:-1]  # back from up[i + 1] to up[i] at up[i + 1]'s rate
+    return ups + downs + [END_POSE], holds + [0] * len(downs) + [0], rates + down_rates + [MOVE_DPS]
 
 
-def _dur(a: S.Pose, b: S.Pose) -> int:
+def _dur(a: S.Pose, b: S.Pose, rate: float = MOVE_DPS) -> int:
     d = max(abs(x - y) for x, y in zip(a.astuple(), b.astuple()))
-    return max(MIN_DUR, math.ceil(d / MOVE_DPS * 1000.0 / TICK_MS))
+    return max(MIN_DUR, math.ceil(d / rate * 1000.0 / TICK_MS))
 
 
 def keyframe(p: S.Pose, dur: int, hold: int = 0) -> Keyframe:
@@ -224,24 +320,32 @@ def pose_of(kf: Keyframe) -> S.Pose:
                   head_pan=j["head_pan"], head_tilt=j["head_tilt"])
 
 
-def build(g: S.Geometry | None = None) -> Trick:
-    poses, holds = sequence(g)
+def build(g: S.Geometry | None = None, st=1) -> Trick:
+    st = stage(st)
+    poses, holds, rates = sequence(g, st)
     frames = []
     prev = STAND
-    for p, h in zip(poses, holds):
-        frames.append(keyframe(p, _dur(prev, p), h))
+    for p, h, rate in zip(poses, holds, rates):
+        frames.append(keyframe(p, _dur(prev, p, rate), h))
         prev = p
+    top = UP_SPECS[st.top]
     return Trick(
-        name=NAME, frames=tuple(frames), end_posture=END, stop_ticks=STOP_TICKS,
-        source={"kind": "authored", "design": "kilo.tricks.rear_up", "doc": "docs/rear-up-trick.md"},
+        name=st.name, frames=tuple(frames), end_posture=END, stop_ticks=st.stop_ticks,
+        source={"kind": "authored", "design": "kilo.tricks.rear_up", "doc": "docs/rear-up-trick.md",
+                "stage": st.number},
         notes=(
-            "authored (not a legacy skill): sit back on the hind feet and the tail tip, front paws up, 28 deg",
+            f"authored (not a legacy skill): rear_up stage {st.number} of {len(STAGES)}: sit back on the "
+            f"hind feet and the tail tip, front paws up, {top.phi:g} deg",
             "the tail stays at 0 (its lowest point, it swings sideways) as a strut; the body tips up onto it",
             "generated by python -m kilo.tricks.rear_up from world-space keyframes and kilo.tricks.sagittal.Geometry",
-            "balance off, fall_ok off: the pitch stays under 45 deg nose up, the fall detector (75 deg) stays armed",
-            f"end posture SIT; TRICK_STOP crossfades to it over stop_ticks ({STOP_TICKS})",
+            "balance off, fall_ok off: the pitch stays under 70 deg nose up, the fall detector (75 deg) stays armed",
+            f"end posture SIT; TRICK_STOP crossfades to it over stop_ticks ({st.stop_ticks})",
         ),
     ).validate()
+
+
+def build_all(g: S.Geometry | None = None) -> dict:
+    return {st.name: build(g, st) for st in STAGES}
 
 
 # ---- the check ----------------------------------------------------------------------------------
@@ -284,7 +388,7 @@ BACK_DROP_MAX = 15.0    # backwards, onto the tail or the rear end: cut short wh
                         # step, with the centre of mass 10 mm back and up, the rear lands from 10 mm
 FWD_DROP_MAX = 15.0     # forwards, onto the front feet, while playing
 STOP_FWD_DROP_MAX = 40.0  # forwards when the trick is cut short (the paws come down)
-TRIPOD_MARGIN = 5.0     # mm: the centre of mass inside the tripod at the hold, worst case
+# (the tripod margin at the hold, worst case, is each stage's Stage.margin_min)
 LEG_GAP_MIN = 12.0      # mm between the front and the hind leg of a side
 # Servo torque. ESTIMATE: Petoi's P1S is sold as 3 kg cm stall (retailers;
 # MG92B-class servos are similar). Static holding is kept under half of it.
@@ -347,7 +451,7 @@ def _start_phi(p: S.Pose) -> float:
     return 28.0 if p == SIT else 0.0  # SIT rests on the hind and the front feet, 28 deg nose up
 
 
-def _judge(res: Result, kind: str) -> Result:
+def _judge(res: Result, kind: str, margin_min: float) -> Result:
     """kind: "play" (everything), "stop" (a cut-short: no forbidden
     contact, no roll back; a roll forward onto the front feet is the way
     down and only reported), "info" (reported only)."""
@@ -370,8 +474,8 @@ def _judge(res: Result, kind: str) -> Result:
             # on the way is judged above); the test holds the nominal
             # geometry and every single range end to the tripod
             res.notes.append(f"no tripod at the hold ({res.hold_pitch:.1f} deg): the paws stayed down")
-        elif res.hold_margin < TRIPOD_MARGIN:
-            res.problems.append(f"hold margin {res.hold_margin:.1f} mm (min {TRIPOD_MARGIN:g})")
+        elif res.hold_margin < margin_min:
+            res.problems.append(f"hold margin {res.hold_margin:.1f} mm (min {margin_min:g})")
     elif res.fwd_drop > STOP_FWD_DROP_MAX:
         res.problems.append(f"drops forward {res.fwd_roll:.1f} deg, {res.fwd_drop:.0f} mm (max {STOP_FWD_DROP_MAX:g})")
     return res
@@ -391,6 +495,49 @@ def geometries(ranges: dict | None = None, corners: Sequence[str] = CORNERS,
         kw = dict(zip(corners, vals))
         out.append((",".join(f"{k}={v:g}" for k, v in kw.items()), base.with_(**kw)))
     return out
+
+
+def photo_filter(geos) -> tuple[list, list]:
+    """(kept, excluded): the geometries in which the photographed pose
+    stands as the photo shows it (sagittal.photo_check), and the others,
+    with the reason."""
+    kept, excluded = [], []
+    for label, g in geos:
+        pc = S.photo_check(g)
+        if pc.ok:
+            kept.append((label, g))
+        else:
+            where = (f"{pc.margin:.1f} mm behind" if pc.margin >= 0 else f"{-pc.margin:.1f} mm in front of")
+            excluded.append((label, f"the photo's pose would stand at {pc.phi:.1f} deg with the centre of mass "
+                                    f"{where} the hind feet"))
+    return kept, excluded
+
+
+def stage_geometries(st, ranges: dict | None = None, corners: Sequence[str] = CORNERS) -> tuple[list, list]:
+    """(kept, excluded): what a stage is checked over: the geometries of
+    the ranges that the photo allows (the corner "centre of mass forward
+    and low", which the photo rules out, is what limited the first
+    design). The same for every stage: the photo is evidence about Kilo,
+    not about one stage."""
+    return photo_filter(geometries(ranges, corners))
+
+
+def catch(g: S.Geometry, p: S.Pose, phi: float) -> tuple[S.Rest, S.Rest]:
+    """A forward failure at pose p: Kilo pushed (or wobbling) forward over
+    its hind feet until the front paws touch. Returns (the rest as
+    designed, the rest from there): the second should be on the hind and
+    the front feet (the paws catch it) or back on the tripod, never on the
+    nose (it went on over the paws)."""
+    r = S.rest(g, p, phi)
+    pts = S.outline(g, p)
+    land = r.phi
+    while land > -80.0:  # turn nose down over the hind feet until something else meets the floor
+        land -= 0.25
+        w = [(name, S.to_world(x, z, land)[1]) for name, x, z in pts]
+        foot = min(z for name, z in w if name == S.HIND_FOOT)
+        if any(z <= foot + 0.01 for name, z in w if name != S.HIND_FOOT):
+            break
+    return r, S.rest(g, p, land)
 
 
 # The body's SIT row as the crossfade targets it (body/src/core/posture.cpp):
@@ -434,6 +581,8 @@ def motions(trick: Trick, rest: bool = False) -> list[tuple[str, S.Pose, list[S.
 @dataclass
 class Report:
     results: list = field(default_factory=list)  # (geometry label, motion label, Result)
+    excluded: list = field(default_factory=list)  # (geometry label, why): ruled out by the photo
+    catch: tuple = ()  # nominal: (paw height at the hold mm, supports after a forward tip, its pitch)
 
     @property
     def problems(self) -> list[str]:
@@ -455,16 +604,36 @@ class Report:
         return out
 
 
+def _check_one(job) -> list:
+    trick, glabel, g, rest, margin_min = job
+    return [(glabel, mlabel, _judge(_run(g, poses, start, mlabel, hold_i), kind, margin_min))
+            for mlabel, start, poses, hold_i, kind in motions(trick, rest)]
+
+
 def check(trick: Trick | None = None, geos=None, rest: bool = False) -> Report:
     """Every motion (and with ``rest`` the REST reflex paths, reported only)
-    on every geometry."""
+    on every geometry (by default the stage's: stage_geometries)."""
     trick = trick or build()
+    st = stage(trick.name)
     rep = Report()
-    for glabel, g in geos or geometries():
-        for mlabel, start, poses, hold_i, kind in motions(trick, rest):
-            r = _run(g, poses, start, mlabel, hold_i)
-            rep.results.append((glabel, mlabel, _judge(r, kind)))
+    if geos is None:
+        geos, rep.excluded = stage_geometries(st)
+    jobs = [(trick, glabel, g, rest, st.margin_min) for glabel, g in geos]
+    if len(jobs) > 4 and (os.cpu_count() or 1) > 1:
+        # one geometry per task, over the cores (each is ~20 independent runs)
+        with ProcessPoolExecutor(max_workers=os.cpu_count()) as ex:
+            for part in ex.map(_check_one, jobs, chunksize=4):
+                rep.results += part
+    else:
+        for job in jobs:
+            rep.results += _check_one(job)
     nominal = S.Geometry()
+    hold_i = max(range(len(trick.frames)), key=lambda i: trick.frames[i].hold)
+    held, tipped = catch(nominal, pose_of(trick.frames[hold_i]), UP_SPECS[st.top].phi)
+    rep.catch = (held.clear[S.FRONT_FOOT], tuple(sorted(tipped.contacts)), tipped.phi)
+    if set(tipped.contacts) & S.FORBIDDEN or S.HIND_FOOT not in tipped.contacts:
+        rep.results.append(("nominal", "catch", Result("catch", problems=[
+            f"a forward tip at the hold ends on {sorted(tipped.contacts)}, not caught by the paws"])))
     for k, (v, g, m) in rep.torque_max().items():
         if g == "nominal" and v > TORQUE_MAX_KG_CM:
             rep.results.append(("nominal", m, Result(m, problems=[f"{k} {v:.2f} kg cm (max {TORQUE_MAX_KG_CM})"])))
@@ -498,8 +667,14 @@ def summary(rep: Report, trick: Trick) -> str:
                            ("fwd_drop", max, "drop forwards, mm"), ("pi_clear", min, "Pi above the floor, mm")):
         w = rep.worst(attr, "play" if attr in ("hold_margin", "hold_pitch", "lateral") else "", fn)
         lines.append(f"worst {what}: {w[0]:.1f} ({w[1]}, {w[2]})")
+    if rep.catch:
+        lines.append(f"a forward tip at the hold: the paws fall from {rep.catch[0]:.0f} mm and Kilo ends on "
+                     f"{list(rep.catch[1])} at {rep.catch[2]:.1f} deg")
     plays = [r for g, m, r in rep.results if m.startswith("play")]
     lines.append(f"held on the tripod in {sum(r.hold_tripod for r in plays)} of {len(plays)} plays")
+    if rep.excluded:
+        lines.append(f"{len(rep.excluded)} geometries ruled out by the photo (not checked):")
+        lines += [f"  {g}: {why}" for g, why in rep.excluded[:12]]
     lines.append(f"{len(rep.results)} runs, {len(rep.problems)} problems")
     lines += ["  " + p for p in rep.problems[:40]]
     notes = [f"{g} / {m}: {n}" for g, m, r in rep.results for n in r.notes]
@@ -509,35 +684,51 @@ def summary(rep: Report, trick: Trick) -> str:
     return "\n".join(lines)
 
 
+def report_extra(trick: Trick) -> None:
+    """--report: the wider grids, printed."""
+    st = stage(trick.name)
+    full_corners = ("com_dx", "com_dz", "tail_len", "tail_droop_deg", "tail_pivot_x", "tail_pivot_z")
+    print(f"\n-- {st.name}: every corner of the tail and centre-of-mass ranges together (64; some are expected "
+          "to fail safe: the paws stay down):")
+    geos, excl = stage_geometries(st, RANGES, full_corners)
+    full = check(trick, geos)
+    full.excluded = excl
+    print(summary(full, trick))
+    print(f"\n-- {st.name}: the PLAUSIBLE ranges (wider: in case the reading of the tail measurements is off):")
+    geos, excl = stage_geometries(st, PLAUSIBLE, ("com_dx", "tail_len", "tail_droop_deg", "tail_pivot_z"))
+    wide = check(trick, geos, rest=True)
+    wide.excluded = excl
+    print(summary(wide, trick))
+
+
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Build and check the rear_up trick.")
+    ap = argparse.ArgumentParser(description="Build and check the rear_up trick's three stages.")
     ap.add_argument("--check", action="store_true", help="only check: exit 1 if stale or failing")
     ap.add_argument("--report", action="store_true", help="the full uncertainty grid (slow)")
+    ap.add_argument("--stage", type=int, choices=[st.number for st in STAGES], help="only this stage")
     args = ap.parse_args(argv)
-    trick = build()
-    rep = check(trick, rest=args.report)
-    print(summary(rep, trick))
-    if args.report:
-        print("\n-- every corner of the tail and centre-of-mass ranges together (64; some are expected to fail "
-              "safe: the paws stay down):")
-        full = check(trick, geometries(corners=("com_dx", "com_dz", "tail_len", "tail_droop_deg", "tail_pivot_x",
-                                                "tail_pivot_z")))
-        print(summary(full, trick))
-        print("\n-- the PLAUSIBLE ranges (wider: in case the reading of the tail measurements is off):")
-        wide = check(trick, geometries(PLAUSIBLE, corners=("com_dx", "tail_len", "tail_droop_deg", "tail_pivot_z")),
-                     rest=True)
-        print(summary(wide, trick))
-    path = path_for(NAME)
-    text = trick.to_json()
-    stale = not path.exists() or path.read_text() != text
-    if args.check:
-        if stale:
-            print(f"stale: {path.name} (run python -m kilo.tricks.rear_up)")
-        return 1 if stale or rep.problems else 0
-    if stale:
-        path.write_text(text)
-        print(f"wrote {path.name}")
-    return 1 if rep.problems else 0
+    bad = False
+    for st in STAGES:
+        if args.stage is not None and st.number != args.stage:
+            continue
+        trick = build(None, st)
+        rep = check(trick, rest=args.report)
+        print(summary(rep, trick))
+        if args.report:
+            report_extra(trick)
+        print()
+        path = path_for(st.name)
+        text = trick.to_json()
+        stale = not path.exists() or path.read_text() != text
+        bad = bad or bool(rep.problems)
+        if args.check:
+            if stale:
+                print(f"stale: {path.name} (run python -m kilo.tricks.rear_up)")
+                bad = True
+        elif stale:
+            path.write_text(text)
+            print(f"wrote {path.name}")
+    return 1 if bad else 0
 
 
 if __name__ == "__main__":
