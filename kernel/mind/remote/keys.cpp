@@ -31,15 +31,24 @@ const Key kKeyTable[kKeys] = {
 namespace {
 // B2 with the rear-up key off: a row 1-3 key that does nothing.
 const Key kRearUpOff = {0x38, "B2", "push-up", Kind::Ignore, "", "none"};
-bool g_rear_up_key = false;
+// B2 with the key on at stage 2 or 3 (stage 1 is the table's own entry).
+const Key kRearUpStage[2] = {
+    {0x38, "B2", "push-up", Kind::Trick, "rear_up_2", "rear up 2"},
+    {0x38, "B2", "push-up", Kind::Trick, "rear_up_3", "rear up 3"},
+};
+uint8_t g_rear_up_stage = 0;
 }  // namespace
 
-void set_rear_up_key(bool on) { g_rear_up_key = on; }
-bool rear_up_key() { return g_rear_up_key; }
+void set_rear_up_key(uint8_t stage) { g_rear_up_stage = stage <= kRearUpStages ? stage : 0; }
+uint8_t rear_up_key() { return g_rear_up_stage; }
 
 const Key* key_for(uint8_t command) {
-  for (const Key& k : kKeyTable)
-    if (k.command == command) return (k.kind == Kind::Trick && !g_rear_up_key) ? &kRearUpOff : &k;
+  for (const Key& k : kKeyTable) {
+    if (k.command != command) continue;
+    if (k.kind != Kind::Trick) return &k;
+    if (g_rear_up_stage == 0) return &kRearUpOff;
+    return g_rear_up_stage == 1 ? &k : &kRearUpStage[g_rear_up_stage - 2];
+  }
   return nullptr;
 }
 

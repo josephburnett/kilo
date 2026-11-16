@@ -575,7 +575,7 @@ each key does):
 | A6, C6 | turn left, right in place |
 | C7 | freeze: the walk aborted at once (the body settles in STANCE, powered), a trick and the behaviour runner stopped; then only B6 and A7 act |
 | A5 | start the behaviour runner |
-| B2 | rear up (the trick `rear_up`, docs/rear-up-trick.md): sit up on the haunches, hold 2 s, come down to STAND (19 s); pressed again while it plays, it comes down at once (1.5 s); refused below 7400 mV |
+| B2 | off unless built with `KILO_REAR_UP=1`, `2` or `3`: rear up (the trick `rear_up`, `rear_up_2` or `rear_up_3` by that stage, docs/rear-up-trick.md): sit up on the hind feet and the tail at 28, 40 or 54 degrees, hold 2 s, come down to SIT (12 to 18 s); pressed again while it plays, it comes down at once (1.5 to 2.5 s); refused below 7400 mV |
 | rows 1-3 but B2 | nothing (logged as ignored) |
 
 The daemon's blocking waits are phases of `poll()` and keys that come

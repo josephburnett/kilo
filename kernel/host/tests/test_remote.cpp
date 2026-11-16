@@ -30,8 +30,13 @@ uint8_t cmd_of(const char* grid) {
   return 0;
 }
 
-void test_key_table(bool rear_up) {
-  set_rear_up_key(rear_up);
+void test_key_table(uint8_t stage) {
+  // the rear-up key's stage: 0 off, 1-3 the trick B2 starts (rear_up, rear_up_2, rear_up_3)
+  static const char* const kStageTrick[] = {"", "rear_up", "rear_up_2", "rear_up_3"};
+  static const char* const kStageLabel[] = {"none", "rear up", "rear up 2", "rear up 3"};
+  set_rear_up_key(stage);
+  CHECK(rear_up_key() == stage);
+  const bool rear_up = stage != 0;
   std::set<int> cmds;
   std::set<std::string> grids;
   for (int i = 0; i < kKeys; i++) {
@@ -41,9 +46,15 @@ void test_key_table(bool rear_up) {
     // row by row from the top: A7 B7 C7, A6 ...
     char want[3] = {(char)('A' + i % 3), (char)('0' + 7 - i / 3), 0};
     CHECKF(std::strcmp(k.grid, want) == 0, "%s at %d", k.grid, i);
-    const bool off_b2 = k.kind == Kind::Trick && !rear_up;  // B2 with the rear-up key off: an Ignore entry
+    // B2 with the rear-up key off: an Ignore entry; at stage 2 or 3 another Trick entry
+    const bool off_b2 = k.kind == Kind::Trick && stage != 1;
     CHECK((action_for(k.command) == &k) != off_b2 && action_for((uint16_t)(k.command | kRepeat)) == nullptr);
-    if (off_b2) CHECK(action_for(k.command)->kind == Kind::Ignore && std::strcmp(action_for(k.command)->label, "none") == 0);
+    if (k.kind == Kind::Trick) {
+      const Key* b2 = action_for(k.command);
+      CHECK(b2->kind == (rear_up ? Kind::Trick : Kind::Ignore) && std::strcmp(b2->label, kStageLabel[stage]) == 0 &&
+            std::strcmp(b2->name, kStageTrick[stage]) == 0 && std::strcmp(b2->grid, "B2") == 0);
+      if (rear_up) CHECKF(tricks::find_trick(b2->name) != nullptr, "trick %s", b2->name);
+    }
     if (k.kind == Kind::Posture) CHECKF(posture_code(k.name) >= 0, "posture %s", k.name);
     if (k.kind == Kind::Gait) CHECKF(planner::find_pattern(k.name) != nullptr, "gait %s", k.name);
     if (k.kind == Kind::Trick) CHECKF(tricks::find_trick(k.name) != nullptr, "trick %s", k.name);
@@ -61,7 +72,7 @@ void test_key_table(bool rear_up) {
               {"A6", Kind::Turn, "left"},     {"B6", Kind::Posture, "stand"}, {"C6", Kind::Turn, "right"},
               {"A5", Kind::Behaviour, ""},    {"B5", Kind::Speed, "slower"},  {"C5", Kind::Posture, "calib"},
               {"A4", Kind::Gait, "trot"},     {"B4", Kind::Gait, "crawl"},    {"C4", Kind::Gait, "walk"},
-              {"B2", rear_up ? Kind::Trick : Kind::Ignore, rear_up ? "rear_up" : ""}};
+              {"B2", rear_up ? Kind::Trick : Kind::Ignore, kStageTrick[stage]}};
   for (const auto& w : want) {
     const Key* k = action_for(cmd_of(w.grid));
     CHECKF(k != nullptr && k->kind == w.kind && std::strcmp(k->name, w.name) == 0, "%s", w.grid);
@@ -80,8 +91,10 @@ void test_key_table(bool rear_up) {
   describe(0x45, d, sizeof d);
   CHECK(std::strcmp(d, "? (0x45)") == 0);
   describe(0x38, d, sizeof d);
-  CHECK(std::strcmp(d, rear_up ? "B2 (0x38, rear up)" : "B2 (0x38, none)") == 0);
-  set_rear_up_key(false);
+  char want_b2[32];
+  std::snprintf(want_b2, sizeof want_b2, "B2 (0x38, %s)", kStageLabel[stage]);
+  CHECKF(std::strcmp(d, want_b2) == 0, "%s", d);
+  set_rear_up_key(0);
 }
 
 // The Mind's runner as the remote sees it.
@@ -454,7 +467,25 @@ void test_rear_up_key() {
     LAST_IS(r, "B2", "rear_up refused: on USB power (no battery)");
     CHECK(r.body.count(KILO_MSG_TRICK_PLAY) == 0 && r.body.count(KILO_MSG_TRICK_COMMIT) == 0);
   }
-  set_rear_up_key(false);
+  // the higher stages (KILO_REAR_UP=2, 3): the same key, the stage's trick, its own slower stop
+  for (uint8_t stage = 2; stage <= kRearUpStages; stage++) {
+    set_rear_up_key(stage);
+    const char* name = stage == 2 ? "rear_up_2" : "rear_up_3";
+    const uint8_t stop = stage == 2 ? 100 : 125;
+    const tricks::Trick* ts = tricks::find_trick(name);
+    CHECKF(ts != nullptr && ts->stop_ticks == stop, "%s", name);
+    Rig r;
+    char want[40];
+    std::snprintf(want, sizeof want, "trick %s started", name);
+    CHECKF(std::strncmp(r.key_done("B2"), want, std::strlen(want)) == 0, "%s", r.remote.last());
+    std::snprintf(want, sizeof want, "remote B2 (0x38, rear up %u): %s", (unsigned)stage, "trick");
+    CHECKF(r.log.has(want), "%s", want);
+    r.body.mode = KILO_MODE_TRICK;
+    r.run_ms(40);
+    LAST_IS(r, "B2", "trick stopped: coming down");
+    CHECK(stop_ticks_sent(r) == stop);
+  }
+  set_rear_up_key(0);
 }
 
 void test_keys_queue() {
@@ -473,8 +504,9 @@ void test_keys_queue() {
 }  // namespace
 
 int main() {
-  test_key_table(false);
-  test_key_table(true);
+  for (uint8_t stage = 0; stage <= kRearUpStages; stage++) test_key_table(stage);
+  set_rear_up_key(4);  // past the last stage: off
+  CHECK(rear_up_key() == 0);
   test_posture_keys();
   test_gait_keys();
   test_speed_ladder();

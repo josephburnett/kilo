@@ -30,20 +30,22 @@ A4    0x68    trot: start walking forward in it, or change to it
 B4    0x98    crawl
 C4    0xB0    walk
 B2    0x38    OFF by default (nothing, as rows 1-3). With the rear-up key
-              on (``KILO_REAR_UP=1``, below): rear up (trick ``rear_up``,
+              on (``KILO_REAR_UP=1``, 2 or 3, below): rear up (trick
+              ``rear_up``, ``rear_up_2`` or ``rear_up_3``,
               docs/rear-up-trick.md): stop a walk the planned way, then
               sit back on the hind feet and the tail, front paws up,
               hold, come down to sitting; pressed again while it plays,
               it comes down at once (TRICK_STOP over the trick's
-              stop_ticks, 1.5 s, to SIT)
+              stop_ticks, 1.5 to 2.5 s, to SIT)
 A3-C1         nothing (logged as ignored), but B2 when switched on
 ====  ======  =========================================================
 
 The rear-up key is off until the owner has done the staged, hand-supported
 trials of docs/rear-up-trick.md: the switch is the environment variable
-``KILO_REAR_UP=1`` when the daemon starts (``set_rear_up_key`` in tests); the
-mind kernel has the same switch at build time (``make -C kernel
-KILO_REAR_UP=1``, kernel/mind/remote/keys.h).
+``KILO_REAR_UP`` when the daemon starts (``set_rear_up_key`` in tests), and
+its value is the stage, how high Kilo goes: 1 (28 deg), 2 (40 deg), 3 (54
+deg). The mind kernel has the same switch at build time (``make -C kernel
+KILO_REAR_UP=2``, kernel/mind/remote/keys.h).
 """
 
 from __future__ import annotations
@@ -129,20 +131,33 @@ ACTIONS: dict[str, Action] = {
     "C4": Action("gait", "walk", "walk"),
 }
 ACTIONS.update({k.grid: _NONE for k in KEYS if k.grid not in ACTIONS})
-REAR_UP = Action("trick", "rear_up", "rear up")  # B2, with the rear-up key on
+# B2 with the rear-up key on, by stage (how high Kilo goes; docs/rear-up-trick.md).
+REAR_UP_STAGES = {
+    1: Action("trick", "rear_up", "rear up"),      # 28 deg
+    2: Action("trick", "rear_up_2", "rear up 2"),  # 40 deg
+    3: Action("trick", "rear_up_3", "rear up 3"),  # 54 deg, the owner's photo
+}
+REAR_UP = REAR_UP_STAGES[1]
 
 
-def set_rear_up_key(on: bool) -> None:
-    """B2 starts rear_up (on) or does nothing like rows 1-3 (off, the
-    default until the staged trials are done; docs/rear-up-trick.md "The
-    B2 switch"). The daemon takes it from ``KILO_REAR_UP`` at start."""
+def set_rear_up_key(stage: int | bool) -> None:
+    """B2 starts the rear_up trick at ``stage`` (1, 2 or 3; True is 1) or
+    does nothing like rows 1-3 (0 or False, the default until the staged
+    trials are done; docs/rear-up-trick.md "The B2 switch"). The daemon
+    takes it from ``KILO_REAR_UP`` at start; anything but 1-3 is off."""
     global REAR_UP_KEY
-    REAR_UP_KEY = bool(on)
-    ACTIONS["B2"] = REAR_UP if REAR_UP_KEY else _NONE
+    stage = int(stage)
+    REAR_UP_KEY = stage if stage in REAR_UP_STAGES else 0
+    ACTIONS["B2"] = REAR_UP_STAGES[REAR_UP_KEY] if REAR_UP_KEY else _NONE
 
 
-REAR_UP_KEY = False
-set_rear_up_key(os.environ.get("KILO_REAR_UP", "0").strip() == "1")
+def _env_stage(v: str) -> int:
+    v = v.strip()
+    return int(v) if v in ("1", "2", "3") else 0
+
+
+REAR_UP_KEY = 0
+set_rear_up_key(_env_stage(os.environ.get("KILO_REAR_UP", "0")))
 
 FROZEN = "ignored (frozen: B6 or A7 to go on)"
 CANCELLED = "cancelled (C7 froze Kilo)"
