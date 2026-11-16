@@ -1,11 +1,13 @@
 """The IR remote on the mind: the key table (against the legacy src/infrared.h),
 the --remote key map by grid, its RemoteControl actions on a mock client (the
 posture keys, the gait keys, the speed ladder into backward, the turns, the
-freeze, the behaviour key), the renderings, and the daemon acting on EVENT
-IR_KEY from the virtual body. kernel/host/tests/test_remote.cpp checks the
-kernel's port the same way."""
+freeze, the behaviour key, the rear-up key with its switch off and on), the
+renderings, and the daemon acting on EVENT IR_KEY from the virtual body.
+kernel/host/tests/test_remote.cpp checks the kernel's port the same way."""
 
+import os
 import re
+import subprocess
 import sys
 import tempfile
 import threading
@@ -25,6 +27,23 @@ from kilo.link import consts
 from test_daemon import remote, start_daemon, vbody_pty, sockdir, wait_for  # noqa: F401  (fixtures)
 
 LEGACY = Path(__file__).resolve().parents[2] / "src" / "infrared.h"
+
+
+@pytest.fixture
+def rear_up_on():
+    """The rear-up key switched on (KILO_REAR_UP=1), put back afterwards."""
+    was = ir.REAR_UP_KEY
+    ir.set_rear_up_key(True)
+    yield
+    ir.set_rear_up_key(was)
+
+
+@pytest.fixture
+def rear_up_off():
+    was = ir.REAR_UP_KEY
+    ir.set_rear_up_key(False)
+    yield
+    ir.set_rear_up_key(was)
 
 
 def test_key_table_matches_the_legacy_firmware():
@@ -68,16 +87,27 @@ EXPECTED = {
     "A6": ("turn", "left"), "B6": ("posture", "stand"), "C6": ("turn", "right"),
     "A5": ("behaviour", ""), "B5": ("speed", "slower"), "C5": ("posture", "calib"),
     "A4": ("gait", "trot"), "B4": ("gait", "crawl"), "C4": ("gait", "walk"),
-    "B2": ("trick", "rear_up"),
 }
 
 
-def test_key_map():
+@pytest.mark.parametrize("on", [False, True])
+def test_key_map(on):
+    was = ir.REAR_UP_KEY
+    ir.set_rear_up_key(on)
+    try:
+        _check_key_map(on)
+    finally:
+        ir.set_rear_up_key(was)
+
+
+def _check_key_map(on):
+    expected = dict(EXPECTED, B2=("trick", "rear_up")) if on else EXPECTED
     assert set(ir.ACTIONS) == set(ir.BY_GRID)
     for k in ir.KEYS:
         a = ir.action_for(k.command)
-        assert (a.kind, a.name) == EXPECTED.get(k.grid, ("none", "")), k.grid
-        assert (a.kind == "none") == (int(k.grid[1]) <= 3 and k.grid != "B2")  # rows 1-3 do nothing but B2
+        assert (a.kind, a.name) == expected.get(k.grid, ("none", "")), k.grid
+        # rows 1-3 do nothing, but B2 with the rear-up key on
+        assert (a.kind == "none") == (int(k.grid[1]) <= 3 and not (on and k.grid == "B2"))
         assert ir.action_for(k.command | ir.REPEAT).kind == "ignore"  # held keys do nothing
     assert ir.action_for(0x45).kind == "ignore"  # another remote
     from kilo.planner.patterns import PATTERNS
@@ -287,15 +317,34 @@ def test_remote_freeze():
     assert key("C7") == "frozen (trick stopped): only B6 or A7 act now" and c.calls == [("stop_trick",)]
 
 
-def test_remote_rear_up_key(monkeypatch):
+def test_rear_up_key_is_off_by_default():
+    """Off until the owner has done the staged trials (docs/rear-up-trick.md
+    "The B2 switch"): the daemon takes KILO_REAR_UP from its environment."""
+    code = "from kilo import ir; print(ir.REAR_UP_KEY, ir.action_for(0x38).kind, ir.describe(0x38))"
+    env = {k: v for k, v in os.environ.items() if k != "KILO_REAR_UP"}
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+    for val, want in ((None, "False none B2 (0x38, none)"), ("0", "False none B2 (0x38, none)"),
+                      ("1", "True trick B2 (0x38, rear up)")):
+        e = dict(env) if val is None else dict(env, KILO_REAR_UP=val)
+        out = subprocess.run([sys.executable, "-c", code], env=e, capture_output=True, text=True, check=True).stdout
+        assert out.strip() == want, val
+
+
+def test_remote_rear_up_key_off(rear_up_off):
+    c, rc, key = rig()
+    assert key("B2") == "ignored (no action on this key)" and c.calls == []
+    assert ir.describe(0x38) == "B2 (0x38, none)"
+
+
+def test_remote_rear_up_key(monkeypatch, rear_up_on):
     slept = []
     monkeypatch.setattr(ir.time, "sleep", slept.append)
     c, rc, key = rig()
-    assert key("B2") == "trick rear_up started (19 s; B2 again, B6 or C7 bring it down)"
+    assert key("B2") == "trick rear_up started (12 s; B2 again, B6 or C7 bring it down)"
     assert c.calls == [("start_trick", "rear_up")] and c.started.stop_ticks == 75
     # pressed again while it plays: it comes down (TRICK_STOP over its stop_ticks, from the client)
     assert key("B2") == "trick stopped: coming down" and c.calls[-1] == ("stop_trick",) and slept == []
-    # B6 while it plays: stopped, the 1.5 s crossfade waited for, then STAND
+    # B6 while it plays: stopped, the 1.5 s crossfade (to SIT) waited for, then STAND
     key("B2")
     assert key("B6") == "posture stand" and c.calls[-2:] == [("stop_trick",), ("posture", "stand")]
     assert slept == [pytest.approx(75 * 0.02 + 0.1)]

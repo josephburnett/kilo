@@ -29,16 +29,26 @@ C5    0x90    the calibration posture (CALIB), after stopping a walk
 A4    0x68    trot: start walking forward in it, or change to it
 B4    0x98    crawl
 C4    0xB0    walk
-B2    0x38    rear up (trick ``rear_up``, docs/rear-up-trick.md): stop a walk
-              the planned way, then sit up on the haunches, hold, come
-              down; pressed again while it plays, it comes down at once
-              (TRICK_STOP over the trick's stop_ticks, 1.5 s, to STAND)
-A3-C1         nothing (logged as ignored), but B2
+B2    0x38    OFF by default (nothing, as rows 1-3). With the rear-up key
+              on (``KILO_REAR_UP=1``, below): rear up (trick ``rear_up``,
+              docs/rear-up-trick.md): stop a walk the planned way, then
+              sit back on the hind feet and the tail, front paws up,
+              hold, come down to sitting; pressed again while it plays,
+              it comes down at once (TRICK_STOP over the trick's
+              stop_ticks, 1.5 s, to SIT)
+A3-C1         nothing (logged as ignored), but B2 when switched on
 ====  ======  =========================================================
+
+The rear-up key is off until the owner has done the staged, hand-supported
+trials of docs/rear-up-trick.md: the switch is the environment variable
+``KILO_REAR_UP=1`` when the daemon starts (``set_rear_up_key`` in tests); the
+mind kernel has the same switch at build time (``make -C kernel
+KILO_REAR_UP=1``, kernel/mind/remote/keys.h).
 """
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -117,9 +127,22 @@ ACTIONS: dict[str, Action] = {
     "A4": Action("gait", "trot", "trot"),
     "B4": Action("gait", "crawl", "crawl"),
     "C4": Action("gait", "walk", "walk"),
-    "B2": Action("trick", "rear_up", "rear up"),
 }
 ACTIONS.update({k.grid: _NONE for k in KEYS if k.grid not in ACTIONS})
+REAR_UP = Action("trick", "rear_up", "rear up")  # B2, with the rear-up key on
+
+
+def set_rear_up_key(on: bool) -> None:
+    """B2 starts rear_up (on) or does nothing like rows 1-3 (off, the
+    default until the staged trials are done; docs/rear-up-trick.md "The
+    B2 switch"). The daemon takes it from ``KILO_REAR_UP`` at start."""
+    global REAR_UP_KEY
+    REAR_UP_KEY = bool(on)
+    ACTIONS["B2"] = REAR_UP if REAR_UP_KEY else _NONE
+
+
+REAR_UP_KEY = False
+set_rear_up_key(os.environ.get("KILO_REAR_UP", "0").strip() == "1")
 
 FROZEN = "ignored (frozen: B6 or A7 to go on)"
 CANCELLED = "cancelled (C7 froze Kilo)"
@@ -188,7 +211,8 @@ class RemoteControl:
       a walk and a trick. While it runs, B6, A7 and C7 stop it first
       (``behaviour.stop()``) and then do their own action, A5 does nothing
       and the other keys are ignored.
-    - B2 (``trick``): not playing a trick, stop a walk the planned way and
+    - B2 (``trick``, only with the rear-up key on: ``set_rear_up_key``):
+      not playing a trick, stop a walk the planned way and
       start the trick (``start_trick``: the key returns at once, the trick
       plays on). While a trick plays (mode TRICK), B2 stops it: the toggle,
       so a second press brings rear_up down. Refused below TRICK_MIN_MV or
@@ -411,7 +435,7 @@ class RemoteControl:
                 b.stop()
                 parts.append("behaviour runner stopped")
             if trick:
-                self._stop_trick(settle=False)  # over its stop_ticks: rear_up comes down to STAND
+                self._stop_trick(settle=False)  # over its stop_ticks: rear_up comes down to SIT
                 parts.append("trick stopped")
             self._reset()
             return f"frozen ({', '.join(parts) or 'holding the posture'}): only B6 or A7 act now"

@@ -54,18 +54,21 @@ OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/
 #   KILO_PLANNER_BENCH=1|0  time the walking planner once at boot, no body involved (default 1)
 #   KILO_MDNS=1|0           answer for kilo.local and announce _kilo._tcp (default 1)
 #   KILO_BEHAVIOUR=0|1      run the behaviour runner, as kilo run --behaviour (default 0)
+#   KILO_REAR_UP=0|1        the remote's B2 starts the rear_up trick (default 0: B2 does nothing
+#                           until the staged trials of docs/rear-up-trick.md are done)
 KILO_BODY_SERIAL ?= pl011
 KILO_BOOT_PROBE ?= 1
 KILO_PLANNER_BENCH ?= 1
 KILO_MDNS ?= 1
 KILO_BEHAVIOUR ?= 0
+KILO_REAR_UP ?= 0
 ifeq ($(KILO_BODY_SERIAL),pl011)
 KILO_DEFS := -DKILO_BODY_SERIAL_PL011
 else ifneq ($(KILO_BODY_SERIAL),auto)
 $(error KILO_BODY_SERIAL must be auto or pl011)
 endif
 KILO_DEFS += -DKILO_BOOT_PROBE=$(KILO_BOOT_PROBE) -DKILO_PLANNER_BENCH=$(KILO_PLANNER_BENCH) -DKILO_MDNS=$(KILO_MDNS) \
-	-DKILO_BEHAVIOUR=$(KILO_BEHAVIOUR)
+	-DKILO_BEHAVIOUR=$(KILO_BEHAVIOUR) -DKILO_REAR_UP=$(KILO_REAR_UP)
 LIBS := $(CIRCLE_LIBS)
 
 NETBOOT_SRC  := $(CIRCLEHOME)/sample/38-bootloader

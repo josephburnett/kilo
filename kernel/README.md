@@ -748,6 +748,7 @@ no settings file on the card, so they are compiled in (`src/kernel.cpp`):
 | `remote` | on | `--remote`: the IR remote drives Kilo; logged `IR remote on` |
 | `balance_kp` | 0.99 | `--balance 0.99`: SET_BALANCE on at start, logged `balance on by default (Kp 253/256)` |
 | `behaviour` | off; `make -C kernel KILO_BEHAVIOUR=1` turns it on | the daemon's default; the remote's A5 starts the runner at run time either way. While it runs, the remote's keys other than B6, A7 and C7 (which stop it) are ignored. Built in, the kernel logs `Kilo mind, build ... (behaviour runner on)` |
+| `rear_up_key` | off; `make -C kernel KILO_REAR_UP=1` turns it on | the remote's B2 starts the `rear_up` trick only when switched on (docs/rear-up-trick.md "The B2 switch"): off until the owner's staged trials are done, B2 does nothing like the other keys of rows 1-3. The daemon's switch is `KILO_REAR_UP=1` in its environment, `kilo-mind-host`'s is `--rear-up`. Built in, the kernel logs `Kilo mind, build ... (rear-up key B2 on)` |
 | `seed` | 32 bits from the hardware RNG | the behaviour runner logs it (`seed N`, at boot or in the remote's A5 line), so a run can be replayed on the laptop |
 | `stats_period_ms` | 1000 | a STATS_REQ to the body each second, logged `body STATS: ...`, as `kilo-mind-host` does |
 

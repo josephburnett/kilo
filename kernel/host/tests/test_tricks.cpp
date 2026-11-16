@@ -42,8 +42,8 @@ void test_library_matches_python() {
   CHECK(find_trick("stand") == find_trick("up") && find_trick("up") != nullptr);
   CHECK(find_trick("wsf") != nullptr && std::strcmp(find_trick("wsf")->name, "wash_face") == 0);
   CHECK(find_trick("nope") == nullptr);
-  const Trick* ru = find_trick("rear_up");  // authored: no legacy token, a slow stop, STAND at the end
-  CHECK(ru != nullptr && ru->legacy[0] == '\0' && ru->stop_ticks == 75 && ru->end_posture == KILO_POSTURE_STAND);
+  const Trick* ru = find_trick("rear_up");  // authored: no legacy token, a slow stop, SIT at the end
+  CHECK(ru != nullptr && ru->legacy[0] == '\0' && ru->stop_ticks == 75 && ru->end_posture == KILO_POSTURE_SIT);
   CHECK(ru->flags == 0 && find_trick("") == nullptr && find_trick("stand")->stop_ticks == 0);
   const Trick* s = find_trick("stretch");  // test_trick_id_and_header_carry_expected_attitude
   kilo_trick_begin_t b;

@@ -3,7 +3,8 @@
 // body: the posture keys (B6, A7, C5), the gait keys (A4, B4, C4), the turn
 // keys (A6, C6), the speed ladder (B7, B5) through zero into backward, the
 // freeze (C7), the behaviour key (A5) on a fake runner and the rear-up key
-// (B2: start, the toggle, the slow stop, the battery guard).
+// (B2: off by default, like rows 1-3; switched on: start, the toggle, the
+// slow stop, the battery guard).
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -29,7 +30,8 @@ uint8_t cmd_of(const char* grid) {
   return 0;
 }
 
-void test_key_table() {
+void test_key_table(bool rear_up) {
+  set_rear_up_key(rear_up);
   std::set<int> cmds;
   std::set<std::string> grids;
   for (int i = 0; i < kKeys; i++) {
@@ -39,7 +41,9 @@ void test_key_table() {
     // row by row from the top: A7 B7 C7, A6 ...
     char want[3] = {(char)('A' + i % 3), (char)('0' + 7 - i / 3), 0};
     CHECKF(std::strcmp(k.grid, want) == 0, "%s at %d", k.grid, i);
-    CHECK(action_for(k.command) == &k && action_for((uint16_t)(k.command | kRepeat)) == nullptr);
+    const bool off_b2 = k.kind == Kind::Trick && !rear_up;  // B2 with the rear-up key off: an Ignore entry
+    CHECK((action_for(k.command) == &k) != off_b2 && action_for((uint16_t)(k.command | kRepeat)) == nullptr);
+    if (off_b2) CHECK(action_for(k.command)->kind == Kind::Ignore && std::strcmp(action_for(k.command)->label, "none") == 0);
     if (k.kind == Kind::Posture) CHECKF(posture_code(k.name) >= 0, "posture %s", k.name);
     if (k.kind == Kind::Gait) CHECKF(planner::find_pattern(k.name) != nullptr, "gait %s", k.name);
     if (k.kind == Kind::Trick) CHECKF(tricks::find_trick(k.name) != nullptr, "trick %s", k.name);
@@ -57,7 +61,7 @@ void test_key_table() {
               {"A6", Kind::Turn, "left"},     {"B6", Kind::Posture, "stand"}, {"C6", Kind::Turn, "right"},
               {"A5", Kind::Behaviour, ""},    {"B5", Kind::Speed, "slower"},  {"C5", Kind::Posture, "calib"},
               {"A4", Kind::Gait, "trot"},     {"B4", Kind::Gait, "crawl"},    {"C4", Kind::Gait, "walk"},
-              {"B2", Kind::Trick, "rear_up"}};
+              {"B2", rear_up ? Kind::Trick : Kind::Ignore, rear_up ? "rear_up" : ""}};
   for (const auto& w : want) {
     const Key* k = action_for(cmd_of(w.grid));
     CHECKF(k != nullptr && k->kind == w.kind && std::strcmp(k->name, w.name) == 0, "%s", w.grid);
@@ -75,6 +79,9 @@ void test_key_table() {
   CHECK(std::strcmp(d, "B3 (0x18, none)") == 0);
   describe(0x45, d, sizeof d);
   CHECK(std::strcmp(d, "? (0x45)") == 0);
+  describe(0x38, d, sizeof d);
+  CHECK(std::strcmp(d, rear_up ? "B2 (0x38, rear up)" : "B2 (0x38, none)") == 0);
+  set_rear_up_key(false);
 }
 
 // The Mind's runner as the remote sees it.
@@ -378,12 +385,24 @@ uint8_t stop_ticks_sent(const Rig& r) {
   return s.empty() ? 0xFF : s.back().payload[0];
 }
 
+void test_rear_up_key_off() {
+  // the default until the owner's staged trials: B2 is a row 1-3 key
+  CHECK(!rear_up_key());
+  Rig r;
+  const Key* k = action_for(cmd_of("B2"));
+  CHECK(k != nullptr && k->kind == Kind::Ignore);
+  r.remote.perform(*k, k->command);
+  r.run_ms(40);
+  CHECK(r.body.count(KILO_MSG_TRICK_BEGIN) == 0 && r.body.count(KILO_MSG_TRICK_PLAY) == 0 && !r.player.busy());
+}
+
 void test_rear_up_key() {
+  set_rear_up_key(true);
   const tricks::Trick* t = tricks::find_trick("rear_up");
   CHECK(t != nullptr && t->stop_ticks == 75 && t->legacy[0] == '\0' && tricks::find_trick("") == nullptr);
   {
     Rig r;
-    LAST_IS(r, "B2", "trick rear_up started (19 s; B2 again, B6 or C7 bring it down)");
+    LAST_IS(r, "B2", "trick rear_up started (12 s; B2 again, B6 or C7 bring it down)");
     CHECK(r.body.count(KILO_MSG_TRICK_PLAY) == 1 && r.player.busy());
     CHECK(r.log.has("remote B2 (0x38, rear up): trick rear_up started"));
     r.body.mode = KILO_MODE_TRICK;
@@ -392,7 +411,7 @@ void test_rear_up_key() {
     LAST_IS(r, "B2", "trick stopped: coming down");
     CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1 && stop_ticks_sent(r) == 75);
   }
-  {  // B6 while it plays: TRICK_STOP over 75 ticks, the crossfade waited for, then STAND
+  {  // B6 while it plays: TRICK_STOP over 75 ticks, the crossfade (to SIT) waited for, then STAND
     Rig r;
     r.key("B2");
     r.body.mode = KILO_MODE_TRICK;
@@ -435,6 +454,7 @@ void test_rear_up_key() {
     LAST_IS(r, "B2", "rear_up refused: on USB power (no battery)");
     CHECK(r.body.count(KILO_MSG_TRICK_PLAY) == 0 && r.body.count(KILO_MSG_TRICK_COMMIT) == 0);
   }
+  set_rear_up_key(false);
 }
 
 void test_keys_queue() {
@@ -453,13 +473,15 @@ void test_keys_queue() {
 }  // namespace
 
 int main() {
-  test_key_table();
+  test_key_table(false);
+  test_key_table(true);
   test_posture_keys();
   test_gait_keys();
   test_speed_ladder();
   test_turn_keys();
   test_freeze();
   test_behaviour_key();
+  test_rear_up_key_off();
   test_rear_up_key();
   test_keys_queue();
   return report("remote");

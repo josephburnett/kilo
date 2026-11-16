@@ -37,6 +37,7 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
       runner_hook_(*this),
       remote_(link_, walker_, player_, clock, log_),
       recorder_(clock, link_) {
+  remote::set_rear_up_key(cfg.rear_up_key);
   link_.set_listener(this);
   link_.set_quiet_log(&log_.status());  // a held IR key's repeats: not into the ring unless a laptop reads it
   remote_.set_behaviour(&runner_hook_);

@@ -11,9 +11,17 @@
 //   A6 0x22 turn left         B6 0x02 stand and stop    C6 0xC2 turn right
 //   A5 0xE0 behaviour         B5 0xA8 slower, then back C5 0x90 calibration posture
 //   A4 0x68 trot              B4 0x98 crawl             C4 0xB0 walk
-//                             B2 0x38 rear up (trick rear_up; again: down)
+//                             B2 0x38 rear up (trick rear_up; again: down),
+//                                     only with the rear-up key on (below)
 //   A3 0x30, B3 0x18, C3 0x7A, A2 0x10, C2 0x5A, A1 0x42, B1 0x4A,
 //   C1 0x52: nothing (logged as ignored)
+//
+// The rear-up key is OFF unless switched on (docs/rear-up-trick.md "The
+// B2 switch"): until the owner has done the staged, hand-supported trials,
+// B2 does nothing, like the other keys of rows 1-3. The switch is
+// KILO_REAR_UP: make -C kernel KILO_REAR_UP=1 (MindConfig::rear_up_key,
+// which the Mind passes to set_rear_up_key()); kilo-mind-host --rear-up;
+// for the Python daemon KILO_REAR_UP=1 in its environment (ir.py).
 //
 // The legacy meaning (src/infrared.h) is kept for reference. There is no
 // shutdown key (Python has none either).
@@ -45,8 +53,13 @@ const Key* key_for(uint8_t command);
 inline uint8_t key_command(uint16_t arg) { return (uint8_t)(arg & 0xFF); }
 inline bool key_repeat(uint16_t arg) { return (arg & kRepeat) != 0; }
 // ir.py action_for(): the key's entry (rows 1-3 too, Kind::Ignore but B2), or null
-// for a held-key repeat or a key of another remote.
+// for a held-key repeat or a key of another remote. With the rear-up key
+// off, B2's entry is a Kind::Ignore one ("none").
 const Key* action_for(uint16_t arg);
+// ir.py set_rear_up_key() / REAR_UP_KEY: B2 starts rear_up (true) or does
+// nothing (false, the default).
+void set_rear_up_key(bool on);
+bool rear_up_key();
 // "B6 (0x02, stand)", "B6 (0x02, stand) repeat", "? (0x45)" (ir.py describe()).
 void describe(uint16_t arg, char* buf, uint32_t cap);
 

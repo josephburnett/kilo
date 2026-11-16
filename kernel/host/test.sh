@@ -592,6 +592,7 @@ sleep 0.5
 ctl ir 0x22                   # A6: turn left
 sleep 1
 ctl ir 0x18                   # B3: row 3, nothing
+ctl ir 0x38                   # B2: nothing either (the rear-up key is off without --rear-up)
 ctl ir 0x02                   # B6: stand (the planned stop, then the posture)
 sleep 4
 ctl ir 0x68                   # A4: trot forward again, at 1x
@@ -618,6 +619,7 @@ expect "$OUT/host_ir.log" "remote B7 \(0x62, faster\): speed 1\.15x \(trot 165\.
 expect "$OUT/host_ir.log" "remote B5 \(0xA8, slower\): speed 1x \(trot 144\.0 mm/s forward\)" "B5 slowed"
 expect "$OUT/host_ir.log" "remote A6 \(0x22, turn left\): walk left \(trot\) 144\.0 mm/s" "A6 turned"
 expect "$OUT/host_ir.log" "remote B3 \(0x18, none\): ignored \(no action on this key\)" "B3 did nothing"
+expect "$OUT/host_ir.log" "remote B2 \(0x38, none\): ignored \(no action on this key\)" "B2 did nothing (rear-up key off)"
 expect "$OUT/host_ir.log" "walk ended: stopped" "the planned stop"
 expect "$OUT/host_ir.log" "remote C7 \(0xE2, freeze\): frozen \(walk aborted\): only B6 or A7 act now" "C7 froze"
 expect "$OUT/host_ir.log" "I walk ended: aborted \\(C7 freeze\\)" "the freeze aborted the walk"

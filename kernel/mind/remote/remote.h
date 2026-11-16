@@ -37,17 +37,19 @@
 // - A5: start the behaviour runner (after stopping a walk and a trick as a
 //   posture key does). While it runs, B6, A7 and C7 stop it first and then
 //   do their own action, A5 again does nothing, every other key is ignored.
-// - B2 rear up (Kind::Trick, the trick rear_up, docs/rear-up-trick.md):
+// - B2 rear up (Kind::Trick, the trick rear_up, docs/rear-up-trick.md),
+//   only with the rear-up key switched on (keys.h set_rear_up_key,
+//   KILO_REAR_UP; off, B2 is a row 1-3 key and never reaches perform()):
 //   not playing a trick, stop a walk the planned way, then start the trick
 //   (the key is done once TRICK_PLAY is out; the trick plays on). While a
 //   trick plays, B2 stops it: the toggle, a second press brings rear_up
 //   down. Refused below kTrickMinMv or on USB power (NO_BATTERY), so that
 //   the body's low-battery reflex does not take Kilo to REST half way up.
 // - Stopping a trick (B2, the posture keys, a walk from standing, C7) sends
-//   TRICK_STOP over the trick's stop_ticks (rear_up: 1.5 s to STAND, not
+//   TRICK_STOP over the trick's stop_ticks (rear_up: 1.5 s to SIT, not
 //   the body's 0.2 s); a key that then takes a posture or walks waits for
 //   that crossfade first (Phase::Settle).
-// - Rows 1-3 but B2 do nothing (Mind::ir_key logs them as ignored).
+// - Rows 1-3 (and B2 unless switched on) do nothing (Mind::ir_key logs them as ignored).
 // Every key leaves one log line, "remote <grid> (0x.., <label>): <outcome>".
 // Which keys never reach perform() (repeats, other remotes' keys, rows 1-3,
 // a laptop client holding the body) is the owner's call (Mind::ir_key,

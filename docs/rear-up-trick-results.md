@@ -5,32 +5,30 @@ run and fill in what you saw; "don't know" is a fine answer.
 
 ## YYYY-MM-DD, run N
 
-Build (mind kernel): ...   Battery at the start: ... mV   Floor: ...
-Foam or cardboard over the Pi: yes / no
+Build (mind kernel, with `KILO_REAR_UP=1`): ...   Battery at the start: ... mV   Floor: ...
+Foam or cardboard over the Pi: yes / no   Tail firmly on its servo: yes / no
 
-### Measurements (section 2)
+### Checks and measurements (section 2)
 
-| | Answer | Estimate in the model |
+| | Answer | In the model |
 |---|---|---|
-| M1 the tail from stand to sit: down / up over the back / sideways; touches the floor in sit? | | down, touches |
-| M2 tail length, axle to tip, mm | | 60 |
-| M3 tail at 0: angle to the shoulder line, up or down, degrees | | 30 up |
-| M4 tail axle: behind the back shoulder axle / above (+) or below (-) the shoulder line, mm | | 25 / +6 |
-| M5 frame's back end: behind the back axle / its bottom below the shoulder line, mm | | 26 / 24 |
-| M5 Pi: back edge behind (+) or ahead (-) of the back axle / highest point above the shoulder line, mm | | -6 / 36 |
-| M6 tail weight, g | | 6 |
-| M7 in sit, what touches the floor | | tail tip, front feet |
+| T1 from stand to sit, the tail tip swings to one side and rises | | yes (76 mm aside, 28 mm up at -60) |
+| T2 in sit (tail -60), the tip is on Kilo's left / right | | not known |
+| T3 frame's bottom back corner: behind the hind axles / below them, mm | | 27 / 24 (estimate) |
+| T4 Pi: back edge behind (+) or ahead (-) of the hind axles / highest point above them, mm | | -6 / 36 (estimate) |
+| T5 in sit, what touches the floor | | the four feet (rear end 3 mm up) |
+| T6 tail weight, g | | 6 (estimate) |
 
-### Trials (section 4)
+### Trials (section 5)
 
-| Stage | Tries | What you saw (tail, rear end, sliding, leaning, rocking back, front feet light?) | Stopped because |
+| Stage | Tries | What you saw (tail tip, tail pushed aside?, rear end, sliding, leaning, rocking back, front feet light?) | Stopped because |
 |---|---|---|---|
-| 1 sitting back | | | |
-| 2 ready | | | |
-| 3 paws up | | | |
-| 4 all the way | | top pitch from `monitor`: ... | |
+| 1 onto the tail | | | |
+| 2 the step | | | |
+| 3 paws up: on the tripod / paws stayed down / came back down | | | |
+| 4 all the way | | top pitch from `monitor`: ... (model: -26 to -30) | |
 | 5 toggle: B2 / B6 / C7 at the top | | | |
-| 6 hand further away | | | |
+| 6 hands further away | | | |
 
 Hind shoulder servos after stage 4: cool / warm / too hot to hold
 Anything else:

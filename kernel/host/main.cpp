@@ -21,7 +21,7 @@
 // which the Circle kernel builds in), so the tests use throwaway keys.
 //
 //   kilo-mind-host --port /dev/pts/N [--listen [ADDR:]PORT] [--authorized-keys FILE] [--reset-fifo PATH]
-//                  [--card DIR] [--duration S] [--verbose] [--remote] [--behaviour] [--seed N] [--balance KP]
+//                  [--card DIR] [--duration S] [--verbose] [--remote] [--behaviour] [--seed N] [--balance KP] [--rear-up]
 //
 // Exit status: 0 after --duration (or SIGINT/SIGTERM) with a HELLO seen;
 // 1 no HELLO, or the port failed; 2 the body speaks another protocol major
@@ -139,7 +139,8 @@ int usage() {
   fprintf(stderr,
           "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--authorized-keys FILE] [--reset-fifo PATH]\n"
           "                      [--card DIR] [--duration SECONDS] [--verbose] [--remote] [--behaviour] [--seed N]\n"
-          "                      [--balance KP]\n"
+          "                      [--balance KP] [--rear-up]\n"
+          "  --rear-up  the remote's B2 starts the rear_up trick (off: B2 does nothing; KILO_REAR_UP on the Pi)\n"
           "  --authorized-keys FILE  the laptops' public keys --listen accepts (default %s)\n"
           "  --card DIR  take kernel updates (kilo update --host) into DIR as if it were the SD card\n"
           "exit status: 0 done (a HELLO seen), 1 no HELLO or the port failed, 2 the body speaks another\n"
@@ -184,6 +185,8 @@ int main(int argc, char** argv) {
       cfg.remote = true;
     } else if (strcmp(argv[i], "--behaviour") == 0) {
       cfg.behaviour = true;
+    } else if (strcmp(argv[i], "--rear-up") == 0) {
+      cfg.rear_up_key = true;
     } else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
       cfg.seed = strtoull(argv[++i], &end, 10);
       if (*end != '\0') return usage();
