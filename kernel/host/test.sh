@@ -402,7 +402,7 @@ stop_body
 trap - EXIT
 cat "$OUT/walk.log"
 [ "$status" -eq 0 ] || { echo "FAILED: walk-demo exit status $status"; exit 1; }
-expect "$OUT/walk.log" "walk trot forward at 55\.6 mm/s" "the walk started"
+expect "$OUT/walk.log" "walk trot forward at 144\.0 mm/s" "the walk started"
 expect "$OUT/walk.log" "walked: .* ended: stopped$" "the planned stop"
 
 # ---- body flashing (docs/fast-boot.md P4): kilo flash --host / --sd against kilo-mind-host --reset-fifo ----
@@ -612,11 +612,11 @@ stop_body
 trap - EXIT
 grep -E "remote|trick|walk|behaviour" "$OUT/host_ir.log"
 expect "$OUT/host_ir.log" "remote B6 \(0x02, stand\): posture stand" "B6 stood"
-expect "$OUT/host_ir.log" "remote A4 \(0x68, trot\): walk forward \(trot\) 55\.6 mm/s" "A4 walked"
-expect "$OUT/host_ir.log" "walk trot forward at 55\.6 mm/s" "the trot started"
-expect "$OUT/host_ir.log" "remote B7 \(0x62, faster\): speed 1\.4x \(trot 77\.8 mm/s forward\)" "B7 sped up"
-expect "$OUT/host_ir.log" "remote B5 \(0xA8, slower\): speed 1x \(trot 55\.6 mm/s forward\)" "B5 slowed"
-expect "$OUT/host_ir.log" "remote A6 \(0x22, turn left\): walk left \(trot\) 55\.6 mm/s" "A6 turned"
+expect "$OUT/host_ir.log" "remote A4 \(0x68, trot\): walk forward \(trot\) 144\.0 mm/s" "A4 walked"
+expect "$OUT/host_ir.log" "walk trot forward at 144\.0 mm/s" "the trot started"
+expect "$OUT/host_ir.log" "remote B7 \(0x62, faster\): speed 1\.1x \(trot 152\.2 mm/s forward\)" "B7 sped up"
+expect "$OUT/host_ir.log" "remote B5 \(0xA8, slower\): speed 1x \(trot 144\.0 mm/s forward\)" "B5 slowed"
+expect "$OUT/host_ir.log" "remote A6 \(0x22, turn left\): walk left \(trot\) 144\.0 mm/s" "A6 turned"
 expect "$OUT/host_ir.log" "remote B3 \(0x18, none\): ignored \(no action on this key\)" "B3 did nothing"
 expect "$OUT/host_ir.log" "walk ended: stopped" "the planned stop"
 expect "$OUT/host_ir.log" "remote C7 \(0xE2, freeze\): frozen \(walk aborted\): only B6 or A7 act now" "C7 froze"
