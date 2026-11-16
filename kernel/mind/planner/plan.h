@@ -1,22 +1,24 @@
 // plan: the step planner, one tick of the whole body at a time. A port of
 // mind/kilo/planner/plan.py; its docstring explains the method in full
-// (docs/walking-and-balance.md §10). In short:
+// (docs/walking-and-balance.md §10, §12). In short:
 //
 // - Slots: the pattern's swing groups take turns; each slot is a four-foot
-//   shift of S ticks, then a swing of W ticks. Feet on the ground slide back
-//   at their side's stride / stance time; a swinging foot lifts on a cosine
-//   profile to half a stride ahead of its shoulder. Stride targets move at
-//   most 0.5 mm a tick, the stance time 2 % a tick. A pattern change goes
-//   through the legs' way home.
-// - The lean (walk, crawl): before each lift the body's centre of mass is
+//   shift of S ticks, then a swing of W ticks per leg (the walk's second leg
+//   couple_ticks() after its first). Feet on the ground slide back at their
+//   side's stride / stance time; a swinging foot lifts on a cosine profile
+//   to half a stride ahead of its shoulder. Stride targets move at most
+//   0.5 mm a tick, the stance time 2 % a tick. A change between the walk
+//   and the trot goes straight over at a slot start; into or out of the
+//   crawl through the legs' way home.
+// - The lean (the crawl): before each lift the body's centre of mass is
 //   moved at least margin_mm inside the three feet that stay down (a small
 //   quadratic program on the linearised model), the lift starting
 //   kLeanLeadMs after the move's end (three ticks before it, in its cosine
 //   tail; the servo lag delays the lean and the lift alike). The solve is spread over the swing before the slot, a few
 //   units of work a tick (LeanJob), so no tick carries a whole solve.
 // - Prediction: the attitude for tick t is the plane through the support
-//   feet planned a servo lag earlier; it goes in FEET as the balance's
-//   reference.
+//   feet planned, delayed by the servos' dead time and passed through their
+//   first-order response; it goes in FEET as the balance's reference.
 // - From the measured state (observe): no lift while the body is off the
 //   plan by more than gate_deg (the plan waits, up to hold_max ticks); a
 //   swinging leg lands at once when the body tips toward it by catch_deg.
@@ -41,6 +43,7 @@ constexpr real kAttMaxDeg = 30;         // FEET pitch / roll: the body refuses a
 constexpr real kStrideSlewMm = (real)0.5;
 constexpr real kHeightSlewMm = (real)0.5;
 constexpr real kRecentredMm = (real)1.5;  // a stopping leg this close to its target does not step again
+constexpr real kSwitchSlackMm = (real)4.0;  // a pattern change: every foot within the new half stride plus this
 constexpr real kStanceSlew = (real)0.02;
 constexpr int kLeanUnitsPerTick = 4;      // units of a lean solve per tick
 
@@ -199,9 +202,11 @@ class Planner {
 
   void set_speed(real speed_mm_s);
   void set_direction(Direction d);
-  // Change the pattern: every leg steps home, then the new one starts from
-  // its first group. The walking pattern cancels a change under way; ignored
-  // once stopping.
+  // Change the pattern. Between the walk and the trot (both fixed cadence)
+  // directly, at the first slot start where the strides, the feet and the
+  // height allow (plan.py _switch_ok); into or out of the crawl every leg
+  // steps home first, then the new one starts from its first group. The
+  // walking pattern cancels a change under way; ignored once stopping.
   void set_pattern(const Pattern& p);
   void stop();
   // The body's latest error: measured - predicted - the steady offset (degrees).
@@ -220,7 +225,8 @@ class Planner {
   bool done() const { return done_; }
   uint32_t tick() const { return tick_; }
   int lead() const { return lead_; }      // the lift after the lean's move, ticks (negative: before its end)
-  int settle() const { return settle_; }  // a level-out done this long (the servo lag) before what follows
+  int settle() const { return settle_; }  // a level-out done this long (the servos' response) before what follows
+  int couple_ticks() const;                // a group's second leg lifts this many ticks after its first
   const Pattern& pattern() const { return *pattern_; }
   const Pattern* pending_pattern() const { return pending_; }
   Direction direction() const { return direction_; }
@@ -241,6 +247,11 @@ class Planner {
  private:
   bool leaning() const { return pattern_->lean && cfg_.lean; }
   int shift_for(real stance) const;
+  int span() const;            // a slot's ticks from the first lift to the last touchdown
+  int offset(int leg) const;   // the tick after the shift at which this leg of the slot's group lifts
+  bool direct_change() const;  // the change under way goes straight over (both patterns fixed cadence)
+  bool switch_ok(const Pattern& p) const;
+  int first_group() const;
   bool home() const;
   void apply_timing();
   void start_slot();
@@ -282,14 +293,16 @@ class Planner {
   real swing_[kLegs] = {};  // per leg: x at lift-off
   bool skip_ = false;
   bool caught_[kLegs] = {};
-  int caught_j_[kLegs] = {};
+  int caught_j_[kLegs] = {};  // the slot tick (after the shift) of the catch
   real caught_lift_[kLegs] = {};
   bool stopping_ = false;
   bool finishing_ = false;
   bool done_ = false;
   real err_[2] = {};
   Attitude prev_att_ = {0, 0};
-  real lag_ = 0;
+  real lag_ = 0;    // the servos' dead time, ticks
+  real alpha_ = 1;  // their first-order response's step per tick
+  Attitude resp_ = {0, 0};  // the predicted attitude: the plan's, delayed, through the response
   int hist_n_ = 0;
   Attitude att_hist_[kHistMax] = {};
   bool has_job_ = false;   // this slot's lean while it is still being solved (the slot waits)

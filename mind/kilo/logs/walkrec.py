@@ -485,7 +485,8 @@ def format_summary(s: dict[str, Any]) -> str:
                                                                      "lean") if k in cfg))
     mo = s.get("model", {})
     if mo:
-        L.append(f"  model   servo lag {mo.get('servo_lag_ms')} ms, total {mo.get('total_g')} g")
+        tau = f" + {mo['servo_tau_ms']} ms first-order" if "servo_tau_ms" in mo else ""
+        L.append(f"  model   servo lag {mo.get('servo_lag_ms')} ms{tau}, total {mo.get('total_g')} g")
     for c in s.get("changes", []):
         L.append(f"  {c['t_s']:7.2f}s {c['what']}: " + " ".join(f"{k}={v}" for k, v in c.items()
                                                              if k not in ("t_s", "what")))

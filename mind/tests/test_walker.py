@@ -417,10 +417,10 @@ def _kilo(path, *args, timeout=30):
 @pytest.mark.slow
 def test_kilo_walk_direct(vbody_pty):  # noqa: F811
     vb, path = vbody_pty
-    r = _kilo(path, "walk", "back", "--pattern", "trot", "--speed", "40", "--for", "1.5")
+    r = _kilo(path, "walk", "back", "--pattern", "trot", "--speed", "60", "--for", "1.5")
     assert r.returncode == 0, r.stdout + r.stderr
     assert r.stdout.startswith("SAFETY: Kilo walks on the floor only")
-    assert "walking back: trot 40.0 mm/s" in r.stdout and "stopped (" in r.stdout and "model error" in r.stdout
+    assert "walking back: trot 60.0 mm/s" in r.stdout and "stopped (" in r.stdout and "model error" in r.stdout
     assert vb.feet is None and vb.gait_stops == [0] and vb.posture == "STANCE"
     feet = [P.Feet.unpack(p) for n, _, p in list(vb.received) if n == "FEET"]
     assert len(feet) > 50 and [f.tick for f in feet] == sorted(f.tick for f in feet)

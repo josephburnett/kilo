@@ -78,22 +78,27 @@ def test_stability_margin():
 # ---- patterns and speed --------------------------------------------------------------------------
 
 def test_pattern_tables_and_default_timing():
-    # the tables of 2026-11-15 (before: trot 25 mm / 600 ms at 55.6 mm/s, walk 30 mm / 3200 ms at 11.1,
-    # crawl 25 mm / 2800 ms at 10.0)
+    # the tables of 2026-11-16 (before: trot 35 mm / 393 ms at 144 mm/s, top 152; walk one leg at a
+    # time with the lean, 40 mm / 2550 ms at 17.8, top 21.5; the crawl unchanged)
     t = pat.timing("trot")
-    assert (t.stride_mm, round(t.period_ms), t.shift_ms) == (35, 393, 46.5)
+    assert (round(t.stride_mm, 2), round(t.period_ms), t.shift_ms) == (27.36, 340, 20)
     assert t.speed_mm_s == pytest.approx(144.0, abs=0.1)
-    assert pat.PATTERNS["trot"].groups == ((LF, RB), (RF, LB))
-    assert pat.PATTERNS["walk"].groups == ((LB,), (LF,), (RB,), (RF,)) == pat.PATTERNS["crawl"].groups
-    assert [pat.PATTERNS[p].swing_ms for p in ("trot", "walk", "crawl")] == [150, 300, 300]
+    assert pat.PATTERNS["trot"].groups == ((LF, RB), (RF, LB)) and pat.PATTERNS["trot"].couple_ms == 0
+    # the walk: diagonal couplets, the hind leg 60 ms ahead of its diagonal fore leg
+    assert pat.PATTERNS["walk"].groups == ((LB, RF), (RB, LF)) and pat.PATTERNS["walk"].couple_ms == 60
+    assert pat.PATTERNS["crawl"].groups == ((LB,), (LF,), (RB,), (RF,))
+    assert [pat.PATTERNS[p].swing_ms for p in ("trot", "walk", "crawl")] == [150, 150, 300]
+    assert not pat.PATTERNS["walk"].lean and not pat.PATTERNS["trot"].lean and pat.PATTERNS["crawl"].lean
     w = pat.timing("walk")
-    assert (w.stride_mm, round(w.period_ms), w.shift_ms) == (40, 2550, 337.5)
-    assert w.speed_mm_s == pytest.approx(17.8, abs=0.1)
+    assert (round(w.stride_mm, 1), round(w.period_ms), w.shift_ms) == (24.8, 460, 20)
+    assert w.speed_mm_s == pytest.approx(80.0, abs=0.1)
     c = pat.timing("crawl")
     assert (c.stride_mm, round(c.period_ms)) == (50, 2550) and c.speed_mm_s == pytest.approx(22.2, abs=0.1)
-    assert pat.PATTERNS["crawl"].body_h_256 == 179 and pat.PATTERNS["walk"].body_h_256 == 195
-    tops = {n: pat.speed_range(n)[1] for n in pat.PATTERN_NAMES}
-    assert tops == pytest.approx({"trot": 152.2, "walk": 21.5, "crawl": 26.9}, abs=0.1)
+    assert pat.PATTERNS["crawl"].body_h_256 == 179 and pat.PATTERNS["walk"].body_h_256 == 205
+    ranges = {n: pat.speed_range(n) for n in pat.PATTERN_NAMES}
+    assert ranges["trot"] == pytest.approx((42.1, 184.2), abs=0.1)
+    assert ranges["walk"] == pytest.approx((25.8, 96.8), abs=0.1)
+    assert ranges["crawl"][1] == pytest.approx(26.9, abs=0.1)
 
 
 @pytest.mark.parametrize("name", pat.PATTERN_NAMES)
@@ -108,15 +113,23 @@ def test_timing_clamps(name):
     slow = pat.timing(name, lo / 3)
     assert slow.stride_mm == pat.STRIDE_MIN_MM and slow.speed_mm_s == pytest.approx(lo)
     assert pat.timing(name, -20) == pat.timing(name, 20)  # a magnitude
-    # the swing never changes with the speed: the shift does
-    assert pat.timing(name, lo).period_ms - pat.timing(name, hi).period_ms > 0
+    if pat.fixed_cadence(p):
+        # the walk and the trot: one cycle at every speed, the stride alone changes (their four-foot
+        # phase stays one tick: the body's balance loop never acts in them, §12)
+        assert pat.timing(name, lo).period_ms == pat.timing(name, hi).period_ms
+        assert pat.timing(name, lo).shift_ms == pat.timing(name, hi).shift_ms == 20
+        assert pat.timing(name, lo).stride_mm < pat.timing(name, hi).stride_mm == pytest.approx(p.stride_mm)
+    else:
+        # the crawl: the swing never changes with the speed, the shift does
+        assert pat.timing(name, lo).period_ms - pat.timing(name, hi).period_ms > 0
 
 
-def test_walk_and_crawl_shift_covers_the_lean_move():
-    for name in ("walk", "crawl"):  # the move (300 ms), the lift 60 ms before its end
-        assert pat.shift_min_ms(pat.PATTERNS[name]) == 240
-        assert pat.timing(name, 1e6).shift_ms == pytest.approx(240)
-    assert pat.shift_min_ms(pat.PATTERNS["trot"]) == 40  # two ticks on four feet
+def test_the_crawl_shift_covers_the_lean_move():
+    # the move (300 ms), the lift 60 ms before its end
+    assert pat.shift_min_ms(pat.PATTERNS["crawl"]) == 240
+    assert pat.timing("crawl", 1e6).shift_ms == pytest.approx(240)
+    for name in ("trot", "walk"):  # one tick on four feet (and the swing's last tick: its foot is down)
+        assert pat.shift_min_ms(pat.PATTERNS[name]) == 20
 
 
 def test_side_strides():
@@ -155,11 +168,43 @@ def test_plan_fits_feet_and_the_slew(name):
     for t in ticks:
         assert all(lo <= x <= hi for x in t.x) and all(30 <= z <= 95 for z in t.z)
         assert all(M.reachable(t.x[i], t.z[i]) for i in LEGS)
-        assert bin(t.support).count("1") >= (2 if name == "trot" else 3)
+        assert bin(t.support).count("1") >= (3 if name == "crawl" else 2)
+        if bin(t.support).count("1") == 2:  # two feet: always a diagonal pair
+            assert t.support in (0b0101, 0b1010)
     assert max(joint_step_deg(a, b) for a, b in zip(ticks, ticks[1:])) < M.slew_deg_per_tick
 
 
-@pytest.mark.parametrize("name", ("walk", "crawl"))
+@pytest.mark.parametrize("name", ("walk", "trot"))
+@pytest.mark.parametrize("direction", ("forward", "back", "left"))
+def test_every_speed_of_the_fast_gaits_stays_inside_the_slew(name, direction):
+    """At their slowest, default and top speed every joint of the walk and the
+    trot moves at most 8.3 deg a tick (415 deg/s; the floor runs of 2026-11
+    asked up to 414 and kept up), under the body's 10 deg/tick slew."""
+    lo, hi = pat.speed_range(name)
+    for v in (lo, pat.default_speed(name), hi):
+        _, ticks = plan(name, 300, direction=direction, speed_mm_s=v)
+        assert max(joint_step_deg(a, b) for a, b in zip(ticks, ticks[1:])) < 8.3, (v, direction)
+
+
+def test_the_walk_lifts_a_hind_leg_then_its_diagonal_fore_leg():
+    """The walk's swings: the hind leg lifts, its diagonal fore leg three ticks
+    later, each swings 150 ms; on two diagonal feet in between, never on two
+    feet of one side, and never more than two feet up."""
+    _, ticks = plan("walk", 300)
+    seen = []
+    for t in ticks:
+        assert t.lifting in ((), (LB,), (LB, RF), (RF,), (RB,), (RB, LF), (LF,)), t.lifting
+        if not seen or seen[-1] != t.lifting:
+            seen.append(t.lifting)
+    run = [x for x in seen if x]
+    i = run.index((LB,))
+    assert run[i:i + 6] == [(LB,), (LB, RF), (RF,), (RB,), (RB, LF), (LF,)]
+    lb = [t.tick for t in ticks if LB in t.lifting]
+    rf = [t.tick for t in ticks if RF in t.lifting]
+    assert rf[0] - lb[0] == 3 and lb[6] - lb[0] == 6 and lb[7] - lb[0] > 7  # 60 ms later; 7 ticks up of the 8
+
+
+@pytest.mark.parametrize("name", ("crawl",))
 def test_the_lean_keeps_the_mass_inside_three_feet(name):
     p, ticks = plan(name)
     three = [t for t in ticks if len(t.lifting) == 1]
@@ -194,27 +239,34 @@ def test_trot_stays_level_on_diagonal_pairs():
     assert len(set(pairs)) == 2
 
 
-def test_prediction_is_the_plan_a_servo_lag_earlier():
-    _, ticks = plan("walk", 300)
-    lag = M.lag_ticks()  # 7.5
-    for i in range(20, 300):
-        a, b = ticks[i - 7], ticks[i - 8]
-        assert ticks[i].roll == pytest.approx(a.plan_roll + (b.plan_roll - a.plan_roll) * (lag - 7), abs=1e-9)
+def test_prediction_is_the_plan_through_the_servos_response():
+    """The predicted attitude is the plan's (the plane of the feet commanded)
+    a dead time earlier (2.5 ticks, linear between ticks), through a
+    first-order response of 70 ms: the servo model fitted to the floor
+    recordings of 2026-11-15 (before: a pure 150 ms delay)."""
+    _, ticks = plan("crawl", 300)
+    lag = M.lag_ticks()
+    assert lag == 2.5 and M.servo_tau_ms == 70
+    a = 1 - math.exp(-20 / 70)
+    y = 0.0
+    for i in range(300):
+        u0, u1 = ticks[max(0, i - 2)].plan_roll if i >= 2 else 0.0, ticks[i - 3].plan_roll if i >= 3 else 0.0
+        y += (u0 + (u1 - u0) * (lag - 2) - y) * a
+        assert ticks[i].roll == pytest.approx(y, abs=1e-9), i
 
 
 def test_speed_changes_mid_walk_are_smooth():
-    """Down from the trot's default (144 mm/s) to 90 and 10, and up again to
-    its top: every joint inside the body's slew (the shift follows the stance
-    time as it slews, so a slow-down never leaves a swing more than a stride
-    to carry), feet on the ground slide at most the top speed's 3 mm a tick
-    (plus the 1 mm rounding)."""
+    """Down from the trot's default (144 mm/s) to 90 and 10 (its slowest, 42),
+    and up again to its top: every joint inside the body's slew, feet on the
+    ground slide at most the top speed's 3.7 mm a tick (plus the 1 mm
+    rounding). (At its fixed cadence only the stride moves, 0.5 mm a tick.)"""
     p = Planner(M, "trot", tick=0)
     ticks = [p.next() for _ in range(200)]
     p.set_speed(90)
     ticks += [p.next() for _ in range(200)]
     p.set_speed(10)
     ticks += [p.next() for _ in range(300)]
-    assert p.timing().speed_mm_s == pytest.approx(10)
+    assert p.timing().speed_mm_s == pytest.approx(pat.speed_range("trot")[0])  # 42: the trot's slowest
     p.set_speed(200)
     ticks += [p.next() for _ in range(300)]
     assert max(joint_step_deg(a, b) for a, b in zip(ticks, ticks[1:])) < M.slew_deg_per_tick
@@ -228,23 +280,34 @@ def test_direction_and_pattern_changes():
     for _ in range(100):
         p.next()
     p.set_direction("back")
-    for _ in range(150):  # 0.5 mm a tick: 140 ticks from +35 to -35
+    for _ in range(150):  # 0.5 mm a tick: 110 ticks from +27.4 to -27.4
         p.next()
-    assert p.s_cur == [-35, -35]
+    assert p.s_cur == pytest.approx([-27.36, -27.36])
     p.set_direction("left")
-    for _ in range(130):  # the right side from -35 to +28
+    for _ in range(130):  # the right side from -27.4 to +21.9
         p.next()
-    assert p.s_cur == [-28, 28]
+    assert p.s_cur == pytest.approx([-21.888, 21.888])
     p.set_pattern("walk")
-    assert p.pattern.name == "trot" and p.changing  # the legs go home first
+    assert p.pattern.name == "trot" and p.changing
     seen = []
     for _ in range(300):
         t = p.next()
         seen.append((p.pattern.name, t.lifting))
-    assert ("walk", (LB,)) in seen and all(not (n == "walk" and len(lf) == 2) for n, lf in seen)
     first = next(i for i, (n, _) in enumerate(seen) if n == "walk")
-    assert first * 20 < 1500  # out of the trot: the strides ramp down (50 ticks) and each pair steps home
-    assert p.s_cur == [-32, 32]  # the direction carried over (turning left, the walk's 40 mm stride)
+    # trot to walk directly (§12): the strides shorten to the walk's (24 mm at 0.5 mm a tick),
+    # then the next slot is the walk's; before 2026-11-16 every leg stepped home first
+    assert first * 20 < 600
+    assert any(n == "walk" and lf == (LB, RF) for n, lf in seen) or any(n == "walk" and lf == (RB, LF) for n, lf in seen)
+    assert p.s_cur == pytest.approx([-0.8 * 30, 0.8 * 30])  # turning left carried over, the walk's top stride
+    # into the crawl (a leaning pattern): through the legs' way home, as before
+    p.set_pattern("crawl")
+    seen = []
+    for _ in range(400):
+        t = p.next()
+        seen.append((p.pattern.name, t.lifting, list(t.x)))
+    first = next(i for i, (n, _, _) in enumerate(seen) if n == "crawl")
+    assert all(abs(x) <= 2 for x in seen[first][2])  # every foot home when the crawl starts
+    assert all(len(lf) <= 1 for n, lf, _ in seen[first:] if n == "crawl")
 
 
 def check_ticks(ticks, what=""):
@@ -300,14 +363,14 @@ def test_the_gate_pauses_the_feet():
 def test_the_stance_time_is_slewed():
     """A speed change moves the feet's slide speed gradually (the stance time
     2 % a tick), not at once."""
-    p = Planner(M, "trot", speed_mm_s=90, tick=0)
+    p = Planner(M, "crawl", speed_mm_s=10, tick=0)
     for _ in range(100):
         p.next()
     before = p.stance_ticks
-    p.set_speed(pat.default_speed("trot"))  # faster: a shorter stance
+    p.set_speed(pat.default_speed("crawl"))  # faster: a shorter stance
     p.next()
     assert p.stance_ticks == pytest.approx(before / 1.02)
-    for _ in range(100):
+    for _ in range(200):
         p.next()
     assert p.stance_ticks == pytest.approx(p.stance_tgt)
 
@@ -317,9 +380,10 @@ def test_the_predicted_attitude_stays_inside_feet_range():
     predicts (a bad model, a pose offset): the body refuses a FEET beyond it
     (BAD_ARG), which would end the walk."""
     from kilo.planner.walker import pack_feet
-    p = Planner(M, "walk", tick=0)
+    p = Planner(M, "crawl", tick=0)
     p._lagged = lambda: (45.0, -31.0)
-    t = p.next()
+    for _ in range(60):  # through the servos' response (70 ms) to the bad prediction
+        t = p.next()
     assert (t.pitch, t.roll) == (30.0, -30.0)
     f = P.Feet.unpack(pack_feet(1, replace(t, pitch=45.0, roll=-45.0)))
     assert (f.pitch, f.roll) == (480, -480)
@@ -329,12 +393,12 @@ def test_the_lean_is_solved_during_the_swing_before():
     """The walk's lean for each slot is solved a few units a tick during the
     swing before it, so no tick carries a whole solve, and in a steady walk
     no slot waits for it; a change mid-swing is solved again in time."""
-    for name in ("walk", "crawl"):
+    for name in ("crawl",):
         p = Planner(M, name, tick=0)
         for _ in range(1500):
             p.next()
         assert p.stats["waits"] == 0, name
-    p = Planner(M, "walk", tick=0)
+    p = Planner(M, "crawl", tick=0)
     for i in range(1500):
         if i % 97 == 0:
             p.set_speed(5 + (i % 7))
@@ -342,8 +406,9 @@ def test_the_lean_is_solved_during_the_swing_before():
     assert p.stats["waits"] < 40
 
 
-def test_the_stop_comes_home_level():
-    p = Planner(M, "walk", tick=0)
+@pytest.mark.parametrize("name", pat.PATTERN_NAMES)
+def test_the_stop_comes_home_level(name):
+    p = Planner(M, name, tick=0)
     for _ in range(300):
         p.next()
     p.stop()
@@ -357,7 +422,7 @@ def test_the_stop_comes_home_level():
 
 
 def test_gate_holds_the_lift_and_catch_lands_the_foot():
-    p = Planner(M, "walk", tick=0)
+    p = Planner(M, "crawl", tick=0)
     p.observe(0.0, 8.0)  # the body is 8 deg off the plan: no lift
     ticks = [p.next() for _ in range(40)]
     assert not any(t.lifting for t in ticks) and p.stats["holds"] > 0
@@ -372,6 +437,21 @@ def test_gate_holds_the_lift_and_catch_lands_the_foot():
     assert p.stats["catches"] == 1
     assert not down[-1].lifting and down[-1].support == 0xF  # down in three ticks, where it was
 
+
+def test_the_walk_catches_each_leg_of_a_couplet():
+    """In the walk the catch lands the leg the body tips toward and leaves its
+    partner to swing (or lift) as planned; the slot ends when both are down."""
+    p = Planner(M, "walk", tick=0)
+    while p.last is None or p.last.lifting != (LB, RF):
+        p.next()
+    p.observe(0.0, 8.0)  # tipping left: toward LB (left), away from RF
+    down = [p.next() for _ in range(4)]
+    p.observe(0.0, 0.0)
+    assert p.stats["catches"] == 1 and LB in p.caught and RF not in p.caught
+    assert LB not in down[-1].lifting and RF in down[-1].lifting  # LB down in three ticks, RF still swinging
+    rest = [p.next() for _ in range(20)]
+    check_ticks(down + rest)
+    assert any(t.lifting == (RB,) for t in rest)  # and the walk goes on with the next couplet
 
 # ---- the error estimates ----------------------------------------------------------------------------
 
@@ -407,7 +487,7 @@ def test_a_heavier_side_shifts_the_lean():
     """The lean comes from the model's masses: with the battery on the right
     the body needs less roll to the right before a left leg lifts."""
     right = replace(M, battery=Mass(150.0, 0.0, -12.0, -15.0))
-    _, a = plan("walk", 200)
-    b = Planner(right, "walk", tick=1000)
+    _, a = plan("crawl", 200)
+    b = Planner(right, "crawl", tick=1000)
     b = [b.next() for _ in range(200)]
     assert min(t.plan_roll for t in b) > min(t.plan_roll for t in a)

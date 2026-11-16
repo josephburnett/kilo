@@ -1,15 +1,17 @@
 // patterns: the gait patterns and the speed -> timing mapping. A port of
 // mind/kilo/planner/patterns.py (docs/walking-and-balance.md §3, §10).
 //
-// A pattern is a sequence of swing groups (the legs that lift together);
-// each group's slot is a four-foot shift, then the swing, so
-//   period = groups x (shift + swing),  stance = period - swing.
-// The swing time is fixed per pattern; speed comes from the stride and the
-// stance time (stance = stride / speed). Slower than the longest stance the
+// A pattern is a sequence of swing groups (the legs that lift together, the
+// second of a pair couple_ms after the first); each group's slot is a
+// four-foot shift, then the swing, so
+//   period = groups x (shift + span),  span = swing + couple,  stance = period - swing.
+// The swing time is fixed per pattern. The walk and the trot (no lean) have
+// a fixed cadence: the shift stays at its shortest (one tick) and speed
+// comes from the stride alone. The crawl: speed from the stride and the
+// stance time (stance = stride / speed); slower than the longest stance the
 // stride shrinks (to STRIDE_MIN_MM); faster than the default stride at the
-// shortest shift, the speed is capped. The shortest shift: the trot's two
-// ticks on four feet; the walk's and the crawl's kLeanMoveMs (the body's
-// move over the next three feet) plus kLeanLeadMs.
+// shortest shift, the speed is capped. The crawl's shortest shift:
+// kLeanMoveMs (the body's move over the next three feet) plus kLeanLeadMs.
 #ifndef KILO_MIND_PLANNER_PATTERNS_H
 #define KILO_MIND_PLANNER_PATTERNS_H
 #include <stdint.h>
@@ -37,12 +39,22 @@ struct Pattern {
   real shift_min_ms;     // the shortest four-foot phase before a swing
   real stance_max_ms;    // the longest stance: slower, the stride shrinks
   bool lean;             // one leg at a time: the body moves over the three feet that stay down
+  real couple_ms;        // a group's second leg lifts (and lands) this long after its first
+  real default_mm_s;     // the default speed (< 0: the stride over the default stance)
 
   bool in_group(int k, int leg) const {
     for (int i = 0; i < group_size; i++)
       if (groups[k][i] == leg) return true;
     return false;
   }
+  // the leg's place in group k (0 first, 1 second), -1 if not in it
+  int index_in_group(int k, int leg) const {
+    for (int i = 0; i < group_size; i++)
+      if (groups[k][i] == leg) return i;
+    return -1;
+  }
+  // a slot's swing part: the first leg's lift to the last leg's touchdown
+  real span_ms() const { return swing_ms + couple_ms * (real)(group_size - 1); }
 };
 
 // PATTERNS in patterns.py's order: walk, trot, crawl.
@@ -66,7 +78,9 @@ struct Timing {
 };
 
 real shift_min_ms(const Pattern& p);
-// The pattern table's speed: its stride over its default stance.
+// Speed from the stride alone, the cycle fixed (the patterns without a lean).
+inline bool fixed_cadence(const Pattern& p) { return !p.lean; }
+// The pattern's default speed: its table's, or its stride over its default stance.
 real default_speed(const Pattern& p);
 // (slowest, fastest) speed that timing() gives.
 void speed_range(const Pattern& p, real* lo, real* hi);

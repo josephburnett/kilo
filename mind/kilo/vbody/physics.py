@@ -3,10 +3,11 @@
 A rigid body on four point feet over flat ground, with the masses and
 geometry of kilo.planner.model.BodyModel, at 2 ms steps:
 
-- **Servo lag.** The feet are where the body commanded them ``lag_ms``
-  earlier (a pure delay of the slew-limited commands; ``lag_ms`` may differ
-  from the model the planner uses: the error the mind then sees is that
-  difference).
+- **Servo lag.** The feet follow the slew-limited commands ``lag_ms``
+  later (a dead time) through a first-order response of time constant
+  ``tau_ms`` (both from the body model unless given; fitted to the floor
+  recordings of 2026-11-15: 50 ms + 70 ms; either may differ from the model
+  the planner uses: the error the mind then sees is that difference).
 - **Standing.** The feet within ``contact_mm`` of the lowest one carry the
   body. On three or more of them with the centre of mass's projection
   inside their polygon, the body sits on the plane through them: the
@@ -38,9 +39,11 @@ TICK_S = 0.020
 
 class Physics:
     def __init__(self, model: BodyModel | None = None, lag_ms: float | None = None, contact_mm: float = 0.6,
-                 fall_deg: float = 35.0, settle_s: float = 0.02, feet=None, inset_mm: float = 5.0):
+                 fall_deg: float = 35.0, settle_s: float = 0.02, feet=None, inset_mm: float = 5.0,
+                 tau_ms: float | None = None):
         self.model = model or BodyModel()
         self.lag_ms = self.model.servo_lag_ms if lag_ms is None else float(lag_ms)
+        self.tau_ms = self.model.servo_tau_ms if tau_ms is None else float(tau_ms)
         self.contact_mm = contact_mm
         self.fall_deg = fall_deg
         self.settle_s = settle_s
@@ -58,6 +61,7 @@ class Physics:
         n = int(round(self.lag_ms / (TICK_S * 1000))) + 2
         self._cmd: deque = deque([(tuple(x0), tuple(z0))] * n, maxlen=n)
         self.xs, self.zs = list(x0), list(z0)
+        self._resp = (list(x0), list(z0))  # the first-order response's state (the delayed commands filtered)
         self.rates = (0.0, 0.0)  # pitch, roll rate, deg/s (last tick)
 
     def command(self, xs, zs) -> None:
@@ -80,8 +84,14 @@ class Physics:
         """One body tick (20 ms) in SUBSTEPS steps."""
         p0, r0 = self.pitch, self.roll
         dt = TICK_S / SUBSTEPS
+        a = 1.0 - math.exp(-dt * 1000.0 / self.tau_ms) if self.tau_ms > 0 else 1.0
         for k in range(SUBSTEPS):
-            self.xs, self.zs = self._feet_at((k + 1) / SUBSTEPS)
+            ux, uz = self._feet_at((k + 1) / SUBSTEPS)
+            yx, yz = self._resp
+            for leg in LEGS:
+                yx[leg] += (ux[leg] - yx[leg]) * a
+                yz[leg] += (uz[leg] - yz[leg]) * a
+            self.xs, self.zs = list(yx), list(yz)
             self._substep(dt)
             if self.fallen:
                 break

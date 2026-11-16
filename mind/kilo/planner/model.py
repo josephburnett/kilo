@@ -83,8 +83,14 @@ class BodyModel:
     upper_leg_at: float = 0.8    # ...its centre this far from the shoulder (the servo sits at the knee)
     lower_leg_g: float = 4.0     # lower link and foot (est.)
     lower_leg_at: float = 0.5
-    # ---- servos: ESTIMATES ----
-    servo_lag_ms: float = 150.0  # command to motion under load; never measured (servo step test)
+    # ---- servos: fitted to the floor recordings of 2026-11-15 ----
+    # The attitude follows the legs' commands as a dead time then a first-order
+    # lag (docs/walking-and-balance.md §12): the recorded roll of the walk and
+    # the crawl, replayed through the virtual body with the body's recorded
+    # corrections, fits best at 50 ms + 70 ms (rms 1.15 deg; a pure 140 ms
+    # delay, the best pure delay, leaves 1.55). The mean delay is 120 ms.
+    servo_lag_ms: float = 50.0   # dead time, command to the start of the motion
+    servo_tau_ms: float = 70.0   # then a first-order response with this time constant
     slew_deg_per_tick: float = 10.0  # the body's safety slew (SLEW_MAX_A16)
     reach_frac: float = 0.95     # the IK keeps d <= 0.95 (L1 + L2) (core/ik.h)
     knee_max_deg: float = 150.0  # ...and the knee bend <= 150 deg
@@ -121,7 +127,20 @@ class BodyModel:
         return G_MM_S2 * lever_mm / (com_height_mm ** 2 + lever_mm ** 2)
 
     def lag_ticks(self, tick_ms: float = 20.0) -> float:
+        """The dead time in ticks."""
         return self.servo_lag_ms / tick_ms
+
+    def settle_ticks(self, tick_ms: float = 20.0) -> int:
+        """Ticks until a commanded move has nearly arrived (the dead time and
+        1.5 time constants: 78 %, the rest under a degree for the moves the
+        planner makes): a level-out finishes this long before what follows."""
+        return int(math.ceil((self.servo_lag_ms + 1.5 * self.servo_tau_ms) / tick_ms - 1e-9))
+
+    def response_alpha(self, tick_ms: float = 20.0) -> float:
+        """The first-order response's step per tick: y += (u - y) * alpha."""
+        if self.servo_tau_ms <= 0:
+            return 1.0
+        return 1.0 - math.exp(-tick_ms / self.servo_tau_ms)
 
     def tau_s(self, com_height_mm: float) -> float:
         """The inverted pendulum's time constant: a tilt grows as e^(t / tau)

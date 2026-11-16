@@ -10,19 +10,22 @@ How a tick is made (docs/walking-and-balance.md §10):
 
 - **Slots.** The pattern's swing groups take turns (kilo.planner.patterns):
   each slot is a four-foot shift of ``shift`` ticks, then a swing of
-  ``swing`` ticks. Feet on the ground slide back at their side's stride
+  ``swing`` ticks per leg (in the walk the pair's second leg lifts
+  ``couple_ticks`` after the first; before its lift and after its
+  touchdown it slides with the ground). Feet on the ground slide back at their side's stride
   speed (stride / stance time); a swinging foot lifts on a cosine profile
   (step height at mid-swing, zero speed at lift-off and touchdown) from
   where it left the ground to half a stride ahead of its shoulder. Speed and
   direction change the stride targets, which move at most 0.5 mm per tick,
   and the stance time, which moves at most 2 % per tick, with each slot's
   shift following the stance time as it is (so a slower speed never leaves
-  a swing more than a stride to carry): any change at any tick is smooth. A pattern change goes through the legs' way home: the
-  strides go to 0 and each leg steps under its shoulder (as for a stop),
-  then the new pattern starts from its first group as a walk starts (from
-  the walk, up to ~5.5 s); a second change while that runs just changes
-  where it goes.
-- **The lean (walk, crawl).** On three feet the body stands on a triangle
+  a swing more than a stride to carry): any change at any tick is smooth. A change between the walk and the
+  trot goes straight over at a slot start (``_switch_ok``); into or out
+  of the crawl through the legs' way home: the strides go to 0 and each
+  leg steps under its shoulder (as for a stop), then the new pattern
+  starts from its first group as a walk starts; a second change while
+  that runs just changes where it goes.
+- **The lean (the crawl).** On three feet the body stands on a triangle
   whose long edge runs under its middle, so before each lift the planner
   moves the centre of mass inside the triangle of the three feet that stay
   down, at least ``margin_mm`` from every edge, for the whole swing: it
@@ -39,11 +42,13 @@ How a tick is made (docs/walking-and-balance.md §10):
   units of work per tick, from where the feet will be when the slot
   starts), so no tick carries a whole solve; if something changed since (a
   command, a catch) it is solved again at the slot's start while the plan
-  waits. The trot needs none: its diagonal pairs stand on a line,
-  briefly (150 ms), and no lean helps there.
+  waits. The trot and the walk need none: their diagonal pairs stand on
+  a line, briefly (150 and 90 ms), and no lean helps there.
 - **Prediction.** The attitude for tick t is the plane through the support
-  feet the planner commanded a servo lag earlier (the body follows its
-  commands that much later). It goes in FEET as the balance's reference:
+  feet the planner commanded, delayed by the servos' dead time and passed
+  through their first-order response (BodyModel.servo_lag_ms and
+  servo_tau_ms, fitted to the floor recordings: the body follows its
+  commands that way). It goes in FEET as the balance's reference:
   the body corrects only what the plan did not predict.
 - **From the measured state.** ``observe`` gives the error the body
   reports (measured minus predicted, less the steady offset the walker
@@ -76,6 +81,7 @@ ATT_MAX_DEG = 30.0    # FEET pitch / roll (the body refuses a FEET beyond it: BA
 STRIDE_SLEW_MM = 0.5  # per tick
 HEIGHT_SLEW_MM = 0.5  # per tick
 RECENTRED_MM = 1.5    # a stopping leg this close to its target does not step again
+SWITCH_SLACK_MM = 4.0  # a pattern change: every foot within the new half stride plus this (_switch_ok)
 STANCE_SLEW = 0.02    # the stance time (and with it the feet's slide) changes at most 2 % per tick
 LEAN_UNITS_PER_TICK = 4  # units of a lean solve (Planner._solve_steps) per tick
 
@@ -156,7 +162,7 @@ class Planner:
         self.lead = int(round(pat.LEAN_LEAD_MS / pat.TICK_MS))
         # a level-out (the stop's, or out of the walk into the trot) is done a
         # servo lag before what comes next: the hand-over to STANCE, a trot's lift
-        self.settle = int(math.ceil(model.lag_ticks(pat.TICK_MS) - 1e-9))
+        self.settle = model.settle_ticks(pat.TICK_MS)
         self.pattern = pat.pattern(pattern)
         self.direction = pat.direction(direction)
         self.speed_mm_s = pat.default_speed(self.pattern) if speed_mm_s is None else abs(float(speed_mm_s))
@@ -175,7 +181,7 @@ class Planner:
         self.t = 0                   # tick within the slot (stands still while the plan waits)
         self.S = 0                   # this slot's shift ticks (may grow: the lean's move, a slower speed)
         self.held = 0                # ticks the gate held this slot
-        self.swing = (0.0,) * 4      # per leg: x at lift-off
+        self.swing = [0.0] * 4       # per leg: x at its lift-off
         self.skip = False            # this slot's group does not step (stopping, already in place)
         self.caught: dict[int, tuple[int, float]] = {}  # leg -> (tick of the catch, lift at the catch)
         self.stopping = False
@@ -184,7 +190,9 @@ class Planner:
         self.err = (0.0, 0.0)        # measured - predicted - offset (pitch, roll), the latest
         self.prev_att = (0.0, 0.0)
         self._lag = model.lag_ticks(pat.TICK_MS)
+        self._alpha = model.response_alpha(pat.TICK_MS)
         self._att_hist: list[tuple[float, float]] = [(0.0, 0.0)] * (int(self._lag) + 3)
+        self._resp = (0.0, 0.0)      # the predicted attitude: the plan's, delayed, through the servos' response
         self._job: _LeanJob | None = None   # this slot's lean while it is still being solved (the slot waits)
         self._next: _LeanJob | None = None  # the next slot's, solved during this slot's swing
         self.last: TickPlan | None = None
@@ -202,6 +210,19 @@ class Planner:
         return max(2, int(round(self.pattern.swing_ms / pat.TICK_MS)))
 
     @property
+    def couple_ticks(self) -> int:
+        """A group's second leg lifts this many ticks after its first."""
+        return int(round(self.pattern.couple_ms / pat.TICK_MS))
+
+    def _span(self) -> int:
+        """A slot's ticks from the first lift to the last touchdown."""
+        return self.swing_ticks + self.couple_ticks * (len(self.pattern.groups[0]) - 1)
+
+    def _offset(self, leg: int) -> int:
+        """The tick (after the shift) at which this leg of the slot's group lifts."""
+        return self._group().index(leg) * self.couple_ticks
+
+    @property
     def changing(self) -> bool:
         """A pattern change is under way (the legs go home first)."""
         return self._pending_pattern is not None
@@ -213,9 +234,14 @@ class Planner:
         tm = self.timing()
         shift = tm.shift_ms if self.cfg.shift_ms is None else self.cfg.shift_ms
         n = len(self.pattern.groups)
-        self.stance_tgt = (n * (shift + self.pattern.swing_ms) - self.pattern.swing_ms) / pat.TICK_MS
-        if self.stopping or self._pending_pattern is not None:
+        self.stance_tgt = (n * (shift + self.pattern.span_ms) - self.pattern.swing_ms) / pat.TICK_MS
+        if self.stopping or (self._pending_pattern is not None and not self._direct_change()):
             self.s_tgt = [0.0, 0.0]
+        elif self._pending_pattern is not None:
+            # changing: no stride longer than the new pattern's at this speed
+            # (it switches once the strides and the feet allow, _switch_ok)
+            new = pat.timing(self._pending_pattern, self.speed_mm_s).stride_mm
+            self.s_tgt = list(pat.side_strides(self.direction, min(tm.stride_mm, new)))
         else:
             self.s_tgt = list(pat.side_strides(self.direction, tm.stride_mm))
         self._next = None  # the next slot's lean was solved for the old timing
@@ -234,11 +260,18 @@ class Planner:
         self._apply_timing()
 
     def set_pattern(self, name: str) -> None:
-        """Change the pattern: the strides go to 0 and every leg steps home
-        (as for a stop, without the level-out), then the new pattern starts
-        from its first group the way a walk starts. Asking for the pattern
-        that is walking cancels a change still under way; the last pattern
-        asked for wins. Ignored once stopping."""
+        """Change the pattern. Between two fixed-cadence patterns (the walk
+        and the trot, since 2026-11-16) directly: the strides shorten to what
+        the new pattern takes at this speed, the body goes to its height, and
+        at the first slot start where they and the feet allow (_switch_ok)
+        the new pattern takes over with the group whose feet are furthest
+        behind (about half a second). Into or out of a leaning pattern (the
+        crawl, whose cycle is 6 to 12 times longer) through the legs' way
+        home: the strides go to 0 and each leg steps under its shoulder (as
+        for a stop, without the level-out), then the new pattern starts from
+        its first group as a walk starts. Asking for the pattern that is
+        walking cancels a change still under way; the last pattern asked for
+        wins. Ignored once stopping."""
         p = pat.pattern(name)
         if self.stopping:
             return
@@ -270,9 +303,41 @@ class Planner:
         return (all(abs(self.s_cur[i]) < 0.05 for i in (0, 1))
                 and all(abs(self.xg[leg]) < RECENTRED_MM for leg in LEGS))
 
+    def _switch_ok(self, p: pat.Pattern) -> bool:
+        """The new pattern can take over at this slot start: the strides are
+        no longer than it walks at this speed (+0.5 mm, a tick's slew), every
+        foot is within half of that stride (+ SWITCH_SLACK_MM) of its
+        shoulder, so its first swings carry no foot further than its own do,
+        and the body is at its height (a lower crawl's lean reaches further)."""
+        st = pat.timing(p, self.speed_mm_s).stride_mm
+        return (all(abs(v) <= st + STRIDE_SLEW_MM for v in self.s_cur)
+                and all(abs(x) <= st / 2 + SWITCH_SLACK_MM for x in self.xg)
+                and abs(self.h - self.model.stance_height(p.body_h_256)) <= HEIGHT_SLEW_MM)
+
+    def _direct_change(self) -> bool:
+        """The change under way goes straight over (no step home): both patterns have a fixed cadence."""
+        p = self._pending_pattern
+        return p is not None and pat.fixed_cadence(p) and pat.fixed_cadence(self.pattern)
+
+    def _first_group(self) -> int:
+        """The group to start a new pattern with: the one whose feet are furthest behind."""
+        best, score = 0, -math.inf
+        for k, g in enumerate(self.pattern.groups):
+            sc = -math.inf
+            for leg in g:
+                s = self.s_cur[0 if LEFT[leg] else 1]
+                sc = max(sc, abs(self.xg[leg]) if abs(s) < 0.05 else -math.copysign(1.0, s) * self.xg[leg])
+            if sc > score + 1e-9:
+                best, score = k, sc
+        return best
+
     def _start_slot(self) -> None:
         self._job = None
-        if self._pending_pattern is not None and self._home():
+        if self._pending_pattern is not None and self._direct_change() and self._switch_ok(self._pending_pattern):
+            self.pattern, self._pending_pattern = self._pending_pattern, None
+            self._apply_timing()
+            self.k = self._first_group() - 1
+        elif self._pending_pattern is not None and self._home():
             # every foot is home and still: the new pattern starts from its first group
             self.pattern, self._pending_pattern = self._pending_pattern, None
             self.k = -1
@@ -283,7 +348,7 @@ class Planner:
         self.held = 0
         self.caught = {}
         g = self._group()
-        self.skip = (self.stopping or self.changing) and all(
+        self.skip = (self.stopping or (self.changing and not self._direct_change())) and all(
             abs(self.s_cur[0]) < 0.05 and abs(self.s_cur[1]) < 0.05 and abs(self.xg[leg]) < RECENTRED_MM for leg in g)
         self.lean_from = Lean(self.lean.dx, self.lean.pitch, self.lean.roll)
         nxt, self._next = self._next, None
@@ -335,7 +400,7 @@ class Planner:
         to carry a foot further than a stride in its fixed time."""
         n = len(self.pattern.groups)
         w = self.pattern.swing_ms
-        return max(0, int(round(((stance * pat.TICK_MS + w) / n - w) / pat.TICK_MS)))
+        return max(0, int(round(((stance * pat.TICK_MS + w) / n - self.pattern.span_ms) / pat.TICK_MS)))
 
     def _side_speed(self, leg: int) -> float:
         """mm per tick a foot on the ground slides back."""
@@ -471,6 +536,8 @@ class Planner:
     def _height_target(self) -> float:
         if self.finishing:
             return self.model.stance_height(205)
+        if self._direct_change():  # changing: to the new pattern's height first (_switch_ok)
+            return self.model.stance_height(self._pending_pattern.body_h_256)
         return self.model.stance_height(self.pattern.body_h_256)
 
     def _predict_slot_end(self):
@@ -478,16 +545,18 @@ class Planner:
         slot's swing if nothing changes (the same arithmetic as next())."""
         W = self.swing_ticks
         xg = list(self.xg)
+        x0 = list(self.swing)
         s, st, h = self.s_cur, self.stance_ticks, self.h
         g = self._group()
-        for t in range(self.t, self.S + W):
+        for t in range(self.t, self.S + self._span()):
             s, st, h = self._slewed(s, st, h)
-            sw = smooth((t - self.S + 1) / W)
             for leg in LEGS:
                 side = 0 if LEFT[leg] else 1
-                if leg in g:
-                    x0 = self.swing[leg]
-                    xg[leg] = x0 + (s[side] / 2.0 - x0) * sw
+                j = t - self.S - (self._offset(leg) if leg in g else 0) + 1
+                if leg in g and 1 <= j <= W:
+                    if j == 1:
+                        x0[leg] = xg[leg]
+                    xg[leg] = x0[leg] + (s[side] / 2.0 - x0[leg]) * smooth(j / W)
                 else:
                     xg[leg] -= s[side] / st
         return xg, s, st, h
@@ -497,7 +566,7 @@ class Planner:
         """Plan the next tick (``self.tick``) and advance."""
         cfg = self.cfg
         W = self.swing_ticks
-        if self.t >= self.S + W or (self.skip and self.t >= self.S) or (self.finishing and self.t >= self.S):
+        if self.t >= self.S + self._span() or (self.skip and self.t >= self.S) or (self.finishing and self.t >= self.S):
             if self.finishing:
                 self.done = True
             else:
@@ -530,33 +599,38 @@ class Planner:
                     self.xg[leg] -= self._side_speed(leg)
             else:
                 swinging = True
-                j = self.t - self.S + 1          # 1..swing
-                s = j / W
-                if j == 1:
-                    self.swing = tuple(self.xg)  # where the feet leave the ground
+                # each leg of the group swings W ticks from its own lift (the
+                # second one couple_ticks after the first); before its lift and
+                # after its touchdown it slides with the ground
+                js = {leg: self.t - self.S - self._offset(leg) + 1 for leg in g}  # 1..W while it swings
                 for leg in LEGS:
-                    if leg in g:
+                    if leg in g and leg not in self.caught and 1 <= js[leg] <= W:
                         continue
+                    if leg in self.caught and self.t - self.S - self.caught[leg][0] < 3:
+                        continue  # a caught foot lands where it is (three ticks), then slides
                     self.xg[leg] -= self._side_speed(leg)
                 for leg in g:
-                    if leg in self.caught:
+                    j = js[leg]
+                    if leg in self.caught or not 1 <= j < W:
                         continue
-                    if self._tip_toward(leg) > cfg.catch_deg and j < W:
+                    if self._tip_toward(leg) > cfg.catch_deg:
                         prev_lift = self.pattern.step_h_mm * (1 - math.cos(2 * math.pi * (j - 1) / W)) / 2
-                        self.caught[leg] = (j - 1, prev_lift)
+                        self.caught[leg] = (self.t - self.S, prev_lift)
                         self.stats["catches"] += 1
                         self._next = None  # it lands elsewhere: the next slot's lean is solved when it starts
                 for leg in g:
+                    j = js[leg]
                     if leg in self.caught:
                         jc, lc = self.caught[leg]
-                        k = j - jc
-                        lift[leg] = lc * (1 - smooth(k / 3.0))
-                    else:
+                        lift[leg] = lc * (1 - smooth((self.t - self.S - jc + 1) / 3.0))
+                    elif 1 <= j <= W:
+                        if j == 1:
+                            self.swing[leg] = self.xg[leg]  # where the foot leaves the ground
                         x0 = self.swing[leg]
-                        self.xg[leg] = x0 + (self._target_x(leg) - x0) * smooth(s)
-                        lift[leg] = self.pattern.step_h_mm * (1 - math.cos(2 * math.pi * s)) / 2
-                if self.caught and all(lift[leg] < 1e-6 for leg in g):
-                    self.t = self.S + W  # every caught foot is down: the slot is over
+                        self.xg[leg] = x0 + (self._target_x(leg) - x0) * smooth(j / W)
+                        lift[leg] = self.pattern.step_h_mm * (1 - math.cos(2 * math.pi * j / W)) / 2
+                if self.caught and all(lift[leg] < 1e-6 and (leg in self.caught or js[leg] >= 1) for leg in g):
+                    self.t = self.S + self._span()  # every caught foot is down and no other is still to lift
                     for leg in g:
                         lift[leg] = 0.0
                 lifting = tuple(leg for leg in g if lift[leg] > 1e-6)
@@ -579,7 +653,10 @@ class Planner:
         self.prev_att = att
         self._att_hist.append(att)
         del self._att_hist[0]
-        pp, pr = self._lagged()
+        lp, lr = self._lagged()
+        a = self._alpha
+        self._resp = (self._resp[0] + (lp - self._resp[0]) * a, self._resp[1] + (lr - self._resp[1]) * a)
+        pp, pr = self._resp
         pp = min(ATT_MAX_DEG, max(-ATT_MAX_DEG, pp))
         pr = min(ATT_MAX_DEG, max(-ATT_MAX_DEG, pr))
         m = stability(self.model, xi, zi, support, att[0], att[1])
@@ -602,7 +679,7 @@ class Planner:
         return out
 
     def _lagged(self) -> tuple[float, float]:
-        """The planned attitude a servo lag ago (linear between ticks)."""
+        """The planned attitude the servos' dead time ago (linear between ticks)."""
         hist = self._att_hist
         n = len(hist) - 1            # hist[n] is this tick
         lag = self._lag

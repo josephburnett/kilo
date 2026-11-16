@@ -203,7 +203,7 @@ class VirtualBody:
                  batt_level: int = 0, reset_cause: int = P.ResetCause.COLD,
                  fw_build: int = FW_BUILD, save_busy_s: float = 0.1,
                  clock: Callable[[], float] = time.monotonic, boot_delay: float = 0.0, p2: bool = True,
-                 model: BodyModel | None = None, lag_ms: float | None = None,
+                 model: BodyModel | None = None, lag_ms: float | None = None, tau_ms: float | None = None,
                  imu_offset: tuple[float, float] = (0.0, 0.0)):
         self.t = transport
         # p2=False: the P1 body (FEET / SET_BODY_POSE refused UNKNOWN_TYPE,
@@ -215,6 +215,7 @@ class VirtualBody:
         # mounting error added to the measured attitude in GAIT.
         self.model = model or BodyModel()
         self.lag_ms = lag_ms
+        self.tau_ms = tau_ms
         self.imu_offset = imu_offset
         self.goal_types = P0_GOALS | P2_GOALS if p2 else P0_GOALS
         self.codec = codec or default_codec()
@@ -834,7 +835,7 @@ class VirtualBody:
             return self._refuse(t, reason, now)
         g = self.feet
         if g is None:
-            g = FeetPlayer(self.tick, self.model, lag_ms=self.lag_ms)
+            g = FeetPlayer(self.tick, self.model, lag_ms=self.lag_ms, tau_ms=self.tau_ms)
         if not g.offer(msg, self.tick):
             self.feet_late += 1
             return None

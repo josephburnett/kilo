@@ -123,19 +123,27 @@ def scenarios() -> None:
     scenario("trot_turns", "trot", "back", tick=65500, script=[("run", 40), ("dir", "left"), ("run", 50),
                                                               ("dir", "right"), ("run", 50), ("dir", "march"),
                                                               ("run", 40), ("dir", "forward"), ("run", 30)])
-    scenario("walk_left", "walk", "left", speed=12.0, script=[("run", 120), ("dir", "back"), ("run", 60)])
+    scenario("walk_left", "walk", "left", speed=60.0, script=[("run", 120), ("dir", "back"), ("run", 60)])
     scenario("crawl_march", "crawl", "march", script=[("run", 120)])
     # the top speeds (asked past them: capped), the lift in the lean move's tail
     scenario("crawl_top_back", "crawl", "back", speed=40.0, script=[("run", 220)])
     scenario("trot_top_down", "trot", speed=200.0, script=[("run", 60), ("speed", 100.0), ("run", 60)])
-    # pattern changes: the legs go home first; out of the walk's lean, level first
+    # pattern changes: walk and trot directly at a slot start; into or out of the crawl the legs go
+    # home first, out of the crawl's lean level first
     scenario("trot_to_walk", "trot", "left", script=[("run", 50), ("pattern", "walk"), ("run", 200)])
     scenario("walk_to_trot", "walk", script=[("run", 20), ("pattern", "crawl"), ("run", 10), ("pattern", "trot"),
                                              ("run", 80)])
+    scenario("walk_to_crawl", "walk", speed=97.0, script=[("run", 37), ("pattern", "crawl"), ("run", 260)])
+    scenario("crawl_to_walk", "crawl", script=[("run", 130), ("pattern", "walk"), ("run", 300), ("pattern", "trot"),
+                                               ("run", 60)])
     # speed changes while the next slot's lean is being solved
-    scenario("walk_speeds", "walk", script=[("run", 70), ("speed", 6.0), ("run", 70), ("speed", 11.0), ("run", 70),
-                                            ("speed", 40.0), ("run", 40)])
+    scenario("crawl_speeds", "crawl", script=[("run", 70), ("speed", 6.0), ("run", 70), ("speed", 11.0),
+                                              ("run", 70), ("speed", 40.0), ("run", 40)])
+    scenario("walk_speeds", "walk", script=[("run", 50), ("speed", 30.0), ("run", 70), ("speed", 97.0), ("run", 70)])
     # the attitude error: the gate holds the lift, the catch lands the foot
+    scenario("crawl_gate_catch", "crawl", script=[("observe", 0.0, 8.0), ("run", 40), ("observe", 0.0, 0.0),
+                                                  ("run", 2), ("observe", -3.0, 6.0), ("run", 4),
+                                                  ("observe", 0.0, 0.0), ("run", 40)])
     scenario("walk_gate_catch", "walk", script=[("observe", 0.0, 8.0), ("run", 40), ("observe", 0.0, 0.0),
                                                 ("run", 2), ("observe", -3.0, 6.0), ("run", 4),
                                                 ("observe", 0.0, 0.0), ("run", 40)])

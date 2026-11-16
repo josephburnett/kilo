@@ -135,29 +135,31 @@ void test_stability_margin() {
 // ---- patterns and speed ------------------------------------------------------------------------
 
 void test_pattern_tables_and_default_timing() {
-  Timing t = default_timing(P("trot"));  // the tables of 2026-11-15 (test_planner.py)
-  CHECK(t.stride_mm == 35 && std::lround(t.period_ms) == 393 && near(t.shift_ms, 46.5, 1e-9));
+  Timing t = default_timing(P("trot"));  // the tables of 2026-11-16 (test_planner.py)
+  CHECK(near(t.stride_mm, 27.36, 1e-4) && std::lround(t.period_ms) == 340 && near(t.shift_ms, 20, 1e-4));
   CHECK(near(t.speed_mm_s, 144.0, 0.1));
   const Pattern& tr = P("trot");
   CHECK(tr.n_groups == 2 && tr.groups[0][0] == LF && tr.groups[0][1] == RB && tr.groups[1][0] == RF &&
-        tr.groups[1][1] == LB);
-  for (const char* n : {"walk", "crawl"}) {
-    const Pattern& p = P(n);
-    CHECK(p.n_groups == 4 && p.groups[0][0] == LB && p.groups[1][0] == LF && p.groups[2][0] == RB &&
-          p.groups[3][0] == RF);
-  }
-  CHECK(P("trot").swing_ms == 150 && P("walk").swing_ms == 300 && P("crawl").swing_ms == 300);
+        tr.groups[1][1] == LB && tr.couple_ms == 0);
+  const Pattern& wk = P("walk");  // diagonal couplets, the hind leg 60 ms ahead of its diagonal fore leg
+  CHECK(wk.n_groups == 2 && wk.groups[0][0] == LB && wk.groups[0][1] == RF && wk.groups[1][0] == RB &&
+        wk.groups[1][1] == LF && wk.couple_ms == 60 && !wk.lean);
+  const Pattern& cr = P("crawl");
+  CHECK(cr.n_groups == 4 && cr.groups[0][0] == LB && cr.groups[1][0] == LF && cr.groups[2][0] == RB &&
+        cr.groups[3][0] == RF && cr.lean);
+  CHECK(P("trot").swing_ms == 150 && P("walk").swing_ms == 150 && P("crawl").swing_ms == 300);
   Timing w = default_timing(P("walk"));
-  CHECK(w.stride_mm == 40 && std::lround(w.period_ms) == 2550 && near(w.shift_ms, 337.5, 1e-9));
-  CHECK(near(w.speed_mm_s, 17.8, 0.1));
+  CHECK(near(w.stride_mm, 24.8, 1e-4) && std::lround(w.period_ms) == 460 && near(w.shift_ms, 20, 1e-4));
+  CHECK(near(w.speed_mm_s, 80.0, 0.1));
   Timing c = default_timing(P("crawl"));
   CHECK(c.stride_mm == 50 && std::lround(c.period_ms) == 2550 && near(c.speed_mm_s, 22.2, 0.1));
-  CHECK(P("crawl").body_h_256 == 179 && P("walk").body_h_256 == 195);
-  const double tops[3] = {21.5, 152.2, 26.9};  // walk, trot, crawl
+  CHECK(P("crawl").body_h_256 == 179 && P("walk").body_h_256 == 205);
+  const double los[3] = {25.8, 42.1, -1}, tops[3] = {96.8, 184.2, 26.9};  // walk, trot, crawl
   for (int i = 0; i < kPatterns; i++) {
     real lo, hi;
     speed_range(kPatternTable[i], &lo, &hi);
-    CHECKF(near(hi, tops[i], 0.1), "%s top %.2f", kPatternTable[i].name, hi);
+    CHECKF(near(hi, tops[i], 0.1) && (los[i] < 0 || near(lo, los[i], 0.1)), "%s %.2f..%.2f", kPatternTable[i].name,
+           lo, hi);
   }
   CHECK(&default_pattern() == &P("trot"));
 }
@@ -176,16 +178,19 @@ void test_timing_clamps() {
     CHECK(slow.stride_mm == kStrideMinMm && near(slow.speed_mm_s, lo, 1e-4 * lo));
     Timing a = timing(p, -20), b = timing(p, 20);  // a magnitude
     CHECK(a.stride_mm == b.stride_mm && a.period_ms == b.period_ms && a.speed_mm_s == b.speed_mm_s);
-    CHECK(timing(p, lo).period_ms - timing(p, hi).period_ms > 0);  // the shift changes, not the swing
+    if (fixed_cadence(p)) {  // the walk and the trot: one cycle, the stride alone changes
+      CHECK(timing(p, lo).period_ms == timing(p, hi).period_ms && near(timing(p, lo).shift_ms, 20, 1e-4));
+      CHECK(timing(p, lo).stride_mm < timing(p, hi).stride_mm);
+    } else {
+      CHECK(timing(p, lo).period_ms - timing(p, hi).period_ms > 0);  // the shift changes, not the swing
+    }
   }
 }
 
-void test_walk_and_crawl_shift_covers_the_lean_move() {
-  for (const char* n : {"walk", "crawl"}) {  // the move (300 ms), the lift 60 ms before its end
-    CHECK(shift_min_ms(P(n)) == 240);
-    CHECK(near(timing(P(n), 1e6).shift_ms, 240, 1e-3));
-  }
-  CHECK(shift_min_ms(P("trot")) == 40);  // two ticks on four feet
+void test_the_crawl_shift_covers_the_lean_move() {
+  CHECK(shift_min_ms(P("crawl")) == 240);  // the move (300 ms), the lift 60 ms before its end
+  CHECK(near(timing(P("crawl"), 1e6).shift_ms, 240, 1e-3));
+  CHECK(shift_min_ms(P("trot")) == 20 && shift_min_ms(P("walk")) == 20);  // one tick on four feet
 }
 
 void test_side_strides_and_names() {
@@ -222,13 +227,55 @@ void test_plan_fits_feet_and_the_slew() {
         CHECKF(k.x[i] >= -60 && k.x[i] <= 60 && k.z[i] >= 30 && k.z[i] <= 95 && M.reachable(k.x[i], k.z[i]),
                "%s tick %u leg %d", pat.name, k.tick, i);
       CHECK(bits(k.support) >= (pat.lean ? 3 : 2));
+      if (bits(k.support) == 2) CHECK(k.support == 0x5 || k.support == 0xA);  // two feet: a diagonal pair
     }
     CHECKF(max_joint_step(t) < M.slew_deg_per_tick, "%s: %.2f", pat.name, max_joint_step(t));
   }
 }
 
+void test_every_speed_of_the_fast_gaits_stays_inside_the_slew() {
+  // slowest, default and top, forward, back and turning: at most 8.3 deg a tick (test_planner.py)
+  for (const char* name : {"walk", "trot"}) {
+    real lo, hi;
+    speed_range(P(name), &lo, &hi);
+    for (Direction d : {Direction::Forward, Direction::Back, Direction::Left})
+      for (real v : {lo, default_speed(P(name)), hi}) {
+        Planner p;
+        p.start(P(name), d, v, 1000);
+        std::vector<TickPlan> t;
+        plan(&t, p, 300);
+        CHECKF(max_joint_step(t) < 8.3, "%s %g: %.2f", name, v, max_joint_step(t));
+      }
+  }
+}
+
+void test_the_walk_lifts_a_hind_leg_then_its_diagonal_fore_leg() {
+  Planner& p = fresh("walk");
+  std::vector<TickPlan> t;
+  plan(&t, p, 300);
+  const uint8_t ok[] = {0, 1 << LB, (1 << LB) | (1 << RF), 1 << RF, 1 << RB, (1 << RB) | (1 << LF), 1 << LF};
+  std::vector<uint8_t> seen;
+  for (const TickPlan& k : t) {
+    bool in = false;
+    for (uint8_t v : ok) in = in || k.lifting == v;
+    CHECKF(in, "tick %u lifting %u", k.tick, k.lifting);
+    if (k.lifting && (seen.empty() || seen.back() != k.lifting)) seen.push_back(k.lifting);
+  }
+  size_t i = 0;
+  while (i < seen.size() && seen[i] != (1 << LB)) i++;
+  CHECK(i + 6 <= seen.size());
+  for (int j = 0; j < 6 && i + j < seen.size(); j++) CHECK(seen[i + j] == ok[1 + j]);
+  int lb0 = -1, rf0 = -1, lbn = 0;
+  for (const TickPlan& k : t) {
+    if ((k.lifting >> LB & 1) && lb0 < 0) lb0 = (int)k.tick;
+    if ((k.lifting >> RF & 1) && rf0 < 0) rf0 = (int)k.tick;
+    if (lb0 >= 0 && (int)k.tick < lb0 + 10 && (k.lifting >> LB & 1)) lbn++;
+  }
+  CHECK(rf0 - lb0 == 3 && lbn == 7);  // 60 ms later; 7 ticks up (the swing is 8, its last one down)
+}
+
 void test_the_lean_keeps_the_mass_inside_three_feet() {
-  for (const char* name : {"walk", "crawl"}) {
+  for (const char* name : {"crawl"}) {
     Planner& p = fresh(name);
     std::vector<TickPlan> t;
     plan(&t, p, 600);
@@ -286,14 +333,18 @@ void test_trot_stays_level_on_diagonal_pairs() {
   CHECK(a && b);
 }
 
-void test_prediction_is_the_plan_a_servo_lag_earlier() {
-  Planner& p = fresh("walk");
+void test_prediction_is_the_plan_through_the_servos_response() {
+  // the plan's attitude a dead time earlier (2.5 ticks), through a 70 ms first-order response
+  Planner& p = fresh("crawl");
   std::vector<TickPlan> t;
   plan(&t, p, 300);
-  double lag = M.lag_ticks();  // 7.5
-  for (int i = 20; i < 300; i++) {
-    const TickPlan &a = t[i - 7], &b = t[i - 8];
-    CHECKF(near(t[i].roll, a.plan_roll + (b.plan_roll - a.plan_roll) * (lag - 7), 1e-4), "tick %d", i);
+  double lag = M.lag_ticks();
+  CHECK(near(lag, 2.5, 1e-9) && M.servo_tau_ms == 70);
+  double a = 1 - std::exp(-20.0 / 70.0), y = 0;
+  for (int i = 0; i < 300; i++) {
+    double u0 = i >= 2 ? t[i - 2].plan_roll : 0, u1 = i >= 3 ? t[i - 3].plan_roll : 0;
+    y += (u0 + (u1 - u0) * (lag - 2) - y) * a;
+    CHECKF(near(t[i].roll, y, 1e-3), "tick %d: %.4f vs %.4f", i, t[i].roll, y);
   }
 }
 
@@ -306,7 +357,9 @@ void test_speed_changes_mid_walk_are_smooth() {
   plan(&t, p, 200);
   p.set_speed(10);
   plan(&t, p, 300);
-  CHECK(near(p.timing().speed_mm_s, 10, 1e-4));
+  real lo0, hi0;
+  speed_range(P("trot"), &lo0, &hi0);
+  CHECK(near(p.timing().speed_mm_s, lo0, 1e-4));  // 42: the trot's slowest
   p.set_speed(200);
   plan(&t, p, 300);
   CHECK(max_joint_step(t) < M.slew_deg_per_tick);
@@ -325,26 +378,40 @@ void test_direction_and_pattern_changes() {
   std::vector<TickPlan> t;
   plan(&t, p, 100);
   p.set_direction(Direction::Back);
-  plan(&t, p, 150);  // 0.5 mm a tick: 140 ticks from +35 to -35
-  CHECK(p.s_cur()[0] == -35 && p.s_cur()[1] == -35);
+  plan(&t, p, 150);  // 0.5 mm a tick: 110 ticks from +27.4 to -27.4
+  CHECK(near(p.s_cur()[0], -27.36, 1e-3) && near(p.s_cur()[1], -27.36, 1e-3));
   p.set_direction(Direction::Left);
-  plan(&t, p, 130);  // the right side from -35 to +28
-  CHECK(p.s_cur()[0] == -28 && p.s_cur()[1] == 28);
+  plan(&t, p, 130);  // the right side from -27.4 to +21.9
+  CHECK(near(p.s_cur()[0], -21.888, 1e-3) && near(p.s_cur()[1], 21.888, 1e-3));
   p.set_pattern(P("walk"));
-  CHECK(&p.pattern() == &P("trot") && p.changing());  // the legs go home first
+  CHECK(&p.pattern() == &P("trot") && p.changing());
   int first = -1;
-  bool walk_lb = false, walk_pair = false;
+  bool walk_pair = false;
   for (int i = 0; i < 300; i++) {
     const TickPlan& k = p.next();
     if (&p.pattern() == &P("walk")) {
       if (first < 0) first = i;
-      walk_lb = walk_lb || k.lifting == (1 << LB);
-      walk_pair = walk_pair || k.n_lifting == 2;
+      walk_pair = walk_pair || k.lifting == ((1 << LB) | (1 << RF)) || k.lifting == ((1 << RB) | (1 << LF));
     }
   }
-  CHECK(walk_lb && !walk_pair);
-  CHECK(first >= 0 && first * 20 < 1500);  // the strides ramp down and each pair steps home
-  CHECK(p.s_cur()[0] == -32 && p.s_cur()[1] == 32);  // the direction carried over (the walk's 40 mm stride)
+  CHECK(walk_pair);
+  CHECK(first >= 0 && first * 20 < 600);  // directly (2026-11-16): the strides shorten, the next slot is the walk's
+  CHECK(near(p.s_cur()[0], -24, 1e-3) && near(p.s_cur()[1], 24, 1e-3));  // turning left, the walk's top stride
+  p.set_pattern(P("crawl"));  // into the crawl: the legs go home first, as before
+  int cf = -1;
+  bool home_ok = false, one = true;
+  for (int i = 0; i < 400; i++) {
+    const TickPlan& k = p.next();
+    if (&p.pattern() == &P("crawl")) {
+      if (cf < 0) {
+        cf = i;
+        home_ok = true;
+        for (int leg = 0; leg < 4; leg++) home_ok = home_ok && std::abs(k.x[leg]) <= 2;
+      }
+      one = one && k.n_lifting <= 1;
+    }
+  }
+  CHECK(cf >= 0 && home_ok && one);
 }
 
 void test_pattern_changes_one_after_another_stay_in_reach() {
@@ -390,13 +457,13 @@ void test_the_gate_pauses_the_feet() {
 }
 
 void test_the_stance_time_is_slewed() {
-  Planner& p = fresh("trot", 0, 90);
+  Planner& p = fresh("crawl", 0, 10);
   for (int i = 0; i < 100; i++) p.next();
   real before = p.stance_ticks();
-  p.set_speed(default_speed(P("trot")));  // faster: a shorter stance
+  p.set_speed(default_speed(P("crawl")));  // faster: a shorter stance
   p.next();
-  CHECK(near(p.stance_ticks(), before / 1.02, 1e-4));
-  for (int i = 0; i < 100; i++) p.next();
+  CHECK(near(p.stance_ticks(), before / 1.02, 1e-4 * before));
+  for (int i = 0; i < 200; i++) p.next();
   CHECK(near(p.stance_ticks(), p.stance_target(), 1e-4));
 }
 
@@ -416,12 +483,12 @@ void test_the_sent_attitude_stays_inside_feet_range() {
 }
 
 void test_the_lean_is_solved_during_the_swing_before() {
-  for (const char* name : {"walk", "crawl"}) {
+  for (const char* name : {"crawl"}) {
     Planner& p = fresh(name, 0);
     for (int i = 0; i < 1500; i++) p.next();
     CHECKF(p.stats().waits == 0, "%s: %u waits", name, p.stats().waits);
   }
-  Planner& p = fresh("walk", 0);
+  Planner& p = fresh("crawl", 0);
   for (int i = 0; i < 1500; i++) {
     if (i % 97 == 0) p.set_speed((real)(5 + (i % 7)));
     p.next();
@@ -430,7 +497,8 @@ void test_the_lean_is_solved_during_the_swing_before() {
 }
 
 void test_the_stop_comes_home_level() {
-  Planner& p = fresh("walk", 0);
+  for (const char* name : {"walk", "trot", "crawl"}) {
+  Planner& p = fresh(name, 0);
   for (int i = 0; i < 300; i++) p.next();
   p.stop();
   int n = 0;
@@ -442,10 +510,11 @@ void test_the_stop_comes_home_level() {
   CHECK(p.done() && n < 600);
   for (int i = 0; i < 4; i++) CHECK(std::abs(last.x[i]) <= 1 && std::fabs(last.z[i] - H) <= 1);
   CHECK(std::fabs(last.plan_roll) < 0.5 && std::fabs(last.plan_pitch) < 0.5 && last.support == 0xF);
+  }
 }
 
 void test_gate_holds_the_lift_and_catch_lands_the_foot() {
-  Planner& p = fresh("walk", 0);
+  Planner& p = fresh("crawl", 0);
   p.observe(0, 8);  // the body is 8 deg off the plan: no lift
   bool lifted = false;
   for (int i = 0; i < 40; i++) lifted = lifted || p.next().lifting;
@@ -461,13 +530,30 @@ void test_gate_holds_the_lift_and_catch_lands_the_foot() {
   CHECK(!down.lifting && down.support == 0xF);  // down in three ticks, where it was
 }
 
+void test_the_walk_catches_each_leg_of_a_couplet() {
+  Planner& p = fresh("walk", 0);
+  while (!p.has_last() || p.last().lifting != ((1 << LB) | (1 << RF))) p.next();
+  p.observe(0, 8);  // tipping left: toward LB, away from RF
+  TickPlan down = {};
+  for (int i = 0; i < 4; i++) down = p.next();
+  p.observe(0, 0);
+  CHECK(p.stats().catches == 1);
+  CHECK(!(down.lifting >> LB & 1) && (down.lifting >> RF & 1));  // LB down in three ticks, RF still swinging
+  std::vector<TickPlan> rest;
+  plan(&rest, p, 20);
+  bool next_pair = false;
+  for (const TickPlan& k : rest) next_pair = next_pair || k.lifting == (1 << RB);
+  CHECK(next_pair);
+  check_ticks(rest, "walk catch");
+}
+
 void test_a_heavier_side_shifts_the_lean() {
   BodyModel right = M;
   right.battery = {150, 0, -12, -15};
-  Planner& a = fresh("walk");
+  Planner& a = fresh("crawl");
   real ma = 1e9;
   for (int i = 0; i < 200; i++) ma = std::fmin(ma, a.next().plan_roll);
-  Planner& b = fresh("walk", 1000, -1, right);
+  Planner& b = fresh("crawl", 1000, -1, right);
   real mb = 1e9;
   for (int i = 0; i < 200; i++) mb = std::fmin(mb, b.next().plan_roll);
   CHECK(mb > ma);
@@ -512,12 +598,14 @@ int main() {
   test_stability_margin();
   test_pattern_tables_and_default_timing();
   test_timing_clamps();
-  test_walk_and_crawl_shift_covers_the_lean_move();
+  test_the_crawl_shift_covers_the_lean_move();
   test_side_strides_and_names();
   test_plan_fits_feet_and_the_slew();
+  test_every_speed_of_the_fast_gaits_stays_inside_the_slew();
+  test_the_walk_lifts_a_hind_leg_then_its_diagonal_fore_leg();
   test_the_lean_keeps_the_mass_inside_three_feet();
   test_trot_stays_level_on_diagonal_pairs();
-  test_prediction_is_the_plan_a_servo_lag_earlier();
+  test_prediction_is_the_plan_through_the_servos_response();
   test_speed_changes_mid_walk_are_smooth();
   test_direction_and_pattern_changes();
   test_pattern_changes_one_after_another_stay_in_reach();
@@ -527,6 +615,7 @@ int main() {
   test_the_lean_is_solved_during_the_swing_before();
   test_the_stop_comes_home_level();
   test_gate_holds_the_lift_and_catch_lands_the_foot();
+  test_the_walk_catches_each_leg_of_a_couplet();
   test_a_heavier_side_shifts_the_lean();
   test_error_offset_lag_and_spike();
   return report("planner");

@@ -235,53 +235,60 @@ the body with this checkout's firmware (kilo flash)`.
 a slot: first a *shift* (all four feet down while the body moves over the
 feet that will stay down), then the *swing* (the leg or pair in the air).
 So one cycle is `slots x (shift + swing)` and each foot is on the ground
-for the cycle less its swing. These tables live here now (they left
+for the cycle less its swing. In the walk the pair's second leg lifts
+60 ms after the first, which makes each slot 60 ms longer. These tables live here now (they left
 protocol/spec.toml with SET_GAIT; the code is `kilo/planner/patterns.py`):
 
 | pattern | lifts (in order) | swing | stride | step height | body height | cycle at the default speed | default speed | speed range |
 |---|---|---|---|---|---|---|---|---|
-| trot | LF+RB, RF+LB (diagonal pairs) | 150 ms | 35 mm | 8 mm | 205/256 of (L1 + L2) = 76 mm | 393 ms (shift 47) | 144 mm/s | 6..152 mm/s |
-| walk | LB, LF, RB, RF (one leg at a time) | 300 ms | 40 mm | 15 mm | 195/256 = 72 mm | 2550 ms (shift 338) | 17.8 mm/s | 2..21.5 mm/s |
-| crawl | LB, LF, RB, RF | 300 ms | 50 mm | 15 mm | 179/256 = 66 mm | 2550 ms (shift 338) | 22.2 mm/s | 2..26.9 mm/s |
+| trot | LF+RB, RF+LB (diagonal pairs) | 150 ms | up to 35 mm (27.4 by default) | 8 mm | 205/256 of (L1 + L2) = 76 mm | 340 ms at every speed (shift 20) | 144 mm/s | 42..184 mm/s |
+| walk | LB then RF 60 ms later, RB then LF (diagonal couplets) | 150 ms | up to 30 mm (24.8 by default) | 8 mm | 205/256 = 76 mm | 460 ms at every speed (shift 20) | 80 mm/s | 26..97 mm/s |
+| crawl | LB, LF, RB, RF (one leg at a time, with the lean) | 300 ms | 50 mm | 15 mm | 179/256 = 66 mm | 2550 ms (shift 338) | 22.2 mm/s | 2..26.9 mm/s |
 
 (Legs: LF left front, RF right front, RB right back, LB left back. L1 + L2
 = 45 + 50 mm, Kilo's measured legs; heights are from the shoulder axle to
 the centre of the foot disc, the floor is 6 mm lower.)
 
-Until 2026-11-15 every pattern was about 2.5 times slower (by default trot
-56, walk 11, crawl 10 mm/s; the walk's swing 500 ms): the owner found the
-walk and the crawl "placing the feet super delicately". The remote's
-slowest level is about those old defaults. What limits each top speed, as
-far as the virtual body can show (docs/walking-and-balance.md §11): the
-trot, the servos (its fastest joint near 425°/s in a 150 ms swing); the
-walk and the crawl, the body's move over the next three feet before each
-lift (a side may drop no faster than gravity lets it), the legs' reach (the
-walk) and the servos.
+Since 2026-11-16 (docs/walking-and-balance.md §12) the walk is a new
+gait: a diagonal pair at a time like the trot, but the hind leg lifts
+60 ms before its diagonal fore leg, so the feet land in four beats and the
+body stands on three feet, then two, then three in each swing. It does not
+lean first: it is the gait for 30 to 100 mm/s. The crawl is the careful
+gait, statically stable, one leg at a time with the lean (below). Before,
+the walk was the crawl's sequence at 9 to 21.5 mm/s and the trot ran 6 to
+152 mm/s. What limits each top speed, as far as the virtual body can show:
+the walk and the trot, the servos (the fastest joint at 365 and 414°/s at
+their tops, under the body's 500°/s slew; the floor runs of 2026-11-15 asked
+414 and kept up); the crawl, the body's move over the next three feet
+before each lift (a side may drop no faster than gravity lets it).
 
-**Speed** (docs/walking-and-balance.md §2, §3): the swing time is fixed per
-pattern (short enough that the body does not tip far while a leg is up,
-long enough for the servos: every swing's fastest joint stays under about
-425°/s, under the body's 500°/s (10° per tick) safety slew);
-the speed sets the stride and the time a foot is on the ground: ground time
-= stride / speed, and the shift takes up the rest of the slot. Slower than
-the longest ground time allows (trot 1327 ms, walk and crawl 4000 ms) the
-stride shrinks, down to 8 mm; faster than the default stride at the
-shortest shift allows, the speed is capped. The shortest shift: the trot's
-40 ms (two ticks on four feet); the walk's and crawl's 240 ms (the body's
-typical 300 ms move over the next three feet, the lift starting 60 ms
-before that move ends; a move that needs longer makes its slot longer).
-The speed can change at any tick while walking (the stride moves at most
-0.5 mm per tick toward the new one and the time a foot is on the ground at
-most 2 % per tick, each slot's shift following it, so nothing jumps); a
-direction change does the same. A pattern change goes through the legs'
-way home: the strides go to 0 and each leg steps under its shoulder as for
-a stop, then the new pattern starts from its first lift as a walk starts
-(up to ~5 s out of the walk or the crawl, ~1.6 s out of the trot); a
+**Speed** (docs/walking-and-balance.md §2, §3, §12): the swing time is
+fixed per pattern (short enough that the body does not tip far while a leg
+is up, long enough for the servos). The walk and the trot have a fixed
+cadence: one tick on four feet at every speed, the speed sets the stride
+alone (8 mm at the slowest). That keeps the body's balance loop out of
+them: it corrects only on four feet and holds for two ticks after a
+touchdown, so with one tick on four feet it never acts; with four to eight
+ticks it caught the tip of one diagonal and pushed it into the next (the
+mid-speed rocking of §11). The crawl: the speed sets the stride and the
+time a foot is on the ground (ground time = stride / speed, the shift
+takes up the rest of the slot); slower than its longest ground time (4000
+ms) the stride shrinks, down to 8 mm; faster than its stride at the
+shortest shift allows (240 ms: the body's typical 300 ms move over the
+next three feet, the lift starting 60 ms before that move ends), the speed
+is capped. The speed can change at any tick while walking (the stride
+moves at most 0.5 mm per tick toward the new one and the crawl's ground
+time at most 2 % per tick, so nothing jumps); a direction change does the
+same. A change between the walk and the trot takes over at the next slot
+once the strides fit the new gait (under a second); a change into or out
+of the crawl goes through the legs' way home: the strides go to 0 and each
+leg steps under its shoulder as for a stop, then the new pattern starts
+from its first lift (up to ~5 s out of the crawl, ~1.5 s into it); a
 second change meanwhile only changes where it goes.
-A turn in place moves each side 0.8 of the stride (28 mm per side in the
+A turn in place moves each side 0.8 of the stride (22 mm per side in the
 trot at its default speed, less at a lower speed).
 
-**The lean** (walk and crawl). On three feet the body stands on a triangle
+**The lean** (the crawl). On three feet the body stands on a triangle
 whose long edge runs right under its middle, so a leg that lifts leaves
 the centre of mass on that edge: the body tips toward the lifted leg (the
 floor run without the balance rocked 15° per step). So before every lift
@@ -296,8 +303,9 @@ a side the body drops is lowered no faster than gravity can follow. The
 search for that move is spread over the swing before it (a few pieces a
 tick), so no 20 ms tick carries all of it; after a change mid-swing it is
 redone at the slot's start while the plan waits a few ticks. The
-trot does not lean: on a diagonal pair there is no triangle to lean into,
-so its two-foot phase stays short (150 ms).
+trot and the walk do not lean: on a diagonal pair there is no triangle to
+lean into, so their time off four feet stays short (the trot 150 ms on two
+feet; the walk 90 ms on two and 60 ms either side on three).
 
 **From what the body reports.** Every tick the planner gets the body's
 error (measured minus predicted attitude, less the steady offset). A leg
@@ -498,20 +506,21 @@ and the mind kernel does the same (`kernel/mind/remote/`, a port of
 
 **The gait and turn keys make Kilo walk: use the remote with Kilo on the
 floor only, never on a desk.** The remote keeps a gait (trot at start), a
-speed level and a heading. Levels +1 to +5 walk forward at 0.4, 0.7, 1, 1.1
-and 1.2 × the gait's default speed, −1 to −5 backward at the same factors;
+speed level and a heading. Levels +1 to +5 walk forward at 0.4, 0.7, 1, 1.15
+and 1.25 × the gait's default speed, −1 to −5 backward at the same factors;
 there is no level 0, so from +1 B5 goes to −1 (backward at 0.4×), and from
 −1 B7 goes to +1. B7 stops at +5, B5 at −5; while turning they change only
 the magnitude (1 to 5). The speeds are clamped like `kilo walk --speed`
-(the trot's 1.1× and 1.2× are both its 152 mm/s cap), and the log line
-shows the real speed. In mm/s, levels 1 to 5: trot 57.6, 100.8, 144, 152,
-152; walk 7.1, 12.4, 17.8, 19.6, 21.3; crawl 8.9, 15.6, 22.2, 24.4, 26.7
-(level 1 is about the old default). B7 and B5 while not walking do
-nothing.
+(the crawl's 1.25× is its 26.9 mm/s cap), and the log line shows the real
+speed. In mm/s, levels 1 to 5: crawl 8.9, 15.6, 22.2, 25.6, 26.9; walk 32,
+56, 80, 92, 97; trot 57.6, 100.8, 144, 165.6, 180 (since 2026-11-16; before,
+1.1× and 1.2× with the walk at 7 to 21 and the trot capped at 152). B7 and
+B5 while not walking do nothing.
 
 A gait key while standing walks forward in that gait at +3 (1×). While
-walking it changes the gait (after every leg has stepped home, up to ~5.5 s
-out of the walk), keeping the level and the heading; the gait already in use
+walking it changes the gait (between the walk and the trot at the next
+step, under a second; into or out of the crawl after every leg has stepped
+home, up to ~5 s out of the crawl), keeping the level and the heading; the gait already in use
 brings Kilo back to straight forward at the current magnitude (from a turn
 or from backward), and does nothing when he already walks straight forward.
 Every stop (B6, A7, C5, C7, a walk that ended by itself) puts the level back
@@ -1250,10 +1259,11 @@ op's allow-list; `test_req_lock.py` measures the link's one request in flight
 speed mapping, the planned steps: margins, slew, lead, prediction, speed /
 direction / pattern changes, the stop, the gate and the catch; the error
 estimates), `test_walk_sim.py` (the planner's stream on the virtual body's
-physics, tick by tick through `tests/walksim.py`: the planned walk and
-crawl stay on their plan, the same steps without the lean tip over the
-edge every swing and the balance loop makes that worse, the trot stays up,
-changes mid-walk, a 60 ms stall caught up, a long one underrunning and
+physics, tick by tick through `tests/walksim.py`: the planned crawl stays
+on its plan, the same steps without the lean tip over the edge every swing
+and the balance loop makes that worse, the walk and the trot stay up at
+every level with each model error and the trot no longer rocks at mid
+speeds, speed and gait changes mid-walk, a 60 ms stall caught up, a long one underrunning and
 settling, the planned stop, the attitude's signs, a slower servo and a
 tilted IMU found by the estimates), `test_feet.py` (the virtual body's FEET
 contract), `test_walker.py` (the body clock, the stream's ends, FEET past

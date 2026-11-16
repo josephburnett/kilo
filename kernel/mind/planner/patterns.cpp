@@ -4,12 +4,13 @@
 namespace kilo {
 namespace planner {
 
-// Walk and crawl lift LB, LF, RB, RF (the lateral sequence); the trot the
-// diagonal pairs LF+RB, RF+LB. Values (and why) as in patterns.py's PATTERNS.
+// The walk lifts LB then RF 60 ms later, then RB and LF (diagonal couplets);
+// the trot the diagonal pairs LF+RB, RF+LB; the crawl LB, LF, RB, RF one at
+// a time with the lean. Values (and why) as in patterns.py's PATTERNS.
 const Pattern kPatternTable[kPatterns] = {
-    {"walk", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 300, 40, 15, 195, 2550, 0, 4000, true},
-    {"trot", 2, 2, {{LF, RB}, {RF, LB}, {0, 0}, {0, 0}}, 150, 35, 8, 205, 393, 40, 1327, false},
-    {"crawl", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 300, 50, 15, 179, 2550, 0, 4000, true},
+    {"walk", 2, 2, {{LB, RF}, {RB, LF}, {0, 0}, {0, 0}}, 150, 30, 8, 205, 460, 20, 310, false, 60, 80},
+    {"trot", 2, 2, {{LF, RB}, {RF, LB}, {0, 0}, {0, 0}}, 150, 35, 8, 205, 340, 20, 190, false, 0, 144},
+    {"crawl", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 300, 50, 15, 179, 2550, 0, 4000, true, 0, -1},
 };
 
 const Pattern& default_pattern() { return kPatternTable[1]; }
@@ -52,15 +53,19 @@ real shift_min_ms(const Pattern& p) {
 
 static void stance_limits(const Pattern& p, real* lo, real* hi) {
   real n = p.n_groups;
-  *lo = n * (shift_min_ms(p) + p.swing_ms) - p.swing_ms;
+  *lo = n * (shift_min_ms(p) + p.span_ms()) - p.swing_ms;
   *hi = m_max(*lo, p.stance_max_ms);
 }
 
-real default_speed(const Pattern& p) { return p.stride_mm / (p.period_ms - p.swing_ms) * (real)1000.0; }
+real default_speed(const Pattern& p) {
+  if (p.default_mm_s >= 0) return p.default_mm_s;
+  return p.stride_mm / (p.period_ms - p.swing_ms) * (real)1000.0;
+}
 
 void speed_range(const Pattern& p, real* lo, real* hi) {
   real st_lo, st_hi;
   stance_limits(p, &st_lo, &st_hi);
+  if (fixed_cadence(p)) st_hi = st_lo;
   *lo = kStrideMinMm / st_hi * (real)1000.0;
   *hi = p.stride_mm / st_lo * (real)1000.0;
 }
@@ -70,15 +75,21 @@ Timing timing(const Pattern& p, real speed_mm_s) {
   real st_lo, st_hi;
   stance_limits(p, &st_lo, &st_hi);
   real v = m_fabs(speed_mm_s);
-  real stride = p.stride_mm;
-  real stance = v > 0 ? stride / v * (real)1000.0 : m_inf();
-  if (stance > st_hi) {
-    stance = st_hi;
-    stride = m_max(kStrideMinMm, v * st_hi / (real)1000.0);
+  real stride, stance;
+  if (fixed_cadence(p)) {
+    stance = st_lo;
+    stride = m_min(p.stride_mm, m_max(kStrideMinMm, v * stance / (real)1000.0));
+  } else {
+    stride = p.stride_mm;
+    stance = v > 0 ? stride / v * (real)1000.0 : m_inf();
+    if (stance > st_hi) {
+      stance = st_hi;
+      stride = m_max(kStrideMinMm, v * st_hi / (real)1000.0);
+    }
+    stance = m_max(stance, st_lo);
   }
-  stance = m_max(stance, st_lo);
   real period = stance + p.swing_ms;
-  return {stride, period / n - p.swing_ms, stance, period, stride / stance * (real)1000.0};
+  return {stride, period / n - p.span_ms(), stance, period, stride / stance * (real)1000.0};
 }
 
 Timing default_timing(const Pattern& p) { return timing(p, default_speed(p)); }

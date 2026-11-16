@@ -264,7 +264,9 @@ void Planner::start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tic
   tick_ = tick;
   lag_ = model_.lag_ticks(kTickMs);
   lead_ = round_i(kLeanLeadMs / kTickMs);
-  settle_ = ceil_i(lag_ - (real)1e-9);
+  settle_ = model_.settle_ticks(kTickMs);
+  alpha_ = model_.response_alpha(kTickMs);
+  resp_ = {0, 0};
   pattern_ = &p;
   direction_ = d;
   speed_mm_s_ = speed_mm_s < 0 ? default_speed(p) : speed_mm_s;
@@ -307,7 +309,7 @@ void Planner::start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tic
 int Planner::shift_for(real stance) const {
   real n = pattern_->n_groups;
   real w = pattern_->swing_ms;
-  int st = round_i(((stance * kTickMs + w) / n - w) / kTickMs);
+  int st = round_i(((stance * kTickMs + w) / n - pattern_->span_ms()) / kTickMs);
   return st > 0 ? st : 0;
 }
 
@@ -316,13 +318,61 @@ int Planner::swing_ticks() const {
   return w > 2 ? w : 2;
 }
 
+int Planner::couple_ticks() const { return round_i(pattern_->couple_ms / kTickMs); }
+
+int Planner::span() const { return swing_ticks() + couple_ticks() * (pattern_->group_size - 1); }
+
+int Planner::offset(int leg) const {
+  int i = pattern_->index_in_group(k_, leg);
+  return (i > 0 ? i : 0) * couple_ticks();
+}
+
+bool Planner::direct_change() const {
+  return pending_ != nullptr && fixed_cadence(*pending_) && fixed_cadence(*pattern_);
+}
+
+// plan.py _switch_ok: the strides no longer than the new pattern walks at
+// this speed (+ a tick's slew), every foot within its half stride (+
+// kSwitchSlackMm) of its shoulder, the body at its height.
+bool Planner::switch_ok(const Pattern& p) const {
+  real st = planner::timing(p, speed_mm_s_).stride_mm;
+  for (int i = 0; i < 2; i++)
+    if (!(m_fabs(s_cur_[i]) <= st + kStrideSlewMm)) return false;
+  for (int leg = 0; leg < kLegs; leg++)
+    if (!(m_fabs(xg_[leg]) <= st / 2 + kSwitchSlackMm)) return false;
+  return m_fabs(h_ - model_.stance_height(p.body_h_256)) <= kHeightSlewMm;
+}
+
+// plan.py _first_group: the group whose feet are furthest behind.
+int Planner::first_group() const {
+  int best = 0;
+  real score = -m_inf();
+  for (int k = 0; k < pattern_->n_groups; k++) {
+    real sc = -m_inf();
+    for (int i = 0; i < pattern_->group_size; i++) {
+      int leg = pattern_->groups[k][i];
+      real s = s_cur_[kLeft[leg] ? 0 : 1];
+      real v = m_fabs(s) < (real)0.05 ? m_fabs(xg_[leg]) : (s > 0 ? -xg_[leg] : xg_[leg]);
+      sc = m_max(sc, v);
+    }
+    if (sc > score + (real)1e-9) {
+      best = k;
+      score = sc;
+    }
+  }
+  return best;
+}
+
 void Planner::apply_timing() {
   Timing tm = timing();
   real shift = cfg_.fixed_shift ? cfg_.shift_ms : tm.shift_ms;
   real n = pattern_->n_groups;
-  stance_tgt_ = (n * (shift + pattern_->swing_ms) - pattern_->swing_ms) / kTickMs;
-  if (stopping_ || pending_ != nullptr) {
+  stance_tgt_ = (n * (shift + pattern_->span_ms()) - pattern_->swing_ms) / kTickMs;
+  if (stopping_ || (pending_ != nullptr && !direct_change())) {
     s_tgt_[0] = s_tgt_[1] = 0;
+  } else if (pending_ != nullptr) {  // changing directly: no stride longer than the new pattern's
+    real nw = planner::timing(*pending_, speed_mm_s_).stride_mm;
+    side_strides(direction_, m_min(tm.stride_mm, nw), s_tgt_);
   } else {
     side_strides(direction_, tm.stride_mm, s_tgt_);
   }
@@ -374,7 +424,12 @@ bool Planner::home() const {
 
 void Planner::start_slot() {
   has_job_ = false;
-  if (pending_ != nullptr && home()) {
+  if (pending_ != nullptr && direct_change() && switch_ok(*pending_)) {
+    pattern_ = pending_;
+    pending_ = nullptr;
+    apply_timing();
+    k_ = first_group() - 1;
+  } else if (pending_ != nullptr && home()) {
     // every foot is home and still: the new pattern starts from its first group
     pattern_ = pending_;
     pending_ = nullptr;
@@ -382,12 +437,12 @@ void Planner::start_slot() {
     apply_timing();
     stance_ticks_ = stance_tgt_;
   }
-  k_ = (k_ + 1) % pattern_->n_groups;
+  k_ = (k_ + 1 + pattern_->n_groups) % pattern_->n_groups;
   t_ = 0;
   held_ = 0;
   for (int leg = 0; leg < kLegs; leg++) caught_[leg] = false;
   skip_ = false;
-  if (stopping_ || changing()) {
+  if (stopping_ || (changing() && !direct_change())) {
     skip_ = true;
     for (int leg = 0; leg < kLegs; leg++)
       if (pattern_->in_group(k_, leg) &&
@@ -452,6 +507,7 @@ void Planner::slewed(real s[2], real* stance, real* h) const {
 
 real Planner::height_target() const {
   if (finishing_) return model_.stance_height(205);
+  if (direct_change()) return model_.stance_height(pending_->body_h_256);  // to the new pattern's height first
   return model_.stance_height(pattern_->body_h_256);
 }
 
@@ -538,19 +594,25 @@ void Planner::apply_job(const LeanJob& job) {
 // if nothing changes (the same arithmetic as next()).
 void Planner::predict_slot_end(real xg[kLegs], real s[2], real* st, real* h) const {
   int W = swing_ticks();
-  for (int i = 0; i < kLegs; i++) xg[i] = xg_[i];
+  real x0[kLegs];
+  for (int i = 0; i < kLegs; i++) {
+    xg[i] = xg_[i];
+    x0[i] = swing_[i];
+  }
   s[0] = s_cur_[0];
   s[1] = s_cur_[1];
   *st = stance_ticks_;
   *h = h_;
-  for (int t = t_; t < S_ + W; t++) {
+  const int end = S_ + span();
+  for (int t = t_; t < end; t++) {
     slewed(s, st, h);
-    real sw = smooth((real)(t - S_ + 1) / (real)W);
     for (int leg = 0; leg < kLegs; leg++) {
       int side = kLeft[leg] ? 0 : 1;
-      if (pattern_->in_group(k_, leg)) {
-        real x0 = swing_[leg];
-        xg[leg] = x0 + (s[side] / (real)2.0 - x0) * sw;
+      bool in = pattern_->in_group(k_, leg);
+      int j = t - S_ - (in ? offset(leg) : 0) + 1;
+      if (in && j >= 1 && j <= W) {
+        if (j == 1) x0[leg] = xg[leg];
+        xg[leg] = x0[leg] + (s[side] / (real)2.0 - x0[leg]) * smooth((real)j / (real)W);
       } else {
         xg[leg] -= s[side] / *st;
       }
@@ -561,7 +623,7 @@ void Planner::predict_slot_end(real xg[kLegs], real s[2], real* st, real* h) con
 const TickPlan& Planner::next() {
   const PlannerConfig& cfg = cfg_;
   const int W = swing_ticks();
-  if (t_ >= S_ + W || (skip_ && t_ >= S_) || (finishing_ && t_ >= S_)) {
+  if (t_ >= S_ + span() || (skip_ && t_ >= S_) || (finishing_ && t_ >= S_)) {
     if (finishing_) done_ = true;
     else start_slot();
   }
@@ -596,41 +658,52 @@ const TickPlan& Planner::next() {
       for (int leg = 0; leg < kLegs; leg++) xg_[leg] -= side_speed(leg);
     } else {
       swinging = true;
-      int j = t_ - S_ + 1;  // 1..swing
-      real s = (real)j / (real)W;
-      if (j == 1)
-        for (int leg = 0; leg < kLegs; leg++) swing_[leg] = xg_[leg];  // where the feet leave the ground
-      for (int leg = 0; leg < kLegs; leg++)
-        if (!pattern_->in_group(k, leg)) xg_[leg] -= side_speed(leg);
+      // each leg of the group swings W ticks from its own lift (the second
+      // couple_ticks() after the first); before its lift and after its
+      // touchdown it slides with the ground
+      int js[kLegs];
+      for (int leg = 0; leg < kLegs; leg++) js[leg] = t_ - S_ - offset(leg) + 1;  // 1..W while it swings
       for (int leg = 0; leg < kLegs; leg++) {
-        if (!pattern_->in_group(k, leg) || caught_[leg]) continue;
-        if (tip_toward(leg) > cfg.catch_deg && j < W) {
+        bool in = pattern_->in_group(k, leg);
+        if (in && !caught_[leg] && js[leg] >= 1 && js[leg] <= W) continue;
+        if (in && caught_[leg] && t_ - S_ - caught_j_[leg] < 3) continue;  // a caught foot lands where it is
+        xg_[leg] -= side_speed(leg);
+      }
+      for (int i = 0; i < pattern_->group_size; i++) {
+        int leg = pattern_->groups[k][i];
+        int j = js[leg];
+        if (caught_[leg] || !(j >= 1 && j < W)) continue;
+        if (tip_toward(leg) > cfg.catch_deg) {
           caught_[leg] = true;
-          caught_j_[leg] = j - 1;
+          caught_j_[leg] = t_ - S_;
           caught_lift_[leg] = pattern_->step_h_mm * ((real)1.0 - m_cos(2 * kPi * (real)(j - 1) / (real)W)) / 2;
           stats_.catches++;
           has_next_ = false;  // it lands elsewhere: the next slot's lean is solved when it starts
         }
       }
       bool any_caught = false;
-      for (int leg = 0; leg < kLegs; leg++) {
-        if (!pattern_->in_group(k, leg)) continue;
+      for (int i = 0; i < pattern_->group_size; i++) {
+        int leg = pattern_->groups[k][i];
+        int j = js[leg];
         if (caught_[leg]) {
           any_caught = true;
-          int kk = j - caught_j_[leg];
-          lift[leg] = caught_lift_[leg] * ((real)1.0 - smooth((real)kk / (real)3.0));
-        } else {
+          lift[leg] = caught_lift_[leg] * ((real)1.0 - smooth((real)(t_ - S_ - caught_j_[leg] + 1) / (real)3.0));
+        } else if (j >= 1 && j <= W) {
+          if (j == 1) swing_[leg] = xg_[leg];  // where the foot leaves the ground
           real x0 = swing_[leg];
-          xg_[leg] = x0 + (target_x(leg) - x0) * smooth(s);
-          lift[leg] = pattern_->step_h_mm * ((real)1.0 - m_cos(2 * kPi * s)) / 2;
+          real sj = (real)j / (real)W;
+          xg_[leg] = x0 + (target_x(leg) - x0) * smooth(sj);
+          lift[leg] = pattern_->step_h_mm * ((real)1.0 - m_cos(2 * kPi * sj)) / 2;
         }
       }
       if (any_caught) {
         bool all_down = true;
-        for (int leg = 0; leg < kLegs; leg++)
-          if (pattern_->in_group(k, leg) && !(lift[leg] < (real)1e-6)) all_down = false;
+        for (int i = 0; i < pattern_->group_size; i++) {
+          int leg = pattern_->groups[k][i];
+          if (!(lift[leg] < (real)1e-6) || !(caught_[leg] || js[leg] >= 1)) all_down = false;
+        }
         if (all_down) {
-          t_ = S_ + W;  // every caught foot is down: the slot is over
+          t_ = S_ + span();  // every caught foot is down and no other is still to lift
           for (int leg = 0; leg < kLegs; leg++)
             if (pattern_->in_group(k, leg)) lift[leg] = 0;
         }
@@ -666,8 +739,11 @@ const TickPlan& Planner::next() {
   prev_att_ = att;
   for (int i = 0; i + 1 < hist_n_; i++) att_hist_[i] = att_hist_[i + 1];
   att_hist_[hist_n_ - 1] = att;
-  real pp, pr;
-  lagged(&pp, &pr);
+  real lp, lr;
+  lagged(&lp, &lr);
+  resp_.pitch = resp_.pitch + (lp - resp_.pitch) * alpha_;
+  resp_.roll = resp_.roll + (lr - resp_.roll) * alpha_;
+  real pp = resp_.pitch, pr = resp_.roll;
   pp = m_min(kAttMaxDeg, m_max(-kAttMaxDeg, pp));
   pr = m_min(kAttMaxDeg, m_max(-kAttMaxDeg, pr));
   real m = stability(model_, xi, zi, support, att.pitch, att.roll);
@@ -700,7 +776,7 @@ const TickPlan& Planner::next() {
   return out;
 }
 
-// The planned attitude a servo lag ago (linear between ticks).
+// The planned attitude the servos' dead time ago (linear between ticks).
 void Planner::lagged(real* pitch, real* roll) const {
   int n = hist_n_ - 1;  // att_hist_[n] is this tick
   int i = floor_i(lag_);

@@ -422,6 +422,10 @@ next test.
 
 ## 11. Faster gaits (2026-11-15)
 
+*Since 2026-11-16 the walk is a different gait, the walk and the trot have
+a fixed cadence and the planner's servo model is a dead time and a lag
+(§12). What follows is the state of 2026-11-15.*
+
 The owner, after the first planned walks on the floor: "Walk and crawl are
 too slow. Placing the feet super delicately." The gaits were retuned in the
 virtual body (tests/walksim.py) and the defaults raised about 2.5 times:
@@ -480,3 +484,355 @@ under load, and on three or four feet the body follows the legs exactly
 under load and their lag were never measured; a slower servo would show as
 error at the lift (the gate holds) and as catches.
 
+## 12. Walking faster, from the first recordings (2026-11-16)
+
+The owner, after run 4 (docs/fast-boot-first-boot-results.md): "The trot was
+better. Could try faster. Cats can definitely walk faster than that." The
+walk and the crawl of §11 lean the whole body over three feet before every
+lift, about 17° from side to side, which caps them at 21 to 27 mm/s and
+looks careful rather than like walking.
+
+What changed, in short:
+
+| gait | before (2026-11-15) | now |
+|---|---|---|
+| crawl | one leg at a time with the lean, 2..26.9 mm/s, default 22.2 | the same gait, the careful one; only the prediction changed |
+| walk | the crawl's sequence with the lean, 2..21.5 mm/s, default 17.8 | a new gait: diagonal pairs, the hind leg 60 ms ahead of its fore leg, no lean, 26..97 mm/s, default 80 |
+| trot | diagonal pairs, 6..152 mm/s, default 144, rocks at 75..140 | the same pairs at a fixed cadence (one tick on four feet), 42..184 mm/s, default 144, no rocking band |
+
+The remote's levels (× the gait's default) are now 0.4, 0.7, 1, 1.15, 1.25
+(were 0.4, 0.7, 1, 1.1, 1.2). In mm/s:
+
+| level | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| crawl, before | 8.9 | 15.6 | 22.2 | 24.4 | 26.7 |
+| crawl, now | 8.9 | 15.6 | 22.2 | 25.6 | 26.9 (its top) |
+| walk, before | 7.1 | 12.4 | 17.8 | 19.6 | 21.3 |
+| walk, now | 32 | 56 | 80 | 92 | 97 (its top) |
+| trot, before | 57.6 | 100.8 | 144 | 152 (capped) | 152 (capped) |
+| trot, now | 57.6 | 100.8 | 144 | 165.6 | 180 |
+
+So the ladder goes up from slow: crawl 9 to 27, walk 32 to 97, trot 58 to
+180 mm/s. A change between the walk and the trot now takes under a second
+(before, every leg stepped home first: up to 5.5 s out of the walk; the
+owner waited about 7 s for the trot in walk 1 of run 4).
+
+### 12.1 How cats and small robots walk (the research)
+
+**[E]** marks what is established (peer-reviewed or a textbook), **[L]**
+hobby lore or a single source I could not check.
+
+- **The cat's walk** [E]: about 0.72 m/s; a cycle of 0.71 s (1.4 Hz);
+  swing 0.25 to 0.29 s; duty factor (the fraction of the cycle a foot is
+  down) 0.60 to 0.64. Klishko et al. 2014, J Neurophysiol 112:1376,
+  https://pmc.ncbi.nlm.nih.gov/articles/PMC4137248/ . Cats walk in the
+  lateral sequence (a hind foot, then the fore foot on the same side), the
+  footfalls often about evenly spaced, and change to a trot near 1 m/s,
+  Froude number 0.5 (Fr = v² / g L, L the leg length): Bishop, Pai &
+  Schmitt 2008, PLoS ONE 3:e3808. As speed rises the stance shortens and
+  the swing stays about the same (Goslow, Reinking & Stuart 1973, J Morphol
+  141:1, as cited by others; not read in the original).
+- **Dynamic similarity** [E]: animals of different sizes at the same Froude
+  number use similar duty factors and relative strides (Alexander & Jayes
+  1983, J Zool 201:135; full text not read). For Kilo, L ≈ 0.08 m, the
+  cat's walk (Fr ≈ 0.26) would be 0.45 m/s with a 0.44 s cycle and a 0.18 s
+  swing. Kilo's servos cannot do that (below); the point is that a cat-like
+  walk is quick and short-cycled, not a slow lean-first crawl.
+- **Static stability** [E]: only the crawl in the lateral sequence with a
+  duty factor of at least 0.75 keeps the centre of mass inside the support
+  at every instant (McGhee & Frank 1968, Math Biosci; the stability margin
+  is the distance from the centre of mass to the support polygon's edge).
+  Any walk with a duty factor under 0.75, the cat's 0.6 included, balances
+  dynamically. Hildebrand (1965, Science 150:701; 1980, Am Zool 20:255)
+  puts all symmetrical gaits on one map, by how far the fore foot lags the
+  hind foot of the same side: 0 % a pace, 25 % evenly spaced, 25 to 50 % a
+  walk with diagonal couplets (a "trot-walk"), 50 % the trot, over 50 % a
+  diagonal sequence (as primates walk).
+- **Dynamic criteria** [E]: the zero-moment point (Vukobratović & Borovac
+  2004, Int J Humanoid Robotics 1:157; cited from memory, not fetched) and
+  the capture point, x + ẋ √(h/g) (Pratt et al. 2006, Humanoids). For h =
+  80 mm, √(h/g) = 90 ms: a body moving sideways at 0.1 m/s needs its
+  support 9 mm further out. Hirose's group keeps the zero-moment point on
+  the diagonal line in a trot by swaying the body, and blends a crawl into
+  a trot with four-foot phases as speed rises (Kurazume, Yoneda & Hirose,
+  ICRA 2001, https://robotics.ait.kyushu-u.ac.jp/kurazume/en/papers/ICRA01.pdf).
+  LittleDog's slow crawl plans the zero-moment point first and the centre
+  of mass from it (Byl et al. 2009). Kilo can sway sideways only by rolling
+  (its legs move only fore and aft), which is what the old lean did, slowly.
+- **Petoi's own gaits** [my reading of the source, a rough method]:
+  OpenCat's `src/InstinctBittle.h` (https://github.com/PetoiCamp/OpenCat):
+  Bittle's `wkF` (walk) is 39 frames, duty about 0.62 to 0.67, lateral
+  sequence, the fore foot lagging its hind foot by about 0.43 of the cycle:
+  a walk with diagonal couplets, close to a trot. `trF` is a walking trot
+  of duty about 0.6. Nybble's `wkF` swings the diagonal pairs almost
+  together. Petoi's walk is not statically stable either.
+- **Speeds** [L]: Petoi's FAQ gives "2 body lengths per second, or 40 mm/s"
+  as a safe speed (the two figures disagree), and 3 to 4 body lengths per
+  second in an unreleased mode. I found no independent measured speed for
+  Nybble or Bittle. Stanford Pupper's trot settings: 0.15 s swings, 0.1 s
+  four-foot overlaps, duty 0.7 (settings, not measurements).
+- **Servos** [vendor sheets]: an MG90S is rated 0.1 s per 60° (600°/s) at
+  4.8 V with no load; under load the speed falls roughly in proportion to
+  the torque. Petoi quotes about 860°/s for its own servos [L]. Kilo's body
+  slews a joint at most 500°/s (10° a tick); the floor runs asked up to
+  414°/s.
+
+### 12.2 The virtual body against the recordings
+
+**How.** Each recording holds every FEET sent and every TELEMETRY. The
+recorded FEET were fed tick by tick through the virtual body (its FEET
+player and physics) two ways: with the body's own recorded corrections in
+place of the virtual balance loop (this tests the physics alone), and with
+the virtual balance loop running (physics and loop together). The
+measured attitude was compared with the virtual one, the constant pitch
+offset removed. The tool: `mind/tests/walkreplay.py`.
+
+Roll rms, measured minus virtual (degrees):
+
+| servo model in the virtual body | walk 3 (walk, crawl), recorded corrections | walk 3, virtual loop | walk 1 (crawl, walk, trot), virtual loop | walk 2 (trot turning), virtual loop |
+|---|---|---|---|---|
+| none: the plan's own prediction | 2.92 | 2.92 | 2.58 | 2.09 |
+| before: a pure 150 ms delay | 1.73 | 2.39 | 2.18 | 1.67 |
+| the best pure delay, 140 ms | 1.55 | 2.26 | 2.10 | 1.57 |
+| **now: a 50 ms dead time, then a 70 ms first-order lag** | **1.22** | **1.34** | **1.52** | 1.98 |
+
+A grid of dead times from 40 to 140 ms and time constants from 0 to 100 ms
+put the best fit at 40 to 60 ms and 60 to 80 ms; the mean delay is then
+about 120 ms (the cross-correlation's 140 ms is its peak, not where the
+motion starts). Pitch rms is 0.4 to 0.9° in every case. The body model
+(`servo_lag_ms` 50, `servo_tau_ms` 70), the virtual body's physics and the
+prediction sent with FEET all use it now.
+
+**The extra roll toward a lifted hind leg** (2.4 to 2.9° in the
+recordings) turned out to be the body's own balance correction. In each
+big lean move (from about -12° to +6° before RB, and the mirror before
+LB) the measured roll started moving about 100 ms after the command,
+ahead of the pure 150 ms prediction, by up to 3°. That passed the loop's
+2° dead band, so the loop built a correction of 4 to 5° against the move
+during the four-foot shift, then held it, as it does whenever a foot is
+up, through the hind leg's swing: the body stood about 4° short of its
+planned lean, toward the lifted leg. With the recorded corrections
+replayed, the virtual body reproduces it (the mean residual with LB up
+-0.8°, with RB up +0.8°, against +2.4° and -2.9° for the plan); with the
+fitted servo model and its own loop, too (+0.6°, -0.7°). It is not servo
+sag, the centre of mass or the foot contact. The fore legs show less of it
+because the moves before them are smaller. The new prediction follows the
+servos' fitted response, so the error during the moves should stay inside
+the dead band and the correction should not build. In the virtual body
+(the crawl, the fitted physics, old against new prediction): roll rms 1.35
+→ 1.09° forward and 2.60 → 1.82° backward; largest error 3.8 → 3.3° and
+6.1 → 4.4°. On the recorded data alone (the measured roll against the old
+and the new prediction of the same plans) the gain is small, 2.56 → 2.46°
+and 2.90 → 2.74°, because those recordings already contain the
+corrections the old prediction caused; the floor has to show the rest.
+
+**The pitch offset** (+1.7 to +2.0° measured, nose down) is about 2.6 to
+2.9° once the body's own mean pitch correction (-1 to -1.3°) is counted.
+On four feet the attitude is set by the legs alone, so a centre of mass
+further forward cannot cause it. It is either the IMU mounted nose down or
+the front legs standing about 3 mm shorter than commanded (calibration, or
+sag under the 56 % of the weight they carry). These recordings cannot tell
+the two apart (a check is in §12.6).
+
+**The trot's rocking is not identified.** On the floor the trot rocks ±4
+to 5° at the stride frequency (roll rms 1.4° forward, 2.1° turning),
+tipping during each diagonal stance toward the fore leg in the air: the
+direction the centre of mass predicts (7.5 mm ahead of the middle, 3.5 mm
+from each diagonal). The virtual body rocks 0.6 to 1.1°: it underestimates
+two-foot tipping about twice. A centre of mass 10 mm further forward
+reproduces the turning recording's amplitude but makes the forward one
+worse; changing its height does not help. Turning in place makes the feet
+scrub sideways (the legs move only fore and aft), which the virtual body
+does not model. So the evaluation below uses the wrong-centre-of-mass
+cases (10 mm ahead or behind and 5 mm to a side, with 50 g more battery)
+as the stand-in for a body that tips more than the model.
+
+**Did the servos keep up in the trot at 144 to 152 mm/s?** These
+recordings cannot say: no JOINTS were streamed (and the servos report no
+position anyway), and the trot's planned roll is flat, so there is no lag
+to measure in it. Nothing in them suggests the servos fell behind (no
+catches, no holds, error rms about 2°), and nothing shows that they did
+not. The planned joint speeds are known (§12.4).
+
+The virtual body needed no new model for the two-foot phases: it already
+tips as an inverted pendulum about the support line (§9, §10). What it
+lacks is the real tip's size, as above.
+
+### 12.3 The gaits tried
+
+All in the virtual body with the fitted servos: forward, back and turning;
+each model error (the servos faster, 20 + 50 ms, and slower, 100 + 100 ms;
+the old pure 140 ms; the centre of mass 10 mm and 5 mm off with 50 g more
+battery, four ways; the IMU 2° and 1.5° off); 10 s each; the body's
+balance on at Kp 0.99. Errors are the largest |measured - predicted|.
+
+| model | speed (mm/s) | error, nominal / worst | tilt | margin, one leg up | holds / catches | fastest joint (swing) | verdict |
+|---|---|---|---|---|---|---|---|
+| the old walk: lean first, one leg at a time | 17.8 to 21.5 | 2.1 / 7.2 (§11) | 12.5° on purpose | +12.7 mm | 0 / 0 | 474°/s | too slow; looks careful |
+| (a) lean first with a small sway: margin 3 to 6 mm, roll 6 to 8°, 150 ms swings, 120 to 160 ms moves | 35 to 44 | 2.3 / 4.4 | 4 to 7° | +2 to +5 mm | 0 / 0 | 477 to 596°/s | rejected: past the body's 500°/s slew, still one leg at a time, under the 60 mm/s aimed for |
+| (b) diagonal couplets, the fore leg leading (the cat's lateral sequence), 180 ms swings, 80 ms between the pair | 80 | 7.9 / 7.9 | 7.9° | -3.5 mm | up to 35 / 0 | 439°/s | rejected: with the fore leg up alone the mass is outside the three feet first, then on two |
+| (b) the same, 140 to 160 ms swings, 40 to 60 ms between the pair | 80 | 4.1 to 4.6 / 6.6 | 4 to 6.6° | -3.5 mm | 0 to 3 / 0 | 417 to 426°/s | the fallback |
+| **(b) diagonal couplets, the hind leg leading, 150 ms swings, 60 ms between the pair, 8 mm step** | 26 to 97 | 3.8 / 5.2 | 3.7° | -4.8 to -7.7 mm (dynamic) | 0 / 0 | 365°/s | **chosen** |
+| the trot with the old speed mapping (the shift grows as it slows) | 100, backward | 9.4 | 9.4° | – | 15 / 1 | 498°/s | the rocking band |
+| **the trot at a fixed cadence (one tick on four feet)** | 42 to 184 | 2.5 / 4.7 | 2.5° | – | 0 / 0 | 414°/s at 184 | **chosen** |
+
+The chosen set at each gait's slowest, default and top speed ("worst" over
+every direction and model error above; tilt and margins in degrees and mm;
+"balance updates": whether the body's loop acts at all):
+
+| gait | speed | stride | cycle (ms) | error, nominal | roll rms, nominal | tilt, nominal | error, worst | tilt, worst | margin, one leg up | holds / catches / falls, all cases | fastest joint, swing / on the ground (°/s) | balance updates |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| crawl | 8 | 32 | 4300 | 1.2 | 0.54 | 13.5 | 3.6 | 13.9 | +13.4 | 0 / 0 / 0 | 381 / 128 | yes |
+| crawl | 22 | 50 | 2550 | 3.3 | 1.09 | 13.2 | 6.4 | 18.3 | +13.0 | 5 / 0 / 0 | 479 / 167 | yes |
+| crawl | 27 | 50 | 2160 | 3.1 | 1.36 | 13.3 | 8.4 | 19.1 | +13.3 | 34 / 2 / 0 | 500 / 177 | yes |
+| walk | 26 | 8 | 460 | 2.4 | 0.98 | 2.4 | 3.8 | 3.8 | -4.8 | 0 / 0 / 0 | 293 / 41 | none |
+| walk | 80 | 24.8 | 460 | 3.7 | 1.67 | 3.7 | 5.2 | 4.4 | -7.2 | 0 / 0 / 0 | 362 / 92 | none |
+| walk | 97 | 30 | 460 | 3.8 | 1.57 | 3.7 | 5.2 | 4.5 | -7.7 | 0 / 0 / 0 | 365 / 96 | none |
+| trot | 42 | 8 | 340 | 2.5 | 0.79 | 2.5 | 4.0 | 3.9 | – | 0 / 0 / 0 | 293 / 41 | none |
+| trot | 144 | 27.4 | 340 | 2.5 | 0.63 | 2.5 | 4.7 | 3.9 | – | 0 / 0 / 0 | 364 / 139 | none |
+| trot | 184 | 35 | 340 | 2.5 | 0.61 | 2.5 | 4.6 | 4.0 | – | 0 / 0 / 0 | 414 / 196 | none |
+
+The crawl's holds and catches are all in the slower-servo case walking
+backward at its top. Its backward swing asks 516 to 595°/s at 22 to
+27 mm/s, past the body's 500°/s slew, which then limits it; that was so
+before too, and is not changed here.
+
+### 12.4 Why these
+
+- **The walk.** A walk faster than about 30 mm/s cannot stand on three
+  feet all the time (§12.1), and the lean is what made it slow. A walk
+  with diagonal couplets is the step from the trot that the evidence
+  supports: the trot's two-foot phases are known to work on this body (§7,
+  run 4), and the couplet shortens them (90 ms on two feet instead of 150)
+  and adds 60 ms on three feet either side. Four footfalls a cycle, a duty
+  factor of 0.67 (the cat's is 0.60 to 0.64), a 460 ms cycle. The hind leg
+  leads because the centre of mass is 7.5 mm ahead of the middle: on three
+  feet with a hind leg up it is about 3.5 mm inside their triangle, with a
+  fore leg up about as far outside. Leading with the fore leg, the cat's
+  way, tipped 6 to 8° with 180 ms swings and 4 to 6.6° with 140 to 160 ms;
+  leading with the hind leg, 3.7° (5.2° in the worst case). The cost: it is
+  a diagonal sequence, the primates' order, not the cat's. If the owner
+  wants the cat's order, the fore-leading walk with 140 ms swings is the
+  fallback (about 0.5° more tilt in the virtual body, 1.4° more in the
+  worst case). The predicted attitude stays the plane of the support feet,
+  which is flat for this gait: the real body will rock a few degrees that
+  the plan does not predict, as the trot does, and the body's loop does not
+  act on that (next point), so nothing is fed back.
+- **A fixed cadence for the walk and the trot.** The trot's mid-speed
+  rocking came from the body's balance loop: it corrects on four feet only
+  and holds for two ticks after every touchdown, so with four to eight
+  ticks on four feet it measured the tip of the diagonal just ended and
+  applied the correction during the next one, which tips the other way.
+  With one tick on four feet (plus the swing's last tick, whose foot is
+  already down) it never runs. The speed then comes from the stride alone,
+  8 to 35 mm: the trot at 100 mm/s backward stays within 2.8° (was 9.4°,
+  with gate holds), the same as with the balance off. This is the mind's
+  side of the fix; the body is unchanged. The price: while walking or
+  trotting, the body no longer levels a slope (§12.5).
+- **The crawl** stays the careful gait, statically stable, for slow work.
+  Making it dynamic too would leave no gait that keeps the mass inside the
+  support at every instant.
+- **The trot, faster.** At its top, 184 mm/s, the swing asks 414°/s, the
+  same as the floor runs of 2026-11-15 at 144 to 152 (which kept up),
+  because the stride is the same 35 mm in the same 150 ms. New: the cycle
+  (340 ms, was 380 to 393 ms), so the feet on the ground slide faster
+  (196°/s at the joint). A longer stride or a shorter swing would pass
+  425°/s; a longer swing tips further on two feet. A running trot (a flight
+  phase) is out of reach: the feet would have to push the body up, and at
+  414°/s the servos are already near their budget. The remote's top level
+  is 180.
+
+**Joint speeds asked** (the fastest joint in the FEET stream): trot 293°/s
+at 42 mm/s, 321 at 100, 364 at 144, 414 at 184; walk 293 at 26, 317 at 60,
+362 at 80, 365 at 97; the legs on the ground at most 196 (trot) and 96
+(walk). All under the body's 500°/s slew.
+
+**Gait changes.** Between the walk and the trot the new gait takes over at
+the next slot start once the strides fit it (they shorten at most 0.5 mm a
+tick), every foot is within half its stride (+4 mm) of its shoulder, and
+the body is at its height; it starts with the pair whose feet are furthest
+behind. In the virtual body: 0.6 s and 0.8 s at most. Into or out of the
+crawl, every leg still steps home first: the crawl's cycle is 6 to 12
+times longer, and switching while the feet were spread drove them out of
+the legs' reach in a test. `stop_timeout` (two cycles + 3.5 s: 4.2 s for
+the trot, 4.4 s for the walk, 8.6 s for the crawl) covers every stop at
+each gait's top speed with at least a second to spare (a test checks it),
+so it is unchanged.
+
+### 12.5 What the body's firmware does that matters here (unchanged)
+
+- It holds its corrections while any foot is up and for two ticks after.
+  The walk and the trot now never have three ticks on four feet, so the
+  balance loop does not act during them at all: on a slope they walk
+  tilted (the error tracker learns the offset, and the gate and the catch
+  allow for it). The crawl still levels. Slope levelling in a fast gait
+  would need the firmware to update on two diagonal feet; not done, and
+  not needed on the flat floor.
+- The 10° per tick slew is not reached by the walk or the trot (at most
+  8.3° a tick). The crawl's backward swing reaches it (above).
+- Nothing else in the firmware blocked anything.
+
+### 12.6 On the floor: risks, a first run, the next recordings
+
+**Risks, most likely first.**
+
+1. *The walk tips more than the virtual body says.* With a fore leg up on
+   three feet the mass is 5 to 8 mm outside them (on purpose: it is a
+   dynamic gait), and the real body tipped about twice as far as the
+   virtual one in the trot. If so: gate holds (the walk pauses), then
+   catches (a foot lands early). Watch the walk's error by phase.
+2. *The trot above 152 mm/s* has never run. The swing's joint speed is the
+   same as at 152, the feet on the ground are faster: foot slip is likely,
+   and nothing measures it.
+3. *No levelling in the walk and the trot* (§12.5).
+4. *The direct walk-trot change* has only run in the virtual body.
+5. *The new prediction* changes the crawl's reference; if the servos are
+   slower with a low battery, the crawl's error grows (the slower-servo
+   case is in the table).
+6. *Looks.* The walk leads with the hind leg; the owner may prefer the
+   cat's order (the fallback above).
+
+**A first floor run**, Kilo on the floor only, battery charged, after
+`kilo update --host`:
+
+1. Crawl, level 3 (B4), about 10 s, then B6. In the recording, the roll
+   error with a hind leg up should be well under run 4's 2.4 to 2.9°, and
+   the largest correction under 3°.
+2. Walk (C4) at level 1, about 10 s, B6. Then level 3, then level 5. Stop
+   (B6) at any tip that looks like more than 15° or a stagger, and note
+   which level.
+3. Trot (A4) at level 3, then B7 once (165.6 mm/s), then B7 again (180),
+   each for about 10 s; then the same backward.
+4. Walking at level 3: A4, then C4, then A4: each change should come
+   within a second.
+5. A turn (A6, C6) in the walk and in the trot.
+
+Fetch the recordings (`kilo walks --host IP --fetch all`) and analyse them
+(`kilo log walk FILE.kwalk`; `mind/tests/walkreplay.py FILE.kwalk` for the
+virtual body's replay).
+
+**What the next recordings should check.**
+
+- The servo model: the cross-correlation lag (expected near 120 ms now),
+  and whether the crawl's corrections stay inside the dead band.
+- The walk's error by phase: RF+LB and LF+RB (two feet), and RF and LF
+  alone (a fore leg up, on three feet), against the virtual body's 3.7°.
+- The trot's rocking at 144, 165.6 and 180 mm/s with the balance never
+  acting, against run 4's ±4 to 5° (where the loop acted once a slot).
+- The pitch offset: Kilo standing still on a level floor, a spirit level
+  on his back; then the same with the front feet on 3 mm shims. That tells
+  the IMU's mounting from the front legs' calibration.
+- The real speed: a tape on the floor and the time taken for 1 m, per gait
+  and level (nothing measures slip).
+- A slow-motion phone video from the side during a trot and a walk: the
+  footfall timing, and whether the swinging feet reach their height (the
+  servos keeping up).
+
+### 12.7 What is still unverified
+
+Everything above comes from the virtual body, calibrated on three
+recordings of the old gaits. Not verified: that the real servos follow
+50 + 70 ms in other gaits and at other battery levels; that the real walk
+tips no more than about twice the virtual one; any speed above 152 mm/s;
+foot slip; the fore-leading fallback on the floor; the direct gait change
+on the floor; the cause of the pitch offset.

@@ -59,8 +59,10 @@ struct BodyModel {
   real upper_leg_at = (real)0.8;
   real lower_leg_g = 4;
   real lower_leg_at = (real)0.5;
-  // servos: ESTIMATES
-  real servo_lag_ms = 150;
+  // servos: fitted to the floor recordings of 2026-11-15 (model.py): a dead
+  // time, then a first-order response
+  real servo_lag_ms = 50;
+  real servo_tau_ms = 70;
   real slew_deg_per_tick = 10;
   real reach_frac = (real)0.95;
   real knee_max_deg = 150;
@@ -75,7 +77,17 @@ struct BodyModel {
   real drop_accel(real lever_mm, real com_height_mm) const {
     return kGmmS2 * lever_mm / (com_height_mm * com_height_mm + lever_mm * lever_mm);
   }
-  real lag_ticks(real tick_ms = 20) const { return servo_lag_ms / tick_ms; }
+  real lag_ticks(real tick_ms = 20) const { return servo_lag_ms / tick_ms; }  // the dead time
+  // Ticks until a commanded move has nearly arrived (dead time + 1.5 time constants).
+  int settle_ticks(real tick_ms = 20) const {
+    real t = (servo_lag_ms + (real)1.5 * servo_tau_ms) / tick_ms - (real)1e-9;
+    int i = (int)t;
+    return (real)i < t ? i + 1 : i;
+  }
+  // The first-order response's step per tick: y += (u - y) * alpha.
+  real response_alpha(real tick_ms = 20) const {
+    return servo_tau_ms <= 0 ? (real)1.0 : (real)1.0 - m_exp(-tick_ms / servo_tau_ms);
+  }
   real tau_s(real com_height_mm) const { return m_sqrt(m_max(com_height_mm, 1) / kGmmS2); }
 
   bool reachable(real x, real z) const;

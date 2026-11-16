@@ -10,7 +10,9 @@
 // way by noise. A foot 1 mm off where the port's unrounded value is within
 // 0.002 mm of a .5 is counted as a tie, not a failure (and that tick's
 // margin, which uses the rounded feet, is not compared). The double twin
-// must match with no ties.
+// must match with no ties. (At most 120: since 2026-11-16 the trot's top
+// stride of 35 mm lands every foot at 17.5 at its fixed 340 ms cycle, about
+// 90 ties in the vectors; before, 40 at a slower cycle.)
 //
 //   test_planner_vectors VECTORS    (the build also makes a double-precision
 //                                    twin, test_planner_vectors_double)
@@ -228,6 +230,6 @@ int main(int argc, char** argv) {
                        &err_d, &est_d})
     d->print();
   CHECKF(tick_lines > 1000, "only %ld ticks replayed", tick_lines);
-  CHECKF(tie_d.n <= 40, "%ld ties: more than float noise at .5 mm explains", tie_d.n);
+  CHECKF(tie_d.n <= 120, "%ld ties: more than float noise at .5 mm explains", tie_d.n);
   return report(sizeof(real) == 8 ? "plan vec dbl" : "plan vectors");
 }
