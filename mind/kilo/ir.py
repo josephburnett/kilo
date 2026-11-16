@@ -95,7 +95,7 @@ class Action:
     label: str = ""  # what the key does, for the log
 
 
-SPEED_FACTORS = (0.4, 0.7, 1.0, 1.1, 1.2)  # x the gait's default speed, levels 1..5 (and -1..-5 backward)
+SPEED_FACTORS = (0.4, 0.7, 1.0, 1.15, 1.25)  # x the gait's default speed, levels 1..5 (and -1..-5 backward)
 DEFAULT_LEVEL = 3  # +3: 1x, the gait's spec defaults
 _IGNORE = Action("ignore")  # a held-key repeat or another remote's key
 _NONE = Action("none", label="none")  # rows 1-3: no action

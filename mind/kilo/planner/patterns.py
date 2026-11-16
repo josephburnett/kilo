@@ -52,24 +52,44 @@ class Pattern:
     shift_min_ms: float      # the shortest four-foot phase before a swing (without the lean's needs)
     stance_max_ms: float     # the longest stance: slower than that, the stride shrinks
     lean: bool               # one leg at a time: the body moves over the three feet that stay down
+    couple_ms: float = 0.0   # a group's second leg lifts (and lands) this long after its first
+    default_mm_s: float | None = None  # the default speed (None: the stride over the default stance)
+
+    @property
+    def span_ms(self) -> float:
+        """A slot's swing part: from the first leg's lift to the last leg's touchdown."""
+        return self.swing_ms + self.couple_ms * (len(self.groups[0]) - 1)
 
 
-# Walk and crawl lift LB, LF, RB, RF (the lateral sequence); the trot the
-# diagonal pairs LF+RB, RF+LB. Since 2026-11-15 (the owner: "too slow,
-# placing the feet super delicately") every pattern is about 2.3 times as
-# fast at its default as before and its top speed 2 to 2.7 times the old
-# default: longer strides, shorter swings (walk 500 -> 300 ms, crawl 297 ->
-# 300 ms with a lower step), the walk's body 10/256 lower (the reach: its
-# longer stride with the lean's roll otherwise asks the legs for more than
-# the IK gives), the trot two ticks on four feet at its top speed instead of
-# three. The tops: trot 152, crawl 26.9, walk 21.5 mm/s (the walk and the
-# crawl: the lean's move paced by gravity, the legs' reach and the servos;
-# docs/walking-and-balance.md §10).
+# Three patterns (docs/walking-and-balance.md §12, since 2026-11-16):
+#
+# - crawl: the careful gait, one leg at a time in the lateral sequence LB,
+#   LF, RB, RF, statically stable: before each lift the body moves over the
+#   three feet that stay down (the lean). 9 to 27 mm/s.
+# - walk: a walk with diagonal couplets (Hildebrand's "trot-walk"; Petoi's
+#   own walk is one too): LB lifts, RF 60 ms after it, LB lands, RF lands,
+#   then RB and LF the same way. Four footfalls a cycle; on two diagonal
+#   feet for 90 ms of each 150 ms swing, on three for the 60 ms either side,
+#   no lean. The hind leg leads (a diagonal sequence, as primates walk; cats
+#   lead with the fore leg) because the centre of mass is ahead of the
+#   middle: on three feet with a hind leg up it is inside their triangle, with
+#   a fore leg up outside. Fixed cadence (460 ms cycle, duty 0.67); speed
+#   from the stride, 26 to 97 mm/s.
+# - trot: the diagonal pairs LF+RB, RF+LB, fixed cadence (340 ms cycle, one
+#   tick on four feet), speed from the stride, 42 to 184 mm/s.
+#
+# Fixed cadence (the patterns without a lean): their four-foot phase stays
+# one tick at every speed, so the body's balance loop (which holds its
+# corrections while a foot is up and for two ticks after) never acts during
+# them: in 4 to 8-tick four-foot phases it caught the tip of one diagonal
+# and put it into the next, the rocking of §11.
 PATTERNS: dict[str, Pattern] = {
-    "walk": Pattern("walk", ((LB,), (LF,), (RB,), (RF,)), swing_ms=300.0, stride_mm=40.0, step_h_mm=15.0,
-                    body_h_256=195, period_ms=2550.0, shift_min_ms=0.0, stance_max_ms=4000.0, lean=True),
+    "walk": Pattern("walk", ((LB, RF), (RB, LF)), swing_ms=150.0, stride_mm=30.0, step_h_mm=8.0,
+                    body_h_256=205, period_ms=460.0, shift_min_ms=20.0, stance_max_ms=310.0, lean=False,
+                    couple_ms=60.0, default_mm_s=80.0),
     "trot": Pattern("trot", ((LF, RB), (RF, LB)), swing_ms=150.0, stride_mm=35.0, step_h_mm=8.0,
-                    body_h_256=205, period_ms=393.0, shift_min_ms=40.0, stance_max_ms=1327.0, lean=False),
+                    body_h_256=205, period_ms=340.0, shift_min_ms=20.0, stance_max_ms=190.0, lean=False,
+                    default_mm_s=144.0),
     "crawl": Pattern("crawl", ((LB,), (LF,), (RB,), (RF,)), swing_ms=300.0, stride_mm=50.0, step_h_mm=15.0,
                      body_h_256=179, period_ms=2550.0, shift_min_ms=0.0, stance_max_ms=4000.0, lean=True),
 }
@@ -110,13 +130,20 @@ def shift_min_ms(p: Pattern) -> float:
 
 def _stance_limits(p: Pattern) -> tuple[float, float]:
     n = len(p.groups)
-    lo = n * (shift_min_ms(p) + p.swing_ms) - p.swing_ms
+    lo = n * (shift_min_ms(p) + p.span_ms) - p.swing_ms
     return lo, max(lo, p.stance_max_ms)
 
 
+def fixed_cadence(p: Pattern) -> bool:
+    """Speed from the stride alone, the cycle fixed (the patterns without a lean)."""
+    return not p.lean
+
+
 def default_speed(p: Pattern | str) -> float:
-    """The speed (mm/s) of the pattern's table: its stride over its default stance."""
+    """The pattern's default speed (mm/s): its table's, or its stride over its default stance."""
     p = pattern(p) if isinstance(p, str) else p
+    if p.default_mm_s is not None:
+        return p.default_mm_s
     return p.stride_mm / (p.period_ms - p.swing_ms) * 1000.0
 
 
@@ -124,6 +151,8 @@ def speed_range(p: Pattern | str) -> tuple[float, float]:
     """(slowest, fastest) speed in mm/s that timing() gives."""
     p = pattern(p) if isinstance(p, str) else p
     lo, hi = _stance_limits(p)
+    if fixed_cadence(p):
+        hi = lo
     return STRIDE_MIN_MM / hi * 1000.0, p.stride_mm / lo * 1000.0
 
 
@@ -134,14 +163,18 @@ def timing(p: Pattern | str, speed_mm_s: float | None = None) -> Timing:
     n = len(p.groups)
     st_lo, st_hi = _stance_limits(p)
     v = default_speed(p) if speed_mm_s is None else abs(float(speed_mm_s))
-    stride = p.stride_mm
-    stance = stride / v * 1000.0 if v > 0 else float("inf")
-    if stance > st_hi:
-        stance = st_hi
-        stride = max(STRIDE_MIN_MM, v * st_hi / 1000.0)
-    stance = max(stance, st_lo)
+    if fixed_cadence(p):
+        stance = st_lo
+        stride = min(p.stride_mm, max(STRIDE_MIN_MM, v * stance / 1000.0))
+    else:
+        stride = p.stride_mm
+        stance = stride / v * 1000.0 if v > 0 else float("inf")
+        if stance > st_hi:
+            stance = st_hi
+            stride = max(STRIDE_MIN_MM, v * st_hi / 1000.0)
+        stance = max(stance, st_lo)
     period = stance + p.swing_ms
-    return Timing(stride, period / n - p.swing_ms, stance, period, stride / stance * 1000.0)
+    return Timing(stride, period / n - p.span_ms, stance, period, stride / stance * 1000.0)
 
 
 def side_strides(direction_name: str, stride: float) -> tuple[float, float]:
