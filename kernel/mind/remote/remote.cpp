@@ -29,7 +29,7 @@ double stop_timeout_s(double period_ms) {
     for (const planner::Pattern& p : planner::kPatternTable)
       if (p.period_ms > period_ms) period_ms = p.period_ms;
   }
-  return 2 * period_ms / 1000.0 + 1.5;
+  return 2 * period_ms / 1000.0 + 3.5;  // walker.py stop_timeout(): the stride's ramp-down is up to 2 s
 }
 
 RemoteControl::RemoteControl(SerialLink& link, planner::Walker& walker, tricks::TrickPlayer& player, Clock& clock,

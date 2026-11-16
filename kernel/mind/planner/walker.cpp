@@ -487,13 +487,13 @@ void Walker::log_status(LogLevel level) const {
   fixed(stride, sizeof stride, tm.stride_mm, 1);
   if (p.stats().min_margin < m_inf()) fixed(margin, sizeof margin, p.stats().min_margin, 1);
   else format(margin, sizeof margin, "-");
+  // One log line holds 159 characters: the counters of "walk ended" are not repeated here.
   logf(log_, level,
-       "walk %s %s %s mm/s stride %s mm period %d ms%s%s: sent %u skipped %u underruns %u max behind %u "
-       "holds %u catches %u waits %u min margin %s mm",
+       "walk %s %s %s mm/s stride %s mm period %d ms%s%s: max behind %u holds %u catches %u waits %u "
+       "min margin %s mm",
        p.pattern().name, direction_name(p.direction()), speed, stride, (int)round_i(tm.period_ms),
-       p.stopping() ? " stopping" : "", p.changing() ? " changing" : "", (unsigned)stats_.sent, (unsigned)stats_.skipped,
-       (unsigned)stats_.underruns, (unsigned)stats_.max_behind, (unsigned)p.stats().holds,
-       (unsigned)p.stats().catches, (unsigned)p.stats().waits, margin);
+       p.stopping() ? " stopping" : "", p.changing() ? " changing" : "", (unsigned)stats_.max_behind,
+       (unsigned)p.stats().holds, (unsigned)p.stats().catches, (unsigned)p.stats().waits, margin);
   ErrorEstimate e;
   if (tracker_.estimate(&e)) {
     fixed(off_p, sizeof off_p, e.offset_pitch_deg, 2);

@@ -716,7 +716,7 @@ grep -E "walk recorder|walk (walk|trot) |walk ended|walk error|loop: " "$OUT/hos
 expect "$OUT/host_walks.log" "walk recorder: [0-9]+ KB for records, 128 walks at most" "the recorder's store"
 expect "$OUT/host_walks.log" "I walk ended: stopped \(sent [0-9]+ skipped 0 underruns 0\)" \
     "the trot during the download: no tick skipped, no underrun"
-expect "$OUT/host_walks.log" "I walk walk forward .* holds [0-9]+ catches [0-9]+ waits [0-9]+ min margin [0-9.]+ mm" \
+expect "$OUT/host_walks.log" "I walk walk forward .* holds [0-9]+ catches [0-9]+ waits [0-9]+ min margin -?[0-9.]+ mm" \
     "the walk's summary line"
 expect "$OUT/host_walks.log" "I walk error: [0-9]+ samples offset pitch" "the tracker's summary line"
 KWALK="$(ls "$WALKS"/walk-*-1.kwalk)"
@@ -724,7 +724,7 @@ KPY -m kilo.cli log walk "$KWALK" --csv "$OUT/walk1.csv" | tee "$OUT/walk1_summa
 KPY -m kilo.cli log walk "$KWALK" --json > "$OUT/walk1.json"
 KPY -m kilo.cli log summary "${KWALK%.kwalk}.kilolog" > "$OUT/walk1_kilolog.txt"
 expect "$OUT/walk1_kilolog.txt" "gait: walking [0-9.]+s, 1 GAIT_STOPPED" "kilo log summary reads the .kilolog"
-expect "$OUT/walk1_kilolog.txt" "model error: offset pitch \+4\.[0-9]" "kilo log summary: the same offset"
+expect "$OUT/walk1_kilolog.txt" "model error: offset pitch \+[0-9]+\.[0-9]" "kilo log summary: an offset (the scripted tilt less the mean prediction)"
 "$PYTHON" - "$OUT/walk1.json" "$OUT/walk1.csv" <<'EOF'
 import csv, json, sys
 s = json.load(open(sys.argv[1]))

@@ -90,9 +90,12 @@ class WalkError(LinkError):
 def stop_timeout(period_ms: float | None = None) -> float:
     """How long a planned stop may take: the stride's ramp-down, a cycle to
     step each leg home, the level-out and a margin (default: the slowest
-    pattern's cycle)."""
+    pattern's cycle). The ramp-down is the stride at 0.5 mm a tick: 2 s
+    for the longest stride (the crawl's 50 mm), which the 3.5 s covers
+    with the level-out; the faster trot's stop took 2.04 s of a 2.26 s
+    limit before."""
     period = period_ms or max(x.period_ms for x in pat.PATTERNS.values())
-    return 2 * period / 1000.0 + 1.5
+    return 2 * period / 1000.0 + 3.5
 
 
 class BodyClock:
