@@ -180,6 +180,9 @@ void HostServer::drop(uint32_t i, const char* why) {
   logf(log_, LogLevel::Info, "host: client %d %s", (int)i, why);
   if (controller_ == (int32_t)i) lose_control(why);
   if (flash_client_ == (int32_t)i) flash_client_ = -1;  // a flash runs on; its status has nowhere to go
+  if (bench_client_ == (int32_t)i) bench_client_ = -1;  // a bench runs on to its end
+  if (saver_ != nullptr) saver_->read_cancel(i);
+  c.fetch_on = false;
   if (update_client_ == (int32_t)i) {
     if (updater_->receiving()) drop_update(why);
     update_client_ = -1;  // an update that is writing runs on
@@ -311,8 +314,9 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
         return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_BAD_ARG, "enable 0..1, min_level 0..3");
       c.log_on = enable != 0;
       c.log_min = min_level;
-      uint32_t next = ring_.next_seq();
-      c.log_seq = next - (tail < next - ring_.first_seq() ? tail : next - ring_.first_seq());
+      uint32_t next = ring_.next_seq(), kept = next - ring_.first_seq();
+      c.log_seq = tail == 255 || tail >= kept ? ring_.first_seq() : next - tail;  // 255: all the history kept
+      c.log_status = ring_.status_next();  // status lines: live only
       return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_OK);
     }
     case KILO_HOST_MSG_BRIDGE_OPEN:
@@ -371,6 +375,18 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
       return walk_list(i, f.seq, p, now);
     case KILO_HOST_MSG_WALK_FETCH:
       return walk_fetch(i, f.seq, p);
+    case KILO_HOST_MSG_REC_STATUS_REQ:
+      return rec_status(i, f.seq, now);
+    case KILO_HOST_MSG_REC_FETCH:
+      return rec_fetch(i, f.seq, p, now);
+    case KILO_HOST_MSG_METRICS_REQ:
+      return metrics(i, f.seq, p);
+    case KILO_HOST_MSG_REC_BENCH:
+      return rec_bench(i, f.seq, p);
+    case KILO_HOST_MSG_REC_SAVE:
+      return rec_save(i, f.seq, p);
+    case KILO_HOST_MSG_REC_DELETE:
+      return rec_delete(i, f.seq, p);
     default:
       return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UNSUPPORTED, name_of(f.type));
   }
@@ -610,99 +626,6 @@ void HostServer::update_reboot() {
   reboot_ = true;
 }
 
-// ---- walk recordings ------------------------------------------------------------
-
-void HostServer::walk_list(uint32_t i, uint8_t seq, const uint8_t* p, uint64_t now) {
-  if (walks_ == nullptr)
-    return result(i, seq, KILO_HOST_MSG_WALK_LIST, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no walk recorder on this mind");
-  uint32_t after;
-  mem_copy(&after, p, sizeof after);
-  kilo_host_walk_info_t w;
-  mem_zero(&w, sizeof w);
-  const record::WalkStore& st = *walks_;
-  w.kept = (uint16_t)st.kept();
-  w.recording = st.recording_id();
-  w.capacity = st.capacity();
-  w.used = st.used();
-  w.dropped_walks = st.dropped_walks();
-  w.dropped_records = st.dropped_records();
-  uint32_t len = KILO_HOST_WALK_INFO_MIN_LEN;
-  const record::WalkEntry* e = st.after(after);
-  if (e != nullptr) {
-    w.found = 1;
-    w.id = e->id;
-    w.start_ms = e->start_us > start_us_ ? (uint32_t)((e->start_us - start_us_) / 1000u) : 0;
-    uint64_t end = e->end_us != 0 ? e->end_us : now;
-    w.duration_ms = end > e->start_us ? (uint32_t)((end - e->start_us) / 1000u) : 0;
-    w.bytes = e->size;
-    w.records = e->records;
-    w.feet = e->feet;
-    w.flags = e->flags;
-    mem_copy(w.text, e->text, e->text_len);
-    len += e->text_len;
-  }
-  reply(i, seq, &w, len, KILO_HOST_MSG_WALK_INFO);
-}
-
-void HostServer::walk_fetch(uint32_t i, uint8_t seq, const uint8_t* p) {
-  const uint8_t type = KILO_HOST_MSG_WALK_FETCH;
-  if (walks_ == nullptr) return result(i, seq, type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no walk recorder on this mind");
-  kilo_host_walk_fetch_t q;
-  mem_copy(&q, p, sizeof q);
-  Client& c = clients_[i];
-  if (q.id == 0) {
-    c.fetch_on = false;
-    return result(i, seq, type, KILO_HOST_RESULT_CODE_OK, "stopped");
-  }
-  const record::WalkEntry* e = walks_->find(q.id);
-  char why[60];
-  if (e == nullptr) {
-    format(why, sizeof why, "no walk %u in the store", (unsigned)q.id);
-    return result(i, seq, type, KILO_HOST_RESULT_CODE_BAD_ARG, why);
-  }
-  if (e->flags & KILO_WALK_FLAGS_RECORDING) {
-    format(why, sizeof why, "walk %u is still being recorded", (unsigned)q.id);
-    return result(i, seq, type, KILO_HOST_RESULT_CODE_BAD_ARG, why);
-  }
-  if (q.offset > e->size) {
-    format(why, sizeof why, "offset %u past the walk's %u bytes", (unsigned)q.offset, (unsigned)e->size);
-    return result(i, seq, type, KILO_HOST_RESULT_CODE_BAD_ARG, why);
-  }
-  c.fetch_on = true;
-  c.fetch_id = q.id;
-  c.fetch_off = q.offset;
-  result(i, seq, type, KILO_HOST_RESULT_CODE_OK);
-}
-
-// The fetching client's next chunks, as far as its send ring has room (a
-// slow laptop waits, nothing is dropped), then END or GONE.
-void HostServer::pump_fetch(uint32_t i) {
-  Client& c = clients_[i];
-  uint32_t chunks = walks_->recording_id() != 0 ? kFetchChunksRecording : kFetchChunks;
-  for (uint32_t k = 0; k < chunks && c.fetch_on; k++) {
-    if (room(i) < KILO_HOST_WALK_DATA_MAX_LEN + kHostOverhead) return;
-    kilo_host_walk_data_t d;
-    d.id = c.fetch_id;
-    d.offset = c.fetch_off;
-    uint32_t total = 0;
-    int32_t n = walks_->read(c.fetch_id, c.fetch_off, d.data, sizeof d.data, &total);
-    d.total = total;
-    d.status = n < 0 ? KILO_WALK_DATA_STATUS_GONE : n == 0 ? KILO_WALK_DATA_STATUS_END : KILO_WALK_DATA_STATUS_DATA;
-    uint32_t len = KILO_HOST_WALK_DATA_MIN_LEN + (n > 0 ? (uint32_t)n : 0u);
-    if (!enqueue(i, KILO_HOST_MSG_WALK_DATA, c.out_seq, &d, len)) return;
-    c.out_seq++;
-    if (n <= 0) {
-      c.fetch_on = false;
-      if (n == 0) stats_.walk_fetches++;
-      else logf(log_, LogLevel::Warn, "host: client %d: walk %u dropped from the store during its download", (int)i,
-                (unsigned)c.fetch_id);
-      return;
-    }
-    c.fetch_off += (uint32_t)n;
-    stats_.walk_bytes_sent += (uint32_t)n;
-  }
-}
-
 // ---- streams --------------------------------------------------------------------
 
 void HostServer::pump_bridge() {
@@ -751,25 +674,34 @@ void HostServer::streams(uint64_t now) {
         stats_.telem_skipped++;
       }
     }
-    if (c.fetch_on && walks_ != nullptr) pump_fetch(i);
-    while (c.log_on) {
-      if (c.log_seq < ring_.first_seq()) c.log_seq = ring_.first_seq();  // overwritten: the seq gap tells
-      const LogEntry* e = ring_.get(c.log_seq);
-      if (e == nullptr) break;  // caught up
-      if ((uint8_t)e->level < c.log_min) {
-        c.log_seq++;
-        continue;
-      }
+    if (c.fetch_on && rec_ != nullptr) pump_fetch(i);
+    if (c.log_on) pump_log(i);
+  }
+}
+
+// History lines and status lines, oldest first by time, as far as the ring has room.
+void HostServer::pump_log(uint32_t i) {
+  Client& c = clients_[i];
+  for (;;) {
+    if (c.log_seq < ring_.first_seq()) c.log_seq = ring_.first_seq();  // overwritten: the seq gap tells
+    if (c.log_status < ring_.status_first()) c.log_status = ring_.status_first();
+    const LogEntry* h = ring_.get(c.log_seq);
+    const LogEntry* s = ring_.status_get(c.log_status);
+    bool status = s != nullptr && (h == nullptr || s->t_ms < h->t_ms);
+    const LogEntry* e = status ? s : h;
+    if (e == nullptr) return;  // caught up
+    if ((uint8_t)e->level >= c.log_min) {
       kilo_host_log_line_t l;
       l.seq = e->seq;
       l.t_ms = e->t_ms;
       l.level = (uint8_t)e->level;
       mem_copy(l.text, e->text, e->len);
-      if (!enqueue(i, KILO_HOST_MSG_LOG_LINE, c.out_seq, &l, KILO_HOST_LOG_LINE_MIN_LEN + e->len)) break;
+      if (!enqueue(i, KILO_HOST_MSG_LOG_LINE, c.out_seq, &l, KILO_HOST_LOG_LINE_MIN_LEN + e->len)) return;
       c.out_seq++;
-      c.log_seq++;
       stats_.log_sent++;
     }
+    if (status) c.log_status++;
+    else c.log_seq++;
   }
 }
 

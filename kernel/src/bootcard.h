@@ -86,6 +86,44 @@ private:
 	FIL m_KernelFile;		// the KernelStore's open file
 	boolean m_bKernelOpen;
 	boolean m_bKernelWriting;
+
+	friend class CRecordCard;
+};
+
+// The flight recorder's saver (mind/record/saver.h) on the same FAT
+// partition: kilo::RecordCard with a file and a directory object of its
+// own, so neither the updater nor the body image calls disturb it. The
+// first ready() mounts the card (CBootCard::Mount: once, at the boot flash
+// check normally). Every call spins as the SD driver does; the saver makes
+// at most one a pass and times it.
+class CRecordCard : public kilo::RecordCard
+{
+public:
+	CRecordCard (CBootCard *pCard);
+
+	bool ready (void) override;
+	Result make_dir (const char *pPath) override;
+	Result create (const char *pPath) override;
+	Result append (const char *pPath) override;
+	Result open (const char *pPath) override;
+	Result seek (uint32_t nOffset) override;
+	Result write (const uint8_t *pData, uint32_t nLen) override;
+	int32_t read (uint8_t *pBuffer, uint32_t nLen) override;
+	Result sync (void) override;
+	Result close (void) override;
+	Result remove (const char *pPath) override;
+	Result rename (const char *pFrom, const char *pTo) override;
+	Result list_begin (const char *pDir) override;
+	Result list_next (char *pName, uint32_t nSize, uint32_t *pSize) override;
+
+private:
+	Result Open (const char *pPath, BYTE uchMode);
+
+	CBootCard *m_pCard;
+	FIL m_File;
+	boolean m_bOpen;
+	DIR m_Dir;
+	boolean m_bListing;
 };
 
 #endif

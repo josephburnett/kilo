@@ -63,7 +63,9 @@ MIND_SRCS += \
 	mind/remote/remote.cpp \
 	mind/mind.cpp
 
-# Walk recordings (record/): every walk tick by tick in RAM, for WALK_LIST / WALK_FETCH.
+# The flight recorder (record/): every frame, log line, walk and trick in RAM, the card saver, the metrics.
 MIND_SRCS += \
-	mind/record/store.cpp \
+	mind/record/flight.cpp \
+	mind/record/saver.cpp \
+	mind/net/host_records.cpp \
 	mind/record/recorder.cpp

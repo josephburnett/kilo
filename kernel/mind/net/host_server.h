@@ -29,11 +29,16 @@
 //   the loop). On DONE: REST latched, the DONE status sent, then
 //   reboot_requested(), as for REBOOT. A flash and an update exclude each
 //   other (FLASHING, UPDATING).
-// - the walk recordings, with a WalkStore attached (attach_walks()):
-//   WALK_LIST answers WALK_INFO, one walk per request; WALK_FETCH streams a
-//   walk to its client as WALK_DATA, a few chunks a pass and only into room
-//   in that client's send ring (kFetchChunks, one a pass while a walk is
-//   recorded), then END. Any client: they only read.
+// - the flight recorder, with a Recorder attached (attach_recorder(),
+//   record/recorder.h) and its card Saver (attach_saver(), record/saver.h):
+//   WALK_LIST answers WALK_INFO, one run per request (this boot's, then the
+//   card's earlier boots'); WALK_FETCH streams a run's span and REC_FETCH
+//   any range of blocks (or an earlier boot's log) to its client as
+//   WALK_DATA, a few chunks a pass and only into room in that client's
+//   send ring (kFetchChunks, one a pass while a run is recorded), then END;
+//   REC_STATUS_REQ, METRICS_REQ (the MetricsSource), and for the
+//   controller REC_SAVE, REC_DELETE and REC_BENCH (BENCH_RESULT back to
+//   it). Card reads go through the saver, a card call a pass when safe.
 //
 // Who may connect (kernel/README.md "Who may talk to Kilo: keys", the spec's
 // [host] comments): every connection starts with a clear hello naming the
@@ -71,13 +76,14 @@
 #include "net/noise.h"
 #include "platform.h"
 #include "platform_net.h"
-#include "record/store.h"
+#include "record/recorder.h"
+#include "record/saver.h"
 #include "update/updater.h"
 #include "util/logring.h"
 
 namespace kilo {
 
-class HostServer {
+class HostServer final : public record::BenchSink {
  public:
   static constexpr uint32_t kMaxClients = KILO_HOST_MAX_CLIENTS;
   static constexpr uint32_t kSlots = kHostSlots;  // the listener's slots: kMaxClients + 1 (see above)
@@ -133,9 +139,16 @@ class HostServer {
   // they are answered UNSUPPORTED (kilo-mind-host without --card). poll()
   // then polls it.
   void attach_updater(KernelUpdater& updater);
-  // Serve WALK_LIST and WALK_FETCH from this store (it outlives the
-  // server). Without one they are answered UNSUPPORTED.
-  void attach_walks(const record::WalkStore& walks) { walks_ = &walks; }
+  // Serve WALK_LIST, WALK_FETCH, REC_STATUS_REQ and REC_FETCH from this
+  // recorder (it outlives the server). Without one they are answered UNSUPPORTED.
+  void attach_recorder(const record::Recorder& rec) { rec_ = &rec; }
+  // ... and the card through this saver (REC_SAVE, REC_DELETE, REC_BENCH,
+  // earlier boots, saved logs). Without one those are UNSUPPORTED.
+  void attach_saver(record::Saver& saver) { saver_ = &saver; }
+  // METRICS_REQ's lines.
+  void attach_metrics(record::MetricsSource& m) { metrics_ = &m; }
+  // record::BenchSink: REC_BENCH's results, to the client that asked.
+  void bench_result(const kilo_host_bench_result_t& r) override;
   // The laptops' public keys a connection may name (they outlive the
   // server), and the source of the ephemeral keys. Without them (or with
   // no keys) every hello is refused: fail closed.
@@ -206,11 +219,18 @@ class HostServer {
     uint32_t telem_period_us;  // 0 = off
     uint64_t telem_next_us;
     bool log_on;
-    uint32_t log_seq;          // the next line to send
+    uint32_t log_seq;          // the next history line to send
+    uint32_t log_status;       // the next status line to send (LogRing::status_get)
     uint8_t log_min;
-    bool fetch_on;             // WALK_FETCH: sending walk fetch_id from fetch_off
-    uint32_t fetch_id;
-    uint32_t fetch_off;
+    bool fetch_on;             // WALK_FETCH / REC_FETCH: sending fetch_id's blocks
+    bool fetch_card;           // the card part (the saver reads), then RAM (this boot) or the end
+    bool fetch_ram;            // a RAM part follows the card's
+    uint32_t fetch_id;         // WALK_DATA.id: the run, 0 for a range
+    uint32_t fetch_off;        // bytes sent
+    uint32_t fetch_total;      // 0: not known (the card)
+    uint32_t fetch_seq, fetch_last, fetch_boff;  // RAM: the block, the last one, the offset in it
+    uint32_t fetch_last_used;  // the last block's length when the fetch began (it may be open)
+    uint64_t fetch_from_us, fetch_to_us;  // the range (RAM after the card)
   };
 
   void accept(uint64_t now);
@@ -241,9 +261,22 @@ class HostServer {
   void drop_update(const char* why);
   void update_status();
   void update_reboot();
+  // The flight recorder (net/host_records.cpp).
   void walk_list(uint32_t i, uint8_t seq, const uint8_t* p, uint64_t now);
   void walk_fetch(uint32_t i, uint8_t seq, const uint8_t* p);
+  void rec_status(uint32_t i, uint8_t seq, uint64_t now);
+  void rec_fetch(uint32_t i, uint8_t seq, const uint8_t* p, uint64_t now);
+  void metrics(uint32_t i, uint8_t seq, const uint8_t* p);
+  void rec_bench(uint32_t i, uint8_t seq, const uint8_t* p);
+  void rec_save(uint32_t i, uint8_t seq, const uint8_t* p);
+  void rec_delete(uint32_t i, uint8_t seq, const uint8_t* p);
+  // Plan a fetch of [from_us, to_us] of boot (0: this one): false if nothing is there.
+  bool plan_fetch(uint32_t i, uint32_t id, uint32_t boot, uint64_t from_us, uint64_t to_us);
+  bool plan_ram(Client& c, uint64_t from_us, uint64_t to_us, uint32_t min_seq);
+  void stop_fetch(uint32_t i);
   void pump_fetch(uint32_t i);
+  void pump_log(uint32_t i);
+  bool body_limp() const;
   // Write out what is sealed, sealing at most a few records per call (all:
   // until the ring is empty or the connection takes no more, for an OK that
   // must leave now).
@@ -290,7 +323,10 @@ class HostServer {
   int32_t update_client_ = -1;   // the client receiving, then the one UPDATE_STATUS goes to
   uint32_t update_sent_ = 0;     // the updater's changes() last sent
 
-  const record::WalkStore* walks_ = nullptr;  // attach_walks()
+  const record::Recorder* rec_ = nullptr;  // attach_recorder()
+  record::Saver* saver_ = nullptr;         // attach_saver()
+  record::MetricsSource* metrics_ = nullptr;
+  int32_t bench_client_ = -1;
 };
 
 }  // namespace kilo

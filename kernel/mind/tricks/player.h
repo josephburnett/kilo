@@ -95,6 +95,11 @@ class TrickPlayer {
   const PlayResult& result() const { return result_; }
   // The trick last started (null before any).
   const Trick* trick() const { return trick_; }
+  // The body is playing it: TRICK_PLAY was acknowledged at played_at_us().
+  bool playing() const { return step_ == Step::Playing; }
+  uint64_t played_at_us() const { return played_at_; }
+  uint8_t speed() const { return speed_; }
+  bool mirrored() const { return mirror_; }
 
  private:
   enum class Step : uint8_t { Idle, Check, Begin, Frames, Commit, Play, Playing };

@@ -1,5 +1,6 @@
 #include "record/recorder.h"
 #include "link/names.h"
+#include "tricks/library.h"
 #include "util/fmt.h"
 #include "util/mem.h"
 
@@ -56,76 +57,308 @@ int16_t mm10(real mm) {
   return (int16_t)planner::round_i(mm * 10);
 }
 
+// The rear_up stages (docs/rear-up-trick.md): their number, 0 for another trick.
+unsigned rear_up_stage(const char* name) {
+  const char* r = "rear_up";
+  size_t i = 0;
+  for (; r[i] != '\0'; i++)
+    if (name[i] != r[i]) return 0;
+  if (name[i] == '\0') return 1;
+  if (name[i] == '_' && (name[i + 1] == '2' || name[i + 1] == '3') && name[i + 2] == '\0') return (unsigned)(name[i + 1] - '0');
+  return 0;
+}
+
+constexpr uint64_t kKeyRecentUs = 5000000;  // a trick started this soon after a remote key: by=remote
+
 }  // namespace
 
-WalkRecorder::WalkRecorder(Clock& clock, const SerialLink& link) : clock_(clock), link_(link) {}
-
-void WalkRecorder::attach(uint8_t* storage, uint32_t bytes, uint32_t mind_build) {
-  mind_build_ = mind_build;
-  pre_ = nullptr;
-  pre_head_ = pre_n_ = 0;
-  recording_ = ending_ = false;
-  uint32_t pre = kPreRoll * (uint32_t)sizeof(PreRec) + 8;
-  if (storage == nullptr || bytes <= pre) {
-    store_.attach(nullptr, 0);
+void NamedCounts::add(const char* name) {
+  total_++;
+  if (name == nullptr) name = "?";
+  // the key: the text up to a ':', '(' or digit, spaces as '_', at most kNameMax - 1 characters
+  char key[kNameMax];
+  uint32_t k = 0;
+  for (; k < kNameMax - 1 && name[k] != '\0' && name[k] != ':' && name[k] != '(' && !(name[k] >= '0' && name[k] <= '9');
+       k++)
+    key[k] = name[k] == ' ' ? '_' : name[k];
+  while (k > 0 && key[k - 1] == '_') k--;
+  if (k == 0) key[k++] = '?';
+  key[k] = '\0';
+  for (uint32_t i = 0; i < n_; i++) {
+    uint32_t j = 0;
+    while (key[j] != '\0' && key[j] == names_[i][j]) j++;
+    if (key[j] == names_[i][j]) {
+      counts_[i]++;
+      return;
+    }
+  }
+  if (n_ == kSlots) {
+    other_++;
     return;
   }
-  uintptr_t a = ((uintptr_t)storage + 7u) & ~(uintptr_t)7u;
-  pre_ = reinterpret_cast<PreRec*>(a);
-  store_.attach(storage + pre, bytes - pre);
-  if (!store_.ready()) pre_ = nullptr;
+  for (uint32_t j = 0; j <= k; j++) names_[n_][j] = key[j];
+  counts_[n_++] = 1;
 }
 
-uint32_t WalkRecorder::rel(uint64_t now) const {
-  if (now <= t0_) return 0;
-  uint64_t d = now - t0_;
-  return d > 0xFFFFFFFFull ? 0xFFFFFFFFu : (uint32_t)d;
+Recorder::Recorder(Clock& clock, const SerialLink& link) : clock_(clock), link_(link) {}
+
+void Recorder::attach(uint8_t* storage, uint32_t bytes, uint32_t mind_build) {
+  mind_build_ = mind_build;
+  flight_.attach(storage, bytes);
 }
 
-bool WalkRecorder::frame(uint8_t kind, uint8_t type, uint8_t seq, const uint8_t* payload, uint8_t len, uint64_t now) {
-  uint8_t ts[2] = {type, seq};
-  return store_.append(kind, rel(now), ts, 2, payload, len);
+// ---- runs ---------------------------------------------------------------------------------
+
+Run* Recorder::run(uint32_t id) {
+  for (uint32_t i = 0; i < n_runs_; i++) {
+    Run& r = runs_[(head_ + i) % kMaxRuns];
+    if (r.id == id) return &r;
+  }
+  return nullptr;
 }
 
-void WalkRecorder::mark_line(const char* line, uint64_t now, bool essential) {
+const Run* Recorder::find(uint32_t id) const { return const_cast<Recorder*>(this)->run(id); }
+
+const Run* Recorder::run_after(uint32_t after) const {
+  for (uint32_t i = 0; i < n_runs_; i++) {
+    const Run& r = runs_[(head_ + i) % kMaxRuns];
+    if (r.id > after) return &r;  // ids grow with the index order
+  }
+  return nullptr;
+}
+
+Run* Recorder::begin_run(uint8_t kind, uint64_t now) {
+  if (n_runs_ == kMaxRuns) {  // the oldest entry goes (its blocks may still be in the stream)
+    head_ = (head_ + 1) % kMaxRuns;
+    n_runs_--;
+  }
+  Run& r = runs_[(head_ + n_runs_++) % kMaxRuns];
+  mem_zero(&r, sizeof r);
+  r.id = next_id_++;
+  r.kind = kind;
+  r.flags = KILO_WALK_FLAGS_RECORDING | (kind == KILO_RUN_KIND_TRICK ? KILO_WALK_FLAGS_TRICK : 0);
+  r.start_us = now;
+  runs_changed_++;
+  run_mark(r.id, kind, KILO_RUN_EVENT_BEGIN, now);
+  return &r;
+}
+
+void Recorder::end_run(uint32_t id, uint64_t now) {
+  Run* r = run(id);
+  if (r == nullptr) return;
+  r->end_us = now;
+  run_mark(id, r->kind, KILO_RUN_EVENT_END, now);
+  last_end_us_ = now;
+  if (now + kPostRollUs > tail_end_us_) tail_end_us_ = now + kPostRollUs;
+  runs_changed_++;
+}
+
+bool Recorder::span(const Run& r, uint32_t* first_seq, uint32_t* last_seq) const {
+  if ((r.flags & KILO_WALK_FLAGS_RECORDING) || r.end_us == 0 || flight_.empty()) return false;
+  uint64_t a = r.start_us > kPreRollUs ? r.start_us - kPreRollUs : 0;
+  uint32_t f = flight_.seq_at(a), l = flight_.seq_at(r.end_us + kPostRollUs);
+  if (flight_.t0(f) > r.start_us && flight_.first_seq() > 0) return false;  // its start is overwritten
+  *first_seq = f;
+  *last_seq = l;
+  return true;
+}
+
+void Recorder::poll(const tricks::TrickPlayer& p) {
+  uint64_t now = clock_.now_us();
+  const tricks::PlayResult& r = p.result();
+  if (r.play != 0 && r.play != trick_play_) {  // a new play
+    if (trick_ != 0) end_trick("FAILED", "another play began", 0, 0, now);
+    begin_trick(p, now);
+  }
+  if (trick_ != 0) {
+    if (r.uploaded && !upload_marked_) {
+      upload_marked_ = true;
+      mark_line("uploaded", now);
+    }
+    bool acked = p.playing() || (r.state == tricks::PlayState::Done);
+    if (acked && !play_marked_) {
+      play_marked_ = true;
+      Line l("play");
+      l.unum("speed", p.speed());
+      mark_line(l.text(), p.played_at_us() != 0 ? p.played_at_us() : now);
+      Run* run_ = run(trick_);
+      if (run_ != nullptr) run_->flags |= KILO_WALK_FLAGS_STREAMED;
+    }
+    if (r.state == tricks::PlayState::Done)
+      end_trick(tricks::done_reason_name(r.reason), "", r.elapsed_ms, r.expected_ticks, now);
+    else if (r.state == tricks::PlayState::Failed)
+      end_trick("FAILED", r.error != nullptr ? r.error : "?", 0, r.expected_ticks, now);
+  }
+  if (tail_end_us_ != 0 && now >= tail_end_us_) tail_end_us_ = 0;
+  for (uint32_t i = 0; i < n_runs_; i++) {  // post-rolls over: fetchable
+    Run& x = runs_[(head_ + i) % kMaxRuns];
+    if ((x.flags & KILO_WALK_FLAGS_RECORDING) && x.end_us != 0 && now >= x.end_us + kPostRollUs) {
+      x.flags &= (uint8_t)~KILO_WALK_FLAGS_RECORDING;
+      runs_changed_++;
+    }
+  }
+}
+
+void Recorder::trick_header(const tricks::Trick& t, uint32_t id, uint8_t speed, bool mirror, uint64_t now) {
+  const BodyState& b = link_.state();
+  Line l("trick");
+  l.unum("id", (unsigned)id);
+  l.unum("format", KILO_HOST_WALK_FORMAT);
+  l.str("trick", t.name);
+  unsigned stage = rear_up_stage(t.name);
+  if (stage != 0) l.unum("stage", stage);
+  l.unum("tid", tricks::trick_id_for(t));
+  char crc[8];
+  format(crc, sizeof crc, "%04x", (unsigned)tricks::trick_crc16(t));
+  l.str("crc", crc);
+  l.unum("frames", t.n_frames);
+  l.unum("speed", speed);
+  l.unum("mirror", mirror ? 1u : 0u);
+  l.hex("mind_build", (unsigned)mind_build_);
+  if (b.has_hello) l.hex("body_build", (unsigned)b.hello.fw_build);
+  if (b.has_telemetry) {
+    l.unum("battery_mv", b.telemetry.batt_mv);
+    l.str("mode", mode_name(b.telemetry.mode));
+  }
+  l.str("by", have_key_ && now - last_key_us_ < kKeyRecentUs ? "remote" : "other");
+  mark_line(l.text(), now);
+  // each keyframe's ticks at 1x, and the loop
+  char buf[250];
+  size_t n = format(buf, sizeof buf, "frames dur=");
+  for (uint8_t i = 0; i < t.n_frames; i++) n += format(buf + n, sizeof buf - n, i ? ",%u" : "%u", (unsigned)t.frames[i].dur);
+  n += format(buf + n, sizeof buf - n, " hold=");
+  for (uint8_t i = 0; i < t.n_frames; i++) n += format(buf + n, sizeof buf - n, i ? ",%u" : "%u", (unsigned)t.frames[i].hold);
+  format(buf + n, sizeof buf - n, " loop=%u,%u,%u", (unsigned)t.loop_start, (unsigned)t.loop_end, (unsigned)t.repeats);
+  mark_line(buf, now);
+}
+
+void Recorder::begin_trick(const tricks::TrickPlayer& p, uint64_t now) {
+  trick_play_ = p.result().play;
+  play_marked_ = upload_marked_ = false;
+  const tricks::Trick* t = p.trick();
+  Run* r = begin_run(KILO_RUN_KIND_TRICK, now);
+  trick_ = r->id;
+  if (t == nullptr) return;
+  trick_header(*t, r->id, p.speed(), p.mirrored(), now);
+  char text[KILO_HOST_WALK_TEXT_MAX + 1];
+  unsigned stage = rear_up_stage(t->name);
+  if (stage != 0) format(text, sizeof text, "trick=%s stage=%u", t->name, stage);
+  else format(text, sizeof text, "trick=%s", t->name);
+  set_text(r, text);
+  if (metrics_ != nullptr) {
+    metrics_->tricks++;
+    metrics_->trick_names.add(t->name);
+  }
+}
+
+void Recorder::end_trick(const char* reason, const char* why, uint32_t elapsed_ms, uint32_t expected, uint64_t now) {
+  const BodyState& b = link_.state();
+  Line l("end");
+  l.str("reason", reason);
+  l.unum("elapsed_ms", elapsed_ms);
+  l.unum("expected_ticks", expected);
+  if (b.has_telemetry) {
+    l.unum("battery_mv", b.telemetry.batt_mv);
+    l.str("mode", mode_name(b.telemetry.mode));
+  }
+  l.str("why", why);  // last: it may hold spaces
+  mark_line(l.text(), now);
+  Run* r = run(trick_);
+  if (r != nullptr) {
+    if (reason[0] == 'D') r->flags |= KILO_WALK_FLAGS_ENDED_OK;  // DONE
+    char text[KILO_HOST_WALK_TEXT_MAX + 1];
+    format(text, sizeof text, "%s end=%s", r->text, reason);
+    set_text(r, text);
+  }
+  if (metrics_ != nullptr) metrics_->trick_ends.add(reason);
+  end_run(trick_, now);
+  trick_ = 0;
+}
+
+void Recorder::trick_refused(const char* trick, const char* why) {
+  if (!attached()) return;
+  uint64_t now = clock_.now_us();
+  if (trick_ != 0) end_trick("FAILED", "another play began", 0, 0, now);
+  Run* r = begin_run(KILO_RUN_KIND_TRICK, now);
+  trick_ = r->id;
+  const tricks::Trick* t = tricks::find_trick(trick);
+  if (t != nullptr) trick_header(*t, r->id, tricks::kSpeedUnity, false, now);
+  char text[KILO_HOST_WALK_TEXT_MAX + 1];
+  unsigned stage = rear_up_stage(trick);
+  if (stage != 0) format(text, sizeof text, "trick=%s stage=%u", trick, stage);
+  else format(text, sizeof text, "trick=%s", trick);
+  set_text(r, text);
+  if (metrics_ != nullptr) {
+    metrics_->tricks++;
+    metrics_->trick_names.add(trick);
+    metrics_->refusals.add(why);
+  }
+  end_trick("REFUSED", why, 0, 0, now);
+}
+
+void Recorder::key(const char* text) {
+  uint64_t now = clock_.now_us();
+  last_key_us_ = now;
+  have_key_ = true;
+  if (!in_run()) return;
+  char buf[200];
+  format(buf, sizeof buf, "key %s", text);
+  mark_line(buf, now);
+}
+
+// ---- records --------------------------------------------------------------------------------
+
+void Recorder::run_mark(uint32_t id, uint8_t kind, uint8_t event, uint64_t now) {
+  kilo_run_mark_t m;
+  m.id = id;
+  m.kind = kind;
+  m.event = event;
+  flight_.append(KILO_WALK_RECORD_RUN, now, &m, sizeof m);
+}
+
+void Recorder::mark_line(const char* line, uint64_t now) {
   uint32_t n = 0;
   while (line[n] != '\0' && n < 255) n++;
-  store_.append(KILO_WALK_RECORD_MARK, rel(now), line, n, nullptr, 0, essential);
+  flight_.append(KILO_WALK_RECORD_MARK, now, line, n);
 }
 
-void WalkRecorder::on_frame(bool tx, uint8_t type, uint8_t seq, const uint8_t* payload, uint8_t len, uint64_t now) {
-  if (pre_ == nullptr) return;
-  if (len > KILO_MAX_PAYLOAD) return;  // cannot be: the link checks lengths
-  uint8_t kind = tx ? KILO_WALK_RECORD_TX : KILO_WALK_RECORD_RX;
-  PreRec& p = pre_[(pre_head_ + pre_n_) % kPreRoll];
-  if (pre_n_ < kPreRoll) pre_n_++;
-  else pre_head_ = (pre_head_ + 1) % kPreRoll;
-  p.t_us = now;
-  p.kind = kind;
-  p.type = type;
-  p.seq = seq;
-  p.len = len;
-  mem_copy(p.payload, payload, len);
-  if (!recording_) return;
-  frame(kind, type, seq, payload, len, now);
-  WalkEntry* e = store_.current();
-  if (tx && type == KILO_MSG_FEET && e != nullptr) e->feet++;
+void Recorder::set_text(Run* r, const char* text) {
+  if (r == nullptr) return;
+  uint32_t n = 0;
+  while (text[n] != '\0' && n < KILO_HOST_WALK_TEXT_MAX) n++;
+  mem_copy(r->text, text, n);
+  if (n < KILO_HOST_WALK_TEXT_MAX) r->text[n] = '\0';
+  r->text_len = (uint8_t)n;
+  runs_changed_++;
 }
 
-void WalkRecorder::poll() {
-  if (recording_ && ending_ && clock_.now_us() >= end_at_) finish();
+void Recorder::write(LogLevel level, const char* line) {
+  uint8_t lv = (uint8_t)level;
+  uint32_t n = 0;
+  while (line[n] != '\0' && n < 254) n++;
+  flight_.append(KILO_WALK_RECORD_LOG, clock_.now_us(), &lv, 1, line, n);
 }
 
-void WalkRecorder::finish() {
-  store_.close();
-  recording_ = ending_ = false;
+void Recorder::on_frame(bool tx, uint8_t type, uint8_t seq, const uint8_t* payload, uint8_t len, uint64_t now) {
+  if (tx && type == KILO_MSG_HEARTBEAT) {
+    flight_.count_skipped(now);
+    return;
+  }
+  uint8_t ts[2] = {type, seq};
+  flight_.append(tx ? KILO_WALK_RECORD_TX : KILO_WALK_RECORD_RX, now, ts, 2, payload, len);
+  if (tx && type == KILO_MSG_FEET && walk_ != 0) {
+    Run* r = run(walk_);
+    if (r != nullptr) r->feet++;
+  }
 }
 
-void WalkRecorder::set_text(const planner::Walker& w, const char* end) {
-  WalkEntry* e = store_.current();
-  if (e == nullptr) return;
+// ---- walks ----------------------------------------------------------------------------------
+
+void Recorder::walk_text(const planner::Walker& w, const char* end) {
+  Run* r = run(walk_);
+  if (r == nullptr) return;
   const planner::WalkGoal& g = w.goal();
-  real speed = (e->flags & KILO_WALK_FLAGS_STREAMED) ? w.planner().timing().speed_mm_s : g.speed_mm_s;
+  real speed = (r->flags & KILO_WALK_FLAGS_STREAMED) ? w.planner().timing().speed_mm_s : g.speed_mm_s;
   // "gait=trot dir=forward speed=55.6[ end=REASON]" (Line puts a space before each key)
   Line s("");
   s.str("gait", g.pattern->name);
@@ -133,14 +366,10 @@ void WalkRecorder::set_text(const planner::Walker& w, const char* end) {
   if (speed >= 0) s.fixed("speed", speed, 1);
   else s.str("speed", "default");
   if (end != nullptr) s.str("end", end);
-  char buf[KILO_HOST_WALK_TEXT_MAX + 2];
-  size_t n = format(buf, sizeof buf, "%s", s.text() + 1);  // without the leading space
-  if (n > KILO_HOST_WALK_TEXT_MAX) n = KILO_HOST_WALK_TEXT_MAX;
-  mem_copy(e->text, buf, n);
-  e->text_len = (uint8_t)n;
+  set_text(r, s.text() + 1);  // without the leading space
 }
 
-void WalkRecorder::goal_line(const char* word, const planner::WalkGoal& g, uint64_t now) {
+void Recorder::goal_line(const char* word, const planner::WalkGoal& g, uint64_t now) {
   Line l(word);
   l.str("pattern", g.pattern->name);
   l.str("dir", planner::direction_name(g.direction));
@@ -150,7 +379,7 @@ void WalkRecorder::goal_line(const char* word, const planner::WalkGoal& g, uint6
   mark_line(l.text(), now);
 }
 
-void WalkRecorder::timing_line(const char* word, const planner::Walker& w, uint64_t now) {
+void Recorder::timing_line(const char* word, const planner::Walker& w, uint64_t now) {
   const planner::Planner& p = w.planner();
   planner::Timing tm = p.timing();
   Line l(word);
@@ -170,63 +399,44 @@ void WalkRecorder::timing_line(const char* word, const planner::Walker& w, uint6
   mark_line(l.text(), now);
 }
 
-void WalkRecorder::begin(const planner::Walker& w, uint64_t now) {
-  if (recording_) finish();  // the previous walk's post-roll ends here
-  uint32_t id = store_.open(now);
-  if (id == 0) return;
-  recording_ = true;
-  ending_ = false;
-  last_ = {};
-  // t0: the oldest pre-roll frame within kPreRollUs
-  t0_ = now;
-  uint32_t first = pre_n_;
-  for (uint32_t i = 0; i < pre_n_; i++) {
-    const PreRec& p = pre_[(pre_head_ + i) % kPreRoll];
-    if (now - p.t_us <= kPreRollUs) {
-      first = i;
-      t0_ = p.t_us;
-      break;
-    }
-  }
-  const BodyState& b = link_.state();
-  Line l("walk");
-  l.unum("id", (unsigned)id);
-  l.unum("format", KILO_HOST_WALK_FORMAT);
-  // t0 on the mind's clock, in two 32-bit halves of microseconds (fmt has no 64-bit conversion)
-  l.unum("t0_us_hi", (unsigned)(t0_ >> 32));
-  l.unum("t0_us_lo", (unsigned)(t0_ & 0xFFFFFFFFu));
-  l.unum("setup_us", rel(now));
-  l.hex("mind_build", (unsigned)mind_build_);
-  if (b.has_hello) {
-    l.hex("body_build", (unsigned)b.hello.fw_build);
-    l.unum("proto", (unsigned)b.hello.proto_major * 100u + b.hello.proto_minor);
-  }
-  l.num("epoch", b.epoch);
-  l.unum("tick_ms", KILO_TICK_MS);
-  mark_line(l.text(), t0_, true);
-  for (uint32_t i = first; i < pre_n_; i++) {
-    const PreRec& p = pre_[(pre_head_ + i) % kPreRoll];
-    frame(p.kind, p.type, p.seq, p.payload, p.len, p.t_us);
-  }
-  goal_line("setup", w.goal(), now);
-  set_text(w, nullptr);
-}
-
-void WalkRecorder::on_walk_mark(const planner::Walker& w, planner::WalkMark mark) {
-  if (!store_.ready()) return;
+void Recorder::on_walk_mark(const planner::Walker& w, planner::WalkMark mark) {
+  if (!attached()) return;
   uint64_t now = clock_.now_us();
   using planner::WalkMark;
   if (mark == WalkMark::Setup) {
-    begin(w, now);
+    if (walk_ != 0) end_run(walk_, now);  // cannot be: a walk ends before the next one's setup
+    Run* r = begin_run(KILO_RUN_KIND_WALK, now);
+    walk_ = r->id;
+    last_ = {};
+    const BodyState& b = link_.state();
+    Line l("walk");
+    l.unum("id", (unsigned)r->id);
+    l.unum("format", KILO_HOST_WALK_FORMAT);
+    // t0 on the mind's clock, in two 32-bit halves of microseconds (fmt has no 64-bit conversion)
+    l.unum("t0_us_hi", (unsigned)(now >> 32));
+    l.unum("t0_us_lo", (unsigned)(now & 0xFFFFFFFFu));
+    l.unum("setup_us", 0);
+    l.hex("mind_build", (unsigned)mind_build_);
+    if (b.has_hello) {
+      l.hex("body_build", (unsigned)b.hello.fw_build);
+      l.unum("proto", (unsigned)b.hello.proto_major * 100u + b.hello.proto_minor);
+    }
+    l.num("epoch", b.epoch);
+    l.unum("tick_ms", KILO_TICK_MS);
+    if (b.has_telemetry) l.unum("battery_mv", b.telemetry.batt_mv);
+    mark_line(l.text(), now);
+    goal_line("setup", w.goal(), now);
+    walk_text(w, nullptr);
+    if (metrics_ != nullptr) metrics_->walks++;
     return;
   }
-  if (!recording_ || ending_) return;
-  WalkEntry* e = store_.current();
+  if (walk_ == 0) return;
+  Run* r = run(walk_);
   switch (mark) {
     case WalkMark::Setup:
       break;
     case WalkMark::Stream: {
-      if (e != nullptr) e->flags |= KILO_WALK_FLAGS_STREAMED;
+      if (r != nullptr) r->flags |= KILO_WALK_FLAGS_STREAMED;
       timing_line("stream", w, now);
       const planner::PlannerConfig& c = w.planner().config();
       Line l("config");
@@ -276,13 +486,13 @@ void WalkRecorder::on_walk_mark(const planner::Walker& w, planner::WalkMark mark
       ms.fixed("lower_leg_g", m.lower_leg_g, 1);
       ms.fixed("lower_leg_at", m.lower_leg_at, 2);
       mark_line(ms.text(), now);
-      set_text(w, nullptr);
+      walk_text(w, nullptr);
       break;
     }
     case WalkMark::Change:
       goal_line("change", w.goal(), now);
       if (w.phase() == planner::WalkPhase::Streaming) timing_line("timing", w, now);
-      set_text(w, nullptr);
+      walk_text(w, nullptr);
       break;
     case WalkMark::Stop: {
       Line l("stop");
@@ -294,25 +504,25 @@ void WalkRecorder::on_walk_mark(const planner::Walker& w, planner::WalkMark mark
       goal_line("queued", w.queued_goal(), now);
       break;
     case WalkMark::End: {
-      bool streamed = e != nullptr && (e->flags & KILO_WALK_FLAGS_STREAMED);
+      bool streamed = r != nullptr && (r->flags & KILO_WALK_FLAGS_STREAMED);
       const char* why = w.ended() != nullptr ? w.ended() : "?";
       const planner::StreamStats& s = w.stream_stats();
       const planner::PlannerStats& ps = w.planner().stats();
-      Line r("result");
-      r.unum("sent", s.sent);
-      r.unum("skipped", s.skipped);
-      r.unum("underruns", s.underruns);
-      r.unum("max_behind", s.max_behind);
-      r.unum("dropped_rx", s.dropped_rx);
+      Line res("result");
+      res.unum("sent", s.sent);
+      res.unum("skipped", s.skipped);
+      res.unum("underruns", s.underruns);
+      res.unum("max_behind", s.max_behind);
+      res.unum("dropped_rx", s.dropped_rx);
       if (streamed) {
-        r.unum("holds", ps.holds);
-        r.unum("catches", ps.catches);
-        r.unum("waits", ps.waits);
-        r.fixed("min_margin_mm", ps.min_margin, 1);
-        r.unum("tick", (unsigned)w.planner().tick());
+        res.unum("holds", ps.holds);
+        res.unum("catches", ps.catches);
+        res.unum("waits", ps.waits);
+        res.fixed("min_margin_mm", ps.min_margin, 1);
+        res.unum("tick", (unsigned)w.planner().tick());
       }
-      r.unum("clock_resets", w.body_clock().resets());
-      mark_line(r.text(), now, true);
+      res.unum("clock_resets", w.body_clock().resets());
+      mark_line(res.text(), now);
       planner::ErrorEstimate est;
       if (streamed && w.tracker().estimate(&est)) {
         Line x("error");
@@ -326,27 +536,32 @@ void WalkRecorder::on_walk_mark(const planner::Walker& w, planner::WalkMark mark
         x.fixed("spike_deg", est.spike_deg, 2);
         x.fixed("corr_pitch_deg", est.corr_pitch_deg, 2);
         x.fixed("corr_roll_deg", est.corr_roll_deg, 2);
-        mark_line(x.text(), now, true);
+        mark_line(x.text(), now);
       }
       Line l("end");
       l.unum("ok", w.ended_ok() ? 1u : 0u);
       l.unum("streamed", streamed ? 1u : 0u);
       l.str("reason", why);  // last: it may hold spaces
-      mark_line(l.text(), now, true);
-      if (e != nullptr) {
-        e->end_us = now;
-        if (w.ended_ok()) e->flags |= KILO_WALK_FLAGS_ENDED_OK;
+      mark_line(l.text(), now);
+      if (r != nullptr && w.ended_ok()) r->flags |= KILO_WALK_FLAGS_ENDED_OK;
+      walk_text(w, why);
+      if (metrics_ != nullptr) {
+        if (w.ended_ok()) metrics_->walks_ok++;
+        metrics_->walk_ends.add(why);
+        if (streamed) {
+          metrics_->walk_holds += ps.holds;
+          metrics_->walk_catches += ps.catches;
+        }
       }
-      set_text(w, why);
-      ending_ = true;
-      end_at_ = now + kPostRollUs;
+      end_run(walk_, now);
+      walk_ = 0;
       break;
     }
   }
 }
 
-void WalkRecorder::on_walk_tick(const planner::Walker& w, const planner::TickPlan& tp, bool sent) {
-  if (!recording_ || ending_) return;
+void Recorder::on_walk_tick(const planner::Walker& w, const planner::TickPlan& tp, bool sent) {
+  if (walk_ == 0) return;
   uint64_t now = clock_.now_us();
   kilo_walk_plan_t p;
   p.tick = tp.tick;
@@ -358,7 +573,7 @@ void WalkRecorder::on_walk_tick(const planner::Walker& w, const planner::TickPla
   p.plan_roll = a16(tp.plan_roll);
   p.pitch = a16(tp.pitch);
   p.roll = a16(tp.roll);
-  store_.append(KILO_WALK_RECORD_PLAN, rel(now), &p, sizeof p);
+  flight_.append(KILO_WALK_RECORD_PLAN, now, &p, sizeof p);
   const planner::PlannerStats& s = w.planner().stats();
   if (s.holds != last_.holds || s.catches != last_.catches || s.waits != last_.waits) {
     kilo_walk_planner_t q;
@@ -367,7 +582,7 @@ void WalkRecorder::on_walk_tick(const planner::Walker& w, const planner::TickPla
     q.catches = s.catches;
     q.waits = s.waits;
     q.min_margin = mm10(s.min_margin);
-    store_.append(KILO_WALK_RECORD_PLANNER, rel(now), &q, sizeof q);
+    flight_.append(KILO_WALK_RECORD_PLANNER, now, &q, sizeof q);
     last_ = s;
   }
 }

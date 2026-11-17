@@ -11,10 +11,15 @@
 //   Runner       the behaviour layer at 10 Hz, when enabled (behaviour/)
 //   RemoteControl  EVENT IR_KEY -> actions, when enabled (remote/)
 //   HostServer   the laptop interface, when the platform has a Listener (net/)
-//   WalkRecorder every walk tick by tick, with storage from attach_recorder() (record/)
+//   Recorder     the flight recorder: every frame, log line, walk and trick,
+//                with storage from attach_recorder() (record/)
+//   Saver        the recorder onto the SD card at safe moments (attach_saver())
+//   Metrics      the session's counters (METRICS, kilo metrics --host)
 //
-//   static Mind mind(serial, clock, platform_log, &listener, cfg);  // ~90 KB: static
-//   mind.attach_recorder(storage, record::kStoreBytes);  // the walk recorder's 8 MB, once
+//   static Mind mind(serial, clock, platform_log, &listener, cfg);  // ~150 KB: static
+//   mind.attach_log(new LogEntry[LogRing::kLines], LogRing::kLines);  // the log's history, once
+//   mind.attach_recorder(storage, record::kStoreBytes);  // the flight recorder's 64 MB, once
+//   mind.attach_saver(*new record::Saver(...));          // with an SD card
 //   mind.start();                // the port is open: HELLO_REQ
 //   for (;;) mind.poll();        // a few ms apart; never blocks
 //
@@ -51,7 +56,9 @@
 #include "planner/walker.h"
 #include "platform.h"
 #include "platform_net.h"
+#include "record/metrics.h"
 #include "record/recorder.h"
+#include "record/saver.h"
 #include "remote/remote.h"
 #include "tricks/player.h"
 #include "util/logring.h"
@@ -67,6 +74,7 @@ struct MindConfig {
   uint64_t seed = 0;            // the behaviour RNG's seed (logged)
   const behaviour::Personality* personality = nullptr;  // null: behaviour::kPersonality
   uint32_t stats_period_ms = 0;  // > 0: STATS_REQ this often, the answer logged ("body STATS: ...")
+  bool record_save = false;     // the card saver on from the start (KILO_RECORD_SAVE; the card's SAVE_ON also turns it on)
   // The laptop interface's keys (net/host_server.h set_keys(); they outlive
   // the Mind) and the source of its ephemeral keys. Without a Random every
   // connection is refused.
@@ -75,7 +83,7 @@ struct MindConfig {
   Random* random = nullptr;
 };
 
-class Mind final : public LinkListener {
+class Mind final : public LinkListener, public remote::TrickNotes, public record::MetricsSource {
  public:
   static constexpr uint64_t kRunnerStallUs = 1000000;       // daemon/behaviour.py RUNNER_STALL_S
   static constexpr uint64_t kRunnerStartGraceUs = 10000000;  // RUNNER_START_GRACE_S
@@ -91,10 +99,18 @@ class Mind final : public LinkListener {
   // A second LinkListener for the platform (statistics windows); the Mind
   // keeps the link's own.
   void set_tap(LinkListener* tap) { tap_ = tap; }
-  // Record every walk into this block (record::kStoreBytes, allocated once by
-  // the platform; it outlives the Mind), served to the laptop as WALK_LIST /
-  // WALK_FETCH. Before start(). Without it nothing is recorded.
+  // The flight recorder's block (record::kStoreBytes, allocated once by
+  // the platform; it outlives the Mind), served to the laptop as WALK_LIST,
+  // WALK_FETCH, REC_FETCH. Before start(). Without it nothing is recorded.
   void attach_recorder(uint8_t* storage, uint32_t bytes);
+  // The log's history (LogRing::kLines entries, once). Before start().
+  void attach_log(LogEntry* lines, uint32_t n) { log_.attach(lines, n); }
+  // The card saver (it outlives the Mind; made on recorder() and log()).
+  void attach_saver(record::Saver& saver);
+  record::Saver* saver() { return saver_; }
+  record::Metrics& metrics() { return metrics_; }
+  // Nothing moves and nothing needs the loop: the card may be written.
+  bool card_safe() const { return card_safe_; }
 
   LogRing& log() { return log_; }
   SerialLink& link() { return link_; }
@@ -103,7 +119,7 @@ class Mind final : public LinkListener {
   perception::Percepts& percepts() { return percepts_; }
   remote::RemoteControl& remote() { return remote_; }
   HostServer& host() { return host_; }
-  record::WalkRecorder& recorder() { return recorder_; }
+  record::Recorder& recorder() { return recorder_; }
   behaviour::Runner& runner() { return runner_; }
   bool behaviour_active() const { return behaviour_on_ && !runner_.stopped(); }
   bool poweroff_requested() const { return runner_.poweroff_requested(); }
@@ -122,6 +138,11 @@ class Mind final : public LinkListener {
   void on_reboot(const kilo_hello_t* hello, const char* why) override;
   void on_goals_cleared(const char* reason, uint32_t count) override;
   void on_refused(uint8_t goal_type, uint8_t reason) override;
+  // remote::TrickNotes
+  void refused(const char* trick, const char* why) override { recorder_.trick_refused(trick, why); }
+  // record::MetricsSource
+  uint32_t metric_lines() override;
+  void metric_line(uint32_t i, char* out, uint32_t n) override;
 
  private:
   // the behaviour layer's body (behaviour/adapter.py BodyAdapter) and percepts (runner.py PerceptFeed)
@@ -166,6 +187,8 @@ class Mind final : public LinkListener {
   bool liveness(uint64_t now);
   void ir_key(const kilo_event_t& e);
   void stats(uint64_t now);
+  bool safe_for_card(uint64_t now);
+  bool body_limp() const;
 
   Clock& clock_;
   MindConfig cfg_;
@@ -181,7 +204,11 @@ class Mind final : public LinkListener {
   behaviour::Runner runner_;
   RunnerHook runner_hook_;
   remote::RemoteControl remote_;
-  record::WalkRecorder recorder_;
+  record::Recorder recorder_;
+  record::Metrics metrics_;
+  record::Saver* saver_ = nullptr;
+  uint64_t unsafe_at_us_ = 0;  // the last pass that was not safe for the card
+  bool card_safe_ = false;
   LinkListener* tap_ = nullptr;
 
   // the snapshot's last EVENTs (BodyState.events)

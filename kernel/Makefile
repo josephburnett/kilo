@@ -57,12 +57,15 @@ OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/
 #   KILO_REAR_UP=0|1|2|3    the remote's B2 starts the rear_up trick at that stage: 1 rear_up (28 deg),
 #                           2 rear_up_2 (40 deg), 3 rear_up_3 (54 deg) (default 0: B2 does nothing
 #                           until the staged trials of docs/rear-up-trick.md are done)
+#   KILO_RECORD_SAVE=0|1    save the flight recorder to the SD card from the start (default 0: off until
+#                           `kilo bench sd --host` has measured the card and `kilo record save on --host`)
 KILO_BODY_SERIAL ?= pl011
 KILO_BOOT_PROBE ?= 1
 KILO_PLANNER_BENCH ?= 1
 KILO_MDNS ?= 1
 KILO_BEHAVIOUR ?= 0
 KILO_REAR_UP ?= 0
+KILO_RECORD_SAVE ?= 0
 ifeq ($(filter 0 1 2 3,$(KILO_REAR_UP)),)
 $(error KILO_REAR_UP must be 0, 1, 2 or 3)
 endif
@@ -72,7 +75,7 @@ else ifneq ($(KILO_BODY_SERIAL),auto)
 $(error KILO_BODY_SERIAL must be auto or pl011)
 endif
 KILO_DEFS += -DKILO_BOOT_PROBE=$(KILO_BOOT_PROBE) -DKILO_PLANNER_BENCH=$(KILO_PLANNER_BENCH) -DKILO_MDNS=$(KILO_MDNS) \
-	-DKILO_BEHAVIOUR=$(KILO_BEHAVIOUR) -DKILO_REAR_UP=$(KILO_REAR_UP)
+	-DKILO_BEHAVIOUR=$(KILO_BEHAVIOUR) -DKILO_REAR_UP=$(KILO_REAR_UP) -DKILO_RECORD_SAVE=$(KILO_RECORD_SAVE)
 LIBS := $(CIRCLE_LIBS)
 
 NETBOOT_SRC  := $(CIRCLEHOME)/sample/38-bootloader

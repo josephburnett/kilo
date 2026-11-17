@@ -139,7 +139,9 @@ int usage() {
   fprintf(stderr,
           "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--authorized-keys FILE] [--reset-fifo PATH]\n"
           "                      [--card DIR] [--duration SECONDS] [--verbose] [--remote] [--behaviour] [--seed N]\n"
-          "                      [--balance KP] [--rear-up[=N]]\n"
+          "                      [--balance KP] [--rear-up[=N]] [--record-mb N] [--record-save]\n"
+          "  --record-mb N  the flight recorder's RAM, MB (default 16; the Pi has 64)\n"
+          "  --record-save  save it to --card DIR/kilorec at safe moments from the start (else REC_SAVE)\n"
           "  --rear-up[=N]  the remote's B2 starts the rear_up trick at stage N (1 rear_up, the default,\n"
           "                 2 rear_up_2, 3 rear_up_3; off: B2 does nothing; KILO_REAR_UP on the Pi)\n"
           "  --authorized-keys FILE  the laptops' public keys --listen accepts (default %s)\n"
@@ -158,6 +160,7 @@ int main(int argc, char** argv) {
   const char* listen = nullptr;
   const char* reset_fifo = nullptr;
   const char* card = nullptr;
+  unsigned long record_mb = 16;  // the flight recorder's RAM here (the Pi's is record::kStoreBytes, 64 MB)
   const char* keys_path = KILO_AUTHORIZED_KEYS;
   double duration_s = -1;
   bool verbose = false;
@@ -177,6 +180,11 @@ int main(int argc, char** argv) {
       keys_path = argv[++i];
     } else if (strcmp(argv[i], "--card") == 0 && i + 1 < argc) {
       card = argv[++i];
+    } else if (strcmp(argv[i], "--record-mb") == 0 && i + 1 < argc) {
+      record_mb = strtoul(argv[++i], &end, 10);
+      if (*end != '\0' || record_mb < 1 || record_mb > 256) return usage();
+    } else if (strcmp(argv[i], "--record-save") == 0) {
+      cfg.record_save = true;
     } else if (strcmp(argv[i], "--duration") == 0 && i + 1 < argc) {
       duration_s = strtod(argv[++i], &end);
       if (*end != '\0' || duration_s < 0) return usage();
@@ -233,6 +241,7 @@ int main(int argc, char** argv) {
   // static: the Mind holds ~60 KB of buffers (the laptop channel's, perception's windows)
   static Mind mind(serial, clock, stderr_log, listen != nullptr ? &listener : nullptr, cfg);
   Log& log = mind.log();  // every line: the RAM ring (`kilo log --host`), then stderr
+  mind.attach_log(new LogEntry[LogRing::kLines], LogRing::kLines);
   if (!serial.open(port)) {
     logf(log, LogLevel::Error, "%s", serial.error());
     return 1;
@@ -255,9 +264,16 @@ int main(int argc, char** argv) {
     logf(log, LogLevel::Info, "kernel updates go to %s (--card)", card);
   }
   mind.set_tap(&window);
-  // The walk recorder's store, on the heap, once (as on the Pi): every walk
-  // tick by tick, for `kilo walks --host`.
-  mind.attach_recorder(new uint8_t[record::kStoreBytes], record::kStoreBytes);
+  // The flight recorder's store, on the heap, once (as on the Pi; --record-mb
+  // MB here): every frame, log line, walk and trick, for `kilo runs --host`
+  // and `kilo record fetch --host`. With --card DIR its saver writes
+  // DIR/kilorec (REC_SAVE turns it on, or --record-save).
+  uint32_t record_bytes = (uint32_t)(record_mb << 20);
+  mind.attach_recorder(new uint8_t[record_bytes], record_bytes);
+  if (card != nullptr) {
+    DirRecordCard* rc = new DirRecordCard(card, log);
+    mind.attach_saver(*new record::Saver(clock, log, mind.recorder(), mind.log(), *rc, cfg.record_save));
+  }
   if (listen != nullptr) {
     if (!listener.open(listen)) {
       logf(log, LogLevel::Error, "%s", listener.error());

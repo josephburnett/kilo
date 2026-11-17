@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
 #include <sys/ioctl.h>
 #include <sys/random.h>
 #include <sys/stat.h>
@@ -199,6 +200,114 @@ KernelStore::Result DirStore::sync() {
   bool ok = fsync(fd) == 0;
   ::close(fd);
   return ok ? Result::Ok : fail("cannot sync", ".");
+}
+
+// ---- DirRecordCard ----------------------------------------------------------------------
+
+DirRecordCard::~DirRecordCard() {
+  if (fd_ >= 0) ::close(fd_);
+  if (dirp_ != nullptr) closedir((DIR*)dirp_);
+}
+
+void DirRecordCard::path(char* out, size_t cap, const char* name) const { snprintf(out, cap, "%s/%s", dir_, name); }
+
+RecordCard::Result DirRecordCard::make_dir(const char* name) {
+  char p[512];
+  path(p, sizeof p, name);
+  if (::mkdir(p, 0755) == 0 || errno == EEXIST) return Result::Ok;
+  logf(log_, LogLevel::Warn, "card: cannot make %s: %s", p, strerror(errno));
+  return Result::Failed;
+}
+
+RecordCard::Result DirRecordCard::open_mode(const char* name, int flags) {
+  if (fd_ >= 0) return Result::Failed;
+  char p[512];
+  path(p, sizeof p, name);
+  fd_ = ::open(p, flags, 0644);
+  if (fd_ < 0) return errno == ENOENT && !(flags & O_CREAT) ? Result::Missing : Result::Failed;
+  return Result::Ok;
+}
+
+RecordCard::Result DirRecordCard::create(const char* name) { return open_mode(name, O_WRONLY | O_CREAT | O_TRUNC); }
+RecordCard::Result DirRecordCard::append(const char* name) { return open_mode(name, O_WRONLY | O_CREAT | O_APPEND); }
+RecordCard::Result DirRecordCard::open(const char* name) { return open_mode(name, O_RDONLY); }
+
+RecordCard::Result DirRecordCard::seek(uint32_t offset) {
+  if (fd_ < 0) return Result::Failed;
+  return lseek(fd_, (off_t)offset, SEEK_SET) == (off_t)offset ? Result::Ok : Result::Failed;
+}
+
+RecordCard::Result DirRecordCard::write(const uint8_t* data, uint32_t len) {
+  if (fd_ < 0) return Result::Failed;
+  while (len > 0) {
+    ssize_t w = ::write(fd_, data, len);
+    if (w < 0 && errno == EINTR) continue;
+    if (w <= 0) return Result::Failed;
+    data += w;
+    len -= (uint32_t)w;
+  }
+  return Result::Ok;
+}
+
+int32_t DirRecordCard::read(uint8_t* buf, uint32_t len) {
+  if (fd_ < 0) return -1;
+  for (;;) {
+    ssize_t n = ::read(fd_, buf, len);
+    if (n < 0 && errno == EINTR) continue;
+    return n < 0 ? -1 : (int32_t)n;
+  }
+}
+
+RecordCard::Result DirRecordCard::sync() { return fd_ >= 0 && fsync(fd_) == 0 ? Result::Ok : Result::Failed; }
+
+RecordCard::Result DirRecordCard::close() {
+  if (fd_ < 0) return Result::Failed;
+  bool ok = ::close(fd_) == 0;
+  fd_ = -1;
+  return ok ? Result::Ok : Result::Failed;
+}
+
+RecordCard::Result DirRecordCard::remove(const char* name) {
+  char p[512];
+  path(p, sizeof p, name);
+  if (::unlink(p) == 0) return Result::Ok;
+  return errno == ENOENT ? Result::Missing : Result::Failed;
+}
+
+RecordCard::Result DirRecordCard::rename(const char* from, const char* to) {
+  char a[512], b[512];
+  path(a, sizeof a, from);
+  path(b, sizeof b, to);
+  struct stat st;
+  if (::stat(a, &st) != 0) return Result::Missing;
+  if (::stat(b, &st) == 0) return Result::Failed;  // as FatFs: never onto an existing file
+  return ::rename(a, b) == 0 ? Result::Ok : Result::Failed;
+}
+
+RecordCard::Result DirRecordCard::list_begin(const char* dir) {
+  if (dirp_ != nullptr) closedir((DIR*)dirp_);
+  path(list_dir_, sizeof list_dir_, dir);
+  dirp_ = opendir(list_dir_);
+  return dirp_ != nullptr ? Result::Ok : Result::Failed;
+}
+
+RecordCard::Result DirRecordCard::list_next(char* name, uint32_t n, uint32_t* size) {
+  if (dirp_ == nullptr) return Result::Missing;
+  for (;;) {
+    struct dirent* e = readdir((DIR*)dirp_);
+    if (e == nullptr) {
+      closedir((DIR*)dirp_);
+      dirp_ = nullptr;
+      return Result::Missing;
+    }
+    if (e->d_name[0] == '.') continue;
+    snprintf(name, n, "%s", e->d_name);
+    char p[1024];
+    snprintf(p, sizeof p, "%s/%s", list_dir_, e->d_name);
+    struct stat st;
+    *size = ::stat(p, &st) == 0 ? (uint32_t)st.st_size : 0;
+    return Result::Ok;
+  }
 }
 
 bool PosixRandom::fill(uint8_t* buf, uint32_t n) {

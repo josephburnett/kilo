@@ -1,71 +1,110 @@
-// recorder: every walk, recorded tick by tick into the WalkStore, so that
-// the error of the model can be studied afterwards (kilo walks --host IP
-// --fetch, then kilo log walk FILE). Python counterpart: the daemon's
-// --kilolog (kilo/logs/kilolog.py), which kept the raw frames of a whole
-// session on the Pi's disk; this keeps the walks only, in RAM, with what
-// the planner knew.
+// recorder: the flight recorder. From boot, everything the mind sees and
+// does goes into one RAM stream (record/flight.h), whether or not Kilo is
+// walking: every body link frame both ways (HEARTBEAT only counted), every
+// log line (the LogRing's tap), and during a walk or a trick what the
+// mind knew. A run (a walk, a trick) is a span of the stream, opened and
+// closed by RUN records and listed in the run index (WALK_LIST); the laptop
+// fetches a run's span or any time range (kilo runs --host --fetch, kilo
+// record fetch) and analyses it afterwards (kilo log walk|trick FILE).
+// Python counterpart: the daemon's --kilolog (kilo/logs/kilolog.py), which
+// kept the raw frames of a whole session on the Pi's disk.
 //
-// A recording (the format is protocol/spec.toml [host] "Walk recordings",
-// host.walk_format; records are kilo_walk_record_header_t + payload):
-//   MARK "walk id=N format=1 t0_us=... mind_build=... body_build=..."   at t 0
-//   RX / TX frames of the pre-roll (KILO_HOST_WALK_PREROLL_MS before the setup)
+// A walk's records (protocol/spec.toml "The flight recorder", host.walk_format):
+//   RUN BEGIN, MARK "walk id=N format=2 t0_us_hi=.. t0_us_lo=.. setup_us=0 mind_build=.. body_build=.."
 //   MARK "setup ..."        the goal asked: pattern, direction, speed, balance
-//   RX / TX                 every body link frame both ways (TELEMETRY at
-//                           50 Hz in the walk, EVENT, JOINTS if streamed;
-//                           FEET, goals, commands, HEARTBEAT)
-//   MARK "stream ..."       the stream began: the first tick, the timing the
-//                           planner chose (speed, stride, period, shift, stance)
-//   MARK "config ..."       the PlannerConfig in use (margin, gate, catch, ...)
-//   MARK "model ..."        the BodyModel in use (masses, geometry, servo lag)
-//   PLAN                    each tick planned (walk_plan: margin, the
-//                           attitude without lag, the legs in the air)
+//   MARK "stream ..."       the stream began: the timing the planner chose
+//   MARK "config ...", "model ...", "masses ..."   the planner's config, the body model
+//   PLAN                    each tick planned (walk_plan)
 //   PLANNER                 the hold, catch and wait counters, when they move
-//   MARK "change ..." / "stop ..." / "queued ..."   as they happen
-//   MARK "end ok=.. reason=..."  "result ..."  "error ..."   the end: the
-//                           stream's counters and the error tracker's estimate
-//   RX / TX of the post-roll (KILO_HOST_WALK_POSTROLL_MS), then the walk closes.
-// t_us counts from t0 (the walk MARK gives it on the mind's clock), so a FEET
-// written at t and the TELEMETRY that reports its tick give the lag.
+//   MARK "change ..." / "timing ..." / "stop ..." / "queued ..."
+//   MARK "result ..." "error ..." "end ok=.. reason=..", RUN END
+// A trick's (the trick player, polled):
+//   RUN BEGIN, MARK "trick id=N format=2 trick=NAME [stage=S] tid=.. crc=.. frames=.. speed=.. mirror=..
+//                    mind_build=.. body_build=.. battery_mv=.. mode=.. by=remote|other"
+//   MARK "frames dur=a,b,.. hold=x,y,.. loop=start,end,repeats"   each keyframe's ticks at 1x
+//   MARK "uploaded"         when this play uploaded the trick
+//   MARK "play speed=.."    at TRICK_PLAY's ACK: the keyframes' times count from here
+//   MARK "key ..."          a remote key while the run is open (which key stopped it)
+//   MARK "end reason=DONE|STOPPED|PREEMPTED|FELL|FAILED|REFUSED elapsed_ms=.. expected_ticks=..
+//                    battery_mv=.. mode=.. why=..", RUN END
+// The frames themselves (TELEMETRY: the measured pitch and roll at every
+// tick; TRICK_PLAY, TRICK_STOP; EVENT TRICK_DONE) are in the stream anyway.
+// A run stays RECORDING for KILO_HOST_WALK_POSTROLL_MS after its end, so
+// its fetch (from KILO_HOST_WALK_PREROLL_MS before its start) has both rolls.
 //
-// Cost: a record is a copy of at most 70 bytes into the ring, plus a few
-// numbers formatted for a MARK line (a handful per walk); no allocation.
-// The pre-roll is a ring of the last kPreRoll frames, filled all the time
-// (one 72-byte copy per frame), copied into a walk at its setup.
+// Cost: an append is a header and a copy of at most 255 bytes (no
+// allocation); a MARK line is formatted a handful of times per run.
 #ifndef KILO_MIND_RECORD_RECORDER_H
 #define KILO_MIND_RECORD_RECORDER_H
 #include <stdint.h>
 #include "link/serial_link.h"
 #include "planner/walker.h"
 #include "platform.h"
-#include "record/store.h"
+#include "record/flight.h"
+#include "record/metrics.h"
+#include "tricks/player.h"
 
 namespace kilo {
 namespace record {
 
-// The storage the platforms allocate for the recorder: enough for 20
-// minutes of walking at 50 Hz and more (kernel/README.md "Walk recordings").
-constexpr uint32_t kStoreBytes = 8u << 20;
+// The storage the platforms allocate: hours of the link (about 3 KB/s
+// idle, 6 KB/s walking).
+constexpr uint32_t kStoreBytes = 64u << 20;
 
-class WalkRecorder final : public FrameTap, public planner::WalkObserver {
+struct Run {
+  uint32_t id;          // 1.. in this boot; an earlier boot's: boot << 20 | id
+  uint8_t kind;         // KILO_RUN_KIND_*
+  uint8_t flags;        // KILO_WALK_FLAGS_*
+  uint8_t text_len;
+  uint8_t reserved;
+  uint32_t feet;        // FEET frames sent (walks)
+  uint64_t start_us;    // the mind's clock at its start (a walk's setup, a trick's start)
+  uint64_t end_us;      // ... at its end; 0 until then
+  char text[KILO_HOST_WALK_TEXT_MAX];  // WALK_INFO.text
+};
+
+class Recorder final : public FrameTap, public planner::WalkObserver, public Log {
  public:
-  static constexpr uint32_t kPreRoll = 256;  // frames kept for the pre-roll (about 2 s of an idle link)
+  static constexpr uint32_t kMaxRuns = 256;
   static constexpr uint64_t kPreRollUs = KILO_HOST_WALK_PREROLL_MS * 1000ull;
   static constexpr uint64_t kPostRollUs = KILO_HOST_WALK_POSTROLL_MS * 1000ull;
 
-  WalkRecorder(Clock& clock, const SerialLink& link);
+  Recorder(Clock& clock, const SerialLink& link);
 
-  // storage: the platform's block (kStoreBytes), the pre-roll carved from
-  // its start, the store the rest. Without it nothing is recorded.
+  // storage: the platform's block (kStoreBytes). Without it nothing is recorded.
   void attach(uint8_t* storage, uint32_t bytes, uint32_t mind_build);
-  bool attached() const { return store_.ready(); }
-  WalkStore& store() { return store_; }
-  const WalkStore& store() const { return store_; }
-  // A walk is being recorded (from its setup to the end of its post-roll).
-  bool recording() const { return recording_; }
+  bool attached() const { return flight_.ready(); }
+  FlightStore& flight() { return flight_; }
+  const FlightStore& flight() const { return flight_; }
+  void set_metrics(Metrics* m) { metrics_ = m; }
 
-  // Ends a walk's recording once its post-roll is over. Every pass.
-  void poll();
+  // Every pass: the trick player's state (a play began, was acknowledged,
+  // ended), and the end of runs' post-rolls.
+  void poll(const tricks::TrickPlayer& player);
+  // The remote refused to start a trick (battery, USB power, the player busy).
+  void trick_refused(const char* trick, const char* why);
+  // A remote key's line: a MARK into the open runs (and remembered: a trick
+  // started within 5 s of one is "by=remote").
+  void key(const char* text);
 
+  // A run is open or in its post-roll.
+  bool recording() const { return walk_ != 0 || trick_ != 0 || tail_end_us_ != 0; }
+  // Moving now: a walk or a trick run open (the card saver waits).
+  bool in_run() const { return walk_ != 0 || trick_ != 0; }
+  uint64_t last_run_end_us() const { return last_end_us_; }
+  uint32_t runs_total() const { return next_id_ - 1; }
+  // The oldest run with an id above after (0: the oldest kept), or null.
+  const Run* run_after(uint32_t after) const;
+  const Run* find(uint32_t id) const;
+  uint32_t runs_kept() const { return n_runs_; }
+  // Runs whose index entries changed since the saver last took them.
+  uint32_t runs_changed() const { return runs_changed_; }
+  // The blocks a run's fetch covers, from its pre-roll to its post-roll
+  // (false: not in RAM, or still recording).
+  bool span(const Run& r, uint32_t* first_seq, uint32_t* last_seq) const;
+
+  // Log: every line (LogRing::set_tap)
+  void write(LogLevel level, const char* line) override;
   // FrameTap
   void on_frame(bool tx, uint8_t type, uint8_t seq, const uint8_t* payload, uint8_t len, uint64_t now) override;
   // planner::WalkObserver
@@ -73,31 +112,40 @@ class WalkRecorder final : public FrameTap, public planner::WalkObserver {
   void on_walk_tick(const planner::Walker& w, const planner::TickPlan& tp, bool sent) override;
 
  private:
-  struct PreRec {
-    uint64_t t_us;
-    uint8_t kind, type, seq, len;
-    uint8_t payload[KILO_MAX_PAYLOAD];
-  };
-
-  void begin(const planner::Walker& w, uint64_t now);
-  void finish();
-  uint32_t rel(uint64_t now) const;
-  bool frame(uint8_t kind, uint8_t type, uint8_t seq, const uint8_t* payload, uint8_t len, uint64_t now);
-  void mark_line(const char* line, uint64_t now, bool essential = false);
-  void set_text(const planner::Walker& w, const char* end);
+  Run* begin_run(uint8_t kind, uint64_t now);
+  void end_run(uint32_t id, uint64_t now);
+  Run* run(uint32_t id);
+  void mark_line(const char* line, uint64_t now);
+  void run_mark(uint32_t id, uint8_t kind, uint8_t event, uint64_t now);
+  void set_text(Run* r, const char* text);
+  void walk_text(const planner::Walker& w, const char* end);
   void goal_line(const char* word, const planner::WalkGoal& g, uint64_t now);
   void timing_line(const char* word, const planner::Walker& w, uint64_t now);
+  void begin_trick(const tricks::TrickPlayer& p, uint64_t now);
+  void end_trick(const char* reason, const char* why, uint32_t elapsed_ms, uint32_t expected, uint64_t now);
+  void trick_header(const tricks::Trick& t, uint32_t id, uint8_t speed, bool mirror, uint64_t now);
 
   Clock& clock_;
   const SerialLink& link_;
-  WalkStore store_;
+  FlightStore flight_;
+  Metrics* metrics_ = nullptr;
   uint32_t mind_build_ = 0;
-  PreRec* pre_ = nullptr;
-  uint32_t pre_head_ = 0, pre_n_ = 0;
-  bool recording_ = false;
-  bool ending_ = false;   // the walk ended: the post-roll runs until end_at_
-  uint64_t end_at_ = 0;
-  uint64_t t0_ = 0;
+
+  Run runs_[kMaxRuns] = {};
+  uint32_t head_ = 0, n_runs_ = 0;  // the oldest entry, entries kept
+  uint32_t next_id_ = 1;
+  uint32_t runs_changed_ = 0;
+
+  uint32_t walk_ = 0;      // the open walk run's id, 0 none
+  uint32_t trick_ = 0;     // the open trick run's id
+  uint64_t tail_end_us_ = 0;  // the latest post-roll's end (0: none running)
+  uint64_t last_end_us_ = 0;
+  uint64_t last_key_us_ = 0;
+  bool have_key_ = false;
+
+  uint32_t trick_play_ = 0;   // the player's play the trick run is for
+  bool play_marked_ = false;
+  bool upload_marked_ = false;
   planner::PlannerStats last_ = {};
 };
 

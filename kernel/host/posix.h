@@ -99,6 +99,37 @@ class DirStore final : public KernelStore {
   bool writing_ = false;
 };
 
+// --card DIR for the flight recorder's saver (mind/platform.h RecordCard):
+// paths "kilorec/NAME" under DIR.
+class DirRecordCard final : public RecordCard {
+ public:
+  DirRecordCard(const char* dir, Log& log) : dir_(dir), log_(log) {}
+  ~DirRecordCard();
+  bool ready() override { return true; }
+  Result make_dir(const char* path) override;
+  Result create(const char* path) override;
+  Result append(const char* path) override;
+  Result open(const char* path) override;
+  Result seek(uint32_t offset) override;
+  Result write(const uint8_t* data, uint32_t len) override;
+  int32_t read(uint8_t* buf, uint32_t len) override;
+  Result sync() override;
+  Result close() override;
+  Result remove(const char* path) override;
+  Result rename(const char* from, const char* to) override;
+  Result list_begin(const char* dir) override;
+  Result list_next(char* name, uint32_t n, uint32_t* size) override;
+
+ private:
+  void path(char* out, size_t cap, const char* name) const;
+  Result open_mode(const char* name, int flags);
+  const char* dir_;
+  Log& log_;
+  int fd_ = -1;
+  void* dirp_ = nullptr;
+  char list_dir_[512] = {};
+};
+
 // The host channel's ephemeral keys (mind/platform.h Random): getrandom().
 class PosixRandom final : public Random {
  public:

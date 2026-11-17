@@ -1,205 +1,165 @@
-// The walk recorder: the store's ring (whole walks dropped oldest first, a
-// walk that outgrows it keeps its start and its end, the index's limit, a
-// reader of a dropped walk told so, never another walk's bytes), a full
-// 20-minute walk in record::kStoreBytes, the recorder in the Mind on a
-// scripted body (the MARK lines, PLAN per planned tick, FEET and TELEMETRY
-// both ways, the pre- and post-roll, the summary lines in the RAM log),
-// and what the RAM log keeps of held IR keys and percepts.
+// The flight recorder: the block store (seal, CRC, ring overwrite, time
+// lookup), the recorder in the Mind on a scripted body (everything from
+// boot, a walk run, a trick run and what stopped it, a refused trick, the
+// session metrics), what the RAM log keeps of a 15-minute play session
+// (and why the old 64-line ring lost it), and the card saver on a fake card:
+// safe moments only, 4 KB writes, a slow write's back-off, a power cut in
+// the middle of a save, the next boot's scan, the cap, the bench, reading
+// back, deleting.
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
+#include "flash/crc32.h"
 #include "mind.h"
+#include "record/flight.h"
 #include "record/recorder.h"
-#include "record/store.h"
+#include "record/saver.h"
 #include "tests/body_rig.h"
 #include "tests/check.h"
+#include "tests/fake_card.h"
+#include "tricks/library.h"
 
 using namespace kilo;
-using record::WalkEntry;
-using record::WalkStore;
+using record::FlightStore;
 
 namespace {
 
 struct Rec {
   uint8_t kind;
-  uint32_t t_us;
-  std::vector<uint8_t> payload;
+  uint64_t t_us;
+  std::string payload;
 };
 
-// Parse a recording; ok false if the bytes do not end on a record boundary.
-std::vector<Rec> parse(const std::vector<uint8_t>& b, bool* ok) {
-  std::vector<Rec> out;
-  size_t i = 0;
-  while (i + KILO_WALK_RECORD_HEADER_SIZE <= b.size()) {
-    kilo_walk_record_header_t h;
-    std::memcpy(&h, b.data() + i, sizeof h);
-    i += sizeof h;
-    if (i + h.len > b.size()) break;
-    out.push_back({h.kind, h.t_us, std::vector<uint8_t>(b.begin() + (long)i, b.begin() + (long)(i + h.len))});
-    i += h.len;
+struct Block {
+  kilo_record_block_header_t h;
+  std::vector<Rec> recs;
+};
+
+// Blocks back to back; false if a block is malformed or its CRC is wrong.
+bool parse_blocks(const uint8_t* b, size_t n, std::vector<Block>* out) {
+  size_t at = 0;
+  while (at + KILO_RECORD_BLOCK_HEADER_SIZE <= n) {
+    Block blk;
+    std::memcpy(&blk.h, b + at, sizeof blk.h);
+    const kilo_record_block_header_t& h = blk.h;
+    if (h.magic != record::kBlockMagic || h.used < sizeof h || at + h.used > n) return false;
+    if (h.crc32 != 0) {
+      uint32_t c = crc32(b + at + sizeof h, h.used - (uint32_t)sizeof h);
+      if (c == 0) c = 1;
+      if (c != h.crc32) return false;
+    }
+    uint64_t t0 = ((uint64_t)h.t0_us_hi << 32) | h.t0_us_lo;
+    size_t p = at + sizeof h;
+    while (p + KILO_WALK_RECORD_HEADER_SIZE <= at + h.used) {
+      kilo_walk_record_header_t rh;
+      std::memcpy(&rh, b + p, sizeof rh);
+      p += sizeof rh;
+      if (p + rh.len > at + h.used) return false;
+      blk.recs.push_back({rh.kind, t0 + rh.t_us, std::string((const char*)b + p, rh.len)});
+      p += rh.len;
+    }
+    if (p != at + h.used || blk.recs.size() != h.records) return false;
+    at += h.used;
+    out->push_back(blk);
   }
-  *ok = i == b.size();
+  return at == n;
+}
+
+// Every record in RAM, in order.
+std::vector<Rec> ram_records(const FlightStore& f) {
+  std::vector<Rec> out;
+  if (f.empty()) return out;
+  for (uint32_t s = f.first_seq(); s <= f.last_seq(); s++) {
+    std::vector<Block> bs;
+    CHECK(parse_blocks(f.block(s), f.used(s), &bs) && bs.size() == 1);
+    for (Block& b : bs) out.insert(out.end(), b.recs.begin(), b.recs.end());
+  }
   return out;
 }
 
-std::vector<uint8_t> read_all(const WalkStore& s, uint32_t id, int32_t* status = nullptr) {
-  std::vector<uint8_t> out;
-  uint8_t buf[KILO_HOST_WALK_CHUNK_MAX];
-  for (;;) {
-    uint32_t total = 0;
-    int32_t n = s.read(id, (uint32_t)out.size(), buf, sizeof buf, &total);
-    if (status != nullptr) *status = n;
-    if (n <= 0) return out;
-    out.insert(out.end(), buf, buf + n);
+const Rec* mark(const std::vector<Rec>& rs, const char* word, size_t from = 0) {
+  size_t n = std::strlen(word);
+  for (size_t i = from; i < rs.size(); i++) {
+    const Rec& r = rs[i];
+    if (r.kind == KILO_WALK_RECORD_MARK && r.payload.size() >= n && r.payload.compare(0, n, word) == 0 &&
+        (r.payload.size() == n || r.payload[n] == ' '))
+      return &r;
   }
+  return nullptr;
 }
 
-std::string text(const Rec& r) { return std::string(r.payload.begin(), r.payload.end()); }
-
-// A record whose payload says which walk and which record it is.
-void put(WalkStore& s, uint32_t walk, uint32_t i, uint32_t len) {
-  uint8_t p[255];
-  for (uint32_t k = 0; k < len; k++) p[k] = (uint8_t)(walk * 31 + i * 7 + k);
-  s.append(KILO_WALK_RECORD_RX, i, p, len);
+size_t count_kind(const std::vector<Rec>& rs, uint8_t kind, int type = -1) {
+  size_t n = 0;
+  for (const Rec& r : rs) n += r.kind == kind && (type < 0 || (!r.payload.empty() && (uint8_t)r.payload[0] == type));
+  return n;
 }
 
-bool walk_intact(const WalkStore& s, uint32_t walk, uint32_t len) {
-  bool ok;
-  std::vector<Rec> rs = parse(read_all(s, walk), &ok);
-  if (!ok || rs.empty()) return false;
-  for (const Rec& r : rs) {
-    if (r.payload.size() != len) return false;
-    for (uint32_t k = 0; k < len; k++)
-      if (r.payload[k] != (uint8_t)(walk * 31 + r.t_us * 7 + k)) return false;
+// ---- the block store --------------------------------------------------------------------
+
+void test_flight_store() {
+  std::vector<uint8_t> mem(4 * record::kBlockBytes + 100);
+  FlightStore f;
+  f.attach(mem.data(), (uint32_t)mem.size());
+  CHECK(f.ready() && f.empty() && f.capacity() == 4 * record::kBlockBytes);
+  uint8_t p[200];
+  for (int i = 0; i < 200; i++) p[i] = (uint8_t)i;
+  uint64_t t = 5000000;
+  // 300 records of 206 B: about 3.8 blocks
+  for (int i = 0; i < 300; i++, t += 20000) CHECK(f.append(KILO_WALK_RECORD_RX, t, p, sizeof p));
+  CHECK(f.blocks() == 4 && f.first_seq() == 0 && f.open() && f.dropped_blocks() == 0 && f.records() == 300);
+  for (uint32_t s = 0; s < 3; s++) {
+    std::vector<Block> bs;
+    CHECK(f.sealed(s) && parse_blocks(f.block(s), f.used(s), &bs) && bs[0].h.crc32 != 0 && bs[0].h.seq == s);
   }
-  return true;
-}
-
-void test_store_drops_oldest_whole_walks() {
-  std::vector<uint8_t> mem(WalkStore::kIndexBytes + 8 + 20000);
-  WalkStore s;
-  s.attach(mem.data(), (uint32_t)mem.size());
-  CHECK(s.ready() && s.capacity() >= 19990 && s.capacity() <= 20008);
-  CHECK(s.open(1000) == 1 && s.recording_id() == 1);
-  uint32_t total = 0;
-  for (uint32_t i = 0; i < 40; i++) put(s, 1, i, 50);  // 40 x 56 B
-  s.close();
-  CHECK(s.recording_id() == 0 && s.kept() == 1 && s.used() == 40u * 56u);
-  // walks 2..20, 3 KB each: the ring wraps several times; the oldest go whole
-  for (uint32_t w = 2; w <= 20; w++) {
-    CHECK(s.open(w * 1000) == w);
-    for (uint32_t i = 0; i < 25; i++) put(s, w, i, 114);  // 25 x 120 B
-    s.close();
-    total += 3000;
+  CHECK(!f.sealed(3));
+  // more: the oldest blocks go whole
+  for (int i = 0; i < 300; i++, t += 20000) f.append(KILO_WALK_RECORD_TX, t, p, 50, p, 50);
+  CHECK(f.blocks() == 4 && f.first_seq() > 0 && f.dropped_blocks() == f.first_seq() && !f.has(0) &&
+        f.block(0) == nullptr);
+  // the time lookup
+  uint32_t mid = f.first_seq() + 1;
+  CHECK(f.seq_at(f.t0(mid)) == mid && f.seq_at(f.t0(mid) + 1) == mid && f.seq_at(f.t0(mid) - 1) == mid - 1);
+  CHECK(f.seq_at(0) == f.first_seq() && f.seq_at(UINT64_MAX) == f.last_seq());
+  // a long silence opens a new block (t_us is 32 bits)
+  uint32_t before = f.last_seq();
+  f.append(KILO_WALK_RECORD_MARK, t + FlightStore::kMaxSpanUs + 1000, "late", 4);
+  CHECK(f.last_seq() == before + 1 && f.t0(f.last_seq()) == t + FlightStore::kMaxSpanUs + 1000);
+  // heartbeats: counted in the open block
+  f.count_skipped(t + FlightStore::kMaxSpanUs + 2000);
+  kilo_record_block_header_t h;
+  std::memcpy(&h, f.block(f.last_seq()), sizeof h);
+  CHECK(h.skipped == 1 && f.skipped() == 1);
+  // the boot's number, stamped into the blocks in RAM (the CRC does not cover it)
+  f.set_boot(7);
+  for (uint32_t s = f.first_seq(); s <= f.last_seq(); s++) {
+    std::memcpy(&h, f.block(s), sizeof h);
+    CHECK(h.boot == 7);
   }
-  CHECK(s.used() <= s.capacity());
-  const WalkEntry* oldest = s.after(0);
-  CHECK(oldest != nullptr && s.dropped_walks() == oldest->id - 1);
-  CHECKF(s.kept() == 21 - oldest->id, "kept %u, oldest %u", s.kept(), oldest != nullptr ? oldest->id : 0);
-  for (uint32_t w = oldest->id; w <= 20; w++) CHECKF(walk_intact(s, w, 114), "walk %u", w);
-  uint8_t b[8];
-  uint32_t t;
-  CHECK(s.read(1, 0, b, sizeof b, &t) == -1 && s.find(1) == nullptr);  // dropped: gone, never other bytes
-  CHECK(s.dropped_records() == 0);
-  // a reader in the middle of walk K when K is dropped finds it gone
-  uint32_t k = s.after(0)->id;
-  CHECK(s.read(k, 100, b, sizeof b, &t) == 8);
-  for (uint32_t w = 21; w <= 30; w++) {
-    s.open(w);
-    for (uint32_t i = 0; i < 25; i++) put(s, w, i, 114);
-    s.close();
-  }
-  CHECK(s.read(k, 108, b, sizeof b, &t) == -1);
-  CHECK(walk_intact(s, 30, 114));
+  std::vector<Block> bs;
+  CHECK(parse_blocks(f.block(f.first_seq()), f.used(f.first_seq()), &bs));
+  // too long a record, too small a store
+  CHECK(!f.append(KILO_WALK_RECORD_MARK, t, p, 200, p, 100));
+  FlightStore tiny;
+  tiny.attach(mem.data(), record::kBlockBytes);
+  CHECK(!tiny.ready() && !tiny.append(KILO_WALK_RECORD_RX, 0, p, 1));
 }
 
-void test_store_walk_that_outgrows_it() {
-  std::vector<uint8_t> mem(WalkStore::kIndexBytes + 8 + 12000);
-  WalkStore s;
-  s.attach(mem.data(), (uint32_t)mem.size());
-  s.open(1);
-  for (uint32_t i = 0; i < 10; i++) put(s, 1, i, 100);
-  s.close();
-  s.open(2);
-  uint32_t i = 0, kept = 0;
-  for (; i < 1000; i++) kept += s.append(KILO_WALK_RECORD_RX, i, "0123456789", 10) ? 1 : 0;
-  const char* end = "end ok=1 streamed=1 reason=stopped";
-  CHECK(s.append(KILO_WALK_RECORD_MARK, i, end, (uint32_t)std::strlen(end), nullptr, 0, true));
-  s.close();
-  const WalkEntry* e = s.find(2);
-  CHECK(s.find(1) == nullptr && s.dropped_walks() == 1);  // the older walk made room first
-  CHECK(e != nullptr && (e->flags & KILO_WALK_FLAGS_TRUNCATED) && s.dropped_records() == 1000 - kept);
-  CHECKF(kept > 500 && kept < 1000, "kept %u", kept);
-  bool ok;
-  std::vector<Rec> rs = parse(read_all(s, 2), &ok);
-  CHECK(ok && rs.size() == kept + 1 && rs.back().kind == KILO_WALK_RECORD_MARK && text(rs.back()) == end);
-  CHECK(rs.front().t_us == 0 && text(rs.front()) == "0123456789");  // its start is kept
-}
-
-void test_store_index_limit() {
-  std::vector<uint8_t> mem(WalkStore::kIndexBytes + 8 + 100000);
-  WalkStore s;
-  s.attach(mem.data(), (uint32_t)mem.size());
-  for (uint32_t w = 1; w <= WalkStore::kMaxWalks + 2; w++) {
-    s.open(w);
-    put(s, w, 0, 20);
-  }
-  s.close();
-  CHECK(s.kept() == WalkStore::kMaxWalks && s.dropped_walks() == 2 && s.after(0)->id == 3);
-  CHECK(s.after(WalkStore::kMaxWalks + 2) == nullptr && s.after(50)->id == 51);
-  for (uint32_t w = 3; w <= WalkStore::kMaxWalks + 2; w++) CHECKF(walk_intact(s, w, 20), "walk %u", w);
-  // too small a block: not ready, nothing recorded
-  WalkStore tiny;
-  tiny.attach(mem.data(), 1000);
-  CHECK(!tiny.ready() && tiny.open(1) == 0 && !tiny.append(1, 0, "x", 1));
-}
-
-// 20 minutes of walking at 50 Hz, the records the recorder writes per tick
-// in a walk (measured on the virtual body: TELEMETRY in, FEET out, PLAN; a
-// SET_BALANCE refresh at 5 Hz; a PLANNER now and then), into the size the
-// platforms allocate.
-void test_store_twenty_minutes() {
-  std::vector<uint8_t> mem(record::kStoreBytes);
-  WalkStore s;
-  s.attach(mem.data(), (uint32_t)mem.size());
-  s.open(0);
-  uint8_t tel[2 + KILO_TELEMETRY_LEN] = {KILO_MSG_TELEMETRY, 0};
-  uint8_t feet[2 + KILO_FEET_LEN] = {KILO_MSG_FEET, 0};
-  uint8_t bal[2 + KILO_SET_BALANCE_LEN] = {KILO_MSG_SET_BALANCE, 0};
-  kilo_walk_plan_t plan = {};
-  kilo_walk_planner_t pl = {};
-  const uint32_t ticks = 20 * 60 * 50;
-  uint32_t used_at_walk = 0;
-  for (uint32_t t = 0; t < ticks; t++) {
-    uint32_t us = t * 20000;
-    s.append(KILO_WALK_RECORD_RX, us, tel, sizeof tel);
-    s.append(KILO_WALK_RECORD_TX, us, feet, sizeof feet);
-    s.append(KILO_WALK_RECORD_PLAN, us, &plan, sizeof plan);
-    if (t % 10 == 0) s.append(KILO_WALK_RECORD_TX, us, bal, sizeof bal);
-    if (t % 50 == 0) s.append(KILO_WALK_RECORD_PLANNER, us, &pl, sizeof pl);
-    if (t == 0) used_at_walk = s.used();
-  }
-  s.close();
-  const WalkEntry* e = s.find(1);
-  CHECK(e != nullptr && !(e->flags & KILO_WALK_FLAGS_TRUNCATED) && s.dropped_records() == 0);
-  double per_tick = (double)s.used() / ticks;
-  double minutes = (double)s.capacity() / per_tick / 50.0 / 60.0;
-  std::printf("  20 min at 50 Hz: %u B (%.1f B a tick); %u B of records hold %.0f minutes\n", (unsigned)s.used(),
-              per_tick, (unsigned)s.capacity(), minutes);
-  CHECK(minutes >= 25 && used_at_walk > 0);
-}
-
-// ---- the recorder in the Mind ------------------------------------------------------------
+// ---- the recorder in the Mind -----------------------------------------------------------
 
 struct Rig {
   FakeBody body;
   CaptureLog log;
   Mind mind;
   std::vector<uint8_t> mem;
-  explicit Rig(const MindConfig& cfg, uint32_t store = 1u << 20)
-      : mind(body.serial, body.clock, log, nullptr, cfg), mem(store) {
+  std::vector<LogEntry> history;
+  explicit Rig(const MindConfig& cfg, uint32_t store = 4u << 20)
+      : mind(body.serial, body.clock, log, nullptr, cfg), mem(store), history(LogRing::kLines) {
+    mind.attach_log(history.data(), (uint32_t)history.size());
     mind.attach_recorder(mem.data(), (uint32_t)mem.size());
+  }
+  void start() {
     mind.start();
     run_ms(100);
   }
@@ -219,165 +179,522 @@ struct Rig {
     }
     return false;
   }
+  std::vector<Rec> records() { return ram_records(mind.recorder().flight()); }
+  std::string metric(uint32_t i) {
+    char line[204];
+    mind.metric_line(i, line, sizeof line);
+    return line;
+  }
 };
 
-const Rec* mark(const std::vector<Rec>& rs, const char* word) {
-  size_t n = std::strlen(word);
-  for (const Rec& r : rs)
-    if (r.kind == KILO_WALK_RECORD_MARK && r.payload.size() > n && std::memcmp(r.payload.data(), word, n) == 0 &&
-        r.payload[n] == ' ')
-      return &r;
-  return nullptr;
+void test_records_from_boot() {
+  MindConfig cfg;
+  cfg.remote = true;
+  Rig r(cfg);
+  r.start();
+  r.run_ms(2000);
+  std::vector<Rec> rs = r.records();
+  size_t tel = count_kind(rs, KILO_WALK_RECORD_RX, KILO_MSG_TELEMETRY);
+  CHECKF(tel >= 95 && tel <= 106, "%zu TELEMETRY in 2.1 s idle", tel);
+  CHECK(count_kind(rs, KILO_WALK_RECORD_TX, KILO_MSG_HEARTBEAT) == 0 && r.mind.recorder().flight().skipped() > 5);
+  CHECK(count_kind(rs, KILO_WALK_RECORD_TX, KILO_MSG_HELLO_REQ) == 1 && count_kind(rs, KILO_WALK_RECORD_RX, KILO_MSG_HELLO) == 1);
+  bool logged = false;
+  for (const Rec& x : rs) logged = logged || (x.kind == KILO_WALK_RECORD_LOG && x.payload.find("link connected") == 1);
+  CHECK(logged && r.mind.recorder().runs_total() == 0);
+  // a key no remote action takes: in the stream (EVENT, and the log line)
+  r.body.event(KILO_EVENT_IR_KEY, 0x45);
+  r.run_ms(20);
+  rs = r.records();
+  bool key = false;
+  for (const Rec& x : rs) key = key || (x.kind == KILO_WALK_RECORD_LOG && x.payload.find("remote ? (0x45): ignored") != std::string::npos);
+  CHECK(key && count_kind(rs, KILO_WALK_RECORD_RX, KILO_MSG_EVENT) >= 1);
 }
 
-size_t frames(const std::vector<Rec>& rs, uint8_t kind, uint8_t type) {
-  size_t n = 0;
-  for (const Rec& r : rs) n += r.kind == kind && !r.payload.empty() && r.payload[0] == type;
-  return n;
-}
-
-void test_recorder_records_a_walk() {
+void test_walk_run() {
   MindConfig cfg;
   cfg.remote = true;
   cfg.mind_build = 0x12345678;
   Rig r(cfg);
-  r.body.pitch = 3 * 16;   // a tilted IMU: measured - predicted has an offset
-  r.run_ms(2000);          // the pre-roll fills (idle TELEMETRY, heartbeats)
-  record::WalkStore& st = r.mind.recorder().store();
-  CHECK(st.kept() == 0 && !r.mind.recorder().recording());
+  r.start();
+  r.body.pitch = 3 * 16;
+  r.run_ms(2000);
   r.body.event(KILO_EVENT_IR_KEY, 0x68);  // A4: trot
   r.run_ms(40);
-  CHECK(r.mind.walker().active() && r.mind.recorder().recording() && st.recording_id() == 1);
+  record::Recorder& rec = r.mind.recorder();
+  CHECK(r.mind.walker().active() && rec.in_run() && rec.recording());
   r.run_ms(3000);
   r.body.event(KILO_EVENT_IR_KEY, 0x62);  // B7: faster
   r.run_ms(1500);
   r.body.event(KILO_EVENT_IR_KEY, 0x02);  // B6: the planned stop, then stand
   for (int k = 0; k < 400 && r.mind.walker().active(); k++) r.run_ms(20);
-  CHECKF(!r.mind.walker().active() && r.mind.walker().ended() != nullptr, "%s",
-         r.mind.walker().ended() ? r.mind.walker().ended() : "still walking");
-  CHECK(r.mind.recorder().recording());  // the post-roll
-  r.run_ms((uint32_t)(record::WalkRecorder::kPostRollUs / 1000) + 100);
-  CHECK(!r.mind.recorder().recording() && st.recording_id() == 0 && st.kept() == 1);
-  const WalkEntry* e = st.find(1);
-  CHECK(e != nullptr && (e->flags & KILO_WALK_FLAGS_STREAMED) && (e->flags & KILO_WALK_FLAGS_ENDED_OK) &&
-        !(e->flags & (KILO_WALK_FLAGS_RECORDING | KILO_WALK_FLAGS_TRUNCATED)));
-  std::string info(e->text, e->text_len);
-  CHECKF(info.find("gait=trot dir=forward speed=") == 0 && info.find(" end=stopped") != std::string::npos, "%s",
-         info.c_str());
-  bool ok;
-  std::vector<Rec> rs = parse(read_all(st, 1), &ok);
-  CHECK(ok && rs.size() == e->records);
-  // the first record is the walk's MARK at t 0; the times never go back
-  CHECK(!rs.empty() && rs[0].kind == KILO_WALK_RECORD_MARK && rs[0].t_us == 0 &&
-        text(rs[0]).find("walk id=1 format=1 t0_us_hi=") == 0 && text(rs[0]).find("mind_build=12345678") != std::string::npos);
-  bool mono = true;
-  for (size_t i = 1; i < rs.size(); i++) mono = mono && rs[i].t_us >= rs[i - 1].t_us;
-  CHECK(mono);
-  const Rec* setup = mark(rs, "setup");
-  CHECK(setup != nullptr && text(*setup).find("pattern=trot dir=forward speed_asked=") != std::string::npos);
-  // the pre-roll: about 2 s of frames before the setup
-  CHECKF(setup != nullptr && setup->t_us >= 1900000 && setup->t_us <= 2000000, "setup at %u us",
-         setup ? setup->t_us : 0);
-  size_t pre_tel = 0;
-  for (const Rec& x : rs) pre_tel += x.kind == KILO_WALK_RECORD_RX && x.payload[0] == KILO_MSG_TELEMETRY && setup && x.t_us < setup->t_us;
-  CHECKF(pre_tel >= 95 && pre_tel <= 101, "%zu TELEMETRY in the pre-roll", pre_tel);
-  const char* words[] = {"stream", "config", "model", "masses", "change", "timing", "stop", "result", "error", "end"};
-  for (const char* w : words) CHECKF(mark(rs, w) != nullptr, "no MARK %s", w);
-  CHECK(mark(rs, "config") && text(*mark(rs, "config")).find("margin_mm=") != std::string::npos);
-  CHECK(mark(rs, "masses") && text(*mark(rs, "masses")).find("battery_g=") != std::string::npos);
-  CHECK(mark(rs, "end") && text(*mark(rs, "end")) == "end ok=1 streamed=1 reason=stopped");
+  CHECK(!r.mind.walker().active() && !rec.in_run() && rec.recording());  // the post-roll
+  r.run_ms((uint32_t)(record::Recorder::kPostRollUs / 1000) + 100);
+  CHECK(!rec.recording() && rec.runs_kept() == 1);
+  const record::Run* run = rec.find(1);
+  CHECK(run != nullptr && run->kind == KILO_RUN_KIND_WALK && (run->flags & KILO_WALK_FLAGS_STREAMED) &&
+        (run->flags & KILO_WALK_FLAGS_ENDED_OK) && !(run->flags & KILO_WALK_FLAGS_RECORDING));
+  std::string text(run->text, run->text_len);
+  CHECKF(text.find("gait=trot dir=forward speed=") == 0 && text.find(" end=stopped") != std::string::npos, "%s", text.c_str());
+  uint32_t a, b;
+  CHECK(rec.span(*run, &a, &b) && a <= b);
+  std::vector<Rec> rs = r.records();
+  const Rec* w = mark(rs, "walk");
+  CHECK(w != nullptr && w->payload.find("walk id=1 format=2 t0_us_hi=") == 0 &&
+        w->payload.find("mind_build=12345678") != std::string::npos);
+  const char* words[] = {"setup", "stream", "config", "model", "masses", "change", "timing", "stop", "result", "error", "end"};
+  for (const char* x : words) CHECKF(mark(rs, x) != nullptr, "no MARK %s", x);
+  CHECK(mark(rs, "end")->payload == "end ok=1 streamed=1 reason=stopped");
+  CHECK(count_kind(rs, KILO_WALK_RECORD_RUN) == 2);
   const planner::StreamStats& ss = r.mind.walker().stream_stats();
-  size_t plans = 0, sent = 0;
-  for (const Rec& x : rs) {
-    if (x.kind != KILO_WALK_RECORD_PLAN) continue;
-    plans++;
-    kilo_walk_plan_t p;
-    std::memcpy(&p, x.payload.data(), sizeof p);
-    sent += p.sent;
-  }
-  CHECKF(plans == ss.sent + ss.skipped && sent == ss.sent, "%zu plans %zu sent, walker %u + %u", plans, sent,
-         (unsigned)ss.sent, (unsigned)ss.skipped);
-  CHECK(frames(rs, KILO_WALK_RECORD_TX, KILO_MSG_FEET) == ss.sent && e->feet == ss.sent);
-  CHECK(frames(rs, KILO_WALK_RECORD_RX, KILO_MSG_TELEMETRY) > 400);  // 50 Hz in the walk
-  CHECK(mark(rs, "result") && text(*mark(rs, "result")).find("sent=" + std::to_string(ss.sent)) != std::string::npos);
-  // the error tracker saw the tilt (the scripted body reports ref 0: the offset is the tilt less the prediction)
-  CHECK(mark(rs, "error") && text(*mark(rs, "error")).find("offset_pitch_deg=") != std::string::npos);
-  // the walk's summary is in the RAM log
-  CHECK(r.ring_has("walk trot forward") && r.ring_has(" holds ") && r.ring_has("walk error: "));
-  // the post-roll ended about 2 s after the end
-  const Rec& last = rs.back();
-  const Rec* end = mark(rs, "end");
-  CHECKF(end && last.t_us - end->t_us >= 1900000, "post-roll %u us", end ? last.t_us - end->t_us : 0);
-  std::printf("  a %u-tick walk: %u records, %u B (%.1f B a tick sent)\n", (unsigned)ss.sent, (unsigned)e->records,
-              (unsigned)e->size, (double)e->size / ss.sent);
+  CHECK(count_kind(rs, KILO_WALK_RECORD_PLAN) == ss.sent + ss.skipped && run->feet == ss.sent &&
+        count_kind(rs, KILO_WALK_RECORD_TX, KILO_MSG_FEET) == ss.sent);
+  // the keys that drove it are marked in the run, and the walk's summary is in the log
+  CHECK(mark(rs, "key") != nullptr && mark(rs, "key")->payload.find("key B7 (0x62, faster)") == 0);
+  CHECK(r.ring_has("walk trot forward") && r.ring_has("walk error: "));
+  CHECKF(r.metric(2).find("walks: started=1 ok=1") == 0 && r.metric(2).find("stopped=1") != std::string::npos, "%s",
+         r.metric(2).c_str());
+  CHECKF(r.metric(1).find("keys: pressed=3 acted=3") == 0 && r.metric(1).find("A4=1") != std::string::npos, "%s",
+         r.metric(1).c_str());
 }
 
-void test_recorder_setup_failure_and_next_walk() {
+uint16_t trick_done_arg(const char* name, uint8_t reason) {
+  const tricks::Trick* t = tricks::find_trick(name);
+  return (uint16_t)(tricks::trick_id_for(*t) | (reason << 8));
+}
+
+void test_trick_runs() {
   MindConfig cfg;
   cfg.remote = true;
+  cfg.rear_up_key = 1;
   Rig r(cfg);
-  // a walk that never gets its SET_STREAM: refused by the body
-  r.body.answer = [](const Sent& s) -> uint8_t {
-    return s.type == KILO_MSG_SET_STREAM ? KILO_ACK_STATUS_BUSY : KILO_ACK_STATUS_OK;
-  };
-  r.body.event(KILO_EVENT_IR_KEY, 0x68);  // A4: trot
+  r.start();
+  r.run_ms(500);
+  record::Recorder& rec = r.mind.recorder();
+  // 1. B2: rear_up plays and ends DONE
+  r.body.event(KILO_EVENT_IR_KEY, 0x38);
   r.run_ms(200);
-  CHECK(!r.mind.walker().active());
-  r.body.answer = [](const Sent&) -> uint8_t { return KILO_ACK_STATUS_OK; };
-  r.run_ms(500);  // inside the first walk's post-roll
-  r.body.event(KILO_EVENT_IR_KEY, 0x68);  // trot again: the first recording closes now
-  r.run_ms(2000);
-  record::WalkStore& st = r.mind.recorder().store();
-  const WalkEntry* a = st.find(1);
-  CHECK(a != nullptr && !(a->flags & (KILO_WALK_FLAGS_RECORDING | KILO_WALK_FLAGS_STREAMED | KILO_WALK_FLAGS_ENDED_OK)));
-  CHECK(a && std::string(a->text, a->text_len).find("end=SET_STREAM BUSY") != std::string::npos);
-  CHECK(st.recording_id() == 2 && (st.find(2)->flags & KILO_WALK_FLAGS_STREAMED));
-  bool ok;
-  std::vector<Rec> rs = parse(read_all(st, 1), &ok);
-  CHECK(ok && mark(rs, "end") && text(*mark(rs, "end")) == "end ok=0 streamed=0 reason=SET_STREAM BUSY" &&
-        mark(rs, "stream") == nullptr && mark(rs, "error") == nullptr);
+  CHECK(r.mind.player().playing() && rec.in_run());
+  r.body.mode = KILO_MODE_TRICK;
+  r.body.pitch = -20 * 16;
+  r.run_ms(3000);
+  r.body.mode = KILO_MODE_IDLE;
+  r.body.pitch = 0;
+  r.body.event(KILO_EVENT_TRICK_DONE, (int16_t)trick_done_arg("rear_up", KILO_TRICK_DONE_REASON_DONE));
+  r.run_ms(100);
+  CHECK(!rec.in_run() && r.mind.player().result().state == tricks::PlayState::Done);
+  r.run_ms(2200);
+  const record::Run* run = rec.find(1);
+  CHECK(run != nullptr && run->kind == KILO_RUN_KIND_TRICK && (run->flags & KILO_WALK_FLAGS_TRICK) &&
+        (run->flags & KILO_WALK_FLAGS_STREAMED) && (run->flags & KILO_WALK_FLAGS_ENDED_OK) &&
+        !(run->flags & KILO_WALK_FLAGS_RECORDING));
+  CHECK(std::string(run->text, run->text_len) == "trick=rear_up stage=1 end=DONE");
+  std::vector<Rec> rs = r.records();
+  const Rec* t = mark(rs, "trick");
+  CHECKF(t != nullptr && t->payload.find("trick id=1 format=2 trick=rear_up stage=1 tid=") == 0 &&
+             t->payload.find(" battery_mv=8000 mode=") != std::string::npos && t->payload.find(" by=remote") != std::string::npos,
+         "%s", t ? t->payload.c_str() : "none");
+  const Rec* fr = mark(rs, "frames");
+  const tricks::Trick* trick = tricks::find_trick("rear_up");
+  CHECK(fr != nullptr && fr->payload.find("frames dur=" + std::to_string(trick->frames[0].dur) + ",") == 0 &&
+        fr->payload.find(" loop=") != std::string::npos);
+  const Rec* play = mark(rs, "play");
+  const Rec* end = mark(rs, "end");
+  CHECK(play != nullptr && play->payload == "play speed=64" && play->t_us == r.mind.player().played_at_us());
+  CHECKF(end != nullptr && end->payload.find("end reason=DONE elapsed_ms=") == 0 && end->payload.find(" battery_mv=8000") != std::string::npos,
+         "%s", end ? end->payload.c_str() : "none");
+  CHECK(count_kind(rs, KILO_WALK_RECORD_TX, KILO_MSG_TRICK_PLAY) == 1);
+  const size_t end_i = (size_t)(end - rs.data());
+  size_t tel_in = 0;  // the measured pitch at every tick of the play
+  for (const Rec& x : rs)
+    if (x.kind == KILO_WALK_RECORD_RX && (uint8_t)x.payload[0] == KILO_MSG_TELEMETRY && x.t_us >= play->t_us && x.t_us <= end->t_us)
+      tel_in++;
+  CHECKF(tel_in >= 150, "%zu TELEMETRY during the play", tel_in);
+
+  // 2. B2 again, then B6: stopped by B6, the key marked in the run
+  r.body.event(KILO_EVENT_IR_KEY, 0x38);
+  r.run_ms(300);
+  CHECK(r.mind.player().playing());
+  r.body.mode = KILO_MODE_TRICK;
+  r.run_ms(100);
+  r.body.event(KILO_EVENT_IR_KEY, 0x02);  // B6
+  r.run_ms(100);
+  CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1);
+  r.body.mode = KILO_MODE_IDLE;
+  r.body.event(KILO_EVENT_TRICK_DONE, (int16_t)trick_done_arg("rear_up", KILO_TRICK_DONE_REASON_STOPPED));
+  r.run_ms(4000);
+  rs = r.records();
+  const Rec* t2 = mark(rs, "trick", end_i + 1);
+  CHECK(t2 != nullptr && t2->payload.find("trick id=2 ") == 0);
+  size_t from = (size_t)(t2 - rs.data());
+  const Rec* k2 = mark(rs, "key", from);
+  const Rec* e2 = mark(rs, "end", from);
+  CHECKF(k2 != nullptr && e2 != nullptr && k2->payload.find("key B6 (0x02, stand)") == 0 && k2->t_us <= e2->t_us &&
+             e2->payload.find("end reason=STOPPED") == 0,
+         "%s / %s", k2 ? k2->payload.c_str() : "-", e2 ? e2->payload.c_str() : "-");
+
+  // 3. a low battery: B2 refused, a REFUSED run
+  r.body.batt_mv = 7000;
+  r.run_ms(100);
+  r.body.event(KILO_EVENT_IR_KEY, 0x38);
+  r.run_ms(100);
+  const record::Run* run3 = rec.find(3);
+  CHECK(run3 != nullptr && std::string(run3->text, run3->text_len) == "trick=rear_up stage=1 end=REFUSED" &&
+        !(run3->flags & KILO_WALK_FLAGS_STREAMED));
+  rs = r.records();
+  const Rec* e3 = mark(rs, "end", (size_t)(mark(rs, "trick id=3") - rs.data()));
+  CHECK(e3 != nullptr && e3->payload.find("end reason=REFUSED") == 0 &&
+        e3->payload.find("why=battery 7000 mV (needs 7400)") != std::string::npos);
+  std::string tm = r.metric(3), rf = r.metric(4);
+  CHECKF(tm.find("tricks: started=3 DONE=1 STOPPED=1 REFUSED=1 | rear_up=3") == 0, "%s", tm.c_str());
+  CHECKF(rf.find("refusals: total=1 battery_mV=1") == 0 || rf.find("refusals: total=1 battery") == 0, "%s", rf.c_str());
+  CHECK(r.metric(5).find("battery_mv=7000 battery_min_mv=7000") != std::string::npos);
 }
 
-// ---- the RAM log keeps what matters ------------------------------------------------------
+// ---- the log of a play session ----------------------------------------------------------
 
-void test_ring_keeps_first_presses_not_repeats() {
+// What the Circle kernel adds around the Mind's own lines (kernel.cpp): the
+// once-a-second stats lines (status: link, body, loop), and when the
+// Ethernet cable goes in, Circle's and the net task's lines.
+void stats_lines(Mind& m) {
+  Log& s = m.log().status();
+  logf(s, LogLevel::Info, "link ttyS1 (PL011, GPIO14/15): telemetry 50/s (total 4500) rx 4600 frames, tx 900 (450 heartbeats)");
+  logf(s, LogLevel::Info, "body: mode IDLE epoch 4 tick 4500 rx_err 0 overruns 0/50");
+  logf(s, LogLevel::Info, "loop 890/s: period max 1500 mean 1123 us, work max 300 mean 40 us, mind.poll max 280 mean 25 us; 0 clients");
+}
+
+void test_play_session_log() {
   MindConfig cfg;
   cfg.remote = true;
-  Rig r(cfg);
-  r.body.event(KILO_EVENT_IR_KEY, 0x02);  // B6 pressed
-  r.run_ms(40);
-  for (int i = 0; i < 20; i++) {  // ... and held: a repeat every ~110 ms
-    r.body.event(KILO_EVENT_IR_KEY, 0x102);
-    r.run_ms(108);
+  cfg.rear_up_key = 1;
+  cfg.stats_period_ms = 1000;
+  Rig r(cfg, 8u << 20);
+  r.start();
+  LogRing& ring = r.mind.log();
+  uint64_t next_stats = r.body.clock.t + 1000000;
+  auto run_s = [&](double s) {
+    uint64_t until = r.body.clock.t + (uint64_t)(s * 1e6);
+    while (r.body.clock.t < until) {
+      r.pass();
+      if (r.body.clock.t >= next_stats) {
+        next_stats += 1000000;
+        stats_lines(r.mind);
+      }
+    }
+  };
+  auto hold = [&](uint16_t code, int repeats) {  // a key pressed and held: repeats every ~110 ms
+    r.body.event(KILO_EVENT_IR_KEY, (int16_t)code);
+    run_s(0.11);
+    for (int i = 0; i < repeats; i++) {
+      r.body.event(KILO_EVENT_IR_KEY, (int16_t)(code | 0x100));
+      run_s(0.11);
+    }
+  };
+  // 15 minutes without a laptop: 8 walks (trot, faster, stop), a few
+  // postures, a trick, a hand near the sensor, keys held down
+  run_s(20);
+  for (int w = 0; w < 8; w++) {
+    hold(0x68, 3);  // A4: trot
+    run_s(15);
+    hold(0x62, 2);  // B7: faster
+    run_s(20);
+    hold(0x02, 5);  // B6: stop and stand
+    run_s(25);
+    r.body.pitch = (int16_t)(w % 2 ? 40 * 16 : 0);  // picked up, put down: percepts
+    run_s(20);
+    r.body.pitch = 0;
+    run_s(10);
   }
-  CHECK(r.ring_has("event IR_KEY 0x0002") && r.ring_has("remote B6 (0x02, stand): posture stand"));
-  CHECK(!r.ring_has("event IR_KEY 0x0102") && !r.ring_has("repeat: ignored"));
-  CHECK(r.log.has("event IR_KEY 0x0102") && r.log.has("remote B6 (0x02, stand) repeat: ignored"));  // the platform's log has them
-  r.body.event(KILO_EVENT_IR_KEY, 0x45);  // another remote's key, first press: kept
-  r.run_ms(20);
-  CHECK(r.ring_has("remote ? (0x45): ignored"));
-  r.body.pitch = 40 * 16;  // percepts: the platform's log only
-  r.run_ms(1000);
-  CHECK(r.log.has("percept tilted nose_down") && !r.ring_has("percept "));
-  r.mind.log().set_watched(true);  // a laptop reads the log: all of it
-  r.body.pitch = 0;
-  r.body.event(KILO_EVENT_IR_KEY, 0x102);
-  r.run_ms(1000);
-  CHECK(r.ring_has("percept level") && r.ring_has("event IR_KEY 0x0102"));
+  hold(0x38, 1);  // B2: rear_up
+  r.body.mode = KILO_MODE_TRICK;
+  run_s(10);
+  r.body.mode = KILO_MODE_IDLE;
+  r.body.event(KILO_EVENT_TRICK_DONE, (int16_t)trick_done_arg("rear_up", KILO_TRICK_DONE_REASON_DONE));
+  run_s(60);
+  uint32_t session_lines = ring.next_seq();
+  // the cable goes in: Circle's and the net task's lines
+  const char* net[] = {"smsc951x: Link is up", "dhcp: Sending DHCPDISCOVER", "dhcp: Received DHCPOFFER",
+                       "dhcp: Lease is 3600 s", "Ethernet link up, 912000 ms after the net task started",
+                       "listening on 192.168.88.9:5300 (DHCP lease): kilo status --host 192.168.88.9",
+                       "mDNS: kilo.local answers with this address",
+                       "mDNS: announced kilo._kilo._tcp.local, port 5300, at 192.168.88.9"};
+  for (const char* l : net) logf(ring, LogLevel::Info, "%s", l);
+  // a laptop watches the log for a minute (the status lines go to it)
+  ring.set_watched(true);
+  run_s(60);
+  ring.set_watched(false);
+
+  // Count what the session logged, and what a 64-line ring (the old size) kept.
+  std::map<std::string, int> kinds;
+  auto kind_of = [](const char* t) -> std::string {
+    const char* pre[] = {"remote ", "walk ", "trick ", "event ", "host: ", "behaviour", "body STATS", "HELLO", "link ",
+                         "mDNS", "dhcp", "listening", "Ethernet", "smsc", "flight", "IR remote", "balance"};
+    for (const char* p : pre)
+      if (std::strncmp(t, p, std::strlen(p)) == 0) return p;
+    return "other";
+  };
+  uint32_t total = ring.next_seq();
+  for (uint32_t s = ring.first_seq(); s < total; s++) kinds[kind_of(ring.get(s)->text)]++;
+  std::string hist;
+  for (auto& kv : kinds) hist += " " + kv.first + "=" + std::to_string(kv.second);
+  std::printf("  a 15-minute session: %u history lines (%u before the cable),%s\n", (unsigned)total,
+              (unsigned)session_lines, hist.c_str());
+  // the platform's log got the routine lines too: per-second stats, held-key repeats, percepts
+  size_t status = 0;
+  for (const std::string& l : r.log.lines)
+    status += l.find("link ttyS1") == 0 || l.find("body: mode") == 0 || l.find("loop ") == 0 ||
+              l.find("repeat: ignored") != std::string::npos || l.find("percept ") == 0 || l.find("body STATS") == 0;
+  std::printf("  routine (status) lines the session made: %zu; none of them in the history\n", status);
+  CHECK(status > 2000);
+  // Nothing of the session is lost: every key acted on, every walk's
+  // start and end, the trick, all in the history; no status line in it.
+  CHECK(ring.first_seq() == 0 && total < LogRing::kLines);
+  int remote_acted = 0, walks = 0, walk_ends = 0, trick = 0, status_in = 0;
+  for (uint32_t s = 0; s < total; s++) {
+    const char* t = ring.get(s)->text;
+    remote_acted += std::strncmp(t, "remote ", 7) == 0 && std::strstr(t, "ignored") == nullptr;
+    walks += std::strncmp(t, "walk trot forward", 17) == 0;
+    walk_ends += std::strncmp(t, "walk ended: stopped", 19) == 0;
+    trick += std::strstr(t, "trick rear_up: TRICK_DONE DONE") != nullptr;
+    status_in += std::strncmp(t, "link ttyS1", 10) == 0 || std::strncmp(t, "loop ", 5) == 0 ||
+                 std::strstr(t, "repeat: ignored") != nullptr || std::strncmp(t, "percept ", 8) == 0;
+  }
+  CHECKF(remote_acted == 25 && walks >= 8 && walk_ends == 8 && trick == 1 && status_in == 0,
+         "remote %d walks %d ends %d trick %d status %d", remote_acted, walks, walk_ends, trick, status_in);
+  // the old ring: 64 lines. Of the session, the last 64 lines before the
+  // laptop read would have been all that was left: not one walk's start.
+  uint32_t old_first = total > 64 ? total - 64 : 0;
+  int old_walks = 0;
+  for (uint32_t s = old_first; s < total; s++) old_walks += std::strncmp(ring.get(s)->text, "walk trot forward at", 20) == 0;
+  std::printf("  a 64-line ring would have kept lines %u..%u: %d of the 8 walks' starts\n", (unsigned)old_first,
+              (unsigned)(total - 1), old_walks);
+  CHECK(old_walks < 8);
+  // the flight recorder kept the status lines as well (all of them)
+  size_t rec_status = 0, made = 0;
+  for (const Rec& x : r.records())
+    rec_status += x.kind == KILO_WALK_RECORD_LOG && (x.payload.find("link ttyS1") == 1 || x.payload.find("loop ") == 1);
+  for (const std::string& l : r.log.lines) made += l.find("link ttyS1") == 0 || l.find("loop ") == 0;
+  CHECKF(rec_status == made && r.mind.recorder().flight().dropped_blocks() == 0, "%zu status lines in the flight recorder of %zu",
+         rec_status, made);
+}
+
+// ---- the card saver ---------------------------------------------------------------------
+
+struct CardRig : Rig {
+  FakeCard& card;
+  record::Saver saver;
+  CardRig(const MindConfig& cfg, FakeCard& c, bool on)
+      : Rig(cfg), card(c), saver(body.clock, mind.log(), mind.recorder(), mind.log(), c, on) {
+    c.set_clock(body.clock);  // the card's calls take the rig's time
+    mind.attach_saver(saver);
+  }
+};
+
+struct Sink : record::BenchSink {
+  std::vector<kilo_host_bench_result_t> got;
+  void bench_result(const kilo_host_bench_result_t& r) override { got.push_back(r); }
+};
+
+std::vector<std::string> names(const FakeCard& c, const char* ext) {
+  std::vector<std::string> out;
+  for (auto& kv : c.files)
+    if (kv.first.size() > 4 && kv.first.compare(kv.first.size() - 4, 4, ext) == 0) out.push_back(kv.first);
+  return out;
+}
+
+void walk_once(Rig& r) {
+  r.body.event(KILO_EVENT_IR_KEY, 0x68);  // A4
+  r.run_ms(3000);
+  r.body.event(KILO_EVENT_IR_KEY, 0x02);  // B6
+  for (int k = 0; k < 400 && r.mind.walker().active(); k++) r.run_ms(20);
+}
+
+void test_saver() {
+  MindConfig cfg;
+  cfg.remote = true;
+  std::map<std::string, std::vector<uint8_t>> after_boot1;
+  {
+    // boot 1: the card is empty; saving on
+    FakeCard card;
+    CardRig r(cfg, card, true);
+    r.start();
+    r.run_ms(3000);
+    record::Saver& s = r.saver;
+    CHECK(s.scanned() && s.boot() == 1 && card.has("kilorec/SAVE_ON"));
+    uint32_t before = card.calls;
+    // nothing touches the card while walking
+    r.body.event(KILO_EVENT_IR_KEY, 0x68);
+    r.run_ms(200);
+    uint32_t at_walk = card.calls;
+    r.run_ms(3000);
+    CHECKF(card.calls == at_walk, "%u card calls during the walk", card.calls - at_walk);
+    r.body.event(KILO_EVENT_IR_KEY, 0x02);
+    for (int k = 0; k < 400 && r.mind.walker().active(); k++) r.run_ms(20);
+    uint32_t at_end = card.calls;
+    r.run_ms(1900);  // the post-roll
+    CHECK(card.calls == at_end);
+    r.run_ms(6000);  // then quiet: the save
+    CHECKF(card.calls > before && names(card, ".krc").size() >= 1 && card.has("kilorec/b00001.run") &&
+               card.has("kilorec/b00001.log") && card.max_write <= record::Saver::kChunk,
+           "calls %u, %zu krc, max write %u", card.calls - before, names(card, ".krc").size(), card.max_write);
+    // the saved blocks parse, the walk's RUN marks are in them, the CRCs hold
+    std::vector<Block> bs;
+    size_t runs = 0;
+    for (const std::string& n : names(card, ".krc")) {
+      CHECK(parse_blocks(card.files[n].data(), card.files[n].size(), &bs));
+    }
+    for (const Block& b : bs) {
+      CHECK(b.h.boot == 1 && b.h.crc32 != 0);
+      runs += count_kind(b.recs, KILO_WALK_RECORD_RUN);
+    }
+    CHECK(runs == 2);
+    std::string log(card.files["kilorec/b00001.log"].begin(), card.files["kilorec/b00001.log"].end());
+    CHECKF(log.find(" I walk trot forward") != std::string::npos && log.find(" M walks: started=1") != std::string::npos,
+           "%s", log.substr(0, 300).c_str());
+    kilo_host_rec_status_t st = {};
+    s.fill_status(st);
+    CHECK(st.card_state == KILO_RECORD_CARD_STATE_IDLE && st.saved_seq > 0 && st.writes > 0 && st.card_files >= 1);
+
+    // a slow write: a warning, the back-off, then on
+    card.slow_once_us = 150000;
+    walk_once(r);
+    r.run_ms(6000);
+    CHECK(s.slow_writes() == 1 && s.write_max_us() >= 150000 && r.ring_has("card: ") && r.ring_has("took 150 ms"));
+    st = {};
+    s.fill_status(st);
+    CHECK(st.card_state == KILO_RECORD_CARD_STATE_BACKOFF);
+    uint32_t calls = card.calls;
+    r.run_ms(20000);
+    CHECK(card.calls == calls);  // waiting out the 30 s
+    r.run_ms(15000);
+    CHECK(card.calls > calls);
+
+    // the bench, the body limp
+    r.body.flags = 0;  // no servo power
+    r.run_ms(3000);
+    Sink sink;
+    const char* why = nullptr;
+    CHECKF(s.start_bench(4, sink, true, &why), "%s", why ? why : "");
+    for (int k = 0; k < 200 && s.bench_running(); k++) r.pass();
+    CHECKF(sink.got.size() == 4 && sink.got[0].write_bytes == 512 && sink.got[1].write_bytes == 4096 &&
+               sink.got[2].write_bytes == 16384 && sink.got[0].count == 4 && sink.got[0].min_us == card.write_us &&
+               sink.got[3].write_bytes == 0 && sink.got[3].close_us > 0 && sink.got[3].remove_us > 0 && !card.has("kilorec/bench.tmp"),
+           "%zu results", sink.got.size());
+    CHECK(!s.start_bench(4, sink, false, &why) && std::strstr(why, "limp") != nullptr);
+    r.body.flags = KILO_TELEMETRY_FLAGS_SERVOS_POWERED;
+
+    // a walk, then the power goes in the middle of its save
+    walk_once(r);
+    for (int k = 0; k < 5000 && !(card.busy() && card.count_ext(".tmp") == 1); k++) r.pass();
+    for (int k = 0; k < 2; k++) r.pass();
+    CHECK(card.busy() && card.count_ext(".tmp") == 1);
+    card.power_cut();
+    after_boot1 = card.files;
+  }
+  {
+    // boot 2: the half file is removed, boot 1's runs are listed, its blocks read back
+    FakeCard card_;
+    FakeCard* card = &card_;
+    CardRig r(cfg, *card, false);
+    card->files = after_boot1;
+    size_t tmp_before = card->count_ext(".tmp") + card->count_ext(".rtm");
+    CHECK(tmp_before == 1);
+    r.start();
+    r.run_ms(3000);
+    record::Saver& s = r.saver;
+    CHECKF(s.scanned() && s.boot() == 2 && s.save_on() && card->count_ext(".tmp") + card->count_ext(".rtm") == 0,
+           "boot %u on %d", (unsigned)s.boot(), (int)s.save_on());  // SAVE_ON from the card
+    CHECK(r.ring_has("a save cut short") && s.card_runs() >= 2);
+    const record::CardRun& c0 = s.card_run(0);
+    CHECK(c0.boot == 1 && c0.run.id == 1 && (c0.run.flags & KILO_WALK_FLAGS_EARLIER_BOOT) && c0.run.kind == KILO_RUN_KIND_WALK);
+    // read back boot 1's first walk's span from the card
+    uint64_t from = c0.run.start_us - 2000000, to = c0.run.end_us + 2000000;
+    CHECK(s.read_blocks(1, from, to, 0xFFFFFFFFu, 7));
+    std::vector<uint8_t> got;
+    uint8_t buf[200];
+    int32_t n = -2;
+    for (int k = 0; k < 20000 && n != 0 && n != -1; k++) {
+      r.pass();
+      n = s.read(7, buf, sizeof buf);
+      if (n > 0) got.insert(got.end(), buf, buf + n);
+    }
+    std::vector<Block> bs;
+    CHECK(n == 0 && parse_blocks(got.data(), got.size(), &bs) && !bs.empty());
+    bool begin = false, ended = false;
+    for (const Block& b : bs)
+      for (const Rec& x : b.recs) {
+        if (x.kind == KILO_WALK_RECORD_RUN) {
+          kilo_run_mark_t m;
+          std::memcpy(&m, x.payload.data(), sizeof m);
+          begin = begin || (m.id == 1 && m.event == KILO_RUN_EVENT_BEGIN);
+          ended = ended || (m.id == 1 && m.event == KILO_RUN_EVENT_END);
+        }
+      }
+    uint64_t t0 = ((uint64_t)bs.front().h.t0_us_hi << 32) | bs.front().h.t0_us_lo;
+    CHECKF(begin && ended && t0 <= from + 1 && bs.back().recs.back().t_us >= c0.run.end_us, "begin %d end %d", begin, ended);
+    // boot 1's log
+    CHECK(s.read_log(1, 7));
+    std::string log;
+    n = -2;
+    for (int k = 0; k < 2000 && n != 0 && n != -1; k++) {
+      r.pass();
+      n = s.read(7, buf, sizeof buf);
+      if (n > 0) log.append((const char*)buf, (size_t)n);
+    }
+    CHECK(log.find("walk trot forward") != std::string::npos);
+    // the cap: a small one, the oldest files go
+    s.set_cap(40000);
+    walk_once(r);
+    r.run_ms(10000);
+    CHECKF(s.card_bytes() <= 40000 + 70000 && s.files() >= 1, "%u B in %u files", (unsigned)s.card_bytes(), (unsigned)s.files());
+    // delete every earlier boot's
+    uint32_t files = 0;
+    CHECK(s.request_delete(0xFFFFFFFFu, &files));
+    r.run_ms(3000);
+    bool any1 = false;
+    for (auto& kv : card->files) any1 = any1 || kv.first.find("kilorec/b00001") == 0;
+    CHECK(!any1 && s.card_runs() == 0 && !s.request_delete(2, &files));  // never this boot's
+  }
+}
+
+void test_saver_failures() {
+  MindConfig cfg;
+  cfg.remote = true;
+  FakeCard card_;
+  FakeCard* card = &card_;
+  CardRig r(cfg, *card, true);
+  r.start();
+  r.run_ms(3000);
+  card->fail_writes = 100;  // the card refuses every write
+  for (int i = 0; i < 6; i++) {
+    walk_once(r);
+    r.run_ms(4500);
+    r.run_ms(700000);  // past the back-off (it doubles)
+  }
+  kilo_host_rec_status_t st = {};
+  r.saver.fill_status(st);
+  CHECKF(st.card_state == KILO_RECORD_CARD_STATE_FAILED && st.card_errors >= 5 && r.ring_has("saving stopped"),
+         "state %u errors %u", st.card_state, (unsigned)st.card_errors);
+  // no card at all: nothing happens, the recorder runs on
+  FakeCard none_;
+  FakeCard* none = &none_;
+  none->present = false;
+  CardRig n(cfg, *none, true);
+  n.start();
+  n.run_ms(3000);
+  CHECK(!n.saver.scanned() && none->calls == 0 && n.mind.recorder().flight().records() > 100);
 }
 
 }  // namespace
 
 int main() {
-  test_store_drops_oldest_whole_walks();
-  test_store_walk_that_outgrows_it();
-  test_store_index_limit();
-  test_store_twenty_minutes();
-  test_recorder_records_a_walk();
-  test_recorder_setup_failure_and_next_walk();
-  test_ring_keeps_first_presses_not_repeats();
-  std::printf("  sizeof(WalkRecorder) %zu B, sizeof(Mind) %zu B, index %u B, pre-roll %zu B\n",
-              sizeof(record::WalkRecorder), sizeof(Mind), (unsigned)WalkStore::kIndexBytes,
-              (size_t)record::WalkRecorder::kPreRoll * 72);
+  test_flight_store();
+  test_records_from_boot();
+  test_walk_run();
+  test_trick_runs();
+  test_play_session_log();
+  test_saver();
+  test_saver_failures();
+  std::printf("  sizeof(Recorder) %zu B, sizeof(Saver) %zu B, sizeof(Mind) %zu B, LogEntry %zu B\n",
+              sizeof(record::Recorder), sizeof(record::Saver), sizeof(Mind), sizeof(LogEntry));
   return report("record");
 }
