@@ -275,7 +275,7 @@ def test_a_refused_trick():
 
 def test_decode_rows_json_and_the_file(tmp_path, capsys):
     recs, _ = trick_records()
-    meta = {"mind": "x", "mind_t0_us": 1_000_000}
+    meta = {"mind": "x", "mind_t0_ms": 1000}
     path = flight.write_file(tmp_path / "r.krec", meta, blocks(recs))
     assert flight.is_krec(path) and not walkrec.is_kwalk(path)
     s = flight.load(path)
@@ -428,7 +428,7 @@ def test_cli_runs_list_and_fetch(rmind, tmp_path, capsys):
     files = sorted(tmp_path.glob("run-*-trick-3.krec"))
     assert len(files) == 1 and "TIP-OVER onset" in out
     meta, data = flight.read_file(files[0])
-    assert data == rmind.data and meta["mind_t0_us"] == (900_000 - 4321) * 1000 and meta["boot"] == 7
+    assert data == rmind.data and meta["mind_t0_ms"] == 900_000 - 4321 and meta["boot"] == 7
     # an earlier boot's run (from the card: total 0)
     assert cli.main(["--host", rmind.addr, "runs", "--fetch", "b6:2", "--out", str(tmp_path), "-q"]) == 0
     assert sorted(tmp_path.glob("run-b6-*-trick-2.krec"))

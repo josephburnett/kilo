@@ -676,7 +676,7 @@ expect "$OUT/host_pc.log" "behaviour: fallen \(safety\)" "the fallen safety bran
 # The virtual body's IMU is scripted: it reports a fixed tilt (ctl att 4 -3) whatever the legs do,
 # so measured - predicted must be that tilt less the prediction, tick by tick, and its mean the
 # offset. A second walk (trot) runs while the first is downloaded: it must lose nothing.
-echo "== walk recordings: a walk (C4) by the remote, kilo walks --host (list, fetch during a trot), kilo log walk"
+echo "== walk recordings: a walk (C4) by the remote, kilo runs --host (list, fetch during a trot), kilo log walk"
 start_ctl_body "$OUT/vbody_walks.log"
 trap stop_body EXIT
 WALKS="$OUT/walks"
@@ -700,31 +700,32 @@ sleep 6
 ctl ir 0x02                   # B6: the planned stop, then stand
 for _ in $(seq 1 60); do grep -q "walk ended" "$OUT/host_walks.log" && break; sleep 0.25; done
 sleep 2.5                     # the recording's post-roll
-KPY -m kilo.cli --host "$W" walks | tee "$OUT/walks_list.txt"
-expect "$OUT/walks_list.txt" "1 walks kept" "the list: one walk"
-expect "$OUT/walks_list.txt" "^ +1  [0-9-]+ [0-9:]+  walk +forward .* s +[0-9]+ +[0-9.]+ KB  " "the list: walk 1, walk forward"
+KPY -m kilo.cli --host "$W" runs | tee "$OUT/walks_list.txt"
+expect "$OUT/walks_list.txt" "1 runs this boot \(1 walks, 0 tricks\)" "the list: one walk"
+expect "$OUT/walks_list.txt" "^1 +[0-9-]+ [0-9:]+ +walk +walk forward .* s +[0-9.]+ KB +RAM +stopped" \
+    "the list: run 1, walk forward, in RAM"
 ctl ir 0x68                   # A4: trot, while walk 1 is downloaded
 sleep 0.5
 KPY -m kilo.cli --host "$W" walks --fetch all --out "$WALKS" -q 2>&1 | tee "$OUT/walks_fetch.txt"
-expect "$OUT/walks_fetch.txt" "walk 1: [0-9]+ bytes in [0-9.]+ s -> .*walk-[0-9-]+-1\.kwalk \(\+ walk-[0-9-]+-1\.kilolog\)" \
-    "fetch: walk 1 written"
-expect "$OUT/walks_fetch.txt" "walk 2: still being recorded" "fetch: the trot is not fetchable yet"
+expect "$OUT/walks_fetch.txt" "walk 1: [0-9]+ bytes in [0-9.]+ s -> .*run-[0-9-]+-walk-1\.krec \(\+ run-[0-9-]+-walk-1\.kilolog\)" \
+    "fetch: walk 1 written (kilo walks: the old name of kilo runs)"
+expect "$OUT/walks_fetch.txt" "run 2: still being recorded" "fetch: the trot is not fetchable yet"
 sleep 1.5
 ctl ir 0x02                   # B6: stop the trot
 wait_mind "$OUT/host_walks.log"
 stop_body
 trap - EXIT
 grep -E "walk recorder|walk (walk|trot) |walk ended|walk error|loop: " "$OUT/host_walks.log" | grep -v "loop: " | sed 's/^/   /'
-expect "$OUT/host_walks.log" "walk recorder: [0-9]+ KB for records, 128 walks at most" "the recorder's store"
+expect "$OUT/host_walks.log" "flight recorder: [0-9]+ MB of RAM" "the flight recorder's store"
 expect "$OUT/host_walks.log" "I walk ended: stopped \(sent [0-9]+ skipped 0 underruns 0\)" \
     "the trot during the download: no tick skipped, no underrun"
 expect "$OUT/host_walks.log" "I walk walk forward .* holds [0-9]+ catches [0-9]+ waits [0-9]+ min margin -?[0-9.]+ mm" \
     "the walk's summary line"
 expect "$OUT/host_walks.log" "I walk error: [0-9]+ samples offset pitch" "the tracker's summary line"
-KWALK="$(ls "$WALKS"/walk-*-1.kwalk)"
+KWALK="$(ls "$WALKS"/run-*-walk-1.krec)"
 KPY -m kilo.cli log walk "$KWALK" --csv "$OUT/walk1.csv" | tee "$OUT/walk1_summary.txt"
 KPY -m kilo.cli log walk "$KWALK" --json > "$OUT/walk1.json"
-KPY -m kilo.cli log summary "${KWALK%.kwalk}.kilolog" > "$OUT/walk1_kilolog.txt"
+KPY -m kilo.cli log summary "${KWALK%.krec}.kilolog" > "$OUT/walk1_kilolog.txt"
 expect "$OUT/walk1_kilolog.txt" "gait: walking [0-9.]+s, 1 GAIT_STOPPED" "kilo log summary reads the .kilolog"
 expect "$OUT/walk1_kilolog.txt" "model error: offset pitch \+[0-9]+\.[0-9]" "kilo log summary: an offset (the scripted tilt less the mean prediction)"
 "$PYTHON" - "$OUT/walk1.json" "$OUT/walk1.csv" <<'EOF'
@@ -759,5 +760,112 @@ print(f"   kilo log walk: {e['samples']} ticks, offset pitch {e['offset_pitch']:
       f"lead {s['lead_ms']['min']}-{s['lead_ms']['max']} ms, {len(rows)} CSV rows")
 EOF
 grep "loop: " "$OUT/host_walks.log" | awk '{for(i=1;i<=NF;i++) if($i=="max") m=($(i+1)>m?$(i+1):m)} END {print "   mind.poll max over the run: " m " us"}'
+
+# ---- the flight recorder: a trick by the remote, every record, the card, the next boot ----------------
+# The rear-up key on (--rear-up): B2 plays rear_up on the virtual body (which plays it tick-exact but
+# does not tip: its IMU stays level, so the analysis sees the design's pitch never reached). Then the
+# recorder's status, a time range fetched and decoded, the metrics, the log's whole history, the card
+# saver on (kilo-mind-host's --card DIR stands for the SD card), and a second boot on the same card
+# that lists the first boot's run and shows its log (kilo log --previous).
+echo "== flight recorder: a trick (B2), kilo runs/record/metrics/log --host, the card, the next boot"
+REC="$OUT/flight"
+rm -rf "$REC"
+mkdir -p "$REC/card"
+start_ctl_body "$OUT/vbody_flight.log"
+trap stop_body EXIT
+run_mind "$OUT/host_flight.log" --remote --rear-up --authorized-keys "$KEYS" --listen 127.0.0.1:0 --card "$REC/card" \
+    --duration 40
+trap 'kill $MIND_PID 2>/dev/null || true; stop_body' EXIT
+FPORT=""
+for _ in $(seq 1 50); do
+    FPORT="$(grep -o 'listening on port [0-9]*' "$OUT/host_flight.log" | grep -o '[0-9]*$' || true)"
+    [ -n "$FPORT" ] && break
+    sleep 0.1
+done
+[ -n "$FPORT" ] || { echo "FAILED: kilo-mind-host did not listen"; cat "$OUT/host_flight.log"; exit 1; }
+F="127.0.0.1:$FPORT"
+sleep 1
+ctl ir 0x02                   # B6: stand
+sleep 1
+ctl ir 0x38                   # B2: rear_up (stage 1)
+for _ in $(seq 1 120); do grep -q "TRICK_DONE" "$OUT/host_flight.log" && break; sleep 0.25; done
+expect "$OUT/host_flight.log" "trick rear_up: TRICK_DONE DONE" "the trick played to its end"
+sleep 2.5                     # the run's post-roll
+KPY -m kilo.cli --host "$F" runs | tee "$OUT/flight_runs.txt"
+expect "$OUT/flight_runs.txt" "1 runs this boot \(0 walks, 1 tricks\)" "the list: one trick"
+expect "$OUT/flight_runs.txt" "^1 +[0-9-]+ [0-9:]+ +trick +rear_up stage 1 .* DONE" "the list: run 1, rear_up stage 1, DONE"
+KPY -m kilo.cli --host "$F" runs --fetch last --out "$REC/runs" | tee "$OUT/flight_fetch.txt"
+expect "$OUT/flight_fetch.txt" "trick 1: [0-9]+ bytes in [0-9.]+ s -> .*run-[0-9-]+-trick-1\.krec" "fetch: the trick run written"
+expect "$OUT/flight_fetch.txt" "trick run 1: rear_up \(stage 1\)" "the trick analysis"
+expect "$OUT/flight_fetch.txt" "end +DONE" "the analysis: how it ended"
+expect "$OUT/flight_fetch.txt" "^ +5  up " "the analysis: keyframe 5, up"
+KREC="$(ls "$REC"/runs/run-*-trick-1.krec)"
+KPY -m kilo.cli log trick "$KREC" --csv "$OUT/trick1.csv" --json > "$OUT/trick1.json"
+KPY -m kilo.cli --host "$F" record status | tee "$OUT/flight_status.txt"
+expect "$OUT/flight_status.txt" "flight recorder +boot" "record status"
+expect "$OUT/flight_status.txt" "a power cut now loses [0-9]+ KB" "record status: what a power cut loses"
+KPY -m kilo.cli --host "$F" record fetch --last 1m --out "$REC/range" | tee "$OUT/flight_range.txt"
+expect "$OUT/flight_range.txt" "[0-9]+ bytes in [0-9.]+ s -> .*rec-[0-9-]+\.krec" "record fetch --last 1m"
+expect "$OUT/flight_range.txt" "run +1 trick" "the range holds the trick run"
+KRANGE="$(ls "$REC"/range/rec-*.krec)"
+KPY -m kilo.cli record decode "$KRANGE" --csv "$OUT/flight_range.csv" > /dev/null
+KPY -m kilo.cli record decode "$KRANGE" --log > "$OUT/flight_range_log.txt"
+expect "$OUT/flight_range_log.txt" "remote B2 \(0x38, rear up\)" "the decoded range: the remote's line for B2"
+KPY -m kilo.cli --host "$F" metrics | tee "$OUT/flight_metrics.txt"
+expect "$OUT/flight_metrics.txt" "^[a-z_]+: " "kilo metrics: group lines"
+KPY -m kilo.cli log --host "$F" --no-follow --save "$REC/logs" > "$OUT/flight_log.txt"
+expect "$OUT/flight_log.txt" "I remote B2 \(0x38, rear up\)" "kilo log --host: the session's key in the history"
+expect "$OUT/flight_log.txt" "I trick rear_up: TRICK_DONE DONE" "kilo log --host: the trick's end in the history"
+ls "$REC"/logs/kilo-*.log > /dev/null || { echo "FAILED: kilo log --save wrote nothing"; exit 1; }
+KPY -m kilo.cli --host "$F" record save on | tee "$OUT/flight_save.txt"
+KPY -m kilo.cli --host "$F" record save now > /dev/null
+for _ in $(seq 1 60); do
+    ls "$REC"/card/kilorec/*.krc > /dev/null 2>&1 && break
+    sleep 0.25
+done
+ls "$REC"/card/kilorec/*.krc > /dev/null 2>&1 || { echo "FAILED: nothing saved to the card"; ls -lR "$REC/card"; exit 1; }
+"$PYTHON" - "$OUT/trick1.json" "$OUT/trick1.csv" "$OUT/flight_range.csv" <<'EOF'
+import csv, json, sys
+a = json.load(open(sys.argv[1]))
+rows = list(csv.DictReader(open(sys.argv[2])))
+rng = list(csv.DictReader(open(sys.argv[3])))
+def check(cond, what):
+    if not cond:
+        print(f"FAILED: the trick run: {what}\n{json.dumps(a, indent=1)[:3000]}"); sys.exit(1)
+check(a["trick"] == "rear_up" and a["stage"] == "1" and a["played"] and a["end"]["reason"] == "DONE", "rear_up, played, DONE")
+check(a["has_prediction"] and len(a["keyframes"]) == 12, "12 keyframes with a prediction")
+check(all(k["reached"] for k in a["keyframes"]), "every keyframe seen in the telemetry")
+check(sum(1 for r in rows if r["mode"] == "TRICK") > 100, "TRICK telemetry in the CSV")
+check(any(r["body_keyframe"] for r in rows), "the body's keyframe in the telemetry")
+check(any(r["trick"] == "rear_up" for r in rng) and any(r["key"] for r in rng), "the decoded range: the trick, the key")
+print(f"   kilo log trick: {len(a['keyframes'])} keyframes, {a['telemetry']} telemetry ticks, end {a['end']['reason']}, "
+      f"error mean {a['error']['mean_deg']:+.1f} deg (the virtual body does not tip); range: {len(rng)} rows")
+EOF
+wait_mind "$OUT/host_flight.log"
+stop_body
+trap - EXIT
+# The next boot on the same card: the first boot's run and log are there.
+start_ctl_body "$OUT/vbody_flight2.log"
+trap stop_body EXIT
+run_mind "$OUT/host_flight2.log" --remote --authorized-keys "$KEYS" --listen 127.0.0.1:0 --card "$REC/card" --duration 10
+trap 'kill $MIND_PID 2>/dev/null || true; stop_body' EXIT
+FPORT=""
+for _ in $(seq 1 50); do
+    FPORT="$(grep -o 'listening on port [0-9]*' "$OUT/host_flight2.log" | grep -o '[0-9]*$' || true)"
+    [ -n "$FPORT" ] && break
+    sleep 0.1
+done
+[ -n "$FPORT" ] || { echo "FAILED: kilo-mind-host did not listen"; cat "$OUT/host_flight2.log"; exit 1; }
+F="127.0.0.1:$FPORT"
+sleep 2
+KPY -m kilo.cli --host "$F" runs | tee "$OUT/flight2_runs.txt"
+expect "$OUT/flight2_runs.txt" "1 from earlier boots" "the next boot lists the first boot's run"
+expect "$OUT/flight2_runs.txt" "^b1:1 .*trick +rear_up stage 1 .*card +DONE" "the first boot's trick, on the card"
+KPY -m kilo.cli log --host "$F" --previous | tee "$OUT/flight2_prev.txt" | head -3
+expect "$OUT/flight2_prev.txt" "boot 1's log as saved on the SD card" "kilo log --previous"
+expect "$OUT/flight2_prev.txt" "remote B2 \(0x38, rear up\)" "the previous boot's log: the key"
+wait_mind "$OUT/host_flight2.log"
+stop_body
+trap - EXIT
 
 echo "== all kernel host tests passed"

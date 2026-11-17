@@ -136,7 +136,10 @@ def _meta(hl: HostLink, st: Any, rs: Any | None, now: float) -> dict[str, Any]:
         m["clock_ms"] = rs.clock_ms
         m["boot"] = rs.boot
         # the clock at the mind's start: uptimes in the analysis count from it
-        m["mind_t0_us"] = max(0, (rs.clock_ms - st.uptime_ms) * 1000)
+        # the clock at the mind's start, in ms mod 2^32 as REC_STATUS gives it
+        # (the host program's clock can be past 49.7 days of ms): uptimes in the
+        # analysis count from it
+        m["mind_t0_ms"] = (rs.clock_ms - st.uptime_ms) & 0xFFFFFFFF
     return m
 
 
@@ -273,7 +276,7 @@ def fetch_one(hl: HostLink, w: Any, st: Any, rs: Any | None, now: float, out: Pa
         meta["start_wall"] = round(when, 3)
     if d["boot"]:
         meta["boot"] = d["boot"]
-        meta.pop("mind_t0_us", None)  # another boot's clock
+        meta.pop("mind_t0_ms", None)  # another boot's clock
     if not flight.is_blocks(data):  # a mind of host.walk_format 1: a walk's records, as before
         stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(when if when is not None else now))
         stem = out / f"walk-{stamp}-{w.id}"
@@ -445,7 +448,7 @@ def _record_fetch(args: argparse.Namespace, hl: HostLink, rs: Any) -> int:
     meta = dict(_meta(hl, st, rs, now), range_ms=[int(max(0, lo)), int(hi)], what="blocks")
     if args.boot:
         meta["boot"] = args.boot
-        meta.pop("mind_t0_us", None)
+        meta.pop("mind_t0_ms", None)
     out = Path(args.out).expanduser()
     stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now))
     path = flight.write_file(out / (f"rec-{stamp}" + (f"-b{args.boot}" if args.boot else "") + ".krec"), meta, data)

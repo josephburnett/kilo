@@ -30,7 +30,8 @@ mind's uptime then, ``start_wall``), then the raw block bytes.
 
 Times: every record's time is the mind's clock in microseconds (the block's
 t0 + the record's t_us); ``uptime_s`` subtracts the mind's start, which the
-meta's ``mind_t0_us`` gives when known (else the first block's t0). A
+meta's ``mind_t0_ms`` gives when known (the clock in ms, modulo 2^32 as
+REC_STATUS.clock_ms gives it; else 0: the Pi's clock starts near 0). A
 ``start_wall`` in the meta maps them to this laptop's clock.
 """
 
@@ -134,13 +135,15 @@ class Stream:
         return max(ts) if ts else None
 
     @property
-    def mind_t0_us(self) -> int:
-        """The mind's clock at its start (for uptimes): the meta's, else 0
-        (the Circle kernel's and kilo-mind-host's clocks start near 0)."""
-        return int(self.meta.get("mind_t0_us", 0))
+    def mind_t0_ms(self) -> int:
+        """The mind's clock at its start, ms mod 2^32 (for uptimes): the
+        meta's, else 0 (the Circle kernel's clock starts near 0)."""
+        return int(self.meta.get("mind_t0_ms", 0))
 
     def uptime_s(self, t_us: int) -> float:
-        return (t_us - self.mind_t0_us) / 1e6
+        """Seconds since the mind started (the ms count wraps as REC_STATUS's)."""
+        ms = ((t_us // 1000) - self.mind_t0_ms) & 0xFFFFFFFF
+        return ms / 1000 + (t_us % 1000) / 1e6
 
     @property
     def runs(self) -> list[RunSpan]:
