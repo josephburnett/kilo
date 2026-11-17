@@ -57,8 +57,10 @@ TESTS += test_update
 # P3: tricks, perception, behaviour, remote and the Mind (their block is at the end;
 # TESTS must be complete here, before `check:` reads it for its prerequisites).
 TESTS += test_tricks test_perception test_behaviour test_remote test_mind
-# The walk recorder (record/): its store, the recorder in the Mind, what the RAM log keeps.
+# The flight recorder (record/): its blocks, the recorder in the Mind, what the RAM log keeps, the card saver.
 TESTS += test_record
+# The mDNS responder (net/mdns.h): what it answers, to whom, its probes and announcements.
+TESTS += test_mdns
 
 .PHONY: all check bench freestanding clean
 all: $(B)/kilo-mind-host $(B)/walk-demo
@@ -132,7 +134,7 @@ $(B)/bench_planner_double: tests/bench_planner.cpp $(BENCH_DBL_OBJS)
 # The host channel's Noise handshake and records (as the kernel's boot bench).
 $(B)/bench_noise: tests/bench_noise.cpp $(CORE_OBJS)
 	$(CXX) $(CXXFLAGS) $< $(CORE_OBJS) -o $@
-# The walk recorder's per-tick cost and a host pass during a walk download.
+# The flight recorder's per-tick cost and a host pass during a download.
 $(B)/bench_walks: tests/bench_walks.cpp $(CORE_OBJS)
 	$(CXX) $(CXXFLAGS) $< $(CORE_OBJS) -o $@
 bench: $(B)/bench_planner $(B)/bench_planner_double $(B)/bench_noise $(B)/bench_walks
@@ -182,8 +184,14 @@ clean:
 # the drives' arousal decay needs exp, their optional gaussian noise log, sin
 # and cos (GCC fuses the pair into sincos). Circle links libm, which has them.
 ALLOWED += exp log sin cos sincos
-# The remote, the walk recorder and the Mind use the planner's float types:
+# The remote, the flight recorder (and the host server that serves it) and the Mind use the planner's float types:
 # the double-planner builds (the vector test's twin, the bench) leave them out
 # (their recipes expand these at run time).
-DBL_OBJS := $(filter-out $(B)/san/mind/remote/% $(B)/san/mind/record/recorder.o $(B)/san/mind/mind.o,$(DBL_OBJS))
-BENCH_DBL_OBJS := $(filter-out $(B)/obj/mind/remote/% $(B)/obj/mind/record/recorder.o $(B)/obj/mind/mind.o,$(BENCH_DBL_OBJS))
+DBL_OBJS := $(filter-out $(B)/san/mind/remote/% $(B)/san/mind/record/% $(B)/san/mind/net/host_% $(B)/san/mind/mind.o,$(DBL_OBJS))
+BENCH_DBL_OBJS := $(filter-out $(B)/obj/mind/remote/% $(B)/obj/mind/record/% $(B)/obj/mind/net/host_% $(B)/obj/mind/mind.o,$(BENCH_DBL_OBJS))
+
+# ---- finding Kilo by name (net/mdns.h) ----------------------------------------------------
+# The responder on a loopback UDP port, for test.sh's `kilo find --ask`.
+all: $(B)/mdns-host
+$(B)/mdns-host: $(B)/obj/mind/net/mdns.o $(B)/obj/mind/util/fmt.o $(B)/obj/host/mdns_host.o
+	$(CXX) $^ -o $@

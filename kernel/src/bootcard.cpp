@@ -407,3 +407,163 @@ KernelStore::Result CBootCard::sync (void)
 {
 	return m_bMounted ? Result::Ok : Result::Failed;
 }
+
+// ---- the flight recorder's card (kilo::RecordCard) -------------------------------------
+//
+// FatFs: f_write puts the data on the card (multi-sector when it can);
+// f_sync writes the FAT and the directory entry (the size), so a power cut
+// after it keeps the file to that point; f_rename and f_unlink update the
+// directory and sync the volume before they return.
+
+CRecordCard::CRecordCard (CBootCard *pCard)
+:	m_pCard (pCard),
+	m_bOpen (FALSE),
+	m_bListing (FALSE)
+{
+	memset (&m_File, 0, sizeof m_File);
+	memset (&m_Dir, 0, sizeof m_Dir);
+}
+
+bool CRecordCard::ready (void)
+{
+	return m_pCard->Mount ();
+}
+
+static RecordCard::Result Done (FRESULT Result)
+{
+	if (Result == FR_OK)
+	{
+		return RecordCard::Result::Ok;
+	}
+	return Result == FR_NO_FILE || Result == FR_NO_PATH ? RecordCard::Result::Missing : RecordCard::Result::Failed;
+}
+
+RecordCard::Result CRecordCard::make_dir (const char *pPath)
+{
+	char Name[80];
+	m_pCard->Path (Name, sizeof Name, pPath);
+	FRESULT Result = f_mkdir (Name);
+	return Result == FR_EXIST ? Result::Ok : Done (Result);
+}
+
+RecordCard::Result CRecordCard::Open (const char *pPath, BYTE uchMode)
+{
+	if (m_bOpen || !m_pCard->Mount ())
+	{
+		return Result::Failed;
+	}
+	char Name[80];
+	m_pCard->Path (Name, sizeof Name, pPath);
+	FRESULT Result = f_open (&m_File, Name, uchMode);
+	if (Result != FR_OK)
+	{
+		return Done (Result);
+	}
+	m_bOpen = TRUE;
+	return Result::Ok;
+}
+
+RecordCard::Result CRecordCard::create (const char *pPath)	{ return Open (pPath, FA_WRITE | FA_CREATE_ALWAYS); }
+RecordCard::Result CRecordCard::append (const char *pPath)	{ return Open (pPath, FA_WRITE | FA_OPEN_APPEND); }
+RecordCard::Result CRecordCard::open (const char *pPath)	{ return Open (pPath, FA_READ | FA_OPEN_EXISTING); }
+
+RecordCard::Result CRecordCard::seek (uint32_t nOffset)
+{
+	return m_bOpen ? Done (f_lseek (&m_File, (FSIZE_t) nOffset)) : Result::Failed;
+}
+
+RecordCard::Result CRecordCard::write (const uint8_t *pData, uint32_t nLen)
+{
+	if (!m_bOpen)
+	{
+		return Result::Failed;
+	}
+	UINT nWritten = 0;
+	FRESULT Result = f_write (&m_File, pData, (UINT) nLen, &nWritten);
+	return Result == FR_OK && nWritten == nLen ? Result::Ok : Result::Failed;	// short: the card is full
+}
+
+int32_t CRecordCard::read (uint8_t *pBuffer, uint32_t nLen)
+{
+	if (!m_bOpen)
+	{
+		return -1;
+	}
+	UINT nRead = 0;
+	return f_read (&m_File, pBuffer, (UINT) nLen, &nRead) == FR_OK ? (int32_t) nRead : -1;
+}
+
+RecordCard::Result CRecordCard::sync (void)
+{
+	return m_bOpen ? Done (f_sync (&m_File)) : Result::Failed;
+}
+
+RecordCard::Result CRecordCard::close (void)
+{
+	if (!m_bOpen)
+	{
+		return Result::Failed;
+	}
+	m_bOpen = FALSE;
+	return Done (f_close (&m_File));
+}
+
+RecordCard::Result CRecordCard::remove (const char *pPath)
+{
+	if (!m_pCard->Mount ())
+	{
+		return Result::Failed;
+	}
+	char Name[80];
+	m_pCard->Path (Name, sizeof Name, pPath);
+	return Done (f_unlink (Name));
+}
+
+RecordCard::Result CRecordCard::rename (const char *pFrom, const char *pTo)
+{
+	if (!m_pCard->Mount ())
+	{
+		return Result::Failed;
+	}
+	char From[80];
+	m_pCard->Path (From, sizeof From, pFrom);
+	// f_rename's new name has no drive: it stays on the old one's volume.
+	return Done (f_rename (From, pTo));
+}
+
+RecordCard::Result CRecordCard::list_begin (const char *pDir)
+{
+	if (!m_pCard->Mount ())
+	{
+		return Result::Failed;
+	}
+	if (m_bListing)
+	{
+		f_closedir (&m_Dir);
+		m_bListing = FALSE;
+	}
+	char Name[80];
+	m_pCard->Path (Name, sizeof Name, pDir);
+	FRESULT Result = f_opendir (&m_Dir, Name);
+	m_bListing = Result == FR_OK;
+	return Done (Result);
+}
+
+RecordCard::Result CRecordCard::list_next (char *pName, uint32_t nSize, uint32_t *pSize)
+{
+	if (!m_bListing)
+	{
+		return Result::Missing;
+	}
+	FILINFO Info;
+	FRESULT Result = f_readdir (&m_Dir, &Info);
+	if (Result != FR_OK || Info.fname[0] == '\0')
+	{
+		f_closedir (&m_Dir);
+		m_bListing = FALSE;
+		return Result == FR_OK ? Result::Missing : Result::Failed;
+	}
+	format (pName, nSize, "%s", Info.fname);
+	*pSize = (uint32_t) Info.fsize;
+	return Result::Ok;
+}

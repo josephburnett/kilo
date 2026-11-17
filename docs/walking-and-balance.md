@@ -807,7 +807,7 @@ so it is unchanged.
    within a second.
 5. A turn (A6, C6) in the walk and in the trot.
 
-Fetch the recordings (`kilo walks --host IP --fetch all`) and analyse them
+Fetch the recordings (`kilo runs --host IP --fetch all`) and analyse them
 (`kilo log walk FILE.kwalk`; `mind/tests/walkreplay.py FILE.kwalk` for the
 virtual body's replay).
 

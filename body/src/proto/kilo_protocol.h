@@ -352,6 +352,32 @@ enum kilo_walk_record {
     KILO_WALK_RECORD_PLAN = 3,
     KILO_WALK_RECORD_PLANNER = 4,
     KILO_WALK_RECORD_MARK = 5,
+    KILO_WALK_RECORD_LOG = 6,
+    KILO_WALK_RECORD_RUN = 7,
+};
+
+enum kilo_run_kind {
+    KILO_RUN_KIND_WALK = 1,
+    KILO_RUN_KIND_TRICK = 2,
+};
+
+enum kilo_run_event {
+    KILO_RUN_EVENT_BEGIN = 1,
+    KILO_RUN_EVENT_END = 2,
+};
+
+enum kilo_record_card_state {
+    KILO_RECORD_CARD_STATE_NONE = 0,
+    KILO_RECORD_CARD_STATE_OFF = 1,
+    KILO_RECORD_CARD_STATE_IDLE = 2,
+    KILO_RECORD_CARD_STATE_SAVING = 3,
+    KILO_RECORD_CARD_STATE_BACKOFF = 4,
+    KILO_RECORD_CARD_STATE_FAILED = 5,
+};
+
+enum kilo_rec_fetch_what {
+    KILO_REC_FETCH_WHAT_BLOCKS = 0,
+    KILO_REC_FETCH_WHAT_LOG = 1,
 };
 
 /* ---- Bit flags (masks) ---- */
@@ -413,6 +439,9 @@ enum kilo_walk_record {
 #define KILO_WALK_FLAGS_ENDED_OK (1u << 1)
 #define KILO_WALK_FLAGS_TRUNCATED (1u << 2)
 #define KILO_WALK_FLAGS_STREAMED (1u << 3)
+#define KILO_WALK_FLAGS_TRICK (1u << 4)
+#define KILO_WALK_FLAGS_SAVED (1u << 5)
+#define KILO_WALK_FLAGS_EARLIER_BOOT (1u << 6)
 
 /* ---- Shared element structs ---- */
 typedef struct KILO_PACKED kilo_keyframe_s {
@@ -436,6 +465,40 @@ typedef struct KILO_PACKED kilo_note_s {
 KILO_STATIC_ASSERT(sizeof(kilo_note_t) == 2, kilo_sa_note_size);
 KILO_STATIC_ASSERT(offsetof(kilo_note_t, note) == 0, kilo_sa_note_note);
 KILO_STATIC_ASSERT(offsetof(kilo_note_t, dur_10ms) == 1, kilo_sa_note_dur_10ms);
+
+typedef struct KILO_PACKED kilo_record_block_header_s {
+    uint32_t magic; /* host.record_block_magic */
+    uint32_t boot; /* the boot's number on the card (0: not known, the card not read yet) */
+    uint32_t seq; /* the block's number in its boot, 0.. */
+    uint32_t used; /* B; bytes of this block, the header included */
+    uint32_t t0_us_lo; /* us; the mind's clock at the block's start, low half (records' t_us count from it) */
+    uint32_t t0_us_hi; /* us; ... high half */
+    uint32_t records;
+    uint32_t skipped; /* HEARTBEAT frames sent in this block's time (counted, not stored) */
+    uint32_t crc32; /* CRC-32 of the bytes after the header; 0: the block is still being written */
+} kilo_record_block_header_t;
+#define KILO_RECORD_BLOCK_HEADER_SIZE 36u
+KILO_STATIC_ASSERT(sizeof(kilo_record_block_header_t) == 36, kilo_sa_record_block_header_size);
+KILO_STATIC_ASSERT(offsetof(kilo_record_block_header_t, magic) == 0, kilo_sa_record_block_header_magic);
+KILO_STATIC_ASSERT(offsetof(kilo_record_block_header_t, boot) == 4, kilo_sa_record_block_header_boot);
+KILO_STATIC_ASSERT(offsetof(kilo_record_block_header_t, seq) == 8, kilo_sa_record_block_header_seq);
+KILO_STATIC_ASSERT(offsetof(kilo_record_block_header_t, used) == 12, kilo_sa_record_block_header_used);
+KILO_STATIC_ASSERT(offsetof(kilo_record_block_header_t, t0_us_lo) == 16, kilo_sa_record_block_header_t0_us_lo);
+KILO_STATIC_ASSERT(offsetof(kilo_record_block_header_t, t0_us_hi) == 20, kilo_sa_record_block_header_t0_us_hi);
+KILO_STATIC_ASSERT(offsetof(kilo_record_block_header_t, records) == 24, kilo_sa_record_block_header_records);
+KILO_STATIC_ASSERT(offsetof(kilo_record_block_header_t, skipped) == 28, kilo_sa_record_block_header_skipped);
+KILO_STATIC_ASSERT(offsetof(kilo_record_block_header_t, crc32) == 32, kilo_sa_record_block_header_crc32);
+
+typedef struct KILO_PACKED kilo_run_mark_s {
+    uint32_t id; /* the run's id (WALK_INFO.id) */
+    uint8_t kind; /* enum run_kind */
+    uint8_t event; /* enum run_event */
+} kilo_run_mark_t;
+#define KILO_RUN_MARK_SIZE 6u
+KILO_STATIC_ASSERT(sizeof(kilo_run_mark_t) == 6, kilo_sa_run_mark_size);
+KILO_STATIC_ASSERT(offsetof(kilo_run_mark_t, id) == 0, kilo_sa_run_mark_id);
+KILO_STATIC_ASSERT(offsetof(kilo_run_mark_t, kind) == 4, kilo_sa_run_mark_kind);
+KILO_STATIC_ASSERT(offsetof(kilo_run_mark_t, event) == 5, kilo_sa_run_mark_event);
 
 typedef struct KILO_PACKED kilo_walk_record_header_s {
     uint8_t kind; /* enum walk_record */
@@ -1395,7 +1458,7 @@ enum kilo_param_id {
 #define KILO_HOST_KEEPALIVE_SEND_MS 500u
 #define KILO_HOST_TELEM_MAX_HZ 50u
 #define KILO_HOST_LOG_TEXT_MAX 159u
-#define KILO_HOST_LOG_RING_LINES 64u
+#define KILO_HOST_LOG_RING_LINES 4096u
 #define KILO_HOST_BRIDGE_CHUNK_MAX 200u
 #define KILO_HOST_DHCP_TIMEOUT_MS 3000u
 #define KILO_HOST_FALLBACK_IP_INIT {169, 254, 75, 73}
@@ -1407,11 +1470,16 @@ enum kilo_param_id {
 #define KILO_HOST_UPDATE_MAX_IMAGE 4194304UL
 #define KILO_HOST_UPDATE_CHUNK_MAX 200u
 #define KILO_HOST_UPDATE_MARKER "KILO-MIND-KERNEL-1"
-#define KILO_HOST_WALK_FORMAT 1u
+#define KILO_HOST_WALK_FORMAT 2u
 #define KILO_HOST_WALK_TEXT_MAX 120u
 #define KILO_HOST_WALK_CHUNK_MAX 200u
 #define KILO_HOST_WALK_PREROLL_MS 2000u
 #define KILO_HOST_WALK_POSTROLL_MS 2000u
+#define KILO_HOST_RECORD_BLOCK_BYTES 16384u
+#define KILO_HOST_RECORD_BLOCK_MAGIC 826427979UL
+#define KILO_HOST_RECORD_WRITE_CHUNK 4096u
+#define KILO_HOST_RECORD_SLOW_WRITE_MS 100u
+#define KILO_HOST_RECORD_CARD_CAP_MB 64u
 
 enum kilo_host_msg_id {
     KILO_HOST_MSG_STATUS_REQ = 0x01,
@@ -1434,6 +1502,12 @@ enum kilo_host_msg_id {
     KILO_HOST_MSG_UPDATE_COMMIT = 0x4A,
     KILO_HOST_MSG_WALK_LIST = 0x50,
     KILO_HOST_MSG_WALK_FETCH = 0x51,
+    KILO_HOST_MSG_REC_STATUS_REQ = 0x52,
+    KILO_HOST_MSG_REC_FETCH = 0x53,
+    KILO_HOST_MSG_METRICS_REQ = 0x54,
+    KILO_HOST_MSG_REC_BENCH = 0x55,
+    KILO_HOST_MSG_REC_SAVE = 0x56,
+    KILO_HOST_MSG_REC_DELETE = 0x57,
     KILO_HOST_MSG_RESULT = 0x80,
     KILO_HOST_MSG_STATUS = 0x81,
     KILO_HOST_MSG_TELEM = 0x82,
@@ -1441,6 +1515,9 @@ enum kilo_host_msg_id {
     KILO_HOST_MSG_BRIDGE_RX = 0x84,
     KILO_HOST_MSG_WALK_INFO = 0x85,
     KILO_HOST_MSG_WALK_DATA = 0x86,
+    KILO_HOST_MSG_REC_STATUS = 0x87,
+    KILO_HOST_MSG_METRICS = 0x88,
+    KILO_HOST_MSG_BENCH_RESULT = 0x89,
     KILO_HOST_MSG_FLASH_STATUS = 0xC0,
     KILO_HOST_MSG_UPDATE_STATUS = 0xC1,
 };
@@ -1504,11 +1581,11 @@ typedef struct KILO_PACKED kilo_host_telem_sub_s {
 KILO_STATIC_ASSERT(sizeof(kilo_host_telem_sub_t) == 1, kilo_sa_host_telem_sub_size);
 KILO_STATIC_ASSERT(offsetof(kilo_host_telem_sub_t, hz) == 0, kilo_sa_host_telem_sub_hz);
 
-/* host 0x21 LOG_SUB: command. LOG_LINE to this client: first up to `tail` lines still in the mind's ring (host.log_ring_lines), then every new line, at min_level and above. enable 0 stops. Any client. */
+/* host 0x21 LOG_SUB: command. LOG_LINE to this client: first up to `tail` lines of history still in the mind's ring (255: all it keeps, host.log_ring_lines), then every new line, the status lines included, at min_level and above. enable 0 stops. Any client. */
 #define KILO_HOST_LOG_SUB_LEN 3u
 typedef struct KILO_PACKED kilo_host_log_sub_s {
     uint8_t enable; /* range 0..1 */
-    uint8_t tail; /* lines of history */
+    uint8_t tail; /* lines of history; 255 = all */
     uint8_t min_level; /* enum log_level */
 } kilo_host_log_sub_t;
 KILO_STATIC_ASSERT(sizeof(kilo_host_log_sub_t) == 3, kilo_sa_host_log_sub_size);
@@ -1603,6 +1680,55 @@ KILO_STATIC_ASSERT(sizeof(kilo_host_walk_fetch_t) == 8, kilo_sa_host_walk_fetch_
 KILO_STATIC_ASSERT(offsetof(kilo_host_walk_fetch_t, id) == 0, kilo_sa_host_walk_fetch_id);
 KILO_STATIC_ASSERT(offsetof(kilo_host_walk_fetch_t, offset) == 4, kilo_sa_host_walk_fetch_offset);
 
+/* host 0x52 REC_STATUS_REQ: command. Answered by REC_STATUS: the flight recorder and the card saver. Any client. */
+#define KILO_HOST_REC_STATUS_REQ_LEN 0u
+
+/* host 0x53 REC_FETCH: command. Send the flight recorder's blocks from from_ms to to_ms (that boot's mind clock, REC_STATUS.clock_ms; to_ms 0xFFFFFFFF: up to now) as WALK_DATA id 0, or (what LOG) an earlier boot's saved log. RESULT OK (text: what is sent), the data, one WALK_DATA END (or GONE). BAD_ARG: nothing in the range. A new WALK_FETCH or REC_FETCH replaces the one running; WALK_FETCH id 0 stops it. Card reads wait for a safe moment (no walk or trick). Any client. */
+#define KILO_HOST_REC_FETCH_LEN 13u
+typedef struct KILO_PACKED kilo_host_rec_fetch_s {
+    uint32_t boot; /* 0: this boot; else an earlier boot's number (its blocks and log on the card) */
+    uint32_t from_ms; /* ms */
+    uint32_t to_ms; /* ms */
+    uint8_t what; /* enum rec_fetch_what */
+} kilo_host_rec_fetch_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_rec_fetch_t) == 13, kilo_sa_host_rec_fetch_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_fetch_t, boot) == 0, kilo_sa_host_rec_fetch_boot);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_fetch_t, from_ms) == 4, kilo_sa_host_rec_fetch_from_ms);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_fetch_t, to_ms) == 8, kilo_sa_host_rec_fetch_to_ms);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_fetch_t, what) == 12, kilo_sa_host_rec_fetch_what);
+
+/* host 0x54 METRICS_REQ: command. Answered by METRICS: line `index` of the mind's session metrics (counters since boot). A client asks for 0, 1, ... until index >= count. Any client. */
+#define KILO_HOST_METRICS_REQ_LEN 1u
+typedef struct KILO_PACKED kilo_host_metrics_req_s {
+    uint8_t index;
+} kilo_host_metrics_req_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_metrics_req_t) == 1, kilo_sa_host_metrics_req_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_metrics_req_t, index) == 0, kilo_sa_host_metrics_req_index);
+
+/* host 0x55 REC_BENCH: command. Measure the SD card's write times: `count` writes of each of several sizes to a scratch file, then its sync and close, then delete it, a write per pass. Controller only; refused (BUSY) unless the body is limp (REST, or no servo power) and no walk, trick, save, update or flash runs. RESULT OK, then BENCH_RESULT to this client per size, the last with write_bytes 0. */
+#define KILO_HOST_REC_BENCH_LEN 2u
+typedef struct KILO_PACKED kilo_host_rec_bench_s {
+    uint16_t count; /* writes per size, 1..256 */
+} kilo_host_rec_bench_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_rec_bench_t) == 2, kilo_sa_host_rec_bench_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_bench_t, count) == 0, kilo_sa_host_rec_bench_count);
+
+/* host 0x56 REC_SAVE: command. The card saver: mode 0 off, 1 on (remembered on the card: kilorec/SAVE_ON), 2 save now (at the next safe moment). Controller only. RESULT OK, or UNSUPPORTED (no card). */
+#define KILO_HOST_REC_SAVE_LEN 1u
+typedef struct KILO_PACKED kilo_host_rec_save_s {
+    uint8_t mode; /* range 0..2 */
+} kilo_host_rec_save_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_rec_save_t) == 1, kilo_sa_host_rec_save_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_save_t, mode) == 0, kilo_sa_host_rec_save_mode);
+
+/* host 0x57 REC_DELETE: command. Delete an earlier boot's recordings from the card (its blocks, run index and log); boot 0xFFFFFFFF: every earlier boot's. The running boot's are never deleted. Controller only; done at the next safe moment. RESULT OK (text: what goes). */
+#define KILO_HOST_REC_DELETE_LEN 4u
+typedef struct KILO_PACKED kilo_host_rec_delete_s {
+    uint32_t boot;
+} kilo_host_rec_delete_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_rec_delete_t) == 4, kilo_sa_host_rec_delete_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_delete_t, boot) == 0, kilo_sa_host_rec_delete_boot);
+
 /* host 0x80 RESULT: event. The answer to a command without a reply message of its own, and to any refused command: its seq, its type, a code and a short reason. */
 #define KILO_HOST_RESULT_MIN_LEN 2u
 #define KILO_HOST_RESULT_MAX_LEN 62u
@@ -1674,7 +1800,7 @@ KILO_STATIC_ASSERT(offsetof(kilo_host_telem_t, last_event) == 15, kilo_sa_host_t
 KILO_STATIC_ASSERT(offsetof(kilo_host_telem_t, link) == 21, kilo_sa_host_telem_link);
 KILO_STATIC_ASSERT(offsetof(kilo_host_telem_t, telemetry) == 101, kilo_sa_host_telem_telemetry);
 
-/* host 0x83 LOG_LINE: stream. One line of the mind's log. seq counts every line the mind logged: a gap is lines this client lost (the ring overwrote them before they could be sent). */
+/* host 0x83 LOG_LINE: stream. One line of the mind's log. seq counts the history lines the mind logged: a gap is lines this client lost (the ring overwrote them before they could be sent), and the first line's seq is how many older lines are gone. Status lines (the once-a-second counters, percepts, held keys: sent live only, never history) have bit 31 set and count on their own. */
 #define KILO_HOST_LOG_LINE_MIN_LEN 9u
 #define KILO_HOST_LOG_LINE_MAX_LEN 168u
 typedef struct KILO_PACKED kilo_host_log_line_s {
@@ -1751,6 +1877,97 @@ KILO_STATIC_ASSERT(offsetof(kilo_host_walk_data_t, offset) == 4, kilo_sa_host_wa
 KILO_STATIC_ASSERT(offsetof(kilo_host_walk_data_t, total) == 8, kilo_sa_host_walk_data_total);
 KILO_STATIC_ASSERT(offsetof(kilo_host_walk_data_t, status) == 12, kilo_sa_host_walk_data_status);
 KILO_STATIC_ASSERT(offsetof(kilo_host_walk_data_t, data) == 13, kilo_sa_host_walk_data_data);
+
+/* host 0x87 REC_STATUS: event, reply to REC_STATUS_REQ. The flight recorder (RAM) and the card saver. */
+#define KILO_HOST_REC_STATUS_LEN 86u
+typedef struct KILO_PACKED kilo_host_rec_status_s {
+    uint32_t clock_ms; /* ms; the mind's clock now, the one the blocks' t0 and REC_FETCH's from_ms/to_ms use (on the Pi: since power-on) */
+    uint32_t boot; /* this boot's number on the card, 0 = not known */
+    uint32_t capacity; /* B; the RAM ring */
+    uint32_t used; /* B */
+    uint32_t block_bytes; /* B */
+    uint32_t blocks; /* blocks in RAM now */
+    uint32_t first_seq; /* the oldest block in RAM */
+    uint32_t next_seq; /* the block being written */
+    uint32_t oldest_ms; /* ms; the mind's clock at the oldest block's start */
+    uint32_t dropped_blocks; /* blocks the ring overwrote */
+    uint32_t records; /* records written since boot */
+    uint32_t skipped; /* HEARTBEAT frames counted, not stored */
+    uint32_t runs; /* runs this boot */
+    uint8_t card_state; /* enum record_card_state */
+    uint8_t save_on;
+    uint32_t saved_seq; /* blocks below this are on the card */
+    uint32_t unsaved_bytes; /* B; what a power cut now would lose (RAM only) */
+    uint32_t card_bytes; /* B; recordings on the card */
+    uint16_t card_files;
+    uint16_t card_boots; /* earlier boots with recordings on the card */
+    uint32_t writes; /* card writes since boot */
+    uint32_t write_max_us; /* us; the slowest (write, sync or close) */
+    uint32_t slow_writes; /* over host.record_slow_write_ms */
+    uint32_t card_errors;
+} kilo_host_rec_status_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_rec_status_t) == 86, kilo_sa_host_rec_status_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, clock_ms) == 0, kilo_sa_host_rec_status_clock_ms);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, boot) == 4, kilo_sa_host_rec_status_boot);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, capacity) == 8, kilo_sa_host_rec_status_capacity);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, used) == 12, kilo_sa_host_rec_status_used);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, block_bytes) == 16, kilo_sa_host_rec_status_block_bytes);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, blocks) == 20, kilo_sa_host_rec_status_blocks);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, first_seq) == 24, kilo_sa_host_rec_status_first_seq);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, next_seq) == 28, kilo_sa_host_rec_status_next_seq);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, oldest_ms) == 32, kilo_sa_host_rec_status_oldest_ms);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, dropped_blocks) == 36, kilo_sa_host_rec_status_dropped_blocks);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, records) == 40, kilo_sa_host_rec_status_records);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, skipped) == 44, kilo_sa_host_rec_status_skipped);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, runs) == 48, kilo_sa_host_rec_status_runs);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, card_state) == 52, kilo_sa_host_rec_status_card_state);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, save_on) == 53, kilo_sa_host_rec_status_save_on);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, saved_seq) == 54, kilo_sa_host_rec_status_saved_seq);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, unsaved_bytes) == 58, kilo_sa_host_rec_status_unsaved_bytes);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, card_bytes) == 62, kilo_sa_host_rec_status_card_bytes);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, card_files) == 66, kilo_sa_host_rec_status_card_files);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, card_boots) == 68, kilo_sa_host_rec_status_card_boots);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, writes) == 70, kilo_sa_host_rec_status_writes);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, write_max_us) == 74, kilo_sa_host_rec_status_write_max_us);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, slow_writes) == 78, kilo_sa_host_rec_status_slow_writes);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, card_errors) == 82, kilo_sa_host_rec_status_card_errors);
+
+/* host 0x88 METRICS: event, reply to METRICS_REQ. One line of the session metrics: ASCII `group: key=value ...`. */
+#define KILO_HOST_METRICS_MIN_LEN 2u
+#define KILO_HOST_METRICS_MAX_LEN 202u
+typedef struct KILO_PACKED kilo_host_metrics_s {
+    uint8_t index;
+    uint8_t count; /* lines there are */
+    uint8_t text[200]; /* 0..200 B, length implied */
+} kilo_host_metrics_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_metrics_t) == 202, kilo_sa_host_metrics_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_metrics_t, index) == 0, kilo_sa_host_metrics_index);
+KILO_STATIC_ASSERT(offsetof(kilo_host_metrics_t, count) == 1, kilo_sa_host_metrics_count);
+KILO_STATIC_ASSERT(offsetof(kilo_host_metrics_t, text) == 2, kilo_sa_host_metrics_text);
+
+/* host 0x89 BENCH_RESULT: stream. REC_BENCH's measurements for one write size, to the client that asked; the last has write_bytes 0 (and error, if it failed). */
+#define KILO_HOST_BENCH_RESULT_LEN 31u
+typedef struct KILO_PACKED kilo_host_bench_result_s {
+    uint32_t write_bytes; /* B; the size of each write; 0: the bench is over */
+    uint16_t count;
+    uint8_t error; /* 0 = ok; else the card refused (the bench stopped) */
+    uint32_t min_us; /* us */
+    uint32_t mean_us; /* us */
+    uint32_t max_us; /* us */
+    uint32_t sync_us; /* us; f_sync after this size's writes */
+    uint32_t close_us; /* us; the scratch file's close (write_bytes 0 only) */
+    uint32_t remove_us; /* us; write_bytes 0 only: the scratch file's delete */
+} kilo_host_bench_result_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_bench_result_t) == 31, kilo_sa_host_bench_result_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_bench_result_t, write_bytes) == 0, kilo_sa_host_bench_result_write_bytes);
+KILO_STATIC_ASSERT(offsetof(kilo_host_bench_result_t, count) == 4, kilo_sa_host_bench_result_count);
+KILO_STATIC_ASSERT(offsetof(kilo_host_bench_result_t, error) == 6, kilo_sa_host_bench_result_error);
+KILO_STATIC_ASSERT(offsetof(kilo_host_bench_result_t, min_us) == 7, kilo_sa_host_bench_result_min_us);
+KILO_STATIC_ASSERT(offsetof(kilo_host_bench_result_t, mean_us) == 11, kilo_sa_host_bench_result_mean_us);
+KILO_STATIC_ASSERT(offsetof(kilo_host_bench_result_t, max_us) == 15, kilo_sa_host_bench_result_max_us);
+KILO_STATIC_ASSERT(offsetof(kilo_host_bench_result_t, sync_us) == 19, kilo_sa_host_bench_result_sync_us);
+KILO_STATIC_ASSERT(offsetof(kilo_host_bench_result_t, close_us) == 23, kilo_sa_host_bench_result_close_us);
+KILO_STATIC_ASSERT(offsetof(kilo_host_bench_result_t, remove_us) == 27, kilo_sa_host_bench_result_remove_us);
 
 /* host 0xC0 FLASH_STATUS: stream. Progress of a flash, to the client that committed it: on every phase change and page, last DONE or FAILED. */
 #define KILO_HOST_FLASH_STATUS_LEN 21u
@@ -1842,6 +2059,18 @@ static inline uint8_t kilo_host_payload_len_check(uint8_t type, uint16_t len)
         return len == 4u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_WALK_FETCH:
         return len == 8u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_REC_STATUS_REQ:
+        return len == 0u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_REC_FETCH:
+        return len == 13u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_METRICS_REQ:
+        return len == 1u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_REC_BENCH:
+        return len == 2u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_REC_SAVE:
+        return len == 1u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_REC_DELETE:
+        return len == 4u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_RESULT:
         return (len >= 2u && len <= 62u) ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_STATUS:
@@ -1856,6 +2085,12 @@ static inline uint8_t kilo_host_payload_len_check(uint8_t type, uint16_t len)
         return (len >= 48u && len <= 168u) ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_WALK_DATA:
         return (len >= 13u && len <= 213u) ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_REC_STATUS:
+        return len == 86u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_METRICS:
+        return (len >= 2u && len <= 202u) ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_BENCH_RESULT:
+        return len == 31u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_FLASH_STATUS:
         return len == 21u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_UPDATE_STATUS:
@@ -1885,6 +2120,12 @@ static inline uint8_t kilo_host_msg_kind(uint8_t type)
     case KILO_HOST_MSG_UPDATE_COMMIT:
     case KILO_HOST_MSG_WALK_LIST:
     case KILO_HOST_MSG_WALK_FETCH:
+    case KILO_HOST_MSG_REC_STATUS_REQ:
+    case KILO_HOST_MSG_REC_FETCH:
+    case KILO_HOST_MSG_METRICS_REQ:
+    case KILO_HOST_MSG_REC_BENCH:
+    case KILO_HOST_MSG_REC_SAVE:
+    case KILO_HOST_MSG_REC_DELETE:
         return KILO_KIND_COMMAND;
     case KILO_HOST_MSG_KEEPALIVE:
     case KILO_HOST_MSG_BRIDGE_TX:
@@ -1894,12 +2135,15 @@ static inline uint8_t kilo_host_msg_kind(uint8_t type)
     case KILO_HOST_MSG_LOG_LINE:
     case KILO_HOST_MSG_BRIDGE_RX:
     case KILO_HOST_MSG_WALK_DATA:
+    case KILO_HOST_MSG_BENCH_RESULT:
     case KILO_HOST_MSG_FLASH_STATUS:
     case KILO_HOST_MSG_UPDATE_STATUS:
         return KILO_KIND_STREAM;
     case KILO_HOST_MSG_RESULT:
     case KILO_HOST_MSG_STATUS:
     case KILO_HOST_MSG_WALK_INFO:
+    case KILO_HOST_MSG_REC_STATUS:
+    case KILO_HOST_MSG_METRICS:
         return KILO_KIND_EVENT;
     default:
         return KILO_KIND_UNKNOWN;
@@ -1914,6 +2158,10 @@ static inline uint8_t kilo_host_query_reply(uint8_t type)
         return KILO_HOST_MSG_STATUS;
     case KILO_HOST_MSG_WALK_LIST:
         return KILO_HOST_MSG_WALK_INFO;
+    case KILO_HOST_MSG_REC_STATUS_REQ:
+        return KILO_HOST_MSG_REC_STATUS;
+    case KILO_HOST_MSG_METRICS_REQ:
+        return KILO_HOST_MSG_METRICS;
     default:
         return 0u;
     }

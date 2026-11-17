@@ -340,6 +340,32 @@ class WalkRecord(enum.IntEnum):
     PLAN = 3
     PLANNER = 4
     MARK = 5
+    LOG = 6
+    RUN = 7
+
+
+class RunKind(enum.IntEnum):
+    WALK = 1
+    TRICK = 2
+
+
+class RunEvent(enum.IntEnum):
+    BEGIN = 1
+    END = 2
+
+
+class RecordCardState(enum.IntEnum):
+    NONE = 0
+    OFF = 1
+    IDLE = 2
+    SAVING = 3
+    BACKOFF = 4
+    FAILED = 5
+
+
+class RecFetchWhat(enum.IntEnum):
+    BLOCKS = 0
+    LOG = 1
 
 
 class TelemetryFlags(enum.IntFlag):
@@ -423,6 +449,9 @@ class WalkFlags(enum.IntFlag):
     ENDED_OK = 1 << 1
     TRUNCATED = 1 << 2
     STREAMED = 1 << 3
+    TRICK = 1 << 4
+    SAVED = 1 << 5
+    EARLIER_BOOT = 1 << 6
 
 
 LEN_OK = 0
@@ -490,6 +519,98 @@ class Note:
         kw: dict = {}
         kw['note'] = v[0]
         kw['dur_10ms'] = v[1]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        if len(data) != cls._FMT.size:
+            raise PayloadError(f'{cls.__name__}: length {len(data)} != {cls._FMT.size}')
+        return cls._from_fixed(cls._FMT.unpack(bytes(data)))
+
+
+@dataclass
+class RecordBlockHeader:
+    SIZE: ClassVar[int] = 36
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<IIIIIIIII')
+    magic: int = 0  # host.record_block_magic
+    boot: int = 0  # the boot's number on the card (0: not known, the card not read yet)
+    seq: int = 0  # the block's number in its boot, 0..
+    used: int = 0  # B; bytes of this block, the header included
+    t0_us_lo: int = 0  # us; the mind's clock at the block's start, low half (records' t_us count from it)
+    t0_us_hi: int = 0  # us; ... high half
+    records: int = 0
+    skipped: int = 0  # HEARTBEAT frames sent in this block's time (counted, not stored)
+    crc32: int = 0  # CRC-32 of the bytes after the header; 0: the block is still being written
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.magic)
+        v.append(self.boot)
+        v.append(self.seq)
+        v.append(self.used)
+        v.append(self.t0_us_lo)
+        v.append(self.t0_us_hi)
+        v.append(self.records)
+        v.append(self.skipped)
+        v.append(self.crc32)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['magic'] = v[0]
+        kw['boot'] = v[1]
+        kw['seq'] = v[2]
+        kw['used'] = v[3]
+        kw['t0_us_lo'] = v[4]
+        kw['t0_us_hi'] = v[5]
+        kw['records'] = v[6]
+        kw['skipped'] = v[7]
+        kw['crc32'] = v[8]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        if len(data) != cls._FMT.size:
+            raise PayloadError(f'{cls.__name__}: length {len(data)} != {cls._FMT.size}')
+        return cls._from_fixed(cls._FMT.unpack(bytes(data)))
+
+
+@dataclass
+class RunMark:
+    SIZE: ClassVar[int] = 6
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<IBB')
+    id: int = 0  # the run's id (WALK_INFO.id)
+    kind: int = 0  # enum run_kind
+    event: int = 0  # enum run_event
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.id)
+        v.append(self.kind)
+        v.append(self.event)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['id'] = v[0]
+        kw['kind'] = v[1]
+        kw['event'] = v[2]
         kw.update(extra)
         return cls(**kw)
 
@@ -2988,7 +3109,7 @@ HOST_KEEPALIVE_TIMEOUT_MS = 2000
 HOST_KEEPALIVE_SEND_MS = 500
 HOST_TELEM_MAX_HZ = 50
 HOST_LOG_TEXT_MAX = 159
-HOST_LOG_RING_LINES = 64
+HOST_LOG_RING_LINES = 4096
 HOST_BRIDGE_CHUNK_MAX = 200
 HOST_DHCP_TIMEOUT_MS = 3000
 HOST_FALLBACK_IP = (169, 254, 75, 73)
@@ -3000,11 +3121,16 @@ HOST_FLASH_BAUD = 115200
 HOST_UPDATE_MAX_IMAGE = 4194304
 HOST_UPDATE_CHUNK_MAX = 200
 HOST_UPDATE_MARKER = 'KILO-MIND-KERNEL-1'
-HOST_WALK_FORMAT = 1
+HOST_WALK_FORMAT = 2
 HOST_WALK_TEXT_MAX = 120
 HOST_WALK_CHUNK_MAX = 200
 HOST_WALK_PREROLL_MS = 2000
 HOST_WALK_POSTROLL_MS = 2000
+HOST_RECORD_BLOCK_BYTES = 16384
+HOST_RECORD_BLOCK_MAGIC = 826427979
+HOST_RECORD_WRITE_CHUNK = 4096
+HOST_RECORD_SLOW_WRITE_MS = 100
+HOST_RECORD_CARD_CAP_MB = 64
 
 
 class HostMsgId(enum.IntEnum):
@@ -3028,6 +3154,12 @@ class HostMsgId(enum.IntEnum):
     UPDATE_COMMIT = 0x4A
     WALK_LIST = 0x50
     WALK_FETCH = 0x51
+    REC_STATUS_REQ = 0x52
+    REC_FETCH = 0x53
+    METRICS_REQ = 0x54
+    REC_BENCH = 0x55
+    REC_SAVE = 0x56
+    REC_DELETE = 0x57
     RESULT = 0x80
     STATUS = 0x81
     TELEM = 0x82
@@ -3035,6 +3167,9 @@ class HostMsgId(enum.IntEnum):
     BRIDGE_RX = 0x84
     WALK_INFO = 0x85
     WALK_DATA = 0x86
+    REC_STATUS = 0x87
+    METRICS = 0x88
+    BENCH_RESULT = 0x89
     FLASH_STATUS = 0xC0
     UPDATE_STATUS = 0xC1
 
@@ -3367,7 +3502,7 @@ class HostTelemSub:
 
 @dataclass
 class HostLogSub:
-    """host 0x21 LOG_SUB (command). LOG_LINE to this client: first up to `tail` lines still in the mind's ring (host.log_ring_lines), then every new line, at min_level and above. enable 0 stops. Any client."""
+    """host 0x21 LOG_SUB (command). LOG_LINE to this client: first up to `tail` lines of history still in the mind's ring (255: all it keeps, host.log_ring_lines), then every new line, the status lines included, at min_level and above. enable 0 stops. Any client."""
     ID: ClassVar[int] = 0x21
     NAME: ClassVar[str] = 'LOG_SUB'
     KIND: ClassVar[Kind] = Kind.COMMAND
@@ -3378,7 +3513,7 @@ class HostLogSub:
     MAX_LEN: ClassVar[int] = 3
     _FMT: ClassVar[struct.Struct] = struct.Struct('<BBB')
     enable: int = 0  # range 0..1
-    tail: int = 0  # lines of history
+    tail: int = 0  # lines of history; 255 = all
     min_level: int = 0  # enum log_level
 
     def _fixed_values(self) -> list:
@@ -3867,6 +4002,252 @@ class HostWalkFetch:
 
 
 @dataclass
+class HostRecStatusReq:
+    """host 0x52 REC_STATUS_REQ (command). Answered by REC_STATUS: the flight recorder and the card saver. Any client."""
+    ID: ClassVar[int] = 0x52
+    NAME: ClassVar[str] = 'REC_STATUS_REQ'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = True
+    REPLY: ClassVar[int | None] = 0x87
+    MIN_LEN: ClassVar[int] = 0
+    MAX_LEN: ClassVar[int] = 0
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<')
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostRecFetch:
+    """host 0x53 REC_FETCH (command). Send the flight recorder's blocks from from_ms to to_ms (that boot's mind clock, REC_STATUS.clock_ms; to_ms 0xFFFFFFFF: up to now) as WALK_DATA id 0, or (what LOG) an earlier boot's saved log. RESULT OK (text: what is sent), the data, one WALK_DATA END (or GONE). BAD_ARG: nothing in the range. A new WALK_FETCH or REC_FETCH replaces the one running; WALK_FETCH id 0 stops it. Card reads wait for a safe moment (no walk or trick). Any client."""
+    ID: ClassVar[int] = 0x53
+    NAME: ClassVar[str] = 'REC_FETCH'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 13
+    MAX_LEN: ClassVar[int] = 13
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<IIIB')
+    boot: int = 0  # 0: this boot; else an earlier boot's number (its blocks and log on the card)
+    from_ms: int = 0  # ms
+    to_ms: int = 0  # ms
+    what: int = 0  # enum rec_fetch_what
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.boot)
+        v.append(self.from_ms)
+        v.append(self.to_ms)
+        v.append(self.what)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['boot'] = v[0]
+        kw['from_ms'] = v[1]
+        kw['to_ms'] = v[2]
+        kw['what'] = v[3]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostMetricsReq:
+    """host 0x54 METRICS_REQ (command). Answered by METRICS: line `index` of the mind's session metrics (counters since boot). A client asks for 0, 1, ... until index >= count. Any client."""
+    ID: ClassVar[int] = 0x54
+    NAME: ClassVar[str] = 'METRICS_REQ'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = True
+    REPLY: ClassVar[int | None] = 0x88
+    MIN_LEN: ClassVar[int] = 1
+    MAX_LEN: ClassVar[int] = 1
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<B')
+    index: int = 0
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.index)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['index'] = v[0]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostRecBench:
+    """host 0x55 REC_BENCH (command). Measure the SD card's write times: `count` writes of each of several sizes to a scratch file, then its sync and close, then delete it, a write per pass. Controller only; refused (BUSY) unless the body is limp (REST, or no servo power) and no walk, trick, save, update or flash runs. RESULT OK, then BENCH_RESULT to this client per size, the last with write_bytes 0."""
+    ID: ClassVar[int] = 0x55
+    NAME: ClassVar[str] = 'REC_BENCH'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 2
+    MAX_LEN: ClassVar[int] = 2
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<H')
+    count: int = 0  # writes per size, 1..256
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.count)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['count'] = v[0]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostRecSave:
+    """host 0x56 REC_SAVE (command). The card saver: mode 0 off, 1 on (remembered on the card: kilorec/SAVE_ON), 2 save now (at the next safe moment). Controller only. RESULT OK, or UNSUPPORTED (no card)."""
+    ID: ClassVar[int] = 0x56
+    NAME: ClassVar[str] = 'REC_SAVE'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 1
+    MAX_LEN: ClassVar[int] = 1
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<B')
+    mode: int = 0  # range 0..2
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.mode)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['mode'] = v[0]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostRecDelete:
+    """host 0x57 REC_DELETE (command). Delete an earlier boot's recordings from the card (its blocks, run index and log); boot 0xFFFFFFFF: every earlier boot's. The running boot's are never deleted. Controller only; done at the next safe moment. RESULT OK (text: what goes)."""
+    ID: ClassVar[int] = 0x57
+    NAME: ClassVar[str] = 'REC_DELETE'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 4
+    MAX_LEN: ClassVar[int] = 4
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<I')
+    boot: int = 0
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.boot)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['boot'] = v[0]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
 class HostResult:
     """host 0x80 RESULT (event). The answer to a command without a reply message of its own, and to any refused command: its seq, its type, a code and a short reason."""
     ID: ClassVar[int] = 0x80
@@ -4058,7 +4439,7 @@ class HostTelem:
 
 @dataclass
 class HostLogLine:
-    """host 0x83 LOG_LINE (stream). One line of the mind's log. seq counts every line the mind logged: a gap is lines this client lost (the ring overwrote them before they could be sent)."""
+    """host 0x83 LOG_LINE (stream). One line of the mind's log. seq counts the history lines the mind logged: a gap is lines this client lost (the ring overwrote them before they could be sent), and the first line's seq is how many older lines are gone. Status lines (the once-a-second counters, percepts, held keys: sent live only, never history) have bit 31 set and count on their own."""
     ID: ClassVar[int] = 0x83
     NAME: ClassVar[str] = 'LOG_LINE'
     KIND: ClassVar[Kind] = Kind.STREAM
@@ -4284,6 +4665,226 @@ class HostWalkData:
 
 
 @dataclass
+class HostRecStatus:
+    """host 0x87 REC_STATUS (event). The flight recorder (RAM) and the card saver."""
+    ID: ClassVar[int] = 0x87
+    NAME: ClassVar[str] = 'REC_STATUS'
+    KIND: ClassVar[Kind] = Kind.EVENT
+    DIR: ClassVar[str] = 'mind_to_client'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 86
+    MAX_LEN: ClassVar[int] = 86
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<IIIIIIIIIIIIIBBIIIHHIIII')
+    clock_ms: int = 0  # ms; the mind's clock now, the one the blocks' t0 and REC_FETCH's from_ms/to_ms use (on the Pi: since power-on)
+    boot: int = 0  # this boot's number on the card, 0 = not known
+    capacity: int = 0  # B; the RAM ring
+    used: int = 0  # B
+    block_bytes: int = 0  # B
+    blocks: int = 0  # blocks in RAM now
+    first_seq: int = 0  # the oldest block in RAM
+    next_seq: int = 0  # the block being written
+    oldest_ms: int = 0  # ms; the mind's clock at the oldest block's start
+    dropped_blocks: int = 0  # blocks the ring overwrote
+    records: int = 0  # records written since boot
+    skipped: int = 0  # HEARTBEAT frames counted, not stored
+    runs: int = 0  # runs this boot
+    card_state: int = 0  # enum record_card_state
+    save_on: int = 0
+    saved_seq: int = 0  # blocks below this are on the card
+    unsaved_bytes: int = 0  # B; what a power cut now would lose (RAM only)
+    card_bytes: int = 0  # B; recordings on the card
+    card_files: int = 0
+    card_boots: int = 0  # earlier boots with recordings on the card
+    writes: int = 0  # card writes since boot
+    write_max_us: int = 0  # us; the slowest (write, sync or close)
+    slow_writes: int = 0  # over host.record_slow_write_ms
+    card_errors: int = 0
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.clock_ms)
+        v.append(self.boot)
+        v.append(self.capacity)
+        v.append(self.used)
+        v.append(self.block_bytes)
+        v.append(self.blocks)
+        v.append(self.first_seq)
+        v.append(self.next_seq)
+        v.append(self.oldest_ms)
+        v.append(self.dropped_blocks)
+        v.append(self.records)
+        v.append(self.skipped)
+        v.append(self.runs)
+        v.append(self.card_state)
+        v.append(self.save_on)
+        v.append(self.saved_seq)
+        v.append(self.unsaved_bytes)
+        v.append(self.card_bytes)
+        v.append(self.card_files)
+        v.append(self.card_boots)
+        v.append(self.writes)
+        v.append(self.write_max_us)
+        v.append(self.slow_writes)
+        v.append(self.card_errors)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['clock_ms'] = v[0]
+        kw['boot'] = v[1]
+        kw['capacity'] = v[2]
+        kw['used'] = v[3]
+        kw['block_bytes'] = v[4]
+        kw['blocks'] = v[5]
+        kw['first_seq'] = v[6]
+        kw['next_seq'] = v[7]
+        kw['oldest_ms'] = v[8]
+        kw['dropped_blocks'] = v[9]
+        kw['records'] = v[10]
+        kw['skipped'] = v[11]
+        kw['runs'] = v[12]
+        kw['card_state'] = v[13]
+        kw['save_on'] = v[14]
+        kw['saved_seq'] = v[15]
+        kw['unsaved_bytes'] = v[16]
+        kw['card_bytes'] = v[17]
+        kw['card_files'] = v[18]
+        kw['card_boots'] = v[19]
+        kw['writes'] = v[20]
+        kw['write_max_us'] = v[21]
+        kw['slow_writes'] = v[22]
+        kw['card_errors'] = v[23]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostMetrics:
+    """host 0x88 METRICS (event). One line of the session metrics: ASCII `group: key=value ...`."""
+    ID: ClassVar[int] = 0x88
+    NAME: ClassVar[str] = 'METRICS'
+    KIND: ClassVar[Kind] = Kind.EVENT
+    DIR: ClassVar[str] = 'mind_to_client'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 2
+    MAX_LEN: ClassVar[int] = 202
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BB')
+    index: int = 0
+    count: int = 0  # lines there are
+    text: bytes = b''  # 0..200 B
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.index)
+        v.append(self.count)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['index'] = v[0]
+        kw['count'] = v[1]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        tail = bytes(self.text)
+        if not 0 <= len(tail) <= 200:
+            raise PayloadError('text: 0..200 bytes, got %d' % len(tail))
+        try:
+            return self._FMT.pack(*self._fixed_values()) + tail
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data[:2]), text=data[2:])
+
+
+@dataclass
+class HostBenchResult:
+    """host 0x89 BENCH_RESULT (stream). REC_BENCH's measurements for one write size, to the client that asked; the last has write_bytes 0 (and error, if it failed)."""
+    ID: ClassVar[int] = 0x89
+    NAME: ClassVar[str] = 'BENCH_RESULT'
+    KIND: ClassVar[Kind] = Kind.STREAM
+    DIR: ClassVar[str] = 'mind_to_client'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 31
+    MAX_LEN: ClassVar[int] = 31
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<IHBIIIIII')
+    write_bytes: int = 0  # B; the size of each write; 0: the bench is over
+    count: int = 0
+    error: int = 0  # 0 = ok; else the card refused (the bench stopped)
+    min_us: int = 0  # us
+    mean_us: int = 0  # us
+    max_us: int = 0  # us
+    sync_us: int = 0  # us; f_sync after this size's writes
+    close_us: int = 0  # us; the scratch file's close (write_bytes 0 only)
+    remove_us: int = 0  # us; write_bytes 0 only: the scratch file's delete
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.write_bytes)
+        v.append(self.count)
+        v.append(self.error)
+        v.append(self.min_us)
+        v.append(self.mean_us)
+        v.append(self.max_us)
+        v.append(self.sync_us)
+        v.append(self.close_us)
+        v.append(self.remove_us)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['write_bytes'] = v[0]
+        kw['count'] = v[1]
+        kw['error'] = v[2]
+        kw['min_us'] = v[3]
+        kw['mean_us'] = v[4]
+        kw['max_us'] = v[5]
+        kw['sync_us'] = v[6]
+        kw['close_us'] = v[7]
+        kw['remove_us'] = v[8]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
 class HostFlashStatus:
     """host 0xC0 FLASH_STATUS (stream). Progress of a flash, to the client that committed it: on every phase change and page, last DONE or FAILED."""
     ID: ClassVar[int] = 0xC0
@@ -4429,6 +5030,12 @@ HOST_MESSAGES: dict[int, type] = {
     0x4A: HostUpdateCommit,
     0x50: HostWalkList,
     0x51: HostWalkFetch,
+    0x52: HostRecStatusReq,
+    0x53: HostRecFetch,
+    0x54: HostMetricsReq,
+    0x55: HostRecBench,
+    0x56: HostRecSave,
+    0x57: HostRecDelete,
     0x80: HostResult,
     0x81: HostStatus,
     0x82: HostTelem,
@@ -4436,6 +5043,9 @@ HOST_MESSAGES: dict[int, type] = {
     0x84: HostBridgeRx,
     0x85: HostWalkInfo,
     0x86: HostWalkData,
+    0x87: HostRecStatus,
+    0x88: HostMetrics,
+    0x89: HostBenchResult,
     0xC0: HostFlashStatus,
     0xC1: HostUpdateStatus,
 }
@@ -4484,6 +5094,18 @@ def host_payload_len_status(msg_type: int, payload: bytes) -> int:
         return LEN_OK if n == 4 else LEN_BAD
     if msg_type == 0x51:
         return LEN_OK if n == 8 else LEN_BAD
+    if msg_type == 0x52:
+        return LEN_OK if n == 0 else LEN_BAD
+    if msg_type == 0x53:
+        return LEN_OK if n == 13 else LEN_BAD
+    if msg_type == 0x54:
+        return LEN_OK if n == 1 else LEN_BAD
+    if msg_type == 0x55:
+        return LEN_OK if n == 2 else LEN_BAD
+    if msg_type == 0x56:
+        return LEN_OK if n == 1 else LEN_BAD
+    if msg_type == 0x57:
+        return LEN_OK if n == 4 else LEN_BAD
     if msg_type == 0x80:
         return LEN_OK if 2 <= n <= 62 else LEN_BAD
     if msg_type == 0x81:
@@ -4498,6 +5120,12 @@ def host_payload_len_status(msg_type: int, payload: bytes) -> int:
         return LEN_OK if 48 <= n <= 168 else LEN_BAD
     if msg_type == 0x86:
         return LEN_OK if 13 <= n <= 213 else LEN_BAD
+    if msg_type == 0x87:
+        return LEN_OK if n == 86 else LEN_BAD
+    if msg_type == 0x88:
+        return LEN_OK if 2 <= n <= 202 else LEN_BAD
+    if msg_type == 0x89:
+        return LEN_OK if n == 31 else LEN_BAD
     if msg_type == 0xC0:
         return LEN_OK if n == 21 else LEN_BAD
     if msg_type == 0xC1:

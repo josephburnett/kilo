@@ -23,14 +23,18 @@ proves it by linking the core with `-nostdlib`.
 
 ```
 platform.h        the seams: Serial (non-blocking bytes, tx_free), Clock (us), Log (lines), Gpio (body RESET),
-                  KernelStore (the SD card's kernel7.* files: blocking, used only while the link is paused)
+                  KernelStore (the SD card's kernel7.* files: blocking, used only while the link is paused),
+                  RecordCard (the card's kilorec/ for the flight recorder: blocking, one call a pass at safe moments)
 platform_net.h    the network seams: Listener (accept into a fixed slot) and Conn (non-blocking TCP stream)
 util/fmt, log     a small printf (%d %u %x %s %c %%, width, '0') and log lines through Log
-util/logring      the RAM log: a Log sink keeping the last 64 lines, for `kilo log --host` (status lines only while a laptop reads it)
-record/store      the walk recordings in RAM: a byte ring of whole walks and their index (oldest walks dropped whole)
-record/recorder   every walk tick by tick into the store: link frames both ways, planned ticks, parameters, the end
+util/logring      the RAM log: 4096 lines of history for `kilo log --host`; status lines live only, and every line to the recorder
+record/flight     the flight recorder's RAM: a ring of 16 KB blocks (header, CRC-32, records), the oldest dropped
+record/recorder   everything into it from boot: link frames, log lines, walks and tricks as runs, the run index
+record/saver      the recorder onto the SD card at safe moments, a 4 KB call a pass; earlier boots' runs; the bench
+record/metrics.h  the session's counters (METRICS)
 net/host_frame    the laptop channel's framing: len u16 | type | seq | payload | crc16
 net/host_server   the laptop interface (P2): commands, telemetry and log streams, the raw bridge
+net/mdns          the mDNS responder: kilo.local and the _kilo._tcp service, so `kilo find` finds Kilo (kernel/README.md "mDNS")
 link/serial_link  the link state machine: a port of mind/kilo/link/serial_link.py
 link/body_state   what the link knows of the body (kilo/body/state.py's link part)
 link/goals        latched goals, one per type
@@ -114,11 +118,12 @@ for (;;) {
 |---|---|---|
 | Commands | `STATUS_REQ` -> `STATUS`; `CONTROL`, `POSTURE`, `TELEM_SUB`, `LOG_SUB`, `BRIDGE_OPEN`/`_CLOSE`, `REBOOT` -> `RESULT`; `PARAM_GET`/`_SET` answer `UNSUPPORTED` until P3 | any client; `POSTURE`, `PARAM_SET`, `REBOOT` and the bridge need control |
 | Telemetry | `TELEM` at 1-50 Hz: the latest TELEMETRY, last EVENT, link counters | any client |
-| Log | `LOG_LINE`: the last N lines of the ring, then live; seq gaps are lost lines | any client |
+| Log | `LOG_LINE`: the last N lines of history (255: all), then live, status lines too (seq bit 31); seq gaps are lost lines | any client |
 | Raw bridge | `BRIDGE_TX`/`BRIDGE_RX`: UART bytes, the link paused | the controller |
 | Flash (P4) | `FLASH_BEGIN`, `FLASH_DATA`, `FLASH_COMMIT` -> `RESULT`; `FLASH_STATUS` until DONE or FAILED (ids 0x40-0x42, 0xC0) | the controller; see "Flashing" |
 | Kernel update | `UPDATE_BEGIN`, `UPDATE_DATA`, `UPDATE_COMMIT` -> `RESULT`; `UPDATE_STATUS` until DONE (then the reboot) or FAILED (ids 0x48-0x4A, 0xC1) | the controller; see "Updating the kernel" |
-| Walk recordings | `WALK_LIST` -> `WALK_INFO` (one walk a request); `WALK_FETCH` -> `RESULT`, then `WALK_DATA` until END (or GONE) | any client; see "Walk recordings" |
+| Flight recorder | `WALK_LIST` -> `WALK_INFO` (one run a request); `WALK_FETCH` (a run), `REC_FETCH` (a range, or an earlier boot's log) -> `RESULT`, then `WALK_DATA` until END (or GONE); `REC_STATUS_REQ` -> `REC_STATUS`; `METRICS_REQ` -> `METRICS` | any client; see "The flight recorder" |
+| The card | `REC_SAVE`, `REC_DELETE`, `REC_BENCH` -> `RESULT` (`BENCH_RESULT` after the bench) | the controller |
 
 Who may connect (`kernel/README.md` "Who may talk to Kilo: keys" for the
 whole story; the spec's `[host]` comments for the bytes): every
@@ -358,77 +363,101 @@ marker, checks `kernel7.img`, `kernel7.old` and that `kernel7.new` is gone,
 and the exit status 3; `tests/test_update.cpp` runs every store failure
 against an in-memory card (`tests/fake_store.h`).
 
-## Walk recordings
+## The flight recorder
 
-`record/` keeps every walk in RAM, tick by tick, so that the model's error
-can be studied after the walk (the owner walks Kilo with the IR remote and
-the cable unplugged, then plugs it in): `kilo walks --host IP` lists the
-walks, `kilo walks --host IP --fetch` downloads them, `kilo log walk
-FILE.kwalk` analyses one (`mind/README.md`).
+`record/` records everything the mind sees and does, from boot, into one
+RAM stream, so that a walk or a trick can be studied afterwards (the owner
+plays with Kilo with the cable unplugged, then plugs it in): `kilo runs
+--host IP` lists the runs, `kilo runs --host IP --fetch N` downloads one,
+`kilo record fetch --host IP --last 10m` any stretch of time, and `kilo
+log walk|trick|run FILE` analyses them (`mind/README.md`).
 
-What a recording holds, from 2 s before the walk's setup to 2 s after its
-end (`KILO_HOST_WALK_PREROLL_MS`, `_POSTROLL_MS`):
+What the stream holds (`record/recorder.h`):
 
 - every body link frame both ways, as it crossed the UART, with the mind's
-  clock in microseconds (`SerialLink::set_frame_tap()`): TELEMETRY (50 Hz
-  in a walk: measured pitch and roll and their rates, the body's reference
-  `ref_*` and correction `corr_*`, support, flags such as BALANCE_HELD,
-  `feet_queued`, `tick_load`), EVENTs, JOINTS if they are streamed; FEET
-  (each foot's x and z, the predicted pitch and roll, support), goals,
-  commands, HEARTBEAT;
-- each planned tick (`walk_plan`, through the Walker's `WalkObserver`): the
-  attitude the feet give without the servo lag, the prediction before its
-  clamp, the stability margin, the legs in the air, whether it was sent;
-- the planner's hold, catch and wait counters when they move
-  (`walk_planner`);
-- `MARK` lines, `word key=value ...`: `walk` (id, format, t0 on the mind's
-  clock, mind and body builds), `setup` (what was asked), `stream` (the
-  first tick and the timing the planner chose: speed, stride, period,
-  shift, stance, swing), `config` (the `PlannerConfig` in use), `model` and
-  `masses` (the `BodyModel` in use), `change` / `timing` / `stop` / `queued`
-  as they happen, and at the end `result` (sent, skipped, underruns, holds,
-  catches, waits, min margin), `error` (the tracker's offset, lag, spike,
-  mean correction) and `end` (ok, reason). The parameters are read from
-  the planner, never assumed.
+  clock in microseconds (`SerialLink::set_frame_tap()`): TELEMETRY
+  (measured pitch and roll and their rates, mode, flags, battery,
+  distance, the body's reference `ref_*` and correction `corr_*`,
+  support, `feet_queued`, `tick_load`), EVENTs (IR keys, falls,
+  TRICK_DONE, the watchdog), JOINTS if they are streamed; FEET, goals,
+  commands (TRICK_PLAY, TRICK_STOP, postures); HEARTBEAT only counted;
+- every log line (`LOG`: the LogRing's tap), the routine status lines
+  included;
+- during a walk, each planned tick (`walk_plan`, through the Walker's
+  `WalkObserver`), the planner's hold, catch and wait counters when they
+  move (`walk_planner`), and `MARK` lines, `word key=value ...`: `walk`
+  (id, format, the setup's time on the mind's clock, builds, battery),
+  `setup`, `stream` (the timing the planner chose), `config`, `model` and
+  `masses`, `change` / `timing` / `stop` / `queued`, and at the end
+  `result`, `error` and `end` (ok, reason);
+- during a trick (any: the remote's, the behaviour runner's), `MARK`
+  lines: `trick` (id, the trick, its rear-up stage, its id and CRC on the
+  body, frames, speed, mirror, builds, battery, mode, whether a remote key
+  started it), `frames` (each keyframe's `dur` and `hold` in ticks at 1x,
+  and the loop), `uploaded`, `play` (at TRICK_PLAY's acknowledgement: the
+  keyframes' times count from it), `key` (a remote key acted on while the
+  run is open: which key stopped it), and `end` (`reason=DONE`,
+  `STOPPED`, `PREEMPTED`, `FELL`, `FAILED` or `REFUSED`, the elapsed and
+  expected time, battery, mode, `why=` the refusal or failure). A trick
+  the remote refuses (the battery under 7400 mV, USB power, the player
+  busy) is a run too: `trick`, `frames`, `end reason=REFUSED`;
+- `RUN` records (`run_mark`: id, kind, BEGIN or END) around each run.
 
-Each record is a `kilo_walk_record_header_t` (kind, len, t_us since the
-walk's t0) and its payload; the kinds and structs are in
-`protocol/spec.toml` ([host] "Walk recordings", `walk_*`).
+**The blocks** (`record/flight.h`): the stream is a ring of 16 KB blocks
+in one allocation (`record::kStoreBytes`, 64 MB on the Pi,
+`Mind::attach_recorder()`). A block is a `kilo_record_block_header_t`
+(its number, the boot's number on the card, its length, the mind's clock
+at its start, a CRC-32 of its records, the HEARTBEATs counted) and
+records, each a `kilo_walk_record_header_t` (kind, len, t_us since the
+block's start) and its payload; a record never spans two blocks. The
+oldest block goes when the ring is full. A block is sealed (its CRC
+written; the CRC is kept up as records come, so sealing costs nothing)
+when the next record does not fit, when 35 minutes have passed since its
+start, or when the saver wants it. The run index (`Recorder::run_after()`,
+256 runs) gives each run's kind, flags, start, end and WALK_INFO text; a
+run is RECORDING until 2 s after its end, and its fetch covers 2 s before
+its start to 2 s after its end.
 
-**The store** (`record/store`) is one block the platform allocates once at
-start (`record::kStoreBytes`, 8 MB: `Mind::attach_recorder()`, before
-`start()`); the index of up to 128 walks and an 18 KB pre-roll ring are
-carved from it, the rest (8.35 MB, the log's `walk recorder: 8152 KB for records`) holds records. A walk tick costs about
-92 bytes (TELEMETRY 43, FEET 24, PLAN 23, the 5 Hz goal refresh), so the
-store holds about 30 minutes of walking (`test_record`'s 20-minute fill).
-When a record does not fit, the oldest walks go, whole; a walk that alone
-outgrows the store keeps its start and its end (2 KB stay free for the end
-lines) and drops what came between (`TRUNCATED`, counted). A walk being
-recorded is not fetchable. Nothing survives a power cut: the SD card is not
-written (`kernel/README.md` "Walk recordings").
+**The card** (`record/saver.h`, the `RecordCard` seam in `platform.h`):
+see `kernel/README.md` "Saving to the SD card". In short: only at safe
+moments (the Mind's `card_safe()`), one call of at most 4 KB a pass, each
+timed, a back-off after a slow one, `.tmp` files renamed when whole,
+64 MB kept, off until switched on. kilo-mind-host takes `--card DIR`
+(`DirRecordCard`, DIR/kilorec); `tests/test_record.cpp` runs it on a fake
+card (`tests/fake_card.h`) with slow writes, refusals and a power cut in
+the middle of a save, then the next boot's scan.
 
-**The download** (`HostServer`): `WALK_DATA` chunks of 200 bytes go only
-into room in that client's 4 KB send ring, so a laptop that reads slowly
-slows its download and is never dropped for it, and the link is never
-touched: 8 chunks a pass, 1 while a walk is being recorded. On this laptop
-(`make -C kernel/host bench`, `bench_walks`) a pass that downloads costs
-24 us at 1.6 KB a pass, 3.5 us at the one-chunk rate, against 0.1 us idle;
-a walk tick's recording 0.08 us. Downloading during a walk is allowed: at
-one chunk a pass it adds a few microseconds to a pass (some tens on the
-Cortex-A7, estimated), far below the walker's own wake, and `test.sh`
-trots the virtual body through a download with no tick skipped and no
-underrun.
+**The download** (`HostServer`, `net/host_records.cpp`): `WALK_DATA`
+chunks of 200 bytes go only into room in that client's 4 KB send ring, so
+a laptop that reads slowly slows its download and is never dropped for
+it, and the link is never touched: 8 chunks a pass, 1 while a run is being
+recorded. Blocks the RAM no longer has come from the card (through the
+saver, a call a pass at safe moments). On this laptop (`make -C
+kernel/host bench`, `bench_walks`) a pass that downloads costs about
+23 us at 1.6 KB a pass, 3.3 us at the one-chunk rate, against 0.1 us idle;
+a walk tick's recording about 1 us.
 
-**The RAM log** keeps what matters: lines that come many times a second
-go through `LogRing::status()`, which puts them into the 64-line ring only
-while a laptop reads the log (`kilo log --host`): a held IR key's EVENT
-lines (`event IR_KEY 0x01xx`, every ~110 ms) and its `repeat: ignored`
-lines, and the percept lines (`percept approaching`, ...). A first press,
-another remote's key, and what the remote did with a key stay in the ring.
-At the end of every walk that streamed, the walker logs its summary in two
-lines at Info (`walk trot forward 55.6 mm/s stride ... holds .. catches ..
-waits .. min margin .. mm`, `walk error: N samples offset pitch .. roll ..
-deg, lag .., spike .. deg`).
+**The metrics** (`record/metrics.h`, `Mind::metric_line()`): counters
+since boot, served as `METRICS` lines (`kilo metrics --host`) and saved
+with the log: `session` (uptime, builds, boot), `keys` (pressed, acted,
+ignored, no action, held by a laptop, repeats, failed, and per key),
+`walks` (started, ok, holds, catches, by end reason), `tricks` (started,
+by end reason, by trick), `refusals` (by why), `body` (falls, recovered,
+watchdog, low battery, events, reboots, battery now and lowest), `link`
+(frames, heartbeats, decode errors, TX deferred and short), `record` (RAM
+used, blocks dropped, records, runs, the loop's slowest pass and period)
+and `card` (state, saved, unsaved, bytes, files, writes, the slowest
+write, slow writes, errors).
+
+**The RAM log** (`util/logring.h`) keeps 4096 lines of history once the
+platform attaches the storage (`Mind::attach_log()`). Lines that come many
+times a second go through `LogRing::status()` and are never history: a
+held IR key's EVENT lines (`event IR_KEY 0x01xx`, every ~110 ms) and its
+`repeat: ignored` lines, the percept lines, the platform's once-a-second
+counters; a laptop reading the log gets them live (their `seq` has bit 31
+set), the flight recorder keeps them. A first press, another remote's
+key, and what the remote did with a key are history. At the end of every
+walk that streamed, the walker logs its summary in two lines at Info.
 
 ## The Mind
 
@@ -437,8 +466,10 @@ a few lines (`kernel/host/main.cpp`):
 
 ```cpp
 MindConfig cfg;                       // remote, behaviour, balance_kp, seed, stats_period_ms ...
-static Mind mind(serial, clock, platform_log, &listener, cfg);  // ~90 KB: static; listener null = no laptop
-mind.attach_recorder(new uint8_t[record::kStoreBytes], record::kStoreBytes);  // walk recordings (8 MB)
+static Mind mind(serial, clock, platform_log, &listener, cfg);  // ~135 KB: static; listener null = no laptop
+mind.attach_log(new LogEntry[LogRing::kLines], LogRing::kLines);  // the log's history (700 KB)
+mind.attach_recorder(new uint8_t[record::kStoreBytes], record::kStoreBytes);  // the flight recorder (64 MB)
+mind.attach_saver(*new record::Saver(clock, log, mind.recorder(), mind.log(), card, false));  // with an SD card
 mind.start();                         // the port is open: start goals, HELLO_REQ
 for (;;) mind.poll();                 // a few ms apart; never blocks
 ```

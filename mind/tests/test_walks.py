@@ -212,9 +212,9 @@ def test_hostlink_lists_and_fetches(wmind):
 def test_cli_walks_list_and_fetch(wmind, tmp_path, capsys):
     assert cli.main(["--host", wmind.addr, "walks"]) == 0
     out = capsys.readouterr().out
-    assert "2 walks kept" in out and "walk 2 being recorded" in out
+    assert "2 runs this boot (2 walks, 0 tricks)" in out and "run 2 being recorded" in out
     lines = [ln for ln in out.splitlines() if ln.strip()[:1].isdigit()]
-    assert len(lines) == 2 and "walk   forward     11.1" in lines[0] and lines[0].rstrip().endswith("stopped")
+    assert len(lines) == 2 and "walk  walk forward 11.1" in lines[0] and lines[0].rstrip().endswith("stopped")
     assert lines[1].rstrip().endswith("recording") and "trot" in lines[1]
     assert cli.main(["walks", "--host", wmind.addr, "--json"]) == 0
     import json
@@ -234,7 +234,7 @@ def test_cli_walks_list_and_fetch(wmind, tmp_path, capsys):
     assert cli.main(["--host", wmind.addr, "walks", "--fetch", "2", "--out", str(tmp_path)]) == 1
     assert "still being recorded" in capsys.readouterr().err
     assert cli.main(["--host", wmind.addr, "walks", "--fetch", "9", "--out", str(tmp_path)]) == 1
-    assert "no walk 9 on the mind (kept: 1, 2)" in capsys.readouterr().err
+    assert "no run 9 on the mind (kept: 1, 2)" in capsys.readouterr().err
 
 
 def test_cli_walks_on_a_mind_without_a_recorder(wmind, capsys):

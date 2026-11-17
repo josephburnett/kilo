@@ -107,6 +107,8 @@ void RemoteControl::poll() {
 void RemoteControl::done(const char* what, bool failed) {
   phase_ = Phase::Idle;
   last_failed_ = failed;
+  actions_++;
+  if (failed) failures_++;
   format(last_, sizeof last_, "%s%s", note_, what);
   logf(log_, failed ? LogLevel::Warn : LogLevel::Info, "remote %s: %s", text_, last_);
 }
@@ -355,6 +357,7 @@ void RemoteControl::start_trick() {
   char what[96];
   if (s.has_telemetry && (s.telemetry.flags & KILO_TELEMETRY_FLAGS_NO_BATTERY) != 0) {
     format(what, sizeof what, "%s refused: on USB power (no battery)", key_->name);
+    if (notes_ != nullptr) notes_->refused(key_->name, "usb_power (no battery)");
     done(what, true);
     return;
   }
@@ -362,6 +365,12 @@ void RemoteControl::start_trick() {
     if (s.has_telemetry) format(what, sizeof what, "%s refused: battery %u mV (needs %u)", key_->name,
                                 (unsigned)s.telemetry.batt_mv, (unsigned)kTrickMinMv);
     else format(what, sizeof what, "%s refused: battery None mV (needs %u)", key_->name, (unsigned)kTrickMinMv);
+    if (notes_ != nullptr) {
+      char why[48];
+      format(why, sizeof why, "battery %u mV (needs %u)", s.has_telemetry ? (unsigned)s.telemetry.batt_mv : 0u,
+             (unsigned)kTrickMinMv);
+      notes_->refused(key_->name, why);
+    }
     done(what, true);
     return;
   }
@@ -369,6 +378,7 @@ void RemoteControl::start_trick() {
   const char* why = "no such trick";
   if (t == nullptr || player_.start(*t, false, tricks::kSpeedUnity, &why) == 0) {
     format(what, sizeof what, "%s failed: %s", key_->name, why);
+    if (notes_ != nullptr) notes_->refused(key_->name, why);
     done(what, true);
     return;
   }

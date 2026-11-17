@@ -182,10 +182,12 @@ void test_logring() {
   const LogEntry* e = ring.get(1);
   CHECK(e != nullptr && e->seq == 1 && e->t_ms == 1500 && e->level == LogLevel::Warn && e->len == 6 &&
         std::string(e->text) == "line 1");
-  for (int i = 2; i < (int)LogRing::kLines + 10; i++) logf(ring, LogLevel::Debug, "line %d", i);
-  CHECK(ring.next_seq() == LogRing::kLines + 10 && ring.first_seq() == 10);
+  const uint32_t cap = ring.capacity();  // kSmallLines until the platform attaches its storage
+  CHECK(cap == LogRing::kSmallLines);
+  for (int i = 2; i < (int)cap + 10; i++) logf(ring, LogLevel::Debug, "line %d", i);
+  CHECK(ring.next_seq() == cap + 10 && ring.first_seq() == 10);
   CHECK(ring.get(9) == nullptr && ring.get(10) != nullptr && std::string(ring.get(10)->text) == "line 10");
-  CHECK(ring.get(LogRing::kLines + 10) == nullptr);
+  CHECK(ring.get(cap + 10) == nullptr);
   std::string longline(300, 'x');
   ring.write(LogLevel::Info, longline.c_str());
   CHECK(ring.get(ring.next_seq() - 1)->len == kLogLineMax - 1);
@@ -197,10 +199,28 @@ void test_logring() {
   CHECK(ring.next_seq() == kept && next.lines.size() == passed + 1 && next.lines.back() == "status 1");
   logf(ring.status(), LogLevel::Warn, "status %d", 2);
   CHECK(ring.next_seq() == kept + 1 && next.lines.size() == passed + 2);
-  ring.set_watched(true);
+  ring.set_watched(true);  // a laptop reads the log: status lines go to it, live, but are not history
   logf(ring.status(), LogLevel::Info, "status %d", 3);
-  CHECK(ring.next_seq() == kept + 2 && std::string(ring.get(kept + 1)->text) == "status 3" &&
-        next.lines.size() == passed + 3);
+  CHECK(ring.next_seq() == kept + 1 && ring.status_next() == 1 && std::string(ring.status_get(0)->text) == "status 3" &&
+        ring.status_get(0)->seq == (LogRing::kStatusBit | 0u) && next.lines.size() == passed + 3);
+  for (int i = 0; i < (int)LogRing::kStatusLines + 5; i++) logf(ring.status(), LogLevel::Info, "status x%d", i);
+  CHECK(ring.status_get(0) == nullptr && ring.status_first() == 6 && ring.next_seq() == kept + 1);
+  // the tap (the flight recorder) gets every line, history and status
+  CaptureLog tap;
+  ring.set_tap(&tap);
+  logf(ring, LogLevel::Info, "history");
+  ring.set_watched(false);
+  logf(ring.status(), LogLevel::Info, "status unwatched");
+  CHECK(tap.lines.size() == 2 && tap.lines[1] == "status unwatched");
+  // the platform's history storage: the lines so far are copied in
+  std::vector<LogEntry> big(LogRing::kLines);
+  uint32_t first = ring.first_seq(), nxt = ring.next_seq();
+  std::string last = ring.get(nxt - 1)->text;
+  ring.attach(big.data(), (uint32_t)big.size());
+  CHECK(ring.capacity() == LogRing::kLines && ring.first_seq() == first && ring.next_seq() == nxt &&
+        std::string(ring.get(nxt - 1)->text) == last);
+  for (int i = 0; i < 1000; i++) logf(ring, LogLevel::Info, "more %d", i);
+  CHECK(ring.first_seq() == first && ring.get(first) != nullptr);  // 4096 lines: nothing dropped yet
 }
 
 void test_status_and_errors() {
@@ -433,6 +453,29 @@ void test_log_tail() {
   const HostFrame* f = find(live, KILO_HOST_MSG_LOG_LINE);
   CHECK(f != nullptr && f->payload[8] == KILO_LOG_LEVEL_WARN &&
         std::string((const char*)f->payload + 9, f->len - 9) == "live line");
+  // A status line goes to a watching client live, with bit 31 set.
+  logf(r.ring.status(), LogLevel::Info, "link: telemetry 50/s");
+  r.pass();
+  live = a.take();
+  f = find(live, KILO_HOST_MSG_LOG_LINE);
+  uint32_t sseq = 0;
+  if (f != nullptr) std::memcpy(&sseq, f->payload, 4);
+  CHECK(f != nullptr && (sseq & LogRing::kStatusBit) && std::string((const char*)f->payload + 9, f->len - 9) == "link: telemetry 50/s");
+  // tail 255: all the history kept, the status line not in it
+  FakeConn& b = r.connect(1);
+  uint8_t all[3] = {1, 255, KILO_LOG_LEVEL_DEBUG};
+  b.send(KILO_HOST_MSG_LOG_SUB, 1, all, 3);
+  r.run_ms(50, 1);
+  size_t n_all = 0;
+  bool first_zero = false;
+  for (const HostFrame& g : b.take())
+    if (g.type == KILO_HOST_MSG_LOG_LINE) {
+      uint32_t s;
+      std::memcpy(&s, g.payload, 4);
+      if (n_all++ == 0) first_zero = s == 0;
+      CHECK(!(s & LogRing::kStatusBit));
+    }
+  CHECKF(first_zero && n_all >= r.ring.next_seq() - 1, "%zu lines of %u", n_all, (unsigned)r.ring.next_seq());
   // Off: nothing more.
   uint8_t stop[3] = {0, 0, 0};
   a.send(KILO_HOST_MSG_LOG_SUB, 2, stop, 3);
@@ -538,23 +581,7 @@ void test_slow_client_dropped() {
   CHECK(!a.open && r.server.clients() == 0);
 }
 
-// ---- walk recordings (WALK_LIST, WALK_FETCH) -------------------------------------------
-
-void fill_walk(record::WalkStore& s, uint32_t records, uint8_t salt) {
-  s.open(0);
-  uint8_t p[60];
-  for (uint32_t i = 0; i < records; i++) {
-    for (uint32_t k = 0; k < sizeof p; k++) p[k] = (uint8_t)(i + k + salt);
-    s.append(KILO_WALK_RECORD_RX, i * 20000, p, sizeof p);
-  }
-}
-
-std::vector<uint8_t> store_bytes(const record::WalkStore& s, uint32_t id) {
-  std::vector<uint8_t> out(s.find(id)->size);
-  uint32_t total;
-  CHECK(s.read(id, 0, out.data(), (uint32_t)out.size(), &total) == (int32_t)out.size());
-  return out;
-}
+// ---- the flight recorder over the channel (WALK_LIST, WALK_FETCH, REC_*) ----------------
 
 kilo_host_walk_info_t walk_list(Rig& r, FakeConn& c, uint32_t after, uint8_t seq) {
   c.send(KILO_HOST_MSG_WALK_LIST, seq, &after, sizeof after);
@@ -566,129 +593,193 @@ kilo_host_walk_info_t walk_list(Rig& r, FakeConn& c, uint32_t after, uint8_t seq
   return w;
 }
 
-void test_walks() {
-  Rig r;
-  FakeConn& a = r.connect(0);
-  r.pass();
-  a.take();
-  // no store attached: UNSUPPORTED
-  uint32_t zero = 0;
-  a.send(KILO_HOST_MSG_WALK_LIST, 1, &zero, 4);
-  r.pass();
-  CHECK(result_code(a.take(), 1) == KILO_HOST_RESULT_CODE_UNSUPPORTED);
-
-  std::vector<uint8_t> mem(record::WalkStore::kIndexBytes + 8 + 200000);
-  record::WalkStore st;
-  st.attach(mem.data(), (uint32_t)mem.size());
-  r.server.attach_walks(st);
-  fill_walk(st, 400, 1);  // walk 1: 400 x 66 B = 26 KB
-  const char* t1 = "gait=trot dir=forward speed=55.6 end=stopped";
-  std::memcpy(st.current()->text, t1, std::strlen(t1));
-  st.current()->text_len = (uint8_t)std::strlen(t1);
-  st.current()->end_us = st.current()->start_us + 8000000;
-  st.close();
-  fill_walk(st, 10, 2);  // walk 2: still being recorded
-
-  kilo_host_walk_info_t w = walk_list(r, a, 0, 2);
-  CHECKF(w.found == 1 && w.id == 1 && w.kept == 2 && w.recording == 2, "found %u id %u kept %u rec %u", w.found,
-         (unsigned)w.id, w.kept, (unsigned)w.recording);
-  CHECKF(w.bytes == 400u * 66u && w.records == 400 && w.duration_ms == 8000, "%u B %u records %u ms",
-         (unsigned)w.bytes, (unsigned)w.records, (unsigned)w.duration_ms);
-  CHECK(w.found == 1 && w.id == 1 && w.kept == 2 && w.recording == 2 && w.bytes == 400u * 66u && w.records == 400 &&
-        w.duration_ms == 8000 && w.capacity == st.capacity() && w.used == st.used() &&
-        std::memcmp(w.text, t1, std::strlen(t1)) == 0 && !(w.flags & KILO_WALK_FLAGS_RECORDING));
-  w = walk_list(r, a, 1, 3);
-  CHECK(w.found == 1 && w.id == 2 && (w.flags & KILO_WALK_FLAGS_RECORDING));
-  w = walk_list(r, a, 2, 4);
-  CHECK(w.found == 0 && w.kept == 2 && w.recording == 2);
-
-  kilo_host_walk_fetch_t q = {2, 0};
-  a.send(KILO_HOST_MSG_WALK_FETCH, 5, &q, sizeof q);  // still being recorded
-  q = {9, 0};
-  a.send(KILO_HOST_MSG_WALK_FETCH, 6, &q, sizeof q);  // no such walk
-  q = {1, 400u * 66u + 1};
-  a.send(KILO_HOST_MSG_WALK_FETCH, 7, &q, sizeof q);  // past its end
-  r.pass();
-  std::vector<HostFrame> fs = a.take();
-  CHECK(result_code(fs, 5) == KILO_HOST_RESULT_CODE_BAD_ARG && result_code(fs, 6) == KILO_HOST_RESULT_CODE_BAD_ARG &&
-        result_code(fs, 7) == KILO_HOST_RESULT_CODE_BAD_ARG && count(fs, KILO_HOST_MSG_WALK_DATA) == 0);
-
-  // walk 1, while walk 2 is recorded: one chunk a pass
-  std::vector<uint8_t> want = store_bytes(st, 1), got;
-  q = {1, 0};
-  a.send(KILO_HOST_MSG_WALK_FETCH, 8, &q, sizeof q);
-  bool end = false;
-  size_t max_per_pass = 0;
-  for (int k = 0; k < 2000 && !end; k++) {
+// The WALK_DATA bytes of a fetch (all of them, END or GONE at the end).
+std::vector<uint8_t> fetch_all(Rig& r, FakeConn& c, uint8_t type, const void* q, uint32_t n, uint8_t seq, int* status,
+                               size_t* max_per_pass = nullptr, int code_want = KILO_HOST_RESULT_CODE_OK) {
+  c.send(type, seq, q, n);
+  std::vector<uint8_t> got;
+  *status = -1;
+  for (int k = 0; k < 5000 && *status < 0; k++) {
     r.pass();
-    fs = a.take();
-    if (k == 0) CHECK(result_code(fs, 8) == KILO_HOST_RESULT_CODE_OK);
-    max_per_pass = std::max(max_per_pass, count(fs, KILO_HOST_MSG_WALK_DATA));
-    for (const HostFrame& f : fs) {
-      if (f.type != KILO_HOST_MSG_WALK_DATA) continue;
-      kilo_host_walk_data_t d;
-      std::memcpy(&d, f.payload, f.len);
-      CHECK(d.id == 1 && d.total == want.size() && d.offset == got.size());
-      if (d.status == KILO_WALK_DATA_STATUS_END) end = true;
-      else got.insert(got.end(), d.data, d.data + (f.len - KILO_HOST_WALK_DATA_MIN_LEN));
+    std::vector<HostFrame> fs = c.take();
+    int rc = k == 0 ? result_code(fs, seq) : KILO_HOST_RESULT_CODE_OK;
+    if (rc != KILO_HOST_RESULT_CODE_OK || code_want != KILO_HOST_RESULT_CODE_OK) {
+      *status = rc == code_want ? -2 : -3;  // -2: refused as expected
+      return got;
     }
-  }
-  CHECK(end && got == want && max_per_pass == 1 && r.server.stats().walk_fetches == 1);
-
-  // walk 2 ends: kFetchChunks a pass, and a client that stops reading only
-  // stalls its download (it is not dropped, nothing is lost)
-  st.close();
-  got.clear();
-  end = false;
-  a.write_room = 0;
-  a.send(KILO_HOST_MSG_WALK_FETCH, 9, &q, sizeof q);
-  for (int k = 0; k < 50; k++) r.pass();
-  CHECK(a.open && r.server.clients() == 1);
-  a.write_room = -1;
-  max_per_pass = 0;
-  for (int k = 0; k < 2000 && !end; k++) {
-    r.pass();
-    fs = a.take();
-    max_per_pass = std::max(max_per_pass, count(fs, KILO_HOST_MSG_WALK_DATA));
+    if (max_per_pass != nullptr) *max_per_pass = std::max(*max_per_pass, count(fs, KILO_HOST_MSG_WALK_DATA));
     for (const HostFrame& f : fs) {
       if (f.type != KILO_HOST_MSG_WALK_DATA) continue;
       kilo_host_walk_data_t d;
       std::memcpy(&d, f.payload, f.len);
       CHECK(d.offset == got.size());
-      if (d.status == KILO_WALK_DATA_STATUS_END) end = true;
+      if (d.status != KILO_WALK_DATA_STATUS_DATA) *status = d.status;
       else got.insert(got.end(), d.data, d.data + (f.len - KILO_HOST_WALK_DATA_MIN_LEN));
     }
   }
-  CHECKF(end && got == want && max_per_pass > 1 && max_per_pass <= HostServer::kFetchChunks + 20, "per pass %zu",
-         max_per_pass);  // the stalled ring drains in its first passes
+  return got;
+}
 
-  // the walk is dropped from the store during its download: GONE
-  a.send(KILO_HOST_MSG_WALK_FETCH, 10, &q, sizeof q);
+// Records of a block stream: (kind, absolute t_us, payload); false if a block is malformed.
+struct BRec {
+  uint8_t kind;
+  uint64_t t_us;
+  std::string payload;
+};
+bool parse_blocks(const std::vector<uint8_t>& b, std::vector<BRec>* out, uint32_t* blocks = nullptr) {
+  size_t at = 0;
+  uint32_t n = 0;
+  while (at + KILO_RECORD_BLOCK_HEADER_SIZE <= b.size()) {
+    kilo_record_block_header_t h;
+    std::memcpy(&h, b.data() + at, sizeof h);
+    if (h.magic != KILO_HOST_RECORD_BLOCK_MAGIC || h.used < sizeof h || at + h.used > b.size()) return false;
+    uint64_t t0 = ((uint64_t)h.t0_us_hi << 32) | h.t0_us_lo;
+    size_t p = at + sizeof h;
+    while (p + KILO_WALK_RECORD_HEADER_SIZE <= at + h.used) {
+      kilo_walk_record_header_t rh;
+      std::memcpy(&rh, b.data() + p, sizeof rh);
+      p += sizeof rh;
+      if (p + rh.len > at + h.used) return false;
+      out->push_back({rh.kind, t0 + rh.t_us, std::string((const char*)b.data() + p, rh.len)});
+      p += rh.len;
+    }
+    at += h.used;
+    n++;
+  }
+  if (blocks != nullptr) *blocks = n;
+  return at == b.size();
+}
+
+void test_runs() {
+  Rig r;
+  FakeConn& a = r.connect(0);
   r.pass();
   a.take();
-  for (uint32_t i = 0; i < 10; i++) {  // the store makes room: walk 1 goes
-    fill_walk(st, 400, (uint8_t)(10 + i));
-    st.close();
+  uint32_t zero = 0;
+  a.send(KILO_HOST_MSG_WALK_LIST, 1, &zero, 4);
+  a.send(KILO_HOST_MSG_REC_STATUS_REQ, 2);
+  r.pass();
+  std::vector<HostFrame> fs = a.take();
+  CHECK(result_code(fs, 1) == KILO_HOST_RESULT_CODE_UNSUPPORTED && result_code(fs, 2) == KILO_HOST_RESULT_CODE_UNSUPPORTED);
+
+  // a recorder of 8 blocks, link frames every 20 ms, a refused trick, more frames
+  std::vector<uint8_t> mem(8 * record::kBlockBytes);
+  record::Recorder rec(r.clock, r.link);
+  rec.attach(mem.data(), (uint32_t)mem.size(), 0x12345678u);
+  tricks::TrickPlayer idle(r.link, r.clock, r.ring);
+  r.server.attach_recorder(rec);
+  uint8_t pl[30] = {};
+  auto frames = [&](uint32_t ms) {
+    for (uint32_t t = 0; t < ms; t += 20) {
+      r.clock.advance_ms(20);
+      pl[0]++;
+      rec.on_frame(false, KILO_MSG_TELEMETRY, pl[0], pl, sizeof pl, r.clock.now_us());
+      rec.on_frame(true, KILO_MSG_HEARTBEAT, pl[0], nullptr, 0, r.clock.now_us());
+      rec.poll(idle);
+      r.pass();
+    }
+  };
+  frames(1000);
+  rec.trick_refused("rear_up", "battery 7000 mV (needs 7400)");
+  kilo_host_walk_info_t w = walk_list(r, a, 0, 3);
+  CHECK(w.found == 1 && w.id == 1 && (w.flags & KILO_WALK_FLAGS_TRICK) && (w.flags & KILO_WALK_FLAGS_RECORDING) &&
+        w.recording == 1);
+  kilo_host_walk_fetch_t q = {1, 0};
+  int status;
+  fetch_all(r, a, KILO_HOST_MSG_WALK_FETCH, &q, sizeof q, 4, &status, nullptr, KILO_HOST_RESULT_CODE_BAD_ARG);
+  CHECK(status == -2);  // still recording (the post-roll)
+  frames(2100);
+  w = walk_list(r, a, 0, 5);
+  std::string text(w.text, w.text + std::strlen((const char*)w.text));
+  CHECKF(w.found == 1 && !(w.flags & KILO_WALK_FLAGS_RECORDING) && text == "trick=rear_up stage=1 end=REFUSED" &&
+             w.bytes > 0 && w.capacity == rec.flight().capacity(),
+         "flags %x text %s bytes %u", w.flags, text.c_str(), (unsigned)w.bytes);
+  CHECK(walk_list(r, a, 1, 6).found == 0);
+
+  // the run's span: blocks from 2 s before to 2 s after
+  size_t per = 0;
+  std::vector<uint8_t> got = fetch_all(r, a, KILO_HOST_MSG_WALK_FETCH, &q, sizeof q, 7, &status, &per);
+  std::vector<BRec> rs;
+  uint32_t nb = 0;
+  CHECKF(status == KILO_WALK_DATA_STATUS_END && got.size() == w.bytes && parse_blocks(got, &rs, &nb), "status %d, %zu B of %u",
+         status, got.size(), (unsigned)w.bytes);
+  size_t tel = 0, runs = 0, refused = 0, logs = 0;
+  uint64_t first = UINT64_MAX, last = 0;
+  for (const BRec& x : rs) {
+    if (x.kind == KILO_WALK_RECORD_RX) tel++, first = std::min(first, x.t_us), last = std::max(last, x.t_us);
+    if (x.kind == KILO_WALK_RECORD_RUN) runs++;
+    if (x.kind == KILO_WALK_RECORD_MARK && x.payload.find("end reason=REFUSED") == 0 &&
+        x.payload.find("why=battery 7000 mV (needs 7400)") != std::string::npos)
+      refused++;
+    if (x.kind == KILO_WALK_RECORD_TX) CHECK(false);  // heartbeats are counted, not stored
+    if (x.kind == KILO_WALK_RECORD_LOG) logs++;
   }
-  CHECK(st.find(1) == nullptr);
+  // from the recording's start (the run was 1 s in) to 2 s after the run
+  CHECKF(tel >= 150 && runs == 2 && refused == 1 && last - first >= 3000000, "%zu telemetry, %zu runs, %zu refused",
+         tel, runs, refused);
+  CHECK(per >= 1 && per <= HostServer::kFetchChunks);
+
+  // any range: the last 500 ms
+  kilo_host_rec_fetch_t rq = {0, (uint32_t)(r.clock.now_us() / 1000u) - 500u, 0xFFFFFFFFu, KILO_REC_FETCH_WHAT_BLOCKS};
+  got = fetch_all(r, a, KILO_HOST_MSG_REC_FETCH, &rq, sizeof rq, 8, &status);
+  rs.clear();
+  CHECK(status == KILO_WALK_DATA_STATUS_END && parse_blocks(got, &rs) && !rs.empty() &&
+        rs.back().t_us >= r.clock.now_us() - 40000);
+  rq = {0, 0, 1, KILO_REC_FETCH_WHAT_LOG};  // no card: no saved log
+  fetch_all(r, a, KILO_HOST_MSG_REC_FETCH, &rq, sizeof rq, 9, &status, nullptr, KILO_HOST_RESULT_CODE_BAD_ARG);
+  CHECK(status == -2);
+
+  // REC_STATUS
+  a.send(KILO_HOST_MSG_REC_STATUS_REQ, 10);
+  r.pass();
+  fs = a.take();
+  const HostFrame* sf = find(fs, KILO_HOST_MSG_REC_STATUS);
+  CHECK(sf != nullptr && sf->len == sizeof(kilo_host_rec_status_t));
+  if (sf != nullptr) {
+    kilo_host_rec_status_t st;
+    std::memcpy(&st, sf->payload, sizeof st);
+    CHECK(st.capacity == mem.size() && st.block_bytes == record::kBlockBytes && st.runs == 1 &&
+          st.skipped == rec.flight().skipped() && st.skipped > 150 && st.card_state == KILO_RECORD_CARD_STATE_NONE &&
+          st.unsaved_bytes == st.used && st.clock_ms == (uint32_t)(r.clock.now_us() / 1000u));
+  }
+  // METRICS without a source: no lines; REC_SAVE without a card: UNSUPPORTED
+  uint8_t idx = 0;
+  a.send(KILO_HOST_MSG_METRICS_REQ, 11, &idx, 1);
+  uint8_t mode = 1;
+  a.send(KILO_HOST_MSG_REC_SAVE, 12, &mode, 1);
+  r.pass();
+  fs = a.take();
+  const HostFrame* mf = find(fs, KILO_HOST_MSG_METRICS);
+  CHECK(mf != nullptr && mf->payload[1] == 0 && result_code(fs, 12) == KILO_HOST_RESULT_CODE_UNSUPPORTED);
+
+  // a client that stops reading only stalls its download
+  a.write_room = 0;
+  a.send(KILO_HOST_MSG_WALK_FETCH, 13, &q, sizeof q);
+  for (int k = 0; k < 50; k++) r.pass();
+  CHECK(a.open && r.server.clients() == 1);
+  a.write_room = -1;
+  for (int k = 0; k < 300; k++) r.pass();
+  a.take();
+  // the ring overwrites the blocks during a download: GONE
+  a.send(KILO_HOST_MSG_WALK_FETCH, 14, &q, sizeof q);
+  r.pass();
+  a.take();
+  uint8_t big[200] = {};
+  for (int i = 0; i < 1000; i++) rec.flight().append(KILO_WALK_RECORD_MARK, r.clock.now_us(), big, sizeof big);
   bool gone = false;
-  for (int k = 0; k < 50 && !gone; k++) {
+  for (int k = 0; k < 200 && !gone; k++) {
     r.pass();
     for (const HostFrame& f : a.take())
       if (f.type == KILO_HOST_MSG_WALK_DATA && f.payload[12] == KILO_WALK_DATA_STATUS_GONE) gone = true;
   }
   CHECK(gone);
+  w = walk_list(r, a, 0, 15);
+  CHECK(w.found == 1 && (w.flags & KILO_WALK_FLAGS_TRUNCATED) && w.dropped_walks > 0);
   // id 0 stops a fetch
-  q = {st.after(0)->id, 0};
-  a.send(KILO_HOST_MSG_WALK_FETCH, 11, &q, sizeof q);
   kilo_host_walk_fetch_t stop = {0, 0};
-  a.send(KILO_HOST_MSG_WALK_FETCH, 12, &stop, sizeof stop);
+  a.send(KILO_HOST_MSG_WALK_FETCH, 16, &stop, sizeof stop);
   r.pass();
-  fs = a.take();
-  CHECK(result_code(fs, 12) == KILO_HOST_RESULT_CODE_OK);
-  r.pass();
-  r.pass();
-  CHECK(count(a.take(), KILO_HOST_MSG_WALK_DATA) == 0);
+  CHECK(result_code(a.take(), 16) == KILO_HOST_RESULT_CODE_OK);
 }
 
 // ---- the secure layer (net/host_secure.cpp) -------------------------------------------
@@ -933,7 +1024,7 @@ int main(int argc, char** argv) {
   test_bridge();
   test_reboot();
   test_slow_client_dropped();
-  test_walks();
+  test_runs();
   test_handshake_and_records();
   test_one_x25519_per_pass();
   test_no_hello_timeout();

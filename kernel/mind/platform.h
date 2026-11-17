@@ -115,6 +115,48 @@ class KernelStore {
   ~KernelStore() = default;
 };
 
+// The SD card's FAT partition again, for the flight recorder's saver
+// (record/saver.h): its directory kilorec/ and the files in it (paths
+// "kilorec/NAME"). Its own open file, apart from KernelStore's (an update
+// and a save never share a handle), one at a time. These calls block for
+// as long as the card takes, like KernelStore's: the saver makes at most
+// one a pass, never during a walk or a trick, and measures each.
+// kilo-mind-host implements it on DIR/kilorec (--card DIR), the tests on
+// memory (with slow writes and power cuts).
+class RecordCard {
+ public:
+  enum class Result : uint8_t { Ok, Missing, Failed };
+
+  // The card is there and mounted (it mounts it the first time).
+  virtual bool ready() = 0;
+  // Ok if it exists already.
+  virtual Result make_dir(const char* path) = 0;
+  // Open for writing, created or emptied.
+  virtual Result create(const char* path) = 0;
+  // Open for writing at its end, created if missing.
+  virtual Result append(const char* path) = 0;
+  // Open for reading; Missing if there is none.
+  virtual Result open(const char* path) = 0;
+  // The open file's read position.
+  virtual Result seek(uint32_t offset) = 0;
+  virtual Result write(const uint8_t* data, uint32_t len) = 0;
+  // Up to len bytes: the count, 0 at its end, -1 failed.
+  virtual int32_t read(uint8_t* buf, uint32_t len) = 0;
+  // The open file's data and size on the card (f_sync).
+  virtual Result sync() = 0;
+  virtual Result close() = 0;
+  virtual Result remove(const char* path) = 0;
+  // to must not exist.
+  virtual Result rename(const char* from, const char* to) = 0;
+  // The directory's entries one by one: list_begin, then list_next until
+  // Missing (name: the bare file name, null-terminated).
+  virtual Result list_begin(const char* dir) = 0;
+  virtual Result list_next(char* name, uint32_t n, uint32_t* size) = 0;
+
+ protected:
+  ~RecordCard() = default;
+};
+
 }  // namespace kilo
 
 #endif

@@ -7,18 +7,24 @@ today, and so what works here:
     kilo --host IP status [--json]                 the mind, the body's HELLO and state, link counters
     kilo --host IP posture NAME [--transition T] [--for S]   hold a posture; REST when it ends
     kilo --host IP monitor [--rate HZ] [--duration S] [--json]   live telemetry
-    kilo log --host IP [--lines N] [--level L] [--duration S]    the mind's log: the last N lines, then live
+    kilo log --host IP [--lines N] [--level L] [--duration S] [--no-follow] [--save [DIR]]
+                                                   the mind's log: all it kept (or the last N lines), then live
+    kilo log --host IP --previous [BOOT] [--save [DIR]]   an earlier boot's log, saved on the SD card
     kilo --host IP flash [--persist] [--image body.bin [--manifest body.json]]   build and flash the body (P4)
     kilo reboot --host IP                          restart the mind (on the Pi: back to the SD card's boot,
                                                    e.g. the netboot loader); the body gets REST first
     kilo update --host IP [--image PATH] [--force] [--wait S]   write a new kernel onto the mind's SD card;
                                                    it reboots into it, and this waits for it to come back
-    kilo walks --host IP [--json]                  the walks the mind recorded (in RAM, since it started)
-    kilo walks --host IP --fetch [N|all] [--out DIR]   download them: DIR/walk-<time>-<id>.kwalk and .kilolog,
-                                                   and print each one's summary (kilo log walk FILE.kwalk)
+    kilo runs --host IP [--json] | --fetch ... | --delete ...   the walks and tricks recorded (kilo.cli_record;
+                                                   kilo walks is the same), record, bench sd, metrics
 
 ``--host`` may also follow the command (``kilo status --host IP``). Every
-other command prints that it is not available over --host yet.
+other command prints that it is not available over --host yet. ``--host``
+also takes a ``.local`` name (``--host kilo.local``), found by mDNS
+(kilo.mdns), and walks, reboot and update, which only a C++ mind serves,
+look for kilo.local when --host is left out; the address found is printed
+to stderr. Finding gives only an address: the handshake below still checks
+the key.
 
 Every connection needs this laptop's key (kilo.hostkey: ``kilo key init``
 once, its line in kernel/keys/authorized_keys, the kernel rebuilt and
@@ -42,9 +48,8 @@ import zlib
 from pathlib import Path
 from typing import Any
 
-from kilo import hostkey
+from kilo import cli_record, hostkey, mdns
 from kilo.hostlink import REBOOT_CLOSE_WAIT_S, HostError, HostKeyRefused, HostLink, HostRefused, has_kernel_marker
-from kilo.logs import walkrec
 from kilo.protocol import kilo_protocol as P
 
 EXIT_OK, EXIT_ERR = 0, 1
@@ -113,12 +118,37 @@ def print_status(st: Any) -> None:
 
 
 # ---- commands ---------------------------------------------------------------------
+def _extras(hl: HostLink) -> tuple[Any, list[str]]:
+    """REC_STATUS and the metrics lines, or (None, []) from a mind without them."""
+    rs, lines = None, []
+    try:
+        rs = hl.rec_status()
+    except (HostRefused, HostError):
+        pass
+    try:
+        lines = hl.metrics()
+    except (HostRefused, HostError):
+        pass
+    return rs, lines
+
+
 def cmd_status(args: argparse.Namespace, hl: HostLink) -> int:
     st = hl.status()
+    rs, lines = _extras(hl)
     if args.json:
-        print(json.dumps(status_dict(st), indent=2))
+        d = status_dict(st)
+        if rs is not None:
+            d["recorder"] = P.to_dict(rs)
+            d["recorder"]["card_state"] = _name(P.RecordCardState, rs.card_state)
+        if lines:
+            d["metrics"] = lines
+        print(json.dumps(d, indent=2))
     else:
         print_status(st)
+        if rs is not None:
+            print(cli_record.recorder_line(rs))
+        for ln in lines:
+            print(f"metrics     {ln}")
     return EXIT_OK
 
 
@@ -178,13 +208,110 @@ def cmd_monitor(args: argparse.Namespace, hl: HostLink) -> int:
     return _run_for(args.duration, hl)
 
 
-def cmd_log(args: argparse.Namespace, hl: HostLink) -> int:
-    def show(m: Any) -> None:
-        tag = LEVEL_TAG[m.level] if m.level < len(LEVEL_TAG) else "?"
-        print(f"{m.t_ms // 1000:6d}.{m.t_ms % 1000:03d} {tag} {m.text.decode('utf-8', 'replace')}", flush=True)
+STATUS_BIT = 0x80000000
+ALL_LINES = 255  # LOG_SUB tail: everything the mind kept
+LOG_IDLE_S = 0.5  # --no-follow: the history is over once no line came for this long
 
-    hl.subscribe_log(show, tail=args.lines, min_level=P.LogLevel[args.level.upper()])
-    return _run_for(args.duration, hl)
+
+def _log_file(save: str | None, suffix: str = "") -> Any:
+    if save is None:
+        return None
+    d = Path(save).expanduser()
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / f"kilo-{time.strftime('%Y%m%d-%H%M%S')}{suffix}.log"
+    print(f"(saving to {path})", file=sys.stderr, flush=True)
+    return open(path, "w", encoding="utf-8")
+
+
+def cmd_log(args: argparse.Namespace, hl: HostLink) -> int:
+    """`kilo log --host`: the history the mind kept (all of it by default),
+    how many older lines it dropped, then live. Status lines (bit 31 of the
+    seq: the once-a-second counters, percepts, held keys) are live only and
+    not counted. --save copies what is printed to a file; --no-follow stops
+    once the history is shown; --previous prints an earlier boot's log from
+    the SD card."""
+    if getattr(args, "previous", None) is not None:
+        return _previous_log(args, hl)
+    out = _log_file(args.save)
+    st = {"first": True, "last": None, "lost": 0, "at": time.monotonic(), "lines": 0}
+    explicit = args.lines is not None
+    tail = ALL_LINES if not explicit else args.lines
+
+    def emit(text: str) -> None:
+        print(text, flush=True)
+        if out is not None:
+            out.write(text + "\n")
+            out.flush()
+
+    def show(m: Any) -> None:
+        st["at"] = time.monotonic()
+        status = bool(m.seq & STATUS_BIT)
+        if not status:
+            if st["first"]:
+                st["first"] = False
+                if not explicit and m.seq > 0:
+                    emit(f"(the mind dropped {m.seq} older lines; it keeps the last {P.HOST_LOG_RING_LINES})")
+            elif st["last"] is not None and m.seq > st["last"] + 1:
+                gap = m.seq - st["last"] - 1
+                st["lost"] += gap
+                emit(f"({gap} lines lost here: the ring overwrote them before they were sent)")
+            st["last"] = m.seq
+            st["lines"] += 1
+        tag = LEVEL_TAG[m.level] if m.level < len(LEVEL_TAG) else "?"
+        emit(f"{m.t_ms // 1000:6d}.{m.t_ms % 1000:03d} {tag} {m.text.decode('utf-8', 'replace')}")
+
+    try:
+        hl.subscribe_log(show, tail=tail, min_level=P.LogLevel[args.level.upper()])
+        if args.no_follow:
+            end = None if args.duration is None else time.monotonic() + args.duration
+            while time.monotonic() - st["at"] < LOG_IDLE_S and not hl.closed:
+                if end is not None and time.monotonic() >= end:
+                    break
+                time.sleep(0.05)
+            return EXIT_OK
+        return _run_for(args.duration, hl)
+    finally:
+        if out is not None:
+            out.close()
+
+
+def _previous_log(args: argparse.Namespace, hl: HostLink) -> int:
+    try:
+        rs = hl.rec_status()
+    except HostRefused as e:
+        print(f"kilo log --previous: this mind keeps no log on its card ({e.code_name})", file=sys.stderr)
+        return EXIT_ERR
+    boot = args.previous if args.previous > 0 else rs.boot - 1
+    if rs.boot == 0 and args.previous <= 0:
+        print("kilo log --previous: the mind has not read its SD card (no card, or not yet): which boot? "
+              "(--previous BOOT)", file=sys.stderr)
+        return EXIT_ERR
+    if boot <= 0:
+        print(f"kilo log --previous: this is boot {rs.boot}, the first the card knows: no earlier log", file=sys.stderr)
+        return EXIT_ERR
+    try:
+        data = hl.rec_fetch(0, 0xFFFFFFFF, boot=boot, what=P.RecFetchWhat.LOG)
+    except HostRefused as e:
+        print(f"kilo log --previous: no saved log for boot {boot} on the card ({e})", file=sys.stderr)
+        return EXIT_ERR
+    out = _log_file(args.save, f"-boot{boot}")
+    text = data.decode("utf-8", "replace")
+    print(f"(boot {boot}'s log as saved on the SD card: {text.count(chr(10))} lines; this is boot {rs.boot})")
+    try:
+        for ln in text.splitlines():
+            t, _, rest = ln.partition(" ")
+            try:
+                ms = int(t)
+                ln = f"{ms // 1000:6d}.{ms % 1000:03d} {rest}"
+            except ValueError:
+                pass
+            print(ln)
+            if out is not None:
+                out.write(ln + "\n")
+    finally:
+        if out is not None:
+            out.close()
+    return EXIT_OK
 
 
 def _run_for(duration: float | None, hl: HostLink) -> int:
@@ -202,7 +329,7 @@ def _run_for(duration: float | None, hl: HostLink) -> int:
 
 def _unavailable(what: str) -> int:
     print(f"kilo {what}: not available over --host yet (the C++ mind serves status, posture, monitor, log, flash, "
-          "reboot, update, walks)",
+          "reboot, update, runs, record, bench, metrics)",
           file=sys.stderr)
     return EXIT_ERR
 
@@ -408,100 +535,8 @@ def _prepare_flash(args: argparse.Namespace) -> int | None:
     return None
 
 
-def _walk_when(info: Any, uptime_ms: int, now: float) -> float:
-    """A walk's start as wall time: now less the mind's uptime since it."""
-    return now - max(0, uptime_ms - info.start_ms) / 1000.0
-
-
-def _walk_row(info: Any, when: float) -> str:
-    d = walkrec.info_dict(info)
-    flags = d["flags"]
-    state = "recording" if "RECORDING" in flags else d.get("end") or "-"
-    if "TRUNCATED" in flags:
-        state += " (TRUNCATED: it outgrew the store)"
-    return (f"{info.id:4d}  {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(when))}  {d.get('gait', '?'):6s} "
-            f"{d.get('dir', '?'):8s} {d.get('speed', '?'):>7s}  {info.duration_ms / 1000:7.1f} s  {info.feet:6d}  "
-            f"{info.bytes / 1024:8.1f} KB  {state}")
-
-
-def cmd_walks(args: argparse.Namespace, hl: HostLink) -> int:
-    """`kilo walks --host IP [--fetch [N|all] --out DIR] [--json]`: the walks
-    the mind recorded (kernel/mind/record/), and their download: a .kwalk
-    (the raw recording) and a .kilolog (its frames, for kilo log
-    summary|replay|plot) per walk, then the walk's summary (kilo log walk)."""
-    st = hl.status()
-    now = time.time()
-    try:
-        walks = hl.walks()
-    except HostRefused as e:
-        if e.code in (P.HostResultCode.UNSUPPORTED, P.HostResultCode.UNKNOWN_TYPE):
-            print(f"kilo walks: this mind (build {st.mind_build:08x}) does not record walks ({e.code_name})",
-                  file=sys.stderr)
-            return EXIT_ERR
-        raise
-    store = hl.walk_store
-    if args.fetch is None:
-        if args.json:
-            print(json.dumps([dict(walkrec.info_dict(w), start_wall=round(_walk_when(w, st.uptime_ms, now), 3))
-                              for w in walks], indent=1))
-            return EXIT_OK
-        print(f"mind build {st.mind_build:08x}, up {st.uptime_ms / 1000:.0f} s: {len(walks)} walks kept, "
-              f"{store.used / 1048576:.2f} of {store.capacity / 1048576:.2f} MB used"
-              + (f", {store.dropped_walks} older walks dropped for room" if store.dropped_walks else "")
-              + (f", walk {store.recording} being recorded" if store.recording else ""))
-        if walks:
-            print("  id  started (this laptop's clock)  gait   dir        speed  duration   ticks        size  end")
-            for w in walks:
-                print(_walk_row(w, _walk_when(w, st.uptime_ms, now)))
-        return EXIT_OK
-    if args.fetch == "all":
-        chosen = [w for w in walks if not w.flags & P.WalkFlags.RECORDING]
-        for w in walks:  # not an error with `all`: it is fetched next time
-            if w.flags & P.WalkFlags.RECORDING:
-                print(f"walk {w.id}: still being recorded; fetch it once it has ended", file=sys.stderr)
-    else:
-        try:
-            want = int(args.fetch)
-        except ValueError:
-            print(f"kilo walks: --fetch {args.fetch!r}: a walk id or all", file=sys.stderr)
-            return EXIT_ERR
-        chosen = [w for w in walks if w.id == want]
-        if not chosen:
-            print(f"kilo walks: no walk {want} on the mind (kept: {', '.join(str(w.id) for w in walks) or 'none'})",
-                  file=sys.stderr)
-            return EXIT_ERR
-    out = Path(args.out).expanduser()
-    out.mkdir(parents=True, exist_ok=True)
-    status = EXIT_OK
-    for w in chosen:
-        if w.flags & P.WalkFlags.RECORDING:
-            print(f"walk {w.id}: still being recorded; fetch it once it has ended", file=sys.stderr)
-            status = EXIT_ERR
-            continue
-        when = _walk_when(w, st.uptime_ms, now)
-        stem = out / f"walk-{time.strftime('%Y%m%d-%H%M%S', time.localtime(when))}-{w.id}"
-        t = time.monotonic()
-        try:
-            data = hl.fetch_walk(w.id)
-        except (HostError, HostRefused) as e:
-            print(f"walk {w.id}: {e}", file=sys.stderr)
-            status = EXIT_ERR
-            continue
-        took = time.monotonic() - t
-        meta = {"walk": walkrec.info_dict(w), "mind": hl.address, "mind_build": f"{st.mind_build:08x}",
-                "fetched_wall": round(now, 3), "start_wall": round(when, 3), "format": P.HOST_WALK_FORMAT}
-        kw = walkrec.write_file(stem.with_suffix(".kwalk"), meta, data)
-        rec = walkrec.parse_records(data, meta)
-        rec.meta["path"] = str(kw)
-        kl = walkrec.to_kilolog(rec, stem.with_suffix(".kilolog"))
-        print(f"walk {w.id}: {len(data)} bytes in {took:.1f} s -> {kw} (+ {kl.name})", flush=True)
-        if not args.quiet:
-            print(walkrec.format_summary(walkrec.summarize(rec)), flush=True)
-    return status
-
-
 HOST_COMMANDS = {"status": cmd_status, "posture": cmd_posture, "monitor": cmd_monitor, "log": cmd_log,
-                 "flash": cmd_flash, "reboot": cmd_reboot, "update": cmd_update, "walks": cmd_walks}
+                 "flash": cmd_flash, "reboot": cmd_reboot, "update": cmd_update, **cli_record.HOST_COMMANDS}
 
 
 def parse_log_argv(argv: list[str], host: str | None, key: str | None = None) -> argparse.Namespace:
@@ -509,15 +544,26 @@ def parse_log_argv(argv: list[str], host: str | None, key: str | None = None) ->
     p = argparse.ArgumentParser(prog="kilo log --host", description="the mind's log: the last lines, then live")
     p.add_argument("--host", default=host, required=host is None, help="the mind's address, IP[:PORT]")
     p.add_argument("--key", default=key, metavar="PATH", help="this laptop's key file (kilo key init)")
-    p.add_argument("--lines", "-n", type=int, default=20, help="lines of history first (default 20; the mind keeps "
-                                                               f"{P.HOST_LOG_RING_LINES})")
+    p.add_argument("--lines", "-n", type=int, default=None, help="lines of history first (default: all the mind "
+                                                                 f"kept, up to {P.HOST_LOG_RING_LINES})")
     p.add_argument("--level", choices=[lv.name.lower() for lv in P.LogLevel], default="debug")
     p.add_argument("--duration", type=float, default=None, help="stop after S seconds (default: Ctrl-C)")
+    p.add_argument("--no-follow", action="store_true", help="stop once the history is shown")
+    p.add_argument("--save", nargs="?", const=cli_record.DEFAULT_OUT, default=None, metavar="DIR",
+                   help=f"also write what is shown to DIR/kilo-<time>.log (default DIR {cli_record.DEFAULT_OUT})")
+    p.add_argument("--previous", nargs="?", type=int, const=0, default=None, metavar="BOOT",
+                   help="an earlier boot's log from the SD card (default: the boot before this one)")
     return p.parse_args(argv)
 
 
+# Commands only a C++ mind serves: without --host they find Kilo by mDNS (kilo.mdns).
+HOST_ONLY = ("walks", "runs", "bench", "metrics", "reboot", "update")
+
+
 def wants_host(args: argparse.Namespace) -> bool:
-    return bool(getattr(args, "host", None)) or (args.cmd == "log" and "--host" in (args.log_argv or []))
+    return (bool(getattr(args, "host", None)) or args.cmd in HOST_ONLY
+            or (args.cmd == "record" and getattr(args, "rec_cmd", None) != "decode")
+            or (args.cmd == "log" and "--host" in (args.log_argv or [])))
 
 
 def run_host(args: argparse.Namespace) -> int:
@@ -526,10 +572,19 @@ def run_host(args: argparse.Namespace) -> int:
         log_args = parse_log_argv(list(args.log_argv or []), getattr(args, "host", None), getattr(args, "key", None))
         args.host, args.lines, args.level, args.duration = (log_args.host, log_args.lines, log_args.level,
                                                             log_args.duration)
+        args.no_follow, args.save, args.previous = log_args.no_follow, log_args.save, log_args.previous
         args.key = log_args.key
     fn = HOST_COMMANDS.get(args.cmd)
     if fn is None:
         return _unavailable(args.cmd)
+    try:  # a .local name, or no --host at all: kilo.local by mDNS (the address found goes to stderr)
+        args.host = mdns.host_address(getattr(args, "host", None))
+    except mdns.MdnsError as e:
+        if getattr(args, "host", None) is None:
+            print(f"kilo {args.cmd}: needs --host IP[:PORT], and finding Kilo by name failed: {e}", file=sys.stderr)
+        else:
+            print(f"kilo {args.cmd}: {e}", file=sys.stderr)
+        return EXIT_ERR
     if args.cmd == "flash":
         err = _prepare_flash(args)
         if err is not None:

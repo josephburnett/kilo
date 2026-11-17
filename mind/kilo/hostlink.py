@@ -17,7 +17,13 @@ in protocol/spec.toml ``[host]`` and ``[[host_messages]]``; the dataclasses
     hl.update(kernel_image, progress=...)       # write a new mind kernel onto its SD card (controller)
     hl.reboot()                                 # restart the mind (controller): OK, then it goes away
     hl.walks()                                  # [P.HostWalkInfo]: the walks the mind recorded (any client)
-    hl.fetch_walk(3, progress=...)              # walk 3's recording, bytes (WALK_FETCH, WALK_DATA)
+    hl.fetch_walk(3, progress=...)              # run 3's flight-recorder blocks, bytes (WALK_FETCH, WALK_DATA)
+    hl.rec_status()                             # P.HostRecStatus: the flight recorder and the card saver
+    hl.rec_fetch(from_ms, to_ms, boot=0)        # the blocks of a time range (REC_FETCH), bytes
+    hl.rec_fetch(0, 0xFFFFFFFF, boot=6, what=P.RecFetchWhat.LOG)   # boot 6's saved log, text bytes
+    hl.metrics()                                # [str]: the session metrics lines (METRICS_REQ)
+    hl.bench(count=32)                          # [P.HostBenchResult]: the SD card's write times (controller)
+    hl.rec_save(1); hl.rec_delete(boot)         # the card saver on; earlier boots' recordings off the card
     hl.close()                                  # the mind latches REST if this was the controller
 
 Every command gets exactly one reply carrying its seq (STATUS for
@@ -60,7 +66,11 @@ REBOOT_CLOSE_WAIT_S = 2.0
 # written to the SD card and read back. A 512 KB kernel takes seconds.
 UPDATE_TIMEOUT_S = 120.0
 # A walk download: no WALK_DATA for this long is a mind that stopped sending.
+# (A fetch from the SD card waits for a moment the body is still: longer.)
 WALK_IDLE_TIMEOUT_S = 5.0
+REC_IDLE_TIMEOUT_S = 30.0
+# The SD card bench: a few hundred writes, a pass each, some slow.
+BENCH_TIMEOUT_S = 120.0
 
 
 def has_kernel_marker(image: bytes) -> bool:
@@ -142,6 +152,7 @@ class HostLink:
         self.walk_store: Any = None  # the last WALK_INFO with found 0: the store's state
         self._flash_last: Any = None
         self._update_last: Any = None
+        self._bench: list[Any] | None = None
         self._flash_cond = threading.Condition()
         self._keepalive: threading.Thread | None = None
         self._reader = threading.Thread(target=self._read_loop, name="kilo-hostlink", daemon=True)
@@ -327,17 +338,96 @@ class HostLink:
 
     def fetch_walk(self, walk_id: int, progress: Callable[[int, int], None] | None = None,
                    idle_timeout: float = WALK_IDLE_TIMEOUT_S) -> bytes:
-        """Walk ``walk_id``'s recording: its records (kilo.logs.walkrec reads
-        them). ``progress(received, total)`` after each chunk. Raises
-        HostRefused (BAD_ARG: no such walk, or still recording), HostError
-        (the mind dropped the walk meanwhile: GONE; a gap; no data for
-        ``idle_timeout`` s; the connection lost)."""
+        """Run ``walk_id``'s recording: the flight-recorder blocks around it
+        (kilo.logs.flight; a mind of host.walk_format 1 sends a walk's records;
+        kilo.logs.walkrec reads both). ``progress(received, total)`` after
+        each chunk (total 0: not known, from the card). Raises HostRefused
+        (BAD_ARG: no such run, or still recording), HostError (the mind
+        dropped it meanwhile: GONE; a gap; no data for ``idle_timeout`` s; the
+        connection lost)."""
+        return self._fetch(P.HostWalkFetch(id=walk_id, offset=0), walk_id, progress, idle_timeout)
+
+    def rec_fetch(self, from_ms: int, to_ms: int = 0xFFFFFFFF, boot: int = 0, what: int = P.RecFetchWhat.BLOCKS,
+                  progress: Callable[[int, int], None] | None = None,
+                  idle_timeout: float = REC_IDLE_TIMEOUT_S) -> bytes:
+        """REC_FETCH: the flight recorder's blocks from from_ms to to_ms (the
+        mind's clock, REC_STATUS.clock_ms; boot 0 = this boot), or (what LOG)
+        an earlier boot's saved log as text. Raises HostRefused (BAD_ARG:
+        nothing there; UNKNOWN_TYPE: an older mind), HostError as fetch_walk."""
+        return self._fetch(P.HostRecFetch(boot=boot, from_ms=max(0, int(from_ms)),
+                                          to_ms=min(0xFFFFFFFF, int(to_ms)), what=int(what)),
+                           0, progress, idle_timeout)
+
+    def rec_status(self) -> Any:
+        """P.HostRecStatus (HostRefused UNKNOWN_TYPE from a mind without a flight recorder)."""
+        r = self.command(P.HostRecStatusReq())
+        if not isinstance(r, P.HostRecStatus):
+            raise HostError(f"REC_STATUS_REQ: unexpected reply {type(r).__name__}")
+        return r
+
+    def metrics(self) -> list[str]:
+        """The session metrics, one ``group: key=value ...`` line each."""
+        out: list[str] = []
+        i = 0
+        while i < 256:
+            r = self.command(P.HostMetricsReq(index=i))
+            if not isinstance(r, P.HostMetrics):
+                raise HostError(f"METRICS_REQ: unexpected reply {type(r).__name__}")
+            if i >= r.count:
+                break
+            out.append(bytes(r.text).decode("ascii", "replace"))
+            i += 1
+        return out
+
+    def bench(self, count: int = 32, timeout: float = BENCH_TIMEOUT_S,
+              on_result: Callable[[Any], None] | None = None) -> list[Any]:
+        """REC_BENCH (controller, the body limp): BENCH_RESULT per write
+        size, the last with write_bytes 0. on_result(each) as they come."""
+        with self._flash_cond:
+            self._bench = []
+        try:
+            self.command(P.HostRecBench(count=max(1, min(256, int(count)))))
+            end = time.monotonic() + timeout
+            seen = 0
+            while True:
+                with self._flash_cond:
+                    got = list(self._bench or [])
+                    if len(got) <= seen and not (got and got[-1].write_bytes == 0):
+                        if self._closed.is_set():
+                            raise HostError(self.error or "connection closed during the bench")
+                        left = end - time.monotonic()
+                        if left <= 0:
+                            raise HostError(f"no end of the bench within {timeout:g} s")
+                        self._flash_cond.wait(min(left, 0.2))
+                        continue
+                for r in got[seen:]:
+                    if on_result is not None:
+                        on_result(r)
+                seen = len(got)
+                if got and got[-1].write_bytes == 0:
+                    return got
+        finally:
+            with self._flash_cond:
+                self._bench = None
+
+    def rec_save(self, mode: int) -> str:
+        """REC_SAVE (controller): 0 off, 1 on (remembered on the card), 2 save now. The RESULT's text."""
+        r = self.command(P.HostRecSave(mode=int(mode)))
+        return r.text.decode("ascii", "replace") if isinstance(r, P.HostResult) else ""
+
+    def rec_delete(self, boot: int) -> str:
+        """REC_DELETE (controller): an earlier boot's recordings off the card (0xFFFFFFFF: all earlier boots')."""
+        r = self.command(P.HostRecDelete(boot=int(boot)))
+        return r.text.decode("ascii", "replace") if isinstance(r, P.HostResult) else ""
+
+    def _fetch(self, msg: Any, walk_id: int, progress: Callable[[int, int], None] | None,
+               idle_timeout: float) -> bytes:
         st: dict[str, Any] = {"id": walk_id, "buf": bytearray(), "total": None, "end": None, "error": None,
                               "progress": progress, "last": time.monotonic()}
         with self._flash_cond:
             self._walk = st
         try:
-            self.command(P.HostWalkFetch(id=walk_id, offset=0))
+            self.command(msg)
             with self._flash_cond:
                 while st["end"] is None:
                     if self._closed.is_set():
@@ -367,7 +457,7 @@ class HostLink:
                 st["error"] = f"walk {m.id}: data at offset {m.offset}, expected {len(st['buf'])}"
                 st["end"] = "gap"
             elif m.status == P.WalkDataStatus.END:
-                if m.total != len(st["buf"]):
+                if m.total and m.total != len(st["buf"]):
                     st["error"] = f"walk {m.id}: END after {len(st['buf'])} of {m.total} bytes"
                 st["end"] = "end"
             else:
@@ -464,6 +554,11 @@ class HostLink:
                 self._flash_cond.notify_all()
         elif isinstance(msg, P.HostWalkData):
             self._on_walk_data(msg)
+        elif isinstance(msg, P.HostBenchResult):
+            with self._flash_cond:
+                if self._bench is not None:
+                    self._bench.append(msg)
+                self._flash_cond.notify_all()
         elif isinstance(msg, P.HostUpdateStatus):
             if self.on_update is not None:
                 self.on_update(msg)

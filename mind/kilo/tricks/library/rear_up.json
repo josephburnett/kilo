@@ -4,7 +4,35 @@
     "kind": "authored",
     "design": "kilo.tricks.rear_up",
     "doc": "docs/rear-up-trick.md",
-    "stage": 1
+    "stage": 1,
+    "keyframes": [
+      "tuck",
+      "sink",
+      "step",
+      "ready",
+      "paws",
+      "up",
+      "down:paws",
+      "down:ready",
+      "down:step",
+      "down:sink",
+      "down:tuck",
+      "sit"
+    ],
+    "predicted_pitch_deg": [
+      8.0,
+      24.0,
+      24.0,
+      24.0,
+      23.7,
+      28.1,
+      23.7,
+      24.0,
+      24.0,
+      24.0,
+      8.0,
+      28.4
+    ]
   },
   "notes": [
     "authored (not a legacy skill): rear_up stage 1 of 3: sit back on the hind feet and the tail tip, front paws up, 28 deg",

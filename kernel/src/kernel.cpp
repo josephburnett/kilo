@@ -6,7 +6,9 @@
 // runner (P3, the runner off unless built with KILO_BEHAVIOUR=1),
 // flashing the body from the laptop or the SD card (P4), writing a new
 // kernel onto the SD card from the laptop (`kilo update --host`), and the
-// walk recorder (every walk tick by tick in RAM, `kilo walks --host`).
+// flight recorder (every link frame, log line, walk and trick in RAM from
+// boot, `kilo runs --host`, `kilo record fetch --host`; saved to the SD card
+// at safe moments when switched on, `kilo record save on --host`).
 //
 // Initialize: the screen (or nothing), interrupts, timer, then the Mind
 // (so every line is in its ring), the body link's Serial, the flasher, the
@@ -70,6 +72,15 @@
 // make -C kernel KILO_REAR_UP=1 (or 2, 3: the stage, how high) turns it on.
 #ifndef KILO_REAR_UP
 #define KILO_REAR_UP 0
+#endif
+
+// The flight recorder's card saver (mind/record/saver.h): off until the
+// owner has run `kilo bench sd --host` and turned it on (`kilo record save
+// on --host`, remembered on the card as kilorec/SAVE_ON); a card write
+// stalls the main loop and this card's write times are not measured yet.
+// make -C kernel KILO_RECORD_SAVE=1 turns it on from the start.
+#ifndef KILO_RECORD_SAVE
+#define KILO_RECORD_SAVE 0
 #endif
 #if KILO_REAR_UP < 0 || KILO_REAR_UP > 3
 #error "KILO_REAR_UP must be 0, 1, 2 or 3"
@@ -219,6 +230,7 @@ boolean CKernel::Initialize (void)
 	// runner logs it as %u) replays the same choices.
 	Config.seed = m_Random.GetNumber ();
 	Config.stats_period_ms = BodyStatsPeriodMs;
+	Config.record_save = KILO_RECORD_SAVE != 0;
 	// Who may talk to it over the network: the laptops' public keys built
 	// in from kernel/keys/authorized_keys (build/gen/authorized_keys.h, the
 	// Makefile's KILO_AUTHORIZED_KEYS), the ephemeral keys from the hardware RNG.
@@ -226,6 +238,7 @@ boolean CKernel::Initialize (void)
 	Config.authorized_key_count = kAuthorizedKeyCount;
 	Config.random = &m_KeyRandom;
 	m_pMind = new Mind (m_Serial, m_Clock, m_KernelLog, m_pListener, Config);
+	m_pMind->attach_log (new LogEntry[LogRing::kLines], LogRing::kLines);	// 4096 lines of history, 700 KB
 	m_pLog = &m_pMind->log ();
 	m_Watch.m_pLog = m_pLog;
 	m_pMind->set_tap (&m_Watch);
@@ -274,11 +287,15 @@ boolean CKernel::Initialize (void)
 	m_pUpdater = new KernelUpdater (new u8[KernelImageMax], KernelImageMax, *m_pBootCard, m_Clock, *m_pLog);
 	m_pMind->host ().attach_updater (*m_pUpdater);
 
-	// The walk recorder (mind/record/recorder.h): every walk tick by tick,
-	// for `kilo walks --host` after the walk. Its store on the heap, once
-	// (record::kStoreBytes, about 20 minutes of walking or more); RAM only,
-	// so a power cut loses it (kernel/README.md "Walk recordings").
+	// The flight recorder (mind/record/recorder.h): from here on every link
+	// frame, log line, walk and trick, in 64 MB of RAM (hours: the oldest
+	// 16 KB blocks go first), for `kilo runs --host` and `kilo record fetch
+	// --host`. Its saver writes it to the card's kilorec/ at safe moments
+	// (no walk or trick, nothing moving; a 4 KB write a pass, each timed),
+	// when saving is on (KILO_RECORD_SAVE, or the card's SAVE_ON).
 	m_pMind->attach_recorder (new u8[record::kStoreBytes], record::kStoreBytes);
+	m_pMind->attach_saver (*new record::Saver (m_Clock, *m_pLog, m_pMind->recorder (), m_pMind->log (),
+						   *new CRecordCard (m_pBootCard), KILO_RECORD_SAVE != 0));
 
 	// The clock reads nearly the same at every boot, so the core's
 	// clock-based seed would repeat (seq, type) pairs inside the body's
@@ -688,6 +705,17 @@ void CKernel::LogStats (void)
 	      m_Period.m_nCount, m_Period.m_nMax, m_Period.Mean (), m_Work.m_nMax, m_Work.Mean (),
 	      m_MindPoll.m_nMax, m_MindPoll.Mean (), m_pBench != 0 ? " (bench)" : "",
 	      U (m_pMind->host ().clients ()));
+
+	// the session metrics (kilo metrics --host): the worst second so far
+	record::Metrics &Metrics = m_pMind->metrics ();
+	if (m_MindPoll.m_nMax > Metrics.loop_max_us)
+	{
+		Metrics.loop_max_us = m_MindPoll.m_nMax;
+	}
+	if (m_Period.m_nMax > Metrics.loop_period_max_us)
+	{
+		Metrics.loop_period_max_us = m_Period.m_nMax;
+	}
 
 	m_Watch.m_nTelemetry = 0;
 	m_Watch.m_nOverruns = 0;

@@ -41,6 +41,9 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
   link_.set_listener(this);
   link_.set_quiet_log(&log_.status());  // a held IR key's repeats: not into the ring unless a laptop reads it
   remote_.set_behaviour(&runner_hook_);
+  remote_.set_trick_notes(this);
+  recorder_.set_metrics(&metrics_);
+  host_.attach_metrics(*this);
   if (cfg.random != nullptr) host_.set_keys(cfg.authorized_keys, cfg.authorized_key_count, *cfg.random);
   runner_.set_clock(seconds, this);
   runner_.set_percept_source(&body_);
@@ -50,14 +53,42 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
 void Mind::attach_recorder(uint8_t* storage, uint32_t bytes) {
   recorder_.attach(storage, bytes, cfg_.mind_build);
   if (!recorder_.attached()) {
-    logf(log_, LogLevel::Warn, "walk recorder: %u bytes is too small: walks are not recorded", (unsigned)bytes);
+    logf(log_, LogLevel::Warn, "flight recorder: %u bytes is too small: nothing is recorded", (unsigned)bytes);
     return;
   }
   link_.set_frame_tap(&recorder_);
   walker_.set_observer(&recorder_);
-  host_.attach_walks(recorder_.store());
-  logf(log_, LogLevel::Info, "walk recorder: %u KB for records, %u walks at most", (unsigned)(recorder_.store().capacity() >> 10),
-       (unsigned)record::WalkStore::kMaxWalks);
+  log_.set_tap(&recorder_);
+  host_.attach_recorder(recorder_);
+  logf(log_, LogLevel::Info, "flight recorder: %u MB of RAM, %u KB blocks; log history %u lines",
+       (unsigned)(recorder_.flight().capacity() >> 20), (unsigned)(record::kBlockBytes >> 10), (unsigned)log_.capacity());
+}
+
+void Mind::attach_saver(record::Saver& saver) {
+  saver_ = &saver;
+  saver.set_metrics(this);
+  host_.attach_saver(saver);
+}
+
+bool Mind::body_limp() const {
+  const BodyState& b = link_.state();
+  if (!b.has_telemetry || !link_.connected()) return true;
+  return b.telemetry.mode == KILO_MODE_LIMP || !(b.telemetry.flags & KILO_TELEMETRY_FLAGS_SERVOS_POWERED);
+}
+
+// The card stalls the loop: only with nothing moving, no run open or in its
+// post-roll, nothing that needs the loop (a flash, an update, the bridge),
+// and so for kCardQuietUs.
+bool Mind::safe_for_card(uint64_t now) {
+  constexpr uint64_t kCardQuietUs = 2000000;
+  const BodyState& b = link_.state();
+  bool moving = b.has_telemetry && (b.telemetry.mode == KILO_MODE_GAIT || b.telemetry.mode == KILO_MODE_TRICK ||
+                                    b.telemetry.mode == KILO_MODE_FALLEN || b.telemetry.mode == KILO_MODE_RECOVERING ||
+                                    b.telemetry.mode == KILO_MODE_CALIB || b.telemetry.mode == KILO_MODE_BOOT);
+  bool busy = moving || walker_.active() || player_.busy() || remote_.busy() || recorder_.recording() ||
+              host_.link_paused() || host_.flashing() || host_.updating() || behaviour_active();
+  if (busy) unsafe_at_us_ = now;
+  return !busy && now - unsafe_at_us_ >= kCardQuietUs;
 }
 
 void Mind::start() {
@@ -74,6 +105,7 @@ void Mind::start() {
     logf(log_, LogLevel::Info, "behaviour runner: seed %u, personality %s", (unsigned)cfg_.seed,
          personality(cfg_).name);
   if (cfg_.remote) logf(log_, LogLevel::Info, "IR remote on");
+  if (saver_ != nullptr && cfg_.record_save) saver_->set_mode(1);
   link_.connect();
 }
 
@@ -95,7 +127,7 @@ void Mind::poll() {
   stamping_ = liveness(now);
   if (stamping_) link_.mark_alive();
   if (listener_ != nullptr) host_.poll();
-  recorder_.poll();  // a walk's post-roll ends, also while the link is paused
+  recorder_.poll(player_);  // runs end their post-rolls, also while the link is paused
   if (host_.link_paused()) {  // the bridge or the flasher has the UART: the link and everything on it pause
     paused_ = true;
     return;
@@ -112,6 +144,9 @@ void Mind::poll() {
   player_.poll();
   if (cfg_.remote) remote_.poll();
   if (behaviour_on_) runner_.poll((double)clock_.now_us() / 1e6);
+  recorder_.poll(player_);
+  card_safe_ = safe_for_card(clock_.now_us());
+  if (saver_ != nullptr) saver_->poll(card_safe_, body_limp());
 }
 
 void Mind::stats(uint64_t now) {
@@ -150,6 +185,10 @@ void Mind::on_hello(const kilo_hello_t& hello, bool solicited) {
 
 void Mind::on_telemetry(const kilo_telemetry_t& t) {
   walker_.on_telemetry(t);
+  if (t.batt_mv != 0 && !(t.flags & KILO_TELEMETRY_FLAGS_NO_BATTERY)) {
+    metrics_.battery_mv = t.batt_mv;
+    if (metrics_.battery_min_mv == 0 || t.batt_mv < metrics_.battery_min_mv) metrics_.battery_min_mv = t.batt_mv;
+  }
   // every TELEMETRY, at its arrival time (the daemon's _feed_percepts)
   const perception::PerceptEvents& ev = percepts_.update(t, (double)link_.state().telemetry_at_us / 1e6);
   for (int i = 0; i < ev.n; i++) {
@@ -170,11 +209,17 @@ void Mind::on_event(const kilo_event_t& e) {
   }
   events_[n_events_++] = {e.code, e.arg, e.tick, e.epoch};
   event_count_++;
+  metrics_.events++;
+  if (e.code == KILO_EVENT_FELL) metrics_.falls++;
+  if (e.code == KILO_EVENT_RECOVERED) metrics_.recovered++;
+  if (e.code == KILO_EVENT_WATCHDOG) metrics_.watchdogs++;
+  if (e.code == KILO_EVENT_LOW_BATTERY) metrics_.low_battery++;
   if (e.code == KILO_EVENT_IR_KEY) ir_key(e);
   if (tap_ != nullptr) tap_->on_event(e);
 }
 
 void Mind::on_reboot(const kilo_hello_t* hello, const char* why) {
+  metrics_.body_reboots++;
   if (tap_ != nullptr) tap_->on_reboot(hello, why);
 }
 
@@ -183,6 +228,9 @@ void Mind::on_goals_cleared(const char* reason, uint32_t count) {
 }
 
 void Mind::on_refused(uint8_t goal_type, uint8_t reason) {
+  char what[40];
+  format(what, sizeof what, "goal %s %s", msg_name(goal_type), ack_status_name(reason));
+  metrics_.refusals.add(what);
   if (tap_ != nullptr) tap_->on_refused(goal_type, reason);
 }
 
@@ -193,19 +241,119 @@ void Mind::ir_key(const kilo_event_t& e) {
   char text[48];
   remote::describe(arg, text, sizeof text);
   const remote::Key* key = remote::action_for(arg);
+  if (remote::key_repeat(arg)) metrics_.key_repeats++;
+  else metrics_.keys++;
   if (key == nullptr) {  // a held-key repeat (status: every ~110 ms while held) or another remote's key
     logf(remote::key_repeat(arg) ? log_.status() : log_, LogLevel::Debug, "remote %s: ignored", text);
+    if (!remote::key_repeat(arg)) metrics_.keys_ignored++;
     return;
   }
+  for (int k = 0; k < remote::kKeys && k < 32; k++)
+    if (&remote::kKeyTable[k] == key) metrics_.key_counts[k]++;
   if (key->kind == remote::Kind::Ignore) {  // rows 1-3
     logf(log_, LogLevel::Info, "remote %s: ignored (no action on this key)", text);
+    metrics_.keys_no_action++;
     return;
   }
   if (host_controls()) {
     logf(log_, LogLevel::Info, "remote %s: ignored (a laptop client holds the body)", text);
+    metrics_.keys_laptop++;
     return;
   }
+  metrics_.keys_acted++;
+  recorder_.key(text);  // into a trick or walk run: which key stopped it
   remote_.perform(*key, arg);
+}
+
+// ---- the session metrics (METRICS, kilo metrics --host; saved with the log) --------------
+
+namespace {
+
+void named(char* out, uint32_t n, size_t* len, const record::NamedCounts& c) {
+  for (uint32_t i = 0; i < c.n(); i++) *len += format(out + *len, n - *len, " %s=%u", c.name(i), (unsigned)c.count(i));
+  if (c.other() != 0) *len += format(out + *len, n - *len, " other=%u", (unsigned)c.other());
+}
+
+}  // namespace
+
+uint32_t Mind::metric_lines() { return 9; }
+
+void Mind::metric_line(uint32_t i, char* out, uint32_t n) {
+  const record::Metrics& m = metrics_;
+  uint64_t now = clock_.now_us();
+  size_t len = 0;
+  out[0] = '\0';
+  switch (i) {
+    case 0:
+      format(out, n, "session: uptime_s=%u mind_build=%08x boot=%u", (unsigned)((now - started_us_) / 1000000u),
+             (unsigned)cfg_.mind_build, saver_ != nullptr ? (unsigned)saver_->boot() : 0u);
+      return;
+    case 1:
+      len = format(out, n, "keys: pressed=%u acted=%u ignored=%u no_action=%u laptop_held=%u repeats=%u failed=%u",
+                   (unsigned)m.keys, (unsigned)m.keys_acted, (unsigned)m.keys_ignored, (unsigned)m.keys_no_action,
+                   (unsigned)m.keys_laptop, (unsigned)m.key_repeats, (unsigned)remote_.failures());
+      for (int k = 0; k < remote::kKeys && k < 32; k++)
+        if (m.key_counts[k] != 0)
+          len += format(out + len, n - len, " %s=%u", remote::kKeyTable[k].grid, (unsigned)m.key_counts[k]);
+      return;
+    case 2:
+      len = format(out, n, "walks: started=%u ok=%u holds=%u catches=%u", (unsigned)m.walks, (unsigned)m.walks_ok,
+                   (unsigned)m.walk_holds, (unsigned)m.walk_catches);
+      named(out, n, &len, m.walk_ends);
+      return;
+    case 3:
+      len = format(out, n, "tricks: started=%u", (unsigned)m.tricks);
+      named(out, n, &len, m.trick_ends);
+      len += format(out + len, n - len, " |");
+      named(out, n, &len, m.trick_names);
+      return;
+    case 4:
+      len = format(out, n, "refusals: total=%u", (unsigned)m.refusals.total());
+      named(out, n, &len, m.refusals);
+      return;
+    case 5:
+      format(out, n, "body: falls=%u recovered=%u watchdog=%u low_battery=%u events=%u reboots=%u battery_mv=%u "
+                     "battery_min_mv=%u",
+             (unsigned)m.falls, (unsigned)m.recovered, (unsigned)m.watchdogs, (unsigned)m.low_battery,
+             (unsigned)m.events, (unsigned)m.body_reboots, (unsigned)m.battery_mv, (unsigned)m.battery_min_mv);
+      return;
+    case 6: {
+      const LinkStats& s = link_.stats();
+      format(out, n, "link: rx=%u tx=%u heartbeats=%u decode_errors=%u crc=%u cobs=%u overflow=%u tx_deferred=%u "
+                     "tx_short=%u",
+             (unsigned)s.frames_rx, (unsigned)s.frames_tx, (unsigned)s.heartbeats, (unsigned)s.decode_error_total(),
+             (unsigned)s.decode_errors[KILO_FRAME_BAD_CRC], (unsigned)s.decode_errors[KILO_FRAME_BAD_COBS],
+             (unsigned)s.decode_errors[KILO_FRAME_OVERFLOW], (unsigned)s.tx_deferred, (unsigned)s.tx_short);
+      return;
+    }
+    case 7: {
+      const record::FlightStore& f = recorder_.flight();
+      format(out, n, "record: ram_used=%u ram_capacity=%u blocks=%u dropped_blocks=%u records=%u heartbeats=%u "
+                     "runs=%u loop_max_us=%u period_max_us=%u",
+             (unsigned)f.used_bytes(), (unsigned)f.capacity(), (unsigned)f.blocks(), (unsigned)f.dropped_blocks(),
+             (unsigned)f.records(), (unsigned)f.skipped(), (unsigned)recorder_.runs_total(), (unsigned)m.loop_max_us,
+             (unsigned)m.loop_period_max_us);
+      return;
+    }
+    case 8: {
+      if (saver_ == nullptr) {
+        format(out, n, "card: none");
+        return;
+      }
+      kilo_host_rec_status_t st;
+      mem_zero(&st, sizeof st);
+      saver_->fill_status(st);
+      static const char* const kState[] = {"none", "off", "idle", "saving", "backoff", "failed"};
+      format(out, n, "card: state=%s save_on=%u boot=%u saved_seq=%u unsaved=%u bytes=%u files=%u writes=%u "
+                     "write_max_us=%u slow=%u errors=%u",
+             st.card_state < 6 ? kState[st.card_state] : "?", (unsigned)st.save_on, (unsigned)saver_->boot(),
+             (unsigned)st.saved_seq, (unsigned)st.unsaved_bytes, (unsigned)st.card_bytes, (unsigned)st.card_files,
+             (unsigned)st.writes, (unsigned)st.write_max_us, (unsigned)st.slow_writes, (unsigned)st.card_errors);
+      return;
+    }
+    default:
+      return;
+  }
 }
 
 // ---- the behaviour runner, as the remote starts and stops it --------------------------------

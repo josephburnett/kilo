@@ -12,15 +12,21 @@
     kilo flash --host IP [--persist] | --sd MOUNT   [--image body.bin [--manifest body.json]]   (a C++ mind, P4)
     kilo reboot --host IP[:PORT]   restart a C++ mind (the Pi: back to its SD card's boot, e.g. the netboot loader)
     kilo update --host IP[:PORT] [--image kernel7.img] [--force] [--wait S]   a new kernel onto the mind's SD card
-    kilo walks --host IP[:PORT] [--fetch [N|all] [--out DIR]]   the walks the mind recorded; download them
+    kilo runs --host IP[:PORT] [--fetch [N|all|last] [--out DIR]] [--delete BOOT|all]   the walks and tricks the
+                                   mind recorded; download them (kilo walks: the same)
+    kilo record status|fetch [--last 10m|--all ...]|save on|off|now --host IP   the flight recorder (kilo.cli_record)
+    kilo record decode FILE [--csv OUT] [--json] [--log] [--plot PNG]   a downloaded recording, readable
+    kilo bench sd --host IP   the SD card's write times;   kilo metrics --host IP   the session's counters
     kilo vbody [--fall-after S] [--no-keys]
     kilo run [--port P] [--socket PATH] [--log] [--kilolog [FILE]] [--behaviour] [--remote] [--balance [KP]]
     kilo daemon [status|stop]
-    kilo log summary|replay|plot|walk FILE ...   (walk: a .kwalk from kilo walks --fetch)
+    kilo log summary|replay|plot|walk|trick|run FILE ...   (walk, trick, run: a .krec from kilo runs --fetch)
     kilo --kilolog [FILE] COMMAND ...    (also: kilo monitor --percepts; kilo.cli_tools)
     kilo --override posture|balance|trick ...   (through a daemon whose behaviour runner is active)
     kilo --host IP[:PORT] status|posture|monitor|flash|reboot|update ...; kilo log --host IP   (a C++ mind: kilo.cli_host)
     kilo key init [--name NAME] | show   this laptop's key for --host (kilo.hostkey); --key PATH / $KILO_HOST_KEY
+    kilo find [--name kilo.local] [--json]   Kilo's address and build, found by name (mDNS; kilo.cli_find)
+    (--host also takes a .local name, --host kilo.local; walks, reboot and update find Kilo without --host)
 
 Every command first tries the daemon socket (``kilo run``, kilo.daemon; path
 from kilo.remote.socket_path()); when no daemon listens, or ``--direct`` is
@@ -85,7 +91,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "/run/kilo/kilo.sock as root, else ~/.kilo/kilo.sock)")
     p.add_argument("--direct", action="store_true", help="never use the daemon: open the port directly")
     p.add_argument("--host", metavar="IP[:PORT]",
-                   help=f"talk to a C++ mind over its host channel (port {P.HOST_PORT}; kilo.cli_host): "
+                   help=f"talk to a C++ mind over its host channel (port {P.HOST_PORT}; kilo.cli_host; a .local "
+                        "name such as kilo.local is found by mDNS): "
                         "status, posture, monitor, log, flash, reboot, update, walks; needs this laptop's key "
                         "(kilo key init)")
     p.add_argument("--key", metavar="PATH", default=None,
@@ -186,22 +193,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="seconds to wait for the mind to come back after its reboot and show its build "
                         "(default 30; 0: do not wait)")
 
-    s = sub.add_parser(
-        "walks", help="the walks a C++ mind recorded, over --host: list them, or download them (--fetch) for "
-                      "kilo log walk",
-        usage="kilo walks --host IP[:PORT] [--json] | --fetch [N|all] [--out DIR] [--quiet]",
-        description="The mind records every walk in RAM (from 2 s before its setup to 2 s after its end): every "
-                    "body link frame both ways, each planned tick, the planner's counters and the walk's "
-                    "parameters. Without --fetch: the list. --fetch downloads one walk (its id) or all, each as "
-                    "DIR/walk-<time>-<id>.kwalk (the raw recording: kilo log walk FILE) and .kilolog (its frames: "
-                    "kilo log summary|plot FILE), and prints its summary. The recordings live in the mind's RAM: "
-                    "switching Kilo off loses them.")
-    s.add_argument("--fetch", nargs="?", const="all", default=None, metavar="N|all",
-                   help="download walk N, or every walk that has ended (the default with no value)")
-    s.add_argument("--out", default="~/kilo-logs/walks", metavar="DIR",
-                   help="where --fetch writes (default ~/kilo-logs/walks)")
-    s.add_argument("--json", action="store_true", help="the list as JSON")
-    s.add_argument("--quiet", "-q", action="store_true", help="--fetch: no summary per walk")
+    __import__("kilo.cli_record").cli_record.add_parsers(sub)  # kilo runs (walks), record, bench, metrics
 
     s = sub.add_parser("eeprom", help="read the body's EEPROM (EEPROM_READ)")
     es = s.add_subparsers(dest="eeprom_cmd", required=True, metavar="ACTION")
@@ -295,8 +287,11 @@ def build_parser() -> argparse.ArgumentParser:
     __import__("kilo.cli_head").cli_head.add_parser(sub, LINK_COMMANDS)  # kilo look (cli_head.py)
     __import__("kilo.cli_walk").cli_walk.add_parser(sub, LINK_COMMANDS)  # kilo walk, kilo pose (cli_walk.py)
     add_log_parser(sub)
+    __import__("kilo.cli_find").cli_find.add_parser(sub)  # kilo find (cli_find.py)
+    seen: set[int] = set()
     for name, sp in sub.choices.items():  # `kilo status --host IP` too (`kilo log --host`: kilo.cli_host)
-        if name != "log":
+        if name not in ("log", "find") and id(sp) not in seen:  # an alias (walks: runs) is the same parser
+            seen.add(id(sp))
             sp.add_argument("--host", default=argparse.SUPPRESS, metavar="IP[:PORT]", help=argparse.SUPPRESS)
             sp.add_argument("--key", default=argparse.SUPPRESS, metavar="PATH", help=argparse.SUPPRESS)
     return p
@@ -818,11 +813,12 @@ def cmd_reboot(args: argparse.Namespace) -> int:
     return EXIT_ERR
 
 
-def cmd_walks(args: argparse.Namespace) -> int:
-    """`kilo walks` without --host: only a C++ mind records walks (kilo.cli_host)."""
-    print("kilo walks: needs --host IP[:PORT] (the walks a C++ mind recorded: the Circle kernel or kilo-mind-host); "
-          "a downloaded walk: kilo log walk FILE.kwalk", file=sys.stderr)
-    return EXIT_ERR
+def cmd_recorder(args: argparse.Namespace) -> int:
+    """`kilo runs|walks|record|bench|metrics` without --host (kilo.cli_record):
+    `record decode FILE` works offline, the others need a C++ mind."""
+    from kilo.cli_record import offline
+
+    return offline(args)
 
 
 def cmd_key(args: argparse.Namespace) -> int:
@@ -1021,8 +1017,9 @@ LINK_COMMANDS = {"status": cmd_status, "monitor": cmd_monitor, "posture": cmd_po
                  "cal": cmd_cal, "param": cmd_param, "pca": cmd_pca, "eeprom": cmd_eeprom}
 # Commands that manage the port (or the daemon) themselves: cmd(args).
 PORT_COMMANDS = {"flash": cmd_flash, "vbody": cmd_vbody, "run": cmd_run, "daemon": cmd_daemon,
-                 "log": cmd_log, "reboot": cmd_reboot, "update": cmd_update, "walks": cmd_walks,
-                 "key": cmd_key}
+                 "log": cmd_log, "reboot": cmd_reboot, "update": cmd_update, "runs": cmd_recorder,
+                 "walks": cmd_recorder, "record": cmd_recorder, "bench": cmd_recorder, "metrics": cmd_recorder,
+                 "key": cmd_key, "find": lambda args: __import__("kilo.cli_find").cli_find.cmd_find(args)}
 # Link-command modes that must send nothing, so they cannot share the daemon's port.
 SILENT_MODES = {"monitor": ("passive", "--passive"), "posture": ("then_watch", "--then-watch"),
                 "trick": ("then_watch", "--then-watch")}

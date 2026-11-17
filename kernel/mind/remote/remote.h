@@ -92,6 +92,16 @@ class BehaviourHook {
   ~BehaviourHook() = default;
 };
 
+// Who hears of a trick the remote refused to start (the flight recorder:
+// a REFUSED trick run). Not pure, as BehaviourHook.
+class TrickNotes {
+ public:
+  virtual void refused(const char* /*trick*/, const char* /*why*/) {}
+
+ protected:
+  ~TrickNotes() = default;
+};
+
 // walker.py stop_timeout(): how long a planned stop may take.
 double stop_timeout_s(double period_ms);
 
@@ -101,6 +111,7 @@ class RemoteControl {
 
   RemoteControl(SerialLink& link, planner::Walker& walker, tricks::TrickPlayer& player, Clock& clock, Log& log);
   void set_behaviour(BehaviourHook* hook) { behaviour_ = hook; }
+  void set_trick_notes(TrickNotes* notes) { notes_ = notes; }
 
   // Carry out a key's action (now, or after the ones queued; C7 at once).
   // False when the queue is full (the key is dropped, and logged).
@@ -117,6 +128,9 @@ class RemoteControl {
   // The last action's outcome ("walk forward (trot) 55.6 mm/s", "posture stand") and whether it failed.
   const char* last() const { return last_; }
   bool last_failed() const { return last_failed_; }
+  // Actions done, and failed or refused, since start (the session metrics).
+  uint32_t actions() const { return actions_; }
+  uint32_t failures() const { return failures_; }
   // The speed asked for: the level's factor of the gait's default speed (a magnitude).
   double speed_mm_s() const;
 
@@ -166,6 +180,8 @@ class RemoteControl {
   char text_[48] = {};
   char last_[112] = {};
   bool last_failed_ = false;
+  uint32_t actions_ = 0, failures_ = 0;
+  TrickNotes* notes_ = nullptr;
 };
 
 }  // namespace remote
