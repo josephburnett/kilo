@@ -31,8 +31,6 @@
 #include <circle/net/in.h>
 #include <circle/net/netconfig.h>
 #include <circle/net/ipaddress.h>
-#include <circle/net/mdnsdaemon.h>
-#include <circle/net/mdnspublisher.h>
 #include <circle/sched/scheduler.h>
 #include <circle/string.h>
 #include <circle/timer.h>
@@ -424,53 +422,101 @@ void CKiloNet::Pump (CircleConn *pConn)
 
 // ---- mDNS -----------------------------------------------------------------------
 
+static const u8 mDNSGroup[4] = {224, 0, 0, 251};
+
 CKiloMdns::CKiloMdns (CNetSubSystem *pNet, kilo::Log *pLog, u32 nBuild)
 :	m_pNet (pNet),
-	m_pLog (pLog)
+	m_pLog (pLog),
+	m_nBuild (nBuild),
+	m_pSocket (0)
 {
-	format (m_Text, sizeof m_Text, "build=%08x", (unsigned) nBuild);
 	SetName ("kilomdns");
+}
+
+void CKiloMdns::Send (const kilo::mdns::Out &rOut)
+{
+	CIPAddress To (rOut.ip);
+	m_pSocket->SendTo (rOut.data, rOut.len, MSG_DONTWAIT, To, rOut.port);	// a lost datagram: asked again
 }
 
 void CKiloMdns::Run (void)
 {
-	// The publisher's constructor starts Circle's responder and sleeps until
-	// it has probed the name (3 queries 250 ms apart): this task waits, the
-	// main loop and the net task run.
-	uint64_t t0 = CTimer::GetClockTicks64 ();
-	CmDNSPublisher *pPublisher = new CmDNSPublisher (m_pNet);
-	CString Hostname (CmDNSDaemon::Get ()->GetHostname ());
-	logf (*m_pLog, LogLevel::Info, "mDNS: %s.local answers with this address (%u ms to claim the name)",
-	      (const char *) Hostname, (unsigned) ((CTimer::GetClockTicks64 () - t0) / 1000));
+	// One socket: bound to 5353, in the group, not connected (a connected
+	// UDP socket hears only its peer's port, so no legacy resolver).
+	m_pSocket = new CSocket (m_pNet, IPPROTO_UDP);
+	CIPAddress Group (mDNSGroup);
+	if (   m_pSocket->Bind (kilo::mdns::kPort) < 0
+	    || m_pSocket->SetOptionAddMembership (Group) < 0)
+	{
+		logf (*m_pLog, LogLevel::Error, "mDNS: cannot listen on UDP port %u: kilo.local will not answer "
+		      "(use the address: kilo status --host IP)", (unsigned) kilo::mdns::kPort);
+		delete m_pSocket;
+		m_pSocket = 0;
+		for (;;)
+		{
+			CScheduler::Get ()->Sleep (10);
+		}
+	}
 
-	static const char ServiceName[] = "kilo";
-	const char *Text[] = {m_Text, nullptr};
-	boolean bPublished = FALSE;
-	u8 Last[4] = {0, 0, 0, 0};
+	m_Responder.begin (m_pNet->GetHostname (), KILO_HOST_PORT, m_nBuild);
+	u8 Announced[4] = {0, 0, 0, 0};
+	boolean bWasClaimed = FALSE;
+	unsigned nConflicts = 0;
+	boolean bFirstAnswer = FALSE;
 	for (;;)
 	{
+		u64 nNow = CTimer::GetClockTicks64 ();
 		u8 IP[4];
 		m_pNet->GetConfig ()->GetIPAddress ()->CopyTo (IP);
-		if (   (IP[0] | IP[1] | IP[2] | IP[3]) != 0
-		    && memcmp (IP, Last, sizeof IP) != 0)
+		m_Responder.set_address (IP, nNow);
+
+		for (unsigned n = 0; n < RecvPerPass; n++)
 		{
-			// A new address: withdraw the service (a goodbye with TTL 0) and
-			// announce it again; the A record carries the address of the moment.
-			if (bPublished)
+			CIPAddress From;
+			u16 nFromPort;
+			int nLen = m_pSocket->ReceiveFrom (m_Buffer, sizeof m_Buffer, MSG_DONTWAIT, &From, &nFromPort);
+			if (nLen <= 0)
 			{
-				pPublisher->UnpublishService (ServiceName);
-				bPublished = FALSE;
+				break;
 			}
-			if (pPublisher->PublishService (ServiceName, "_kilo._tcp", KILO_HOST_PORT, Text))
+			u8 Src[4];
+			From.CopyTo (Src);
+			if (m_Responder.receive (m_Buffer, (u32) nLen, Src, nFromPort, nNow, &m_Out))
 			{
-				bPublished = TRUE;
-				memcpy (Last, IP, sizeof Last);
-				logf (*m_pLog, LogLevel::Info, "mDNS: announced %s._kilo._tcp.local, port %u, at "
-				      "%u.%u.%u.%u: kilo status --host %s.local", ServiceName, (unsigned) KILO_HOST_PORT,
-				      IP[0], IP[1], IP[2], IP[3], (const char *) Hostname);
+				Send (m_Out);
+				if (!bFirstAnswer)
+				{
+					bFirstAnswer = TRUE;
+					logf (*m_pLog, LogLevel::Info, "mDNS: first query answered, from %u.%u.%u.%u port %u (%s)",
+					      Src[0], Src[1], Src[2], Src[3], (unsigned) nFromPort,
+					      nFromPort != kilo::mdns::kPort ? "unicast reply" : "on the group");
+				}
 			}
-			// else the publisher has not started yet: again next pass
 		}
+
+		while (m_Responder.poll (nNow, &m_Out))
+		{
+			Send (m_Out);
+		}
+
+		const kilo::mdns::Stats &s = m_Responder.stats ();
+		if (s.conflicts != nConflicts)
+		{
+			nConflicts = s.conflicts;
+			logf (*m_pLog, LogLevel::Warn, "mDNS: another host answers for that name: trying %s.local",
+			      m_Responder.hostname ());
+		}
+		boolean bClaimed = m_Responder.claimed ();
+		if (   bClaimed && (IP[0] | IP[1] | IP[2] | IP[3]) != 0
+		    && (!bWasClaimed || memcmp (IP, Announced, sizeof IP) != 0))
+		{
+			memcpy (Announced, IP, sizeof Announced);
+			logf (*m_pLog, LogLevel::Info, "mDNS: %s.local and %s._kilo._tcp.local (port %u, build %08x) at "
+			      "%u.%u.%u.%u: kilo find, kilo status --host %s.local", m_Responder.hostname (),
+			      m_Responder.hostname (), (unsigned) KILO_HOST_PORT, (unsigned) m_nBuild,
+			      IP[0], IP[1], IP[2], IP[3], m_Responder.hostname ());
+		}
+		bWasClaimed = bClaimed;
 
 		CScheduler::Get ()->MsSleep (PeriodMs);
 	}

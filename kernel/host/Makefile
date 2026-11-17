@@ -59,6 +59,8 @@ TESTS += test_update
 TESTS += test_tricks test_perception test_behaviour test_remote test_mind
 # The flight recorder (record/): its blocks, the recorder in the Mind, what the RAM log keeps, the card saver.
 TESTS += test_record
+# The mDNS responder (net/mdns.h): what it answers, to whom, its probes and announcements.
+TESTS += test_mdns
 
 .PHONY: all check bench freestanding clean
 all: $(B)/kilo-mind-host $(B)/walk-demo
@@ -187,3 +189,9 @@ ALLOWED += exp log sin cos sincos
 # (their recipes expand these at run time).
 DBL_OBJS := $(filter-out $(B)/san/mind/remote/% $(B)/san/mind/record/% $(B)/san/mind/net/host_% $(B)/san/mind/mind.o,$(DBL_OBJS))
 BENCH_DBL_OBJS := $(filter-out $(B)/obj/mind/remote/% $(B)/obj/mind/record/% $(B)/obj/mind/net/host_% $(B)/obj/mind/mind.o,$(BENCH_DBL_OBJS))
+
+# ---- finding Kilo by name (net/mdns.h) ----------------------------------------------------
+# The responder on a loopback UDP port, for test.sh's `kilo find --ask`.
+all: $(B)/mdns-host
+$(B)/mdns-host: $(B)/obj/mind/net/mdns.o $(B)/obj/mind/util/fmt.o $(B)/obj/host/mdns_host.o
+	$(CXX) $^ -o $@

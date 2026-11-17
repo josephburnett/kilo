@@ -867,5 +867,20 @@ expect "$OUT/flight2_prev.txt" "remote B2 \(0x38, rear up\)" "the previous boot'
 wait_mind "$OUT/host_flight2.log"
 stop_body
 trap - EXIT
+echo "== finding Kilo by name: kilo find --ask against the mind's mDNS responder (build/mdns-host, loopback)"
+MDNS_OUT="$OUT/mdns_host.out"
+"$HERE/build/mdns-host" --name kilo --address 192.168.88.9 --build 2d7789e1 --duration 20 > "$MDNS_OUT" 2> "$OUT/mdns_host.log" &
+MDNS_PID=$!
+for _ in $(seq 1 100); do grep -q "^mdns-host port" "$MDNS_OUT" && break; sleep 0.05; done
+MDNS_PORT="$(awk '/^mdns-host port/ {print $3}' "$MDNS_OUT")"
+[ -n "$MDNS_PORT" ] || { echo "FAILED: mdns-host did not claim its name"; kill "$MDNS_PID"; exit 1; }
+KPY -m kilo.cli find --ask "127.0.0.1:$MDNS_PORT" --json > "$OUT/find.json"
+kill "$MDNS_PID"; wait "$MDNS_PID" 2>/dev/null || true
+"$PYTHON" - "$OUT/find.json" <<'EOF'
+import json, sys
+f = json.load(open(sys.argv[1]))
+assert [(x["name"], x["address"], x["port"], x["build"]) for x in f] == [("kilo.local", "192.168.88.9", 5300, "2d7789e1")], f
+print(f"   kilo find: {f[0]['name']} {f[0]['address']} port {f[0]['port']} build {f[0]['build']} ({f[0]['via']})")
+EOF
 
 echo "== all kernel host tests passed"

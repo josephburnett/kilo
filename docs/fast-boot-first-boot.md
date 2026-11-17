@@ -230,14 +230,15 @@ address as the loader, or another one.
 kilo.local?" and the Pi answers). On the laptop:
 
 ```
-ping -c 3 kilo.local
+kilo find
 ```
 
-If that prints replies, its address (`192.168.88.Y`) is in them, and you can
-also use `kilo.local` instead of the address everywhere below. If it says
-"Name or service not known", the laptop may not ask the network for
-`.local` names (on Debian that needs the package `libnss-mdns`), or the
-Pi's mDNS does not work: note which, and use the router instead.
+It prints a line like `kilo.local  192.168.88.Y  port 5300  build xxxxxxxx`:
+the address is in it, and you can use `--host kilo.local` instead of the
+address everywhere below (the `kilo` command looks the name up itself; the
+laptop needs no avahi). If it says "no answer for kilo.local", the Pi's
+mDNS did not answer (or the laptop is on another network): note that, and
+use the router instead.
 
 Otherwise open the router's list of devices again (step 4) and
 look for **kilo**, or for the same `b8:27:eb` hardware address. Write the

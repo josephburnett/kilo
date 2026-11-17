@@ -25,6 +25,8 @@
     kilo --override posture|balance|trick ...   (through a daemon whose behaviour runner is active)
     kilo --host IP[:PORT] status|posture|monitor|flash|reboot|update ...; kilo log --host IP   (a C++ mind: kilo.cli_host)
     kilo key init [--name NAME] | show   this laptop's key for --host (kilo.hostkey); --key PATH / $KILO_HOST_KEY
+    kilo find [--name kilo.local] [--json]   Kilo's address and build, found by name (mDNS; kilo.cli_find)
+    (--host also takes a .local name, --host kilo.local; walks, reboot and update find Kilo without --host)
 
 Every command first tries the daemon socket (``kilo run``, kilo.daemon; path
 from kilo.remote.socket_path()); when no daemon listens, or ``--direct`` is
@@ -89,7 +91,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "/run/kilo/kilo.sock as root, else ~/.kilo/kilo.sock)")
     p.add_argument("--direct", action="store_true", help="never use the daemon: open the port directly")
     p.add_argument("--host", metavar="IP[:PORT]",
-                   help=f"talk to a C++ mind over its host channel (port {P.HOST_PORT}; kilo.cli_host): "
+                   help=f"talk to a C++ mind over its host channel (port {P.HOST_PORT}; kilo.cli_host; a .local "
+                        "name such as kilo.local is found by mDNS): "
                         "status, posture, monitor, log, flash, reboot, update, walks; needs this laptop's key "
                         "(kilo key init)")
     p.add_argument("--key", metavar="PATH", default=None,
@@ -284,9 +287,10 @@ def build_parser() -> argparse.ArgumentParser:
     __import__("kilo.cli_head").cli_head.add_parser(sub, LINK_COMMANDS)  # kilo look (cli_head.py)
     __import__("kilo.cli_walk").cli_walk.add_parser(sub, LINK_COMMANDS)  # kilo walk, kilo pose (cli_walk.py)
     add_log_parser(sub)
+    __import__("kilo.cli_find").cli_find.add_parser(sub)  # kilo find (cli_find.py)
     seen: set[int] = set()
     for name, sp in sub.choices.items():  # `kilo status --host IP` too (`kilo log --host`: kilo.cli_host)
-        if name != "log" and id(sp) not in seen:  # an alias (walks: runs) is the same parser
+        if name not in ("log", "find") and id(sp) not in seen:  # an alias (walks: runs) is the same parser
             seen.add(id(sp))
             sp.add_argument("--host", default=argparse.SUPPRESS, metavar="IP[:PORT]", help=argparse.SUPPRESS)
             sp.add_argument("--key", default=argparse.SUPPRESS, metavar="PATH", help=argparse.SUPPRESS)
@@ -1015,7 +1019,7 @@ LINK_COMMANDS = {"status": cmd_status, "monitor": cmd_monitor, "posture": cmd_po
 PORT_COMMANDS = {"flash": cmd_flash, "vbody": cmd_vbody, "run": cmd_run, "daemon": cmd_daemon,
                  "log": cmd_log, "reboot": cmd_reboot, "update": cmd_update, "runs": cmd_recorder,
                  "walks": cmd_recorder, "record": cmd_recorder, "bench": cmd_recorder, "metrics": cmd_recorder,
-                 "key": cmd_key}
+                 "key": cmd_key, "find": lambda args: __import__("kilo.cli_find").cli_find.cmd_find(args)}
 # Link-command modes that must send nothing, so they cannot share the daemon's port.
 SILENT_MODES = {"monitor": ("passive", "--passive"), "posture": ("then_watch", "--then-watch"),
                 "trick": ("then_watch", "--then-watch")}

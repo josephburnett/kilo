@@ -176,7 +176,19 @@ every other command says it is not available over --host yet. `posture`
 takes control of the mind (one controller at a time; other clients only
 watch) and gives it back at the end, and the mind then latches REST, as the
 daemon does when a hold ends; it does the same if the client dies (socket
-closed, or no keepalive for 2 s). On a direct cable the Pi is at
+closed, or no keepalive for 2 s).
+
+Kilo's address comes from DHCP and changes, so `--host` also takes a
+`.local` name: `kilo status --host kilo.local`. The CLI looks the name up
+itself by mDNS (`kilo.mdns`: it asks the whole wired network "who is
+kilo.local?" and Kilo answers; no avahi or libnss-mdns needed) and prints
+the address it found on stderr. `kilo walks`, `kilo reboot` and `kilo
+update`, which only a C++ mind serves, look for `kilo.local` when `--host`
+is left out; the other commands keep their serial and daemon paths without
+`--host`. `kilo find [--json]` prints each Kilo that answered: name,
+address, port and build (`kilo find --ask IP` asks one address directly,
+for a network that drops multicast). Finding gives only an address; the
+handshake still checks the keys. On a direct cable the Pi is at
 169.254.75.73 when no DHCP answers: set the laptop's port to link-local
 (NetworkManager "Link-Local Only", or `sudo ip addr add 169.254.1.1/16 dev
 IF`).

@@ -106,7 +106,9 @@ Each phase ends with something that runs on Kilo.
 ### P2. Laptop interface
 
 See §5. Command channel, telemetry, log stream, raw bridge. `kilo --host <ip>`
-on the laptop.
+on the laptop, or `--host kilo.local`: the kernel answers mDNS queries for
+its name and `kilo find` prints its address and build (kernel/README.md
+"mDNS").
 
 Done when: `kilo status --host <ip>` and a live log tail work.
 

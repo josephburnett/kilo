@@ -23,6 +23,7 @@
 #define KILO_SRC_NET_H
 
 #include "platform_net.h"	// the core's network seams (mind/platform_net.h)
+#include "net/mdns.h"
 #include "proto/kilo_protocol.h"
 #include "seams.h"
 #include <circle/net/netsubsystem.h>
@@ -32,7 +33,7 @@
 #include <circle/types.h>
 #include <circle/usb/usbhcidevice.h>
 
-// Announce kilo.local and the laptop service over mDNS (CKiloMdns below).
+// Answer for kilo.local and the laptop service over mDNS (CKiloMdns below).
 // make -C kernel KILO_MDNS=0 leaves it out.
 #ifndef KILO_MDNS
 #define KILO_MDNS 1
@@ -210,15 +211,20 @@ private:
 };
 
 // mDNS (KILO_MDNS=1, the default): kilo.local answers with the kernel's
-// address, and the laptop service is announced as "kilo" of type _kilo._tcp
-// on KILO_HOST_PORT, so the owner needs no lease table. Circle's responder
-// (CmDNSDaemon) answers A queries for the DHCP hostname ("kilo"; "kilo-2"
-// if another host answers for it at start) with the address of the moment;
-// its publisher (CmDNSPublisher) announces the service unsolicited 3 times
-// at start and every 110 s, and does not answer service queries itself.
-// This task starts both once the net task has an address (the responder
-// probes the name from it, about 1 s of sleeping), and announces again when
-// the address changes (the link-local fallback, then a lease).
+// address, and the laptop service "kilo" of type _kilo._tcp on
+// KILO_HOST_PORT (TXT build=...) answers service queries, so the laptop
+// finds Kilo with `kilo find` or `--host kilo.local` and the owner needs no
+// lease table. What is answered, and to whom, is the core's responder
+// (mind/net/mdns.h, tested on the host); this task owns its UDP socket on
+// port 5353 (bound, in the 224.0.0.251 group, not connected: it hears
+// queries from any port and answers legacy resolvers by unicast), feeds it
+// each datagram and the address of the moment, and sends what it returns.
+// Every call is non-blocking (ReceiveFrom MSG_DONTWAIT, a UDP SendTo
+// queues), at most RecvPerPass datagrams a pass, then a PeriodMs sleep: the
+// main loop never waits for it. It starts once the net task has an address.
+// It logs the name it claimed, a conflict, and the first query it answered
+// (one line each: evidence that a laptop's query reached it), never a line
+// per query.
 class CKiloMdns : public CTask
 {
 public:
@@ -226,12 +232,21 @@ public:
 
 	void Run (void) override;
 
-	static const unsigned PeriodMs = 500;	// how often the address is checked
+	static const unsigned PeriodMs = 5;		// the task's pass
+	static const unsigned RecvPerPass = 8;
+
+	const kilo::mdns::Stats &GetStats (void) const	{ return m_Responder.stats (); }
 
 private:
+	void Send (const kilo::mdns::Out &rOut);
+
 	CNetSubSystem *m_pNet;
 	kilo::Log *m_pLog;
-	char m_Text[24];			// TXT "build=xxxxxxxx"
+	u32 m_nBuild;
+	CSocket *m_pSocket;
+	kilo::mdns::Responder m_Responder;
+	kilo::mdns::Out m_Out;
+	u8 m_Buffer[FRAME_BUFFER_SIZE];
 };
 
 #endif

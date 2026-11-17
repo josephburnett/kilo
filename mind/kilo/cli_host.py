@@ -19,7 +19,12 @@ today, and so what works here:
                                                    kilo walks is the same), record, bench sd, metrics
 
 ``--host`` may also follow the command (``kilo status --host IP``). Every
-other command prints that it is not available over --host yet.
+other command prints that it is not available over --host yet. ``--host``
+also takes a ``.local`` name (``--host kilo.local``), found by mDNS
+(kilo.mdns), and walks, reboot and update, which only a C++ mind serves,
+look for kilo.local when --host is left out; the address found is printed
+to stderr. Finding gives only an address: the handshake below still checks
+the key.
 
 Every connection needs this laptop's key (kilo.hostkey: ``kilo key init``
 once, its line in kernel/keys/authorized_keys, the kernel rebuilt and
@@ -43,7 +48,7 @@ import zlib
 from pathlib import Path
 from typing import Any
 
-from kilo import cli_record, hostkey
+from kilo import cli_record, hostkey, mdns
 from kilo.hostlink import REBOOT_CLOSE_WAIT_S, HostError, HostKeyRefused, HostLink, HostRefused, has_kernel_marker
 from kilo.protocol import kilo_protocol as P
 
@@ -551,8 +556,14 @@ def parse_log_argv(argv: list[str], host: str | None, key: str | None = None) ->
     return p.parse_args(argv)
 
 
+# Commands only a C++ mind serves: without --host they find Kilo by mDNS (kilo.mdns).
+HOST_ONLY = ("walks", "runs", "bench", "metrics", "reboot", "update")
+
+
 def wants_host(args: argparse.Namespace) -> bool:
-    return bool(getattr(args, "host", None)) or (args.cmd == "log" and "--host" in (args.log_argv or []))
+    return (bool(getattr(args, "host", None)) or args.cmd in HOST_ONLY
+            or (args.cmd == "record" and getattr(args, "rec_cmd", None) != "decode")
+            or (args.cmd == "log" and "--host" in (args.log_argv or [])))
 
 
 def run_host(args: argparse.Namespace) -> int:
@@ -566,6 +577,14 @@ def run_host(args: argparse.Namespace) -> int:
     fn = HOST_COMMANDS.get(args.cmd)
     if fn is None:
         return _unavailable(args.cmd)
+    try:  # a .local name, or no --host at all: kilo.local by mDNS (the address found goes to stderr)
+        args.host = mdns.host_address(getattr(args, "host", None))
+    except mdns.MdnsError as e:
+        if getattr(args, "host", None) is None:
+            print(f"kilo {args.cmd}: needs --host IP[:PORT], and finding Kilo by name failed: {e}", file=sys.stderr)
+        else:
+            print(f"kilo {args.cmd}: {e}", file=sys.stderr)
+        return EXIT_ERR
     if args.cmd == "flash":
         err = _prepare_flash(args)
         if err is not None:

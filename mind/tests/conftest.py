@@ -242,3 +242,14 @@ def _session_host_key(tmp_path_factory):
 def host_key(_session_host_key, monkeypatch):
     monkeypatch.setenv("KILO_HOST_KEY", str(_session_host_key.path))
     return _session_host_key
+
+
+@pytest.fixture(autouse=True)
+def _no_mdns_on_the_network(monkeypatch):
+    """No test sends mDNS onto the real network (kilo.mdns): a host-only
+    command run without --host must not find, and act on, the real Kilo.
+    Tests of the resolver pass explicit targets (a fake responder on loopback)."""
+    import kilo.mdns
+
+    monkeypatch.setattr(kilo.mdns, "NETWORK_DISABLED", True)
+    monkeypatch.setenv("KILO_MDNS_DISABLE", "1")
