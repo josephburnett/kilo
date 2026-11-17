@@ -3,6 +3,22 @@
 Runs of docs/fast-boot-first-boot.md. Newest first. Copy the block below
 for each run and fill in what you saw; "don't know" is a fine answer.
 
+## 2026-11-16, run 5: the diagonal walk and the faster trot on the floor
+
+Build af5f8920 (rear-up stage 1 on B2) installed with `kilo update --host 192.168.88.8` (back after 10.7 s). The owner ran Kilo by remote with the cable out, then plugged it in with Kilo still on (address now 192.168.88.9); `kilo walks --fetch all` brought eight recordings. Files: `~/kilo-logs/walks/walk-20261116-20*.kwalk` on rtb.
+
+| | Walk 1 (11 s) | Walk 3 (22 s) | Walk 5 (8 s) | Walk 8 (7 s) |
+|---|---|---|---|---|
+| Gaits | trot 144 -> 165.6 -> 180 mm/s | crawl 22.2 -> 25.6, then walk 92 -> 96.8 | trot 144 -> 165.6 -> 180 | walk 80 |
+| End | stopped; 0 holds, 0 catches, 0 waits | stopped; 0 / 0, 47 waits (the crawl) | stopped; 0 / 0 / 0 | stopped; 0 / 0 / 0 |
+| Pitch, measured - predicted | offset +1.83, rms 0.62 less the offset, max +3.75 | offset +1.95, rms 0.43, max +3.31 | offset +1.73, rms 0.61, max +2.75 | offset +1.56, rms 0.49, max +2.81 |
+| Roll, measured - predicted | rms 1.20 less the offset, max +3.75 | rms 1.49, max -4.69 | rms 1.19, max +3.50 | rms 1.39, max +2.75 |
+| Body's correction, largest | pitch -1.56, roll -0.69 | pitch -1.56, roll -2.12 | pitch -1.12, roll -0.31 | pitch -0.56, roll -0.44 |
+
+The change from the crawl to the walk in walk 3 took 9.1 s (asked at 9.12 s, walking at 18.22 s). Servo lag from the crawl's roll: 120 ms (r 0.976), the fitted model's mean. The other four recordings are short turns and a 100.8 mm/s trot, all stopped with 0 holds and 0 catches.
+
+Not known: what the rear-up trick did. Trick runs are not recorded, and the log ring no longer held the session's lines when the cable went in.
+
 ## 2026-11-15, run 4: the recorder and the faster gaits on the floor
 
 Build 457e180f installed with `kilo update --host` (back after 15.2 s). The owner walked Kilo by remote with the cable out, plugged it back in with Kilo still on; `kilo walks --host 192.168.88.28 --fetch all` brought three recordings (0.44 of 7.96 MB used), analysed with `kilo log walk`. Files: `~/kilo-logs/walks/walk-20261115-2135*.kwalk` on rtb.
