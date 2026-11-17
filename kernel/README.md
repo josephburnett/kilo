@@ -65,8 +65,9 @@ sources were in the image before the kernel used them; composing the
 `Mind` changed its size by less than 1 KB. The keys (Monocypher, all of
 it linked: about 55 KB; the Noise layer and the secure host server, about
 13 KB) took the image from 522,532 to 591,140 bytes; each authorized key
-adds 72 bytes. The walk recorder ("Walk recordings") took it from 594,916
-to 607,140 bytes.
+adds 72 bytes. The walk recorder took it from 594,916 to 607,140 bytes;
+the flight recorder, its card saver and the metrics ("The flight
+recorder") to 646,884.
 
 The build needs at least one laptop key in `keys/authorized_keys` ("Who may
 talk to Kilo: keys"), or `KILO_AUTHORIZED_KEYS=FILE`; without one it stops
@@ -271,8 +272,10 @@ reboot                            after a laptop's REBOOT: 200 ms more passes (t
 CScheduler::usSleep(1000)         the net task runs here
 ```
 
-Where the memory is: the walk recorder's store (8 MB, "Walk recordings"),
-the `Mind` (87 KB: the log ring 11 KB, the host
+Where the memory is: the flight recorder's store (64 MB, "The flight
+recorder"), the log's history (4096 lines, 700 KB), the card saver (58 KB),
+the `Mind` (133 KB: its recorder's run index 38 KB, the log's small ring
+and status lines 16 KB, the host
 server's five connections 36 KB (each 4 KB of frames to send, a 1 KB
 record each way and its Noise state), perception's windows 17 KB, the
 behaviour runner 6 KB), the network slots (`CircleListener`, 40 KB of
@@ -296,7 +299,7 @@ implement its seams:
 |---|---|
 | `Serial` | `Pl011Serial` or `UsbSerial` (below) |
 | `Clock` | `CTimer::GetClockTicks64()`: 1 MHz, 64 bits, no wrap |
-| `Log` | every part logs into the `Mind`'s RAM ring (`mind.log()`, a `LogRing` of 64 lines, `kilo log --host`, Debug included), which passes each line to the platform log, `KernelLog`, and that to `CircleLog`: `CLogger::WriteNoAlloc` (no heap), Info and above; Debug -> `LogDebug`, Info -> `LogNotice`, Warn -> `LogWarning`, Error -> `LogError` |
+| `Log` | every part logs into the `Mind`'s RAM ring (`mind.log()`, a `LogRing` of 4096 lines of history, `kilo log --host`, Debug included; "The log"), which passes each line to the platform log, `KernelLog`, and that to `CircleLog`: `CLogger::WriteNoAlloc` (no heap), Info and above; Debug -> `LogDebug`, Info -> `LogNotice`, Warn -> `LogWarning`, Error -> `LogError` |
 | `Gpio` | GPIO4 (header pin 7, the NyBoard's reset line) as an emulated open drain: released = input, no pull; asserted = latch low, then output. Never driven high. Released at boot; only the flasher pulses it. |
 | `Listener`, `Conn` | `CircleListener`, `CircleConn`: four slots of RX and TX rings, served by the net task (below) |
 
@@ -614,8 +617,9 @@ Everything `kilo-mind-host` serves on the laptop, from the same `Mind`:
 `kilo status`, `kilo monitor` (TELEM), `kilo log` (the ring, Circle's lines
 included), `kilo posture NAME [--for S]` (REST when the controller lets go
 or goes silent), `kilo flash --host`, `kilo reboot --host`, `kilo update
---host` ("Updating the kernel over the network"), `kilo walks --host`
-("Walk recordings") and the raw bridge (`kilo.link` over TCP; everything on
+--host` ("Updating the kernel over the network"), `kilo runs --host`,
+`kilo record ... --host`, `kilo metrics --host` and `kilo bench sd --host`
+with `--card DIR` ("The flight recorder") and the raw bridge (`kilo.link` over TCP; everything on
 the link pauses).
 
 `kilo reboot --host IP` takes control and sends `REBOOT`: the mind latches
@@ -904,54 +908,119 @@ POSTURE, PARAM_SET, REBOOT, the bridge and a body flash are refused
 `UPDATING` meanwhile, and an update is refused `FLASHING` while a body
 flash runs or its `--persist` image waits for the card.
 
-### Walk recordings
+### The flight recorder
 
-The mind records every walk in RAM (`mind/record/`, `mind/README.md` "Walk
-recordings"): every body link frame both ways from 2 s before the walk's
-setup to 2 s after its end, each planned tick, the planner's counters and
-the walk's parameters, with the mind's clock in microseconds. `Initialize`
-allocates the store once on Circle's heap (`record::kStoreBytes`, 8 MB);
-at about 92 bytes a walk tick it holds about 30 minutes of walking, the
-oldest walks dropped whole when it is full. The log says `walk recorder:
-8152 KB for records, 128 walks at most` at start. After a walk, with the
-cable in: `kilo walks --host IP` lists the walks, `kilo walks --host IP
---fetch --out DIR` downloads them and `kilo log walk FILE.kwalk` analyses
-one (`docs/fast-boot-first-boot.md` "After a walk").
+Like an aircraft's flight recorder, the mind records everything from the
+moment it starts, whether or not Kilo is walking (`mind/record/`,
+`mind/README.md` "The flight recorder"):
 
-**Nothing survives switching Kilo off.** Writing finished walks to the SD
-card was considered and left out, because it cannot be done safely
-without measurements that only the Pi can make:
+- every body link frame both ways: each TELEMETRY (attitude, mode, flags,
+  battery, distance), EVENT (keys, falls, TRICK_DONE), JOINTS if the body
+  streams them, and every command the mind sends (FEET, postures,
+  TRICK_PLAY, TRICK_STOP); the HEARTBEATs are only counted;
+- every log line, the routine once-a-second ones included;
+- during a walk, each planned tick and the walk's parameters (as before);
+  during a trick, the trick, its keyframes' timing, the moment the body
+  started playing it, the remote keys pressed meanwhile and how it ended.
 
-- The card is written only while the link is paused (`KernelStore`,
-  `platform.h`): Circle's SD driver busy-waits, so each write stalls the
-  main loop. A kernel update accepts that (the body's watchdog stops it,
-  REST after 1.5 s, and the Pi reboots anyway). A walk saved after it ended
-  must not trip the watchdog: every stall must stay well under its 500 ms
-  (the link's heartbeat goes after 100 ms of silence). How long Kilo's card
-  takes for a 16 KB slice, and its worst case (an SD card's own garbage
-  collection can take hundreds of milliseconds on one write), has never
-  been measured ("Not yet tested on hardware": the slices' time).
-- A 20-minute walk is about 5.5 MB: at a few KB a pass that is a thousand
-  or more stalls, during which the owner may switch Kilo off (half a file
-  on the card).
-- `CBootCard` has one `KernelStore` file open at a time, shared with the
-  updater; the seam has no directory listing, so bounding the files kept
-  (count and bytes) needs a fixed set of slot names or a listing call.
+Walks and tricks are *runs*: stretches of that one stream, opened and
+closed by a RUN record and listed by `kilo runs --host IP` (`kilo walks`
+still works). The laptop can fetch a run (`kilo runs --host IP --fetch N`,
+from 2 s before it to 2 s after) or any stretch of time (`kilo record
+fetch --host IP --last 10m`), and the analysis tools read either.
 
-What it would take: (1) measure on the Pi, with the body resting, the time
-of `f_write` for 1, 4 and 16 KB slices on Kilo's card, many times, and the
-worst case; (2) if the worst case stays under about 100 ms, a `WalkSaver`
-in the core that runs only while the walker, the trick player and any
-flash or update are idle, writes one slice per pass (sized from (1)),
-through a second file object in `CBootCard` (or exclusion with the
-updater: `UPDATE_BEGIN` refused while saving), into fixed names
-`walk00.kwk`..`walk15.kwk` (never `kernel7.*`, `config.txt`, the
-firmware's files or `body.*`), the oldest replaced, total bytes bounded,
-a manifest written last so a cut file is never read as whole; (3) at boot,
-after the boot flash check, read them back into the RAM store so `kilo
-walks --host` serves them as today; (4) the ACT LED showing that a save is
-running, so the owner waits before switching off. Until then: plug the
-cable in before switching Kilo off.
+The stream is kept in RAM in 16 KB *blocks*: a block has a header (its
+number, the mind's clock at its start, its length, a CRC-32 checksum of
+its contents) and records, each with its time in microseconds from the
+block's start. When the RAM is full the oldest block goes. `Initialize`
+allocates 64 MB once on Circle's heap (`record::kStoreBytes`): at about
+2 KB/s while Kilo stands and 6 KB/s while it walks, that is between three
+and nine hours. A record costs one copy of at most 255 bytes into RAM and
+the block's running checksum (`make -C kernel/host bench`: about 1 us a
+walk tick on the laptop, so some 10-20 us on the Pi). The log says
+`flight recorder: 64 MB of RAM, 16 KB blocks; log history 4096 lines` at
+start.
+
+#### Saving to the SD card
+
+The saver (`mind/record/saver.h`) writes the recorder to the card's FAT
+partition, in the directory `kilorec/`, so a power-off loses only what was
+not saved yet. The card's write times are the danger: Circle's SD driver
+busy-waits, so every write stops the main loop, and the body's watchdog
+(500 ms without a heartbeat) must never fire because of it. So the saver:
+
+- writes only at a **safe moment**: no walk, trick or run's 2 s post-roll,
+  the body not walking, playing a trick, fallen or recovering, no flash,
+  update or bridge, the behaviour runner not running, and all of that for
+  2 s;
+- makes **one card call a pass**, a write of at most 4 KB, so the
+  heartbeats keep going between them;
+- **times every call** and keeps the slowest (`kilo record status`,
+  `kilo metrics`); a call slower than 100 ms logs a warning and makes it
+  wait 30 s (doubling, up to 10 minutes) before the next; five failures in
+  a row stop it until `kilo record save on`;
+- writes each file under a `.tmp` name and renames it when it is whole, so
+  a power cut in the middle leaves a `.tmp`, which the next boot deletes;
+- keeps at most 64 MB on the card: the oldest files go first.
+
+What a save writes: the blocks sealed since the last save
+(`b00007-s0000123.krc`: boot 7, blocks from 123 on), the boot's run index
+(`b00007.run`) and the new log lines with the session metrics
+(`b00007.log`). It saves after every run (the run's last block is sealed
+for it), and while idle when 8 blocks wait or 5 minutes have passed. Boot
+numbers count up from the highest found on the card at start.
+
+**Saving is off** until the card has been measured: `make -C kernel
+KILO_RECORD_SAVE=1` turns it on from the start; otherwise `kilo record
+save on --host IP` turns it on and remembers that on the card
+(`kilorec/SAVE_ON`), so later boots save too; `kilo record save off`
+undoes it. First measure the card, with Kilo limp (`kilo posture rest`, or
+the servos off): `kilo bench sd --host IP` writes 32 writes each of
+512 B, 4 KB and 16 KB to `kilorec/bench.tmp`, then syncs, closes and
+deletes it, and prints the shortest, mean and longest time of each, and of
+the sync, close and delete. If the longest 4 KB write is well under
+100 ms, saving is safe to turn on.
+
+How much a power-off loses: with saving on, what was recorded since the
+last save: at most the last run if Kilo is switched off within about 2 s
+of it ending (before the safe moment), otherwise the last few minutes of
+standing still (at most 8 blocks, 128 KB). `kilo record status` shows it
+(`unsaved`).
+
+On boot the saver reads `kilorec/` once, at the first safe moment: it
+deletes torn files, takes the next boot number, and loads the earlier
+boots' run indexes, so `kilo runs --host IP` lists their runs next to this
+boot's (an earlier boot's run has the id `boot << 20 | id`) and fetches
+them from the card. `kilo log --host IP --previous` shows an earlier
+boot's saved log; `kilo runs --host IP --delete BOOT` (or `all`) deletes
+an earlier boot's recordings. Reading the card back also waits for safe
+moments, one call a pass.
+
+`CBootCard`'s second object, `CRecordCard`, gives the saver its own FatFs
+file and directory objects, so the kernel updater and the body image calls
+never share a handle with it.
+
+### The log
+
+The mind's log (`mind/util/logring.h`) keeps 4096 lines of history: what
+happened (remote keys, walks, tricks, refusals, warnings, errors, the
+network coming up). The routine lines (the once-a-second `link`, `body`
+and `loop` counters, the body's STATS, percepts, a held key's repeats)
+are never history: a laptop reading the log gets them live, and the
+flight recorder keeps them. `kilo log --host IP` shows the whole history
+first and how many older lines were dropped, then follows; `--save`
+keeps a copy in `~/kilo-logs`.
+
+Why it was lost before: the ring held only the last 64 lines, and
+the status lines went into the same 64 lines whenever a laptop read the
+log (three a second). A 15-minute session with 8 walks makes about 100
+history lines (`kernel/host/tests/test_record.cpp`
+`test_play_session_log`: a walk makes four, a remote key one or two), and
+`kilo log --host` asked for only the last 20 by default. With the cable
+in, the network's lines (Circle's DHCP and Ethernet lines, the address,
+mDNS), each laptop connection's three or four lines and the planner bench's
+lines came on top, and once a client watched the log, 64 lines were
+twenty seconds of counters: the session's keys and walks were gone.
 
 ### mDNS
 
@@ -994,12 +1063,16 @@ toolchain's hard-float `libm` (`thumb/v7ve+simd/hard`) is a wrapper around
 
 ### Not yet tested on hardware
 
-The walk recorder: the 8 MB store on Circle's heap, its cost per pass on
-the Cortex-A7 while walking (the loop line's `mind.poll`), a download over
-the cable during a walk and after it (`kilo walks --host`), and the
-recordings of a real walk (the IMU's real attitude against the plan: the
-virtual body's IMU is scripted, so the lag and the error by phase have
-only been checked on synthetic data, `mind/tests/test_walks.py`).
+The flight recorder: the 64 MB store on Circle's heap, its cost per pass
+on the Cortex-A7 (the loop line's `mind.poll`), a download over the cable
+during a walk and after it (`kilo runs --host`), and the recordings of a
+real walk or trick (the IMU's real attitude against the plan: the virtual
+body's IMU is scripted, so the lag and the error by phase have only been
+checked on synthetic data, `mind/tests/test_walks.py`). The card saver:
+every number about the card (`kilo bench sd` gives them), FatFs's
+`f_mkdir`, `f_opendir`, `f_lseek`, `f_sync` and `FA_OPEN_APPEND` on
+Circle, whether a write's stall shows in the loop line as expected, and a
+real power cut in the middle of a save (the tests cut a fake card).
 
 All of it: nothing here has run on a Pi. In particular: the netboot loader
 on the 2 B; Circle's USB host finding the CH343 behind the LAN9514 hub and
