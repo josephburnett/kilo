@@ -67,7 +67,7 @@ it linked: about 55 KB; the Noise layer and the secure host server, about
 13 KB) took the image from 522,532 to 591,140 bytes; each authorized key
 adds 72 bytes. The walk recorder took it from 594,916 to 607,140 bytes;
 the flight recorder, its card saver and the metrics ("The flight
-recorder") to 646,884.
+recorder") and the mDNS responder to 649,188.
 
 The build needs at least one laptop key in `keys/authorized_keys` ("Who may
 talk to Kilo: keys"), or `KILO_AUTHORIZED_KEYS=FILE`; without one it stops
@@ -1026,7 +1026,7 @@ twenty seconds of counters: the session's keys and walks were gone.
 
 Kilo's address comes from DHCP and changes from day to day, so the laptop
 finds him by name: `kilo find`, or `--host kilo.local` on any `--host`
-command (`kilo walks`, `kilo reboot` and `kilo update` look for
+command (`kilo runs`, `record`, `bench`, `metrics`, `reboot` and `update` look for
 `kilo.local` by themselves when `--host` is left out). That is mDNS
 (multicast DNS): the laptop sends "who is kilo.local?" to everyone on the
 wired network at once (the group address 224.0.0.251, UDP port 5353), and

@@ -142,9 +142,11 @@ kilo daemon [status] | daemon stop   # status: port/link state, holds, behaviour
 kilo log summary|replay|plot FILE ...   # log tools (same as python -m kilo.logs; see Logs)
 kilo --kilolog status        # any command: raw wire frames to ~/kilo-logs/kilo-<time>.kilolog.gz
 kilo --host 169.254.75.73 status   # a C++ mind (the Circle kernel) over Ethernet: see below
-kilo log --host 169.254.75.73      # its RAM log: the last 20 lines, then live (--lines N, --level, --duration)
-kilo walks --host 169.254.75.73    # the walks it recorded; --fetch [N|all] --out DIR downloads them (see Logs)
-kilo log walk FILE.kwalk           # one walk: predicted vs measured, per tick (--csv, --plot) and summed up
+kilo log --host 169.254.75.73      # its log: all the history it keeps, then live (--lines N, --no-follow, --save [DIR], --previous)
+kilo runs --host 169.254.75.73     # the walks and tricks it recorded (kilo walks too); --fetch N|all|last downloads (see Logs)
+kilo log walk|trick FILE.krec      # one run: predicted vs measured, per tick (--csv, --plot) and summed up
+kilo record status|fetch|save|decode ...   # the flight recorder: any time range, the SD card, rows (see Logs)
+kilo metrics --host 169.254.75.73  # the session's counters since boot; kilo bench sd --host: the SD card's write times
 ```
 
 Global options: `--port`, `--baud`, `--log` / `--log-file FILE` (JSON-lines
@@ -182,7 +184,8 @@ Kilo's address comes from DHCP and changes, so `--host` also takes a
 `.local` name: `kilo status --host kilo.local`. The CLI looks the name up
 itself by mDNS (`kilo.mdns`: it asks the whole wired network "who is
 kilo.local?" and Kilo answers; no avahi or libnss-mdns needed) and prints
-the address it found on stderr. `kilo walks`, `kilo reboot` and `kilo
+the address it found on stderr. `kilo runs` (`walks`), `kilo record` (but
+`decode`), `kilo bench`, `kilo metrics`, `kilo reboot` and `kilo
 update`, which only a C++ mind serves, look for `kilo.local` when `--host`
 is left out; the other commands keep their serial and daemon paths without
 `--host`. `kilo find [--json]` prints each Kilo that answered: name,
@@ -1035,29 +1038,64 @@ writer holds its TX lock) never wait for the disk. The default
 file is `~/kilo-logs/kilo-<time>.kilolog.gz` (the daemon: in `--log-dir`).
 Through a daemon, `kilo --kilolog CMD` notes that the daemon does the logging.
 
-### Walk recordings from a C++ mind
+### The flight recorder of a C++ mind
 
-The mind (the Circle kernel, or `kilo-mind-host`) records every walk in RAM
-from 2 s before it starts to 2 s after it ends: every body link frame both
-ways with its own clock in microseconds, each tick the planner planned,
-the planner's counters and the walk's parameters as the planner had them
-(kernel/mind/README.md "Walk recordings"). It keeps about 30 minutes of
-walking, dropping the oldest walks when full, and loses everything when
-Kilo is switched off. The idea is to walk Kilo with the IR remote and the
-cable unplugged, then plug it in and fetch:
+The mind (the Circle kernel, or `kilo-mind-host`) records everything from
+boot in RAM (kernel/mind/README.md "The flight recorder"): every body link
+frame both ways with its own clock in microseconds, every log line, and
+during a walk each tick the planner planned, the planner's counters and
+the walk's parameters as the planner had them; during a trick its
+keyframes' timing, when the body began playing, the keys pressed and how it
+ended. Walks and tricks are *runs* in that stream. It keeps hours (64 MB on
+the Pi, the oldest dropped first) and, with saving on (`kilo record save
+on`, after `kilo bench sd`), writes it to the SD card at safe moments, so
+an earlier boot's runs are listed (`b<boot>:<run>`) and fetched too. The
+idea is to play with Kilo with the IR remote and the cable unplugged, then
+plug it in and fetch:
 
 ```sh
-kilo walks --host 169.254.75.73              # id, start (this laptop's clock), gait, dir, speed, duration, ticks, size, end
-kilo walks --host 169.254.75.73 --fetch      # every walk that has ended -> ~/kilo-logs/walks/ (--out DIR), with a summary each
-kilo walks --host 169.254.75.73 --fetch 3    # just walk 3
-kilo log walk ~/kilo-logs/walks/walk-20261115-203141-1.kwalk [--csv w1.csv] [--plot w1.png] [--json]
-kilo log summary ~/kilo-logs/walks/walk-20261115-203141-1.kilolog   # the usual tools on the same frames
+kilo runs --host kilo.local                  # id, start (this laptop's clock), walk or trick, gait/trick, duration, end
+kilo runs --host kilo.local --fetch all      # every run that has ended -> ~/kilo-logs/ (--out DIR), with a summary each
+kilo runs --host kilo.local --fetch 3        # just run 3 (b6:2: run 2 of boot 6, from the card)
+kilo log walk ~/kilo-logs/run-20261115-203141-walk-1.krec [--csv w1.csv] [--plot w1.png] [--json]
+kilo log trick ~/kilo-logs/run-20261116-101500-trick-2.krec [--csv t2.csv] [--threshold DEG]
+kilo log summary ~/kilo-logs/run-20261115-203141-walk-1.kilolog   # the usual tools on the same frames
+kilo record status --host kilo.local         # RAM used, what a power cut would lose, the card saver
+kilo record fetch --host kilo.local --last 10m   # any range (--since 20m --until 5m, --from S --to S, --all, --boot N)
+kilo record decode FILE --csv rows.csv       # one row per TELEMETRY (the columns below); --json, --log, --plot
+kilo bench sd --host kilo.local              # Kilo limp: the card's write times, before saving is turned on
+kilo record save on|off|now --host kilo.local
+kilo runs --host kilo.local --delete 5|all   # an earlier boot's recordings off the card
+kilo metrics --host kilo.local               # counters since boot: keys, walks, tricks, refusals, falls, link, card
 ```
 
-`--fetch` writes two files per walk: `walk-<time>-<id>.kwalk`, the
-recording exactly as the mind sent it behind a small JSON header (what
-`kilo log walk` reads; `kilo/logs/walkrec.py` has the format), and
-`walk-<time>-<id>.kilolog`, the same frames as a `.kilolog` (ms stamps),
+`kilo record decode --csv` columns (one row per TELEMETRY, 25 a second, 50
+while walking): `t_s` (seconds from the file's first record), `uptime_s`
+(the mind's clock), `mode`, `flags` (by name, `+` between), `pitch_deg`
+(nose down +, as the body reports it), `nose_up_deg` (the same, nose up +,
+the trick designs' convention), `roll_deg`, `rate_pitch_dps`,
+`rate_roll_dps`, `batt_mv`, `dist_mm`, `body_keyframe` (the keyframe the
+body says it plays), `command` (the last command the mind sent: FEET,
+SET_POSTURE, TRICK_PLAY, ...), `run` ("walk 3", "trick 4"), `trick`,
+`keyframe` (where the trick should be by the clock), `pred_nose_up_deg`
+(the design's predicted pitch then), `err_deg` (measured minus predicted),
+`key` (a remote key since the last row and what the remote did with it),
+`event` (a body EVENT since the last row). `--json` has a row per
+TELEMETRY and one per log line, key, event, command, MARK and RUN record.
+`kilo log trick --csv` has `t_s, uptime_s, since_play_s, mode, flags,
+keyframe, keyframe_name, body_keyframe, nose_up_deg, pred_nose_up_deg,
+err_deg, pitch_deg, roll_deg, rate_pitch_dps, rate_roll_dps, batt_mv,
+dist_mm`; its summary gives per keyframe the measured and predicted pitch
+and the mean and largest error, the peak pitch, roll and their rates, the
+tip-over onset (the first moment the error or the roll stayed beyond 8
+degrees for 0.2 s: time, keyframe, direction), falls, the lowest battery,
+the end and which key stopped it (`docs/rear-up-trick.md` section 6).
+
+`--fetch` writes for a run `run-<time>-<kind>-<id>.krec`, the blocks
+exactly as the mind sent them behind a small JSON header
+(`kilo/logs/flight.py` has the format; an older mind's `.kwalk` files
+still read), and for a walk
+`run-<time>-walk-<id>.kilolog`, the same frames as a `.kilolog` (ms stamps),
 which `kilo log summary|replay|plot` read as they read the daemon's.
 A download never disturbs the walk being recorded: the mind sends it only
 as fast as the laptop reads, one small chunk a pass while a walk is on.

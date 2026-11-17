@@ -288,11 +288,12 @@ What matters:
 
 If it cannot connect, see "When it goes wrong" below.
 
-**Read the mind's log**, straight after the status command (it prints the
-last lines, then keeps printing new ones, and stops after 20 s):
+**Read the mind's log** (it prints everything the mind has logged since it
+started, then keeps printing new lines, and stops after 20 s; `--save`
+also keeps a copy in `~/kilo-logs`):
 
 ```
-~/OpenCat/.venv/bin/kilo log --host 192.168.88.Y --lines 64 --duration 20
+~/OpenCat/.venv/bin/kilo log --host 192.168.88.Y --duration 20 --save
 ```
 
 When the laptop first connects, the mind times its walking planner once,
@@ -302,13 +303,11 @@ for about 5 seconds, without moving Kilo. Copy into the results:
   the walking planner takes on this Pi, and the line starting `noise
   bench`: how long the key handshake's three steps take on this Pi;
 - the line starting `noise: client` (one per connection): this laptop's
-  key, and how long its handshake took; The mind keeps only its last 64
-  log lines. The once-a-second counter lines go into them only while a
-  laptop is reading the log, so with no laptop the 64 lines hold what
-  happened (remote keys, walks, warnings). While a laptop reads the log
-  they fill in about 15 seconds, so if these lines are missing, the status
-  command was too long ago: power-cycle the Pi, send the kernel again
-  (step 6) and run this log command first;
+  key, and how long its handshake took. The mind keeps its last 4096 log
+  lines of what happened (remote keys, walks, tricks, warnings); the
+  once-a-second counter lines are shown live but never pushed the others
+  out. If the first line says the mind dropped older lines, it has been up
+  a long time: `kilo record fetch` (step 14) still has them;
 - one line starting `loop`: how regularly the mind's loop runs while the
   network is in use;
 - if you see it, the line `listening on ...`.
@@ -422,10 +421,10 @@ verified: HELLO build 3d441ec0 reset FLASHED
 
 and the light should go back to the even blink.
 
-**Read the log** straight after (the mind keeps only its last 64 lines):
+**Read the log** straight after:
 
 ```
-~/OpenCat/.venv/bin/kilo log --host 192.168.88.Y --lines 64 --duration 5
+~/OpenCat/.venv/bin/kilo log --host 192.168.88.Y --lines 64 --no-follow
 ```
 
 Copy into the results the lines starting with:
@@ -497,7 +496,7 @@ wrong file cannot end up on the card by mistake.
 
 **If it fails**, the laptop's last line says why. In every case but one the
 card still has its old `kernel7.img` and boots as before: note the line and
-the log (`kilo log --host 192.168.88.Y --lines 64 --duration 5`, the lines
+the log (`kilo log --host 192.168.88.Y --lines 64 --no-follow`, the lines
 starting `update:` and `SD:`). The exception is a line with `CARD_BROKEN`,
 or a Pi that does not come back (the light steady for more than 20 s
 after the restart): then put the card in a card reader and copy the files
@@ -506,63 +505,90 @@ of `kernel/build/card/netboot/` (the loader) or `kernel/build/card/kernel/`
 partition, replacing what is there. `kernel7.old`, if the card has one, is
 the kernel from before the update: renaming it to `kernel7.img` also works.
 
-### 14. Optional: after a walk: plug the cable in, fetch, analyse
+### 14. Optional: after a walk or a trick: plug the cable in, fetch, analyse
 
-The mind remembers every walk, tick by tick, while it runs, so you can walk
-Kilo with the remote and no cable, then look at what happened. Words used:
+The mind records everything while it runs (the *flight recorder*), so you
+can play with Kilo with the remote and no cable, then look at what
+happened. Words used:
 
-- **Walk recording**: what the mind wrote down during one walk: every
-  message between the Pi and Kilo's board (each 20 ms tick: where the plan
-  put each foot, the tilt the plan expected, the tilt the board measured,
-  and the correction the board's own balance loop added), plus the walk's
-  settings. Kept in the Pi's memory, about 30 minutes of walking; the
-  oldest walks go first when it is full.
-- **Predicted** tilt: what the plan expected the body's pitch and roll to
-  be at that tick. **Measured**: what Kilo's IMU (the tilt sensor) said.
-  The **error** is measured minus predicted.
+- **Run**: one walk (from a gait key to its stop) or one trick (from B2 to
+  its end), a stretch of the recording. Each has a number.
+- **Recording**: what the mind wrote down from the moment it started:
+  every message between the Pi and Kilo's board (each 20 ms tick: where
+  the plan put each foot, the tilt the plan expected, the tilt the board
+  measured, the correction its own balance loop added, the battery), every
+  remote key and what it did, every log line. Several hours of it in the
+  Pi's memory; the oldest goes first when it is full.
+- **Predicted** tilt: what the plan (or the trick's design) expected the
+  body's pitch and roll to be at that tick. **Measured**: what Kilo's IMU
+  (the tilt sensor) said. The **error** is measured minus predicted.
 
-**Switching Kilo off loses the recordings** (they are in memory only, not on
-the card). So plug the cable in before you switch Kilo off.
+**Switching Kilo off loses what was not saved.** Saving to the SD card is
+off until the card has been measured (point 6 below); until then plug the
+cable in before you switch Kilo off.
 
 1. Kilo on the floor, the cable unplugged. Walk him with the remote as in
-   step 9 (A4 trot, C4 walk or B4 crawl, then B6 to stop). Each walk, from
-   a gait key to its stop, is one recording.
-2. With Kilo still on, plug the network cable in and wait for the Pi's
-   address (step 4; on a direct cable it is `169.254.75.73`).
-3. List the walks:
+   step 9 (A4 trot, C4 walk or B4 crawl, then B6 to stop), or play a trick.
+2. With Kilo still on, plug the network cable in. `kilo find` prints his
+   address (on a direct cable it is `169.254.75.73`); `kilo.local` works in
+   every command below.
+3. List the runs:
 
    ```
-   ~/OpenCat/.venv/bin/kilo walks --host 192.168.88.Y
+   ~/OpenCat/.venv/bin/kilo runs --host kilo.local
    ```
 
-   One line per walk: its number, when it started (the laptop's clock),
-   the gait, direction, speed in mm/s, how long it lasted, how many ticks
-   were sent, its size and how it ended (`stopped` is the normal end).
+   One line per run: its number, when it started (the laptop's clock), a
+   walk's gait, direction and speed or a trick's name and stage, how long
+   it lasted and how it ended (`stopped` is a walk's normal end, `DONE` a
+   trick's). `kilo walks` is the same command.
 4. Download them:
 
    ```
-   ~/OpenCat/.venv/bin/kilo walks --host 192.168.88.Y --fetch --out ~/kilo-logs/walks
+   ~/OpenCat/.venv/bin/kilo runs --host kilo.local --fetch all
    ```
 
-   For each walk it writes `walk-<date>-<time>-<number>.kwalk` (the
-   recording) and a `.kilolog` beside it, and prints a summary. A walk
-   that is still running is skipped: fetch it again after it ends.
-5. Look at one walk again later, and save its tick-by-tick table:
+   For each run it writes `~/kilo-logs/run-<date>-<time>-<kind>-<number>.krec`
+   (the recording from 2 s before to 2 s after; a walk also gets a
+   `.kilolog` beside it) and prints its summary. A run still going is
+   skipped: fetch it again after it ends. `--fetch last` takes the newest.
+5. Look at one again later, and save its tick-by-tick table:
 
    ```
-   ~/OpenCat/.venv/bin/kilo log walk ~/kilo-logs/walks/walk-....kwalk --csv walk.csv --plot walk.png
+   ~/OpenCat/.venv/bin/kilo log walk ~/kilo-logs/run-....krec --csv walk.csv --plot walk.png
+   ~/OpenCat/.venv/bin/kilo log trick ~/kilo-logs/run-....krec --csv trick.csv
    ```
 
-   What the summary says: the **error** per axis (`rms`: the typical size;
-   `max`: the worst tick; `offset`: the average, a constant tilt such as a
-   sensor that is not mounted level), the **lag** (how much later than the
-   plan the body tilts), the error **by phase** (which legs were in the
-   air), how long the board **held** its corrections, and the smallest
-   **margin** (how far inside its feet the body's weight stayed, in mm).
+   What a walk's summary says: the **error** per axis (`rms`: the typical
+   size; `max`: the worst tick; `offset`: the average, a constant tilt
+   such as a sensor that is not mounted level), the **lag** (how much later
+   than the plan the body tilts), the error **by phase** (which legs were
+   in the air), how long the board **held** its corrections, and the
+   smallest **margin** (how far inside its feet the body's weight stayed,
+   in mm). A trick's: see `docs/rear-up-trick.md` section 6.
+6. Optional, once: measure the SD card and turn saving on. Kilo limp
+   (`kilo posture rest --host kilo.local`, or the servos off), then:
 
-Copy the `kilo walks` list and each walk's summary into the results, and
-keep the `.kwalk` files. If `kilo walks` says the mind does not record
-walks, the Pi runs an older kernel: update it (step 13).
+   ```
+   ~/OpenCat/.venv/bin/kilo bench sd --host kilo.local
+   ```
+
+   It prints, for writes of 512 B, 4 KB and 16 KB, the shortest, mean and
+   longest time, and the time of the sync, close and delete. Copy the table
+   into the results. If the longest 4 KB write is well under 100 ms:
+
+   ```
+   ~/OpenCat/.venv/bin/kilo record save on --host kilo.local
+   ```
+
+   From then on (it is remembered on the card) the mind writes the
+   recording to the card after each run, while Kilo stands still, and a
+   later boot lists the earlier boots' runs as `b<boot>:<run>`. `kilo record
+   status --host kilo.local` says what a power cut would lose now.
+
+Copy the `kilo runs` list and each run's summary into the results, and keep
+the `.krec` files. If `kilo runs` says the mind does not record, the Pi runs
+an older kernel: update it (step 13).
 
 ### 15. Finish
 

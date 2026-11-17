@@ -450,6 +450,8 @@ wobble, any slipping, a sideways lean, servo noise or heat afterwards
 (touch the hind shoulder servos: warm is fine, too hot to hold is not).
 Stop if: the top pitch reads more nose up than -36, Kilo wobbles
 backwards, or a hind servo buzzes and gives way.
+After every play, whatever happened: `kilo runs --host kilo.local --fetch
+last` (section 6) keeps the whole trial and prints where it left the plan.
 
 **Step 5: the toggle.** Start it, and at the top press B2 again: Kilo
 should come down to sitting over 1.5 s. Then the same with B6 (it sits,
@@ -507,18 +509,79 @@ toward the fall detector's 75), any wobble, a knee giving.
 
 **Step 11: hands further away.** Only if step 10 went well three times.
 
-## 6. Recording
+## 6. Recording: fetch a trial and read it
 
-The mind records walks only (`kilo walks --host ... --fetch`). A trick is
-not recorded. For now, `kilo --host 192.168.88.28 monitor` during a trial
-shows the pitch the body measures, and the log line
-`remote B2 (0x38, rear up ...): trick rear_up... started` marks the start in
-`kilo log --host`. What a trick recording would take, if the trials need
-it: the recorder already keeps every link frame of a walk; starting a
-recording at TRICK_PLAY and ending it after TRICK_DONE (with the trick's
-name, frame times and the model's predicted pitch per keyframe in its
-header) would let `kilo log` plot measured against predicted pitch, as it
-does for walks. About a day's work; not built.
+The mind records everything from the moment it starts (the *flight
+recorder*, `kernel/README.md`): every message Kilo's board sends (each
+TELEMETRY, 25-50 a second, with the measured pitch and roll, the mode, the
+battery) and every command the mind sends, every remote key and what the
+remote did with it, every log line. Each trick played is a *run* in it:
+which trick and stage, the keyframes' durations, the moment the board
+started playing, the keys pressed during it, and how it ended. A trick the
+remote refuses (low battery) is a run too, so a press that did nothing
+still shows why. Nothing has to be switched on before a trial.
+
+The recording is in the Pi's memory (several hours of it). It survives
+switching Kilo off only once saving to the SD card is on (step 3 below).
+
+After a trial, with Kilo still on and the network cable in (`kilo.local`
+finds him; an IP address works too):
+
+1. List the runs:
+
+   ```
+   kilo runs --host kilo.local
+   ```
+
+   One line per walk or trick: its number, when it started, the trick and
+   stage, how long it lasted, how it ended (`DONE`, `STOPPED`, `FELL`,
+   `REFUSED`, ...).
+2. Download the last one (or `--fetch 3` for run 3, `--fetch all`) and
+   read its analysis:
+
+   ```
+   kilo runs --host kilo.local --fetch last
+   ```
+
+   It writes `~/kilo-logs/run-<date>-<time>-trick-<number>.krec` and
+   prints the analysis. Read it again later, with a tick-by-tick table and
+   a plot:
+
+   ```
+   kilo log trick ~/kilo-logs/run-....krec --csv trial.csv --plot trial.png
+   ```
+
+3. Once `kilo bench sd --host kilo.local` has shown the card is fast enough
+   (`kernel/README.md` "Saving to the SD card"), `kilo record save on
+   --host kilo.local` keeps the recordings across a power-off; the next
+   boot lists them as `b<boot>:<run>` and fetches them the same way.
+
+What the analysis says (pitch is given **nose up positive**, the design's
+convention; TELEMETRY's own pitch has the opposite sign):
+
+- **keyframes**: each keyframe's name (tuck, sink, step, ready, paws, up,
+  ...; the way down as `down:...`), when it started after the play began,
+  the pitch the design predicts at its end and the pitch measured, and the
+  mean and largest difference (*error* = measured minus predicted) over it;
+- the error over the whole trick (mean, rms, largest);
+- the highest nose-up pitch and the largest roll, and the fastest pitch and
+  roll rates, with their times;
+- the **tip-over onset**: the first moment the error (or the roll) stayed
+  beyond 8 degrees for 0.2 s, with the keyframe and the direction (back,
+  forward, left, right): where Kilo left the plan;
+- falls the board reported, the lowest battery voltage, how it ended and
+  why, and which key stopped it.
+
+The prediction for each keyframe comes from the design's model
+(`python -m kilo.tricks.rear_up` writes it into the library's JSON as
+`predicted_pitch_deg`), and between keyframes it follows the same cosine
+easing the board plays. The CSV's columns are `t_s, uptime_s,
+since_play_s, mode, flags, keyframe, keyframe_name, body_keyframe,
+nose_up_deg, pred_nose_up_deg, err_deg, pitch_deg, roll_deg,
+rate_pitch_dps, rate_roll_dps, batt_mv, dist_mm` (`mind/README.md` "The
+flight recorder" explains each). For a stretch of time instead of a run
+(say Kilo did something odd while standing): `kilo record fetch --host
+kilo.local --last 10m`, then `kilo record decode FILE --csv out.csv`.
 
 ## 7. The mechanics (reference)
 
@@ -684,7 +747,8 @@ a test in the real body core. Not built: the trials come first.
   forward than the model. Note it; the fix is the hind feet further forward
   or the hold lower.
 - **Kilo tips forward onto its paws at stage 2 or 3**: the same, higher up.
-  Note at which keyframe and the pitch `monitor` showed just before; stay at
+  Fetch the run (section 6): its "tip-over onset" line says at which
+  keyframe and time Kilo left the plan, and which way; stay at
   the stage below until I have looked.
 - **The tail tip sticks and jumps during the rise**: more paper, or a
   smoother surface under the tail tip only.

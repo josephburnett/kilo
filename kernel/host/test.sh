@@ -861,7 +861,8 @@ sleep 2
 KPY -m kilo.cli --host "$F" runs | tee "$OUT/flight2_runs.txt"
 expect "$OUT/flight2_runs.txt" "1 from earlier boots" "the next boot lists the first boot's run"
 expect "$OUT/flight2_runs.txt" "^b1:1 .*trick +rear_up stage 1 .*card +DONE" "the first boot's trick, on the card"
-KPY -m kilo.cli log --host "$F" --previous | tee "$OUT/flight2_prev.txt" | head -3
+KPY -m kilo.cli log --host "$F" --previous > "$OUT/flight2_prev.txt"
+head -3 "$OUT/flight2_prev.txt"
 expect "$OUT/flight2_prev.txt" "boot 1's log as saved on the SD card" "kilo log --previous"
 expect "$OUT/flight2_prev.txt" "remote B2 \(0x38, rear up\)" "the previous boot's log: the key"
 wait_mind "$OUT/host_flight2.log"
