@@ -1758,7 +1758,7 @@ name = "REC_FETCH"
 id = 0x53
 dir = "client_to_mind"
 kind = "command"
-doc = "Send the flight recorder's blocks from from_ms to to_ms (mind uptime of that boot; to_ms 0xFFFFFFFF: up to now) as WALK_DATA id 0, or (what LOG) an earlier boot's saved log. RESULT OK (text: what is sent), the data, one WALK_DATA END (or GONE). BAD_ARG: nothing in the range. A new WALK_FETCH or REC_FETCH replaces the one running; WALK_FETCH id 0 stops it. Card reads wait for a safe moment (no walk or trick). Any client."
+doc = "Send the flight recorder's blocks from from_ms to to_ms (that boot's mind clock, REC_STATUS.clock_ms; to_ms 0xFFFFFFFF: up to now) as WALK_DATA id 0, or (what LOG) an earlier boot's saved log. RESULT OK (text: what is sent), the data, one WALK_DATA END (or GONE). BAD_ARG: nothing in the range. A new WALK_FETCH or REC_FETCH replaces the one running; WALK_FETCH id 0 stops it. Card reads wait for a safe moment (no walk or trick). Any client."
 fields = [
   { name = "boot", type = "u32", note = "0: this boot; else an earlier boot's number (its blocks and log on the card)" },
   { name = "from_ms", type = "u32", unit = "ms" },
@@ -1931,7 +1931,7 @@ kind = "event"
 reply_to = "REC_STATUS_REQ"
 doc = "The flight recorder (RAM) and the card saver."
 fields = [
-  { name = "uptime_ms", type = "u32", unit = "ms" },
+  { name = "clock_ms", type = "u32", unit = "ms", note = "the mind's clock now, the one the blocks' t0 and REC_FETCH's from_ms/to_ms use (on the Pi: since power-on)" },
   { name = "boot", type = "u32", note = "this boot's number on the card, 0 = not known" },
   { name = "capacity", type = "u32", unit = "B", note = "the RAM ring" },
   { name = "used", type = "u32", unit = "B" },
@@ -1939,7 +1939,7 @@ fields = [
   { name = "blocks", type = "u32", note = "blocks in RAM now" },
   { name = "first_seq", type = "u32", note = "the oldest block in RAM" },
   { name = "next_seq", type = "u32", note = "the block being written" },
-  { name = "oldest_ms", type = "u32", unit = "ms", note = "mind uptime at the oldest block's start" },
+  { name = "oldest_ms", type = "u32", unit = "ms", note = "the mind's clock at the oldest block's start" },
   { name = "dropped_blocks", type = "u32", note = "blocks the ring overwrote" },
   { name = "records", type = "u32", note = "records written since boot" },
   { name = "skipped", type = "u32", note = "HEARTBEAT frames counted, not stored" },

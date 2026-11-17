@@ -1683,7 +1683,7 @@ KILO_STATIC_ASSERT(offsetof(kilo_host_walk_fetch_t, offset) == 4, kilo_sa_host_w
 /* host 0x52 REC_STATUS_REQ: command. Answered by REC_STATUS: the flight recorder and the card saver. Any client. */
 #define KILO_HOST_REC_STATUS_REQ_LEN 0u
 
-/* host 0x53 REC_FETCH: command. Send the flight recorder's blocks from from_ms to to_ms (mind uptime of that boot; to_ms 0xFFFFFFFF: up to now) as WALK_DATA id 0, or (what LOG) an earlier boot's saved log. RESULT OK (text: what is sent), the data, one WALK_DATA END (or GONE). BAD_ARG: nothing in the range. A new WALK_FETCH or REC_FETCH replaces the one running; WALK_FETCH id 0 stops it. Card reads wait for a safe moment (no walk or trick). Any client. */
+/* host 0x53 REC_FETCH: command. Send the flight recorder's blocks from from_ms to to_ms (that boot's mind clock, REC_STATUS.clock_ms; to_ms 0xFFFFFFFF: up to now) as WALK_DATA id 0, or (what LOG) an earlier boot's saved log. RESULT OK (text: what is sent), the data, one WALK_DATA END (or GONE). BAD_ARG: nothing in the range. A new WALK_FETCH or REC_FETCH replaces the one running; WALK_FETCH id 0 stops it. Card reads wait for a safe moment (no walk or trick). Any client. */
 #define KILO_HOST_REC_FETCH_LEN 13u
 typedef struct KILO_PACKED kilo_host_rec_fetch_s {
     uint32_t boot; /* 0: this boot; else an earlier boot's number (its blocks and log on the card) */
@@ -1881,7 +1881,7 @@ KILO_STATIC_ASSERT(offsetof(kilo_host_walk_data_t, data) == 13, kilo_sa_host_wal
 /* host 0x87 REC_STATUS: event, reply to REC_STATUS_REQ. The flight recorder (RAM) and the card saver. */
 #define KILO_HOST_REC_STATUS_LEN 86u
 typedef struct KILO_PACKED kilo_host_rec_status_s {
-    uint32_t uptime_ms; /* ms */
+    uint32_t clock_ms; /* ms; the mind's clock now, the one the blocks' t0 and REC_FETCH's from_ms/to_ms use (on the Pi: since power-on) */
     uint32_t boot; /* this boot's number on the card, 0 = not known */
     uint32_t capacity; /* B; the RAM ring */
     uint32_t used; /* B */
@@ -1889,7 +1889,7 @@ typedef struct KILO_PACKED kilo_host_rec_status_s {
     uint32_t blocks; /* blocks in RAM now */
     uint32_t first_seq; /* the oldest block in RAM */
     uint32_t next_seq; /* the block being written */
-    uint32_t oldest_ms; /* ms; mind uptime at the oldest block's start */
+    uint32_t oldest_ms; /* ms; the mind's clock at the oldest block's start */
     uint32_t dropped_blocks; /* blocks the ring overwrote */
     uint32_t records; /* records written since boot */
     uint32_t skipped; /* HEARTBEAT frames counted, not stored */
@@ -1907,7 +1907,7 @@ typedef struct KILO_PACKED kilo_host_rec_status_s {
     uint32_t card_errors;
 } kilo_host_rec_status_t;
 KILO_STATIC_ASSERT(sizeof(kilo_host_rec_status_t) == 86, kilo_sa_host_rec_status_size);
-KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, uptime_ms) == 0, kilo_sa_host_rec_status_uptime_ms);
+KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, clock_ms) == 0, kilo_sa_host_rec_status_clock_ms);
 KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, boot) == 4, kilo_sa_host_rec_status_boot);
 KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, capacity) == 8, kilo_sa_host_rec_status_capacity);
 KILO_STATIC_ASSERT(offsetof(kilo_host_rec_status_t, used) == 12, kilo_sa_host_rec_status_used);

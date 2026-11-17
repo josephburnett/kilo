@@ -837,7 +837,7 @@
    "kind": "event",
    "seq": 21,
    "fields": {
-    "uptime_ms": 900000,
+    "clock_ms": 900000,
     "boot": 7,
     "capacity": 67108864,
     "used": 3276800,

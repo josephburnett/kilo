@@ -4040,7 +4040,7 @@ class HostRecStatusReq:
 
 @dataclass
 class HostRecFetch:
-    """host 0x53 REC_FETCH (command). Send the flight recorder's blocks from from_ms to to_ms (mind uptime of that boot; to_ms 0xFFFFFFFF: up to now) as WALK_DATA id 0, or (what LOG) an earlier boot's saved log. RESULT OK (text: what is sent), the data, one WALK_DATA END (or GONE). BAD_ARG: nothing in the range. A new WALK_FETCH or REC_FETCH replaces the one running; WALK_FETCH id 0 stops it. Card reads wait for a safe moment (no walk or trick). Any client."""
+    """host 0x53 REC_FETCH (command). Send the flight recorder's blocks from from_ms to to_ms (that boot's mind clock, REC_STATUS.clock_ms; to_ms 0xFFFFFFFF: up to now) as WALK_DATA id 0, or (what LOG) an earlier boot's saved log. RESULT OK (text: what is sent), the data, one WALK_DATA END (or GONE). BAD_ARG: nothing in the range. A new WALK_FETCH or REC_FETCH replaces the one running; WALK_FETCH id 0 stops it. Card reads wait for a safe moment (no walk or trick). Any client."""
     ID: ClassVar[int] = 0x53
     NAME: ClassVar[str] = 'REC_FETCH'
     KIND: ClassVar[Kind] = Kind.COMMAND
@@ -4676,7 +4676,7 @@ class HostRecStatus:
     MIN_LEN: ClassVar[int] = 86
     MAX_LEN: ClassVar[int] = 86
     _FMT: ClassVar[struct.Struct] = struct.Struct('<IIIIIIIIIIIIIBBIIIHHIIII')
-    uptime_ms: int = 0  # ms
+    clock_ms: int = 0  # ms; the mind's clock now, the one the blocks' t0 and REC_FETCH's from_ms/to_ms use (on the Pi: since power-on)
     boot: int = 0  # this boot's number on the card, 0 = not known
     capacity: int = 0  # B; the RAM ring
     used: int = 0  # B
@@ -4684,7 +4684,7 @@ class HostRecStatus:
     blocks: int = 0  # blocks in RAM now
     first_seq: int = 0  # the oldest block in RAM
     next_seq: int = 0  # the block being written
-    oldest_ms: int = 0  # ms; mind uptime at the oldest block's start
+    oldest_ms: int = 0  # ms; the mind's clock at the oldest block's start
     dropped_blocks: int = 0  # blocks the ring overwrote
     records: int = 0  # records written since boot
     skipped: int = 0  # HEARTBEAT frames counted, not stored
@@ -4703,7 +4703,7 @@ class HostRecStatus:
 
     def _fixed_values(self) -> list:
         v: list = []
-        v.append(self.uptime_ms)
+        v.append(self.clock_ms)
         v.append(self.boot)
         v.append(self.capacity)
         v.append(self.used)
@@ -4732,7 +4732,7 @@ class HostRecStatus:
     @classmethod
     def _from_fixed(cls, v: tuple, **extra):
         kw: dict = {}
-        kw['uptime_ms'] = v[0]
+        kw['clock_ms'] = v[0]
         kw['boot'] = v[1]
         kw['capacity'] = v[2]
         kw['used'] = v[3]

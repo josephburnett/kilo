@@ -365,7 +365,7 @@ def host_frame_cases():
          "the end"),
         ("rec_status_req", "REC_STATUS_REQ", 21, {}, "the flight recorder's state"),
         ("rec_status", "REC_STATUS", 21,
-         {"uptime_ms": 900000, "boot": 7, "capacity": 67108864, "used": 3276800, "block_bytes": 16384, "blocks": 200,
+         {"clock_ms": 900000, "boot": 7, "capacity": 67108864, "used": 3276800, "block_bytes": 16384, "blocks": 200,
           "first_seq": 0, "next_seq": 199, "oldest_ms": 0, "dropped_blocks": 0, "records": 81000, "skipped": 9000,
           "runs": 9, "card_state": 2, "save_on": 1, "saved_seq": 190, "unsaved_bytes": 150000,
           "card_bytes": 3100000, "card_files": 12, "card_boots": 3, "writes": 760, "write_max_us": 41000,
