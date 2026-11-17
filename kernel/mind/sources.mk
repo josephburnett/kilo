@@ -67,3 +67,8 @@ MIND_SRCS += \
 MIND_SRCS += \
 	mind/record/store.cpp \
 	mind/record/recorder.cpp
+
+# Finding Kilo by name (net/mdns.h): the mDNS responder's datagrams; the
+# Circle kernel's CKiloMdns task (src/net.cpp) owns its socket.
+MIND_SRCS += \
+	mind/net/mdns.cpp

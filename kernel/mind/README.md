@@ -31,6 +31,7 @@ record/store      the walk recordings in RAM: a byte ring of whole walks and the
 record/recorder   every walk tick by tick into the store: link frames both ways, planned ticks, parameters, the end
 net/host_frame    the laptop channel's framing: len u16 | type | seq | payload | crc16
 net/host_server   the laptop interface (P2): commands, telemetry and log streams, the raw bridge
+net/mdns          the mDNS responder: kilo.local and the _kilo._tcp service, so `kilo find` finds Kilo (kernel/README.md "mDNS")
 link/serial_link  the link state machine: a port of mind/kilo/link/serial_link.py
 link/body_state   what the link knows of the body (kilo/body/state.py's link part)
 link/goals        latched goals, one per type

@@ -52,7 +52,7 @@ OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/
 #                           Kilo's USB adapter cable (USB is scanned before the link)
 #   KILO_BOOT_PROBE=1|0     GPIO21 (header pin 40) marks the boot for a scope (default 1)
 #   KILO_PLANNER_BENCH=1|0  time the walking planner once at boot, no body involved (default 1)
-#   KILO_MDNS=1|0           answer for kilo.local and announce _kilo._tcp (default 1)
+#   KILO_MDNS=1|0           answer mDNS queries for kilo.local and the _kilo._tcp service (default 1)
 #   KILO_BEHAVIOUR=0|1      run the behaviour runner, as kilo run --behaviour (default 0)
 #   KILO_REAR_UP=0|1|2|3    the remote's B2 starts the rear_up trick at that stage: 1 rear_up (28 deg),
 #                           2 rear_up_2 (40 deg), 3 rear_up_3 (54 deg) (default 0: B2 does nothing

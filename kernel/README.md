@@ -955,25 +955,58 @@ cable in before switching Kilo off.
 
 ### mDNS
 
-With an address (DHCP or the link-local fallback), the net task starts a
-small task, `kilomdns`, which starts Circle's mDNS responder
-(`CmDNSDaemon`) and publisher (`CmDNSPublisher`):
+Kilo's address comes from DHCP and changes from day to day, so the laptop
+finds him by name: `kilo find`, or `--host kilo.local` on any `--host`
+command (`kilo walks`, `kilo reboot` and `kilo update` look for
+`kilo.local` by themselves when `--host` is left out). That is mDNS
+(multicast DNS): the laptop sends "who is kilo.local?" to everyone on the
+wired network at once (the group address 224.0.0.251, UDP port 5353), and
+the kernel answers with its address. The laptop side is `mind/kilo/mdns.py`
+(standard library only: the server has no avahi or libnss-mdns, which is
+what normally resolves `.local` names).
 
-- `kilo.local` answers A queries with the current address (the DHCP
-  hostname, `kilo`; Circle probes the name for about 1 s first and takes
-  `kilo-2` if another host answers for it). So `kilo status --host
-  kilo.local` works without the router's lease table, if the laptop
-  resolves `.local` names (Debian: `libnss-mdns`, with avahi).
-- The service `kilo._kilo._tcp.local`, port 5300, TXT `build=<hash>`, is
-  announced unsolicited three times at start and every 110 s; Circle's
-  publisher does not answer service queries itself, so `avahi-browse
-  _kilo._tcp` may take up to 110 s to see it.
-- A new address (the fallback, then a lease): the service is withdrawn and
-  announced again; the responder always answers with the address of the
-  moment.
+What the kernel answers is the core's responder, `mind/net/mdns.h`
+(tested on the host: `kernel/host/tests/test_mdns.cpp`, and against
+`kilo find` in `test.sh` through `build/mdns-host`):
 
-The tasks sleep in Circle's socket calls and cost the loop nothing
-measurable. `make -C kernel KILO_MDNS=0` leaves it out (about 9 KB).
+| asked | type | answer |
+|---|---|---|
+| `kilo.local` | A | the address of the moment |
+| `_kilo._tcp.local` | PTR | `kilo._kilo._tcp.local` (the laptop service), with its SRV, TXT and A |
+| `kilo._kilo._tcp.local` | SRV, TXT | port 5300 on `kilo.local`; `build=<hash>` (the mind's build) |
+| `_services._dns-sd._udp.local` | PTR | `_kilo._tcp.local` (for service browsers) |
+
+- **Who gets the answer.** A query from a port other than 5353 (a simple
+  resolver's "legacy unicast" query, as `kilo find` sends) is answered
+  straight back to that address and port, with the query's ID and
+  questions. A query from port 5353 asking for a unicast answer (the QU
+  bit) is answered to the sender; any other on the multicast group.
+- **The name.** Once it has an address the responder probes for 0.75 s
+  (three queries for `kilo.local`); if another host answers for it, it
+  takes `kilo-2`, then `kilo-3`. Then it announces its records three
+  times, a second apart. A new address (the link-local fallback, then a
+  lease) is announced again the same way. `kilo find` also finds a Kilo
+  that had to take `kilo-2`, through the service.
+- **Cost.** The `kilomdns` task owns one UDP socket on port 5353 (bound,
+  joined to the group, not connected, so it hears queries from any port).
+  It never blocks: `ReceiveFrom` with `MSG_DONTWAIT`, at most 8 datagrams
+  a pass, then a 5 ms sleep; at most 20 replies a second whatever the
+  network sends. It logs the name it claimed and the address, a name
+  conflict, and the first query it answered (where from: evidence that a
+  laptop's query reached it), never a line per query.
+- **Security.** Finding gives only an address. Anyone on the network could
+  answer for `kilo.local`; the host channel's handshake still checks that
+  the mind at that address has a key this laptop trusts, and the mind
+  still checks the laptop's.
+
+Before this responder the kernel used Circle's (`CmDNSDaemon`,
+`CmDNSPublisher`), which answered only `kilo.local` A queries sent from
+port 5353 and only on the group, and announced the service without
+answering for it. `kilo find` still finds such a kernel (it also asks from
+port 5353 and listens on the group), without the build in the answer; it
+then asks the mind for its build over the host channel.
+
+`make -C kernel KILO_MDNS=0` leaves the task out.
 
 ### Floating point
 
