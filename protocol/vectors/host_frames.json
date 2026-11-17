@@ -816,6 +816,205 @@
    "payload": "01000000401901004019010001",
    "wire": "110086000100000040190100401901000175d4",
    "note": "the end"
+  },
+  {
+   "name": "rec_status_req",
+   "msg": "REC_STATUS_REQ",
+   "type": 82,
+   "dir": "client_to_mind",
+   "kind": "command",
+   "seq": 21,
+   "fields": {},
+   "payload": "",
+   "wire": "040052154637",
+   "note": "the flight recorder's state"
+  },
+  {
+   "name": "rec_status",
+   "msg": "REC_STATUS",
+   "type": 135,
+   "dir": "mind_to_client",
+   "kind": "event",
+   "seq": 21,
+   "fields": {
+    "uptime_ms": 900000,
+    "boot": 7,
+    "capacity": 67108864,
+    "used": 3276800,
+    "block_bytes": 16384,
+    "blocks": 200,
+    "first_seq": 0,
+    "next_seq": 199,
+    "oldest_ms": 0,
+    "dropped_blocks": 0,
+    "records": 81000,
+    "skipped": 9000,
+    "runs": 9,
+    "card_state": 2,
+    "save_on": 1,
+    "saved_seq": 190,
+    "unsaved_bytes": 150000,
+    "card_bytes": 3100000,
+    "card_files": 12,
+    "card_boots": 3,
+    "writes": 760,
+    "write_max_us": 41000,
+    "slow_writes": 0,
+    "card_errors": 0
+   },
+   "payload": "a0bb0d0007000000000000040000320000400000c800000000000000c70000000000000000000000683c010028230000090000000201be000000f0490200604d2f000c000300f802000028a000000000000000000000",
+   "wire": "5a008715a0bb0d0007000000000000040000320000400000c800000000000000c70000000000000000000000683c010028230000090000000201be000000f0490200604d2f000c000300f802000028a000000000000000000000131f",
+   "note": "15 minutes in, saving on, idle"
+  },
+  {
+   "name": "rec_fetch_last",
+   "msg": "REC_FETCH",
+   "type": 83,
+   "dir": "client_to_mind",
+   "kind": "command",
+   "seq": 22,
+   "fields": {
+    "boot": 0,
+    "from_ms": 300000,
+    "to_ms": 4294967295,
+    "what": 0
+   },
+   "payload": "00000000e0930400ffffffff00",
+   "wire": "1100531600000000e0930400ffffffff007457",
+   "note": "this boot's last 10 minutes"
+  },
+  {
+   "name": "rec_fetch_log",
+   "msg": "REC_FETCH",
+   "type": 83,
+   "dir": "client_to_mind",
+   "kind": "command",
+   "seq": 23,
+   "fields": {
+    "boot": 6,
+    "from_ms": 0,
+    "to_ms": 4294967295,
+    "what": 1
+   },
+   "payload": "0600000000000000ffffffff01",
+   "wire": "110053170600000000000000ffffffff014e3d",
+   "note": "boot 6's saved log"
+  },
+  {
+   "name": "metrics_req",
+   "msg": "METRICS_REQ",
+   "type": 84,
+   "dir": "client_to_mind",
+   "kind": "command",
+   "seq": 24,
+   "fields": {
+    "index": 0
+   },
+   "payload": "00",
+   "wire": "050054180048c4",
+   "note": "the first metrics line"
+  },
+  {
+   "name": "metrics",
+   "msg": "METRICS",
+   "type": 136,
+   "dir": "mind_to_client",
+   "kind": "event",
+   "seq": 24,
+   "fields": {
+    "index": 0,
+    "count": 6,
+    "text": "6b6579733a20746f74616c3d31322061637465643d392069676e6f7265643d3220726566757365643d31"
+   },
+   "payload": "00066b6579733a20746f74616c3d31322061637465643d392069676e6f7265643d3220726566757365643d31",
+   "wire": "3000881800066b6579733a20746f74616c3d31322061637465643d392069676e6f7265643d3220726566757365643d3177a9",
+   "note": "one line of 6"
+  },
+  {
+   "name": "rec_bench",
+   "msg": "REC_BENCH",
+   "type": 85,
+   "dir": "client_to_mind",
+   "kind": "command",
+   "seq": 25,
+   "fields": {
+    "count": 32
+   },
+   "payload": "2000",
+   "wire": "060055192000aa96",
+   "note": "32 writes of each size"
+  },
+  {
+   "name": "bench_result",
+   "msg": "BENCH_RESULT",
+   "type": 137,
+   "dir": "mind_to_client",
+   "kind": "stream",
+   "seq": 0,
+   "fields": {
+    "write_bytes": 4096,
+    "count": 32,
+    "error": 0,
+    "min_us": 900,
+    "mean_us": 1500,
+    "max_us": 12000,
+    "sync_us": 3000,
+    "close_us": 0,
+    "remove_us": 0
+   },
+   "payload": "0010000020000084030000dc050000e02e0000b80b00000000000000000000",
+   "wire": "230089000010000020000084030000dc050000e02e0000b80b000000000000000000007747",
+   "note": "32 writes of 4 KiB"
+  },
+  {
+   "name": "bench_result_end",
+   "msg": "BENCH_RESULT",
+   "type": 137,
+   "dir": "mind_to_client",
+   "kind": "stream",
+   "seq": 0,
+   "fields": {
+    "write_bytes": 0,
+    "count": 0,
+    "error": 0,
+    "min_us": 0,
+    "mean_us": 0,
+    "max_us": 0,
+    "sync_us": 0,
+    "close_us": 2500,
+    "remove_us": 1800
+   },
+   "payload": "0000000000000000000000000000000000000000000000c409000008070000",
+   "wire": "230089000000000000000000000000000000000000000000000000c40900000807000027f9",
+   "note": "the end: close and delete"
+  },
+  {
+   "name": "rec_save_on",
+   "msg": "REC_SAVE",
+   "type": 86,
+   "dir": "client_to_mind",
+   "kind": "command",
+   "seq": 26,
+   "fields": {
+    "mode": 1
+   },
+   "payload": "01",
+   "wire": "0500561a016bdc",
+   "note": "saving on"
+  },
+  {
+   "name": "rec_delete_all",
+   "msg": "REC_DELETE",
+   "type": 87,
+   "dir": "client_to_mind",
+   "kind": "command",
+   "seq": 27,
+   "fields": {
+    "boot": 4294967295
+   },
+   "payload": "ffffffff",
+   "wire": "0800571bffffffffafc7",
+   "note": "every earlier boot's recordings"
   }
  ],
  "errors": [
