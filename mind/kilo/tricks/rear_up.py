@@ -329,10 +329,11 @@ def build(g: S.Geometry | None = None, st=1) -> Trick:
         frames.append(keyframe(p, _dur(prev, p, rate), h))
         prev = p
     top = UP_SPECS[st.top]
+    names, pitch = predicted(frames, g, st)
     return Trick(
         name=st.name, frames=tuple(frames), end_posture=END, stop_ticks=st.stop_ticks,
         source={"kind": "authored", "design": "kilo.tricks.rear_up", "doc": "docs/rear-up-trick.md",
-                "stage": st.number},
+                "stage": st.number, "keyframes": names, "predicted_pitch_deg": pitch},
         notes=(
             f"authored (not a legacy skill): rear_up stage {st.number} of {len(STAGES)}: sit back on the "
             f"hind feet and the tail tip, front paws up, {top.phi:g} deg",
@@ -342,6 +343,26 @@ def build(g: S.Geometry | None = None, st=1) -> Trick:
             f"end posture SIT; TRICK_STOP crossfades to it over stop_ticks ({st.stop_ticks})",
         ),
     ).validate()
+
+
+def keyframe_names(st=1) -> list[str]:
+    """The keyframes' names in play order: the way up (UP_SPECS' names), the
+    way down ("down:" and the frame it returns to), "sit" last."""
+    ups = [s.name for s in up_specs(st)]
+    return ups + [f"down:{n}" for n in ups[-2::-1]] + ["sit"]
+
+
+def predicted(frames, g: S.Geometry | None = None, st=1) -> tuple[list[str], list[float]]:
+    """What the model predicts for each keyframe, exported with the library
+    (the trick's source: "keyframes", "predicted_pitch_deg") so that a
+    recording of a trial (kilo runs --fetch, kilo log trick) can be held
+    against it: the nominal geometry's resting pitch, nose up +, deg, at the
+    end of each keyframe's move, following the frames from STAND."""
+    g = g or S.Geometry()
+    poses = [pose_of(kf) for kf in frames]
+    ends = [round(smp.rest.phi, 1) for smp in S.follow(g, poses, start=STAND, steps=24, start_phi=0.0)
+            if smp.frame >= 0 and smp.s == 1.0]
+    return keyframe_names(st), ends
 
 
 def build_all(g: S.Geometry | None = None) -> dict:

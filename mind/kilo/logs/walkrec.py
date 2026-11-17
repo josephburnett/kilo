@@ -159,6 +159,16 @@ def parse_mark(text: str) -> tuple[str, dict[str, str]]:
 
 
 def parse_records(data: bytes, meta: dict[str, Any] | None = None) -> Walk:
+    """A walk's records: host.walk_format 1 (a walk's records alone, t_us
+    from its t0), or 2 (flight-recorder blocks, kilo.logs.flight: the walk
+    run in them, the meta's ``walk.id`` if it names one)."""
+    from kilo.logs import flight
+
+    if flight.is_blocks(data):
+        s = flight.parse_blocks(data, meta)
+        want = ((meta or {}).get("walk") or {}).get("id")
+        run = next((r for r in s.runs if r.kind == "walk" and (want is None or r.id == (want & 0xFFFFF))), None)
+        return flight.walk_of(s, run)
     w = Walk(meta=dict(meta or {}))
     i, n = 0, len(data)
     while i + _HDR.size <= n:
@@ -191,7 +201,13 @@ def parse_records(data: bytes, meta: dict[str, Any] | None = None) -> Walk:
 
 
 def load(path: str | Path) -> Walk:
-    meta, data = read_file(path)
+    """A .kwalk (format 1 or 2) or a .krec (kilo.logs.flight) holding a walk."""
+    from kilo.logs import flight
+
+    if flight.is_krec(path):
+        meta, data = flight.read_file(path)
+    else:
+        meta, data = read_file(path)
     w = parse_records(data, meta)
     w.meta.setdefault("path", str(path))
     return w

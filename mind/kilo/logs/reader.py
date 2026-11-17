@@ -274,8 +274,12 @@ def _rebase(data: LogData) -> None:
 def load(path: str | os.PathLike) -> LogData:
     """Read a log of any supported format."""
     p = Path(path)
-    from kilo.logs import walkrec
+    from kilo.logs import flight, walkrec
 
+    if flight.is_krec(p):  # every frame of a flight recording (kilo runs/record fetch)
+        s = flight.load(p)
+        w = walkrec.Walk(meta=dict(s.meta), frames=list(s.frames))
+        return walkrec.to_logdata(w, p)
     if walkrec.is_kwalk(p):
         return walkrec.to_logdata(walkrec.load(p), p)
     if kilolog.is_kilolog(p):
