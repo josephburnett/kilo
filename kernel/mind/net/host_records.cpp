@@ -199,8 +199,16 @@ void HostServer::rec_fetch(uint32_t i, uint8_t seq, const uint8_t* p, uint64_t n
     c.fetch_on = true;
     return result(i, seq, type, KILO_HOST_RESULT_CODE_OK, "the saved log");
   }
-  uint64_t from = (uint64_t)q.from_ms * 1000u;
-  uint64_t to = q.to_ms == 0xFFFFFFFFu ? now : (uint64_t)q.to_ms * 1000u;
+  // from_ms, to_ms: the clock's ms modulo 2^32 (REC_STATUS.clock_ms): the most recent such time, for this boot
+  auto unwrap = [&](uint32_t ms) -> uint64_t {
+    uint64_t now_ms = now / 1000u;
+    uint64_t t = (now_ms & ~0xFFFFFFFFull) | ms;
+    if (t > now_ms && t >= (1ull << 32)) t -= 1ull << 32;
+    return t * 1000u;
+  };
+  bool this_boot = q.boot == 0 || (saver_ != nullptr && q.boot == saver_->boot());
+  uint64_t from = this_boot ? unwrap(q.from_ms) : (uint64_t)q.from_ms * 1000u;
+  uint64_t to = q.to_ms == 0xFFFFFFFFu ? (this_boot ? now : ~0ull) : this_boot ? unwrap(q.to_ms) : (uint64_t)q.to_ms * 1000u;
   if (to < from) return result(i, seq, type, KILO_HOST_RESULT_CODE_BAD_ARG, "to_ms before from_ms");
   if (!plan_fetch(i, 0, q.boot, from, to))
     return result(i, seq, type, KILO_HOST_RESULT_CODE_BAD_ARG, "nothing recorded in that range");
