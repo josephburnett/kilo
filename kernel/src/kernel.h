@@ -11,6 +11,7 @@
 #include "bootcard.h"
 #include "net.h"
 #include "plannerbench.h"
+#include "power.h"
 #include "flash/flasher.h"
 #include "flash/image.h"
 #include "update/updater.h"
@@ -87,6 +88,7 @@ private:
 	void DrainCircleLog (void);
 	void LogStats (void);
 	void UpdateLED (uint64_t nNowUs);
+	void LightSleep (unsigned nUs);
 
 private:
 	// Construction order matters (Circle's samples use the same order).
@@ -128,6 +130,7 @@ private:
 	CircleListener		*m_pListener;	// the network seams (40 KB of rings: five slots), served by the net task
 	CKiloNet		*m_pNetTask;
 	CPlannerBench		*m_pBench;	// 0 once done, or built without it
+	CKiloPower		*m_pPower;	// light sleep's hardware (mind/power/sleep.h)
 
 	// Flashing the body (P4): the laptop's FLASH_* through the Mind's host
 	// server, and the image on the SD card at boot.
@@ -155,6 +158,8 @@ private:
 	CTiming			m_Period;	// pass to pass: the 1 ms sleep and the other tasks
 	CTiming			m_Work;		// one pass's own work
 	CTiming			m_MindPoll;	// Mind::poll()
+	unsigned		m_nWakeups;	// light sleep: wfi returns this second
+	boolean			m_bSlept;	// light sleep: a pass of it this second
 };
 
 #endif

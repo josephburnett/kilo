@@ -31,7 +31,10 @@
 //                      answer leaves, REST goes out), then Run() returns
 //                      ShutdownReboot (main.cpp: reboot()): the firmware
 //                      boots the card's kernel7.img
-//   CScheduler::usSleep(1000): the net task and Circle's run here
+//   CScheduler::usSleep(1000): the net task and Circle's run here; in
+//                      light sleep (A7, then 30 s of nothing: mind/power/
+//                      sleep.h) LightSleep(10 ms) instead: the other tasks'
+//                      turns and wfi between them
 //
 // Logs go into the Mind's RAM ring, which `kilo log --host` reads, and to
 // the HDMI screen if the firmware gives us a frame buffer, else nowhere
@@ -44,8 +47,10 @@
 //   5 Hz blink     the body speaks another protocol major: not driven (flash it)
 //   double flash   flashing the body, or writing a kernel update to the card
 //                  (two 100 ms flashes a second)
+//   50 ms flash    light sleep (one every 5 s)
 //
 #include "kernel.h"
+#include <circle/synchronize.h>		// WaitForInterrupt (LightSleep)
 #include "authorized_keys.h"		// generated from kernel/keys/authorized_keys (Makefile)
 #include "net/noise.h"
 #include "bootprobe.h"
@@ -81,6 +86,14 @@
 // make -C kernel KILO_RECORD_SAVE=1 turns it on from the start.
 #ifndef KILO_RECORD_SAVE
 #define KILO_RECORD_SAVE 0
+#endif
+// Light sleep (mind/power/sleep.h, docs/power.md): the remote's A7, then
+// 30 s of nothing: servos off, the loop idles (wfi) a 10 ms pass at a
+// time, the Ethernet PHY powered down while no cable is in. On by
+// default; make -C kernel KILO_LIGHT_SLEEP=0 leaves A7 as plain rest (the
+// awake baseline for docs/power.md's comparison).
+#ifndef KILO_LIGHT_SLEEP
+#define KILO_LIGHT_SLEEP 1
 #endif
 #if KILO_REAR_UP < 0 || KILO_REAR_UP > 3
 #error "KILO_REAR_UP must be 0, 1, 2 or 3"
@@ -183,6 +196,7 @@ CKernel::CKernel (void)
 	m_pListener (0),
 	m_pNetTask (0),
 	m_pBench (0),
+	m_pPower (0),
 	m_pFlasher (0),
 	m_pBootCard (0),
 	m_pHostImage (0),
@@ -192,7 +206,9 @@ CKernel::CKernel (void)
 	m_nLinkUpUs (0),
 	m_bGoAhead (FALSE),
 	m_bWasFlashing (FALSE),
-	m_bPoweroffLogged (FALSE)
+	m_bPoweroffLogged (FALSE),
+	m_nWakeups (0),
+	m_bSlept (FALSE)
 {
 	m_ActLED.On ();		// first sign of life, before anything can fail
 	m_Watch.m_pClock = &m_Clock;
@@ -231,6 +247,7 @@ boolean CKernel::Initialize (void)
 	Config.seed = m_Random.GetNumber ();
 	Config.stats_period_ms = BodyStatsPeriodMs;
 	Config.record_save = KILO_RECORD_SAVE != 0;
+	Config.light_sleep = KILO_LIGHT_SLEEP != 0;
 	// Who may talk to it over the network: the laptops' public keys built
 	// in from kernel/keys/authorized_keys (build/gen/authorized_keys.h, the
 	// Makefile's KILO_AUTHORIZED_KEYS), the ephemeral keys from the hardware RNG.
@@ -255,6 +272,18 @@ boolean CKernel::Initialize (void)
 		kilo::noise::fingerprint (kAuthorizedKeys[i].key, Fingerprint);
 		logf (*m_pLog, LogLevel::Info, "host: authorized key %u of %u: %s %s", i + 1, kAuthorizedKeyCount,
 		      Fingerprint, kAuthorizedKeys[i].name);
+	}
+
+	// Light sleep's hardware: the Ethernet PHY (once the net task has it)
+	// and the SoC's clock and temperature, logged once here.
+	m_pPower = new CKiloPower (m_pLog);
+	m_pMind->sleep ().set_hardware (m_pPower);
+	kilo::power::Soc Soc;
+	if (m_pPower->soc (&Soc))
+	{
+		logf (*m_pLog, LogLevel::Info, "power: ARM %u MHz, SoC %d C, throttled 0x%x; light sleep %s",
+		      (unsigned) (Soc.arm_hz / 1000000), (int) (Soc.temp_mc / 1000), (unsigned) Soc.throttled,
+		      KILO_LIGHT_SLEEP ? "on (A7, then 30 s of nothing)" : "off (KILO_LIGHT_SLEEP=0)");
 	}
 
 	kilo::Serial *pSerial = ChooseSerial ();
@@ -490,10 +519,43 @@ TShutdownMode CKernel::Run (void)
 		// the wake tick. The scheduler is cooperative, so a task that does
 		// not yield within a few ms delays the link (it tolerates ~10 ms);
 		// the loop stats line shows the longest pass-to-pass period.
-		m_Scheduler.usSleep (LoopPeriodUs);
+		// Asleep (A7, then 30 s of nothing: mind/power/sleep.h) the pass
+		// waits in wfi instead (LightSleep).
+		unsigned nSleepUs = m_pMind->sleep ().loop_period_us ();
+		if (nSleepUs == 0)
+		{
+			m_Scheduler.usSleep (LoopPeriodUs);
+		}
+		else
+		{
+			LightSleep (nSleepUs);
+		}
 	}
 
 	return ShutdownHalt;
+}
+
+// One pass's wait in light sleep. CScheduler::usSleep would spin in its
+// Yield() while every task sleeps (the scheduler has no idle wfi), so the
+// main task stays ready instead: each round gives the other tasks their turn
+// (the net task, Circle's PHY and DHCP tasks: those whose wake time has come
+// run, then Yield() returns here), then waits in wfi for the next interrupt:
+// the timer's 100 Hz tick at the latest, or a UART byte from the body, or
+// USB. The core's clock stops in wfi; the ARM's draw then is its leakage.
+void CKernel::LightSleep (unsigned nUs)
+{
+	m_bSlept = TRUE;
+	unsigned nStart = CTimer::GetClockTicks ();
+	for (;;)
+	{
+		m_Scheduler.Yield ();
+		if (CTimer::GetClockTicks () - nStart >= nUs)
+		{
+			return;
+		}
+		WaitForInterrupt ();
+		m_nWakeups++;
+	}
 }
 
 // The boot-time flash from the SD card (docs/fast-boot.md §6 path B,
@@ -701,21 +763,29 @@ void CKernel::LogStats (void)
 	// the remote, the behaviour runner's 10 Hz tick).
 	logf (Status, LogLevel::Info,
 	      "loop %u/s: period max %u mean %u us, work max %u mean %u us, mind.poll max %u mean %u us%s; "
-	      "%u clients",
+	      "%u clients%s",
 	      m_Period.m_nCount, m_Period.m_nMax, m_Period.Mean (), m_Work.m_nMax, m_Work.Mean (),
 	      m_MindPoll.m_nMax, m_MindPoll.Mean (), m_pBench != 0 ? " (bench)" : "",
-	      U (m_pMind->host ().clients ()));
+	      U (m_pMind->host ().clients ()), m_bSlept ? " (light sleep)" : "");
+	if (m_bSlept)
+	{
+		// how often the core woke from wfi: the interrupts that keep it up
+		logf (Status, LogLevel::Info, "light sleep: %u wfi wakeups/s", m_nWakeups);
+	}
 
 	// the session metrics (kilo metrics --host): the worst second so far
+	// (a second of light sleep has 10 ms periods by design: not counted)
 	record::Metrics &Metrics = m_pMind->metrics ();
 	if (m_MindPoll.m_nMax > Metrics.loop_max_us)
 	{
 		Metrics.loop_max_us = m_MindPoll.m_nMax;
 	}
-	if (m_Period.m_nMax > Metrics.loop_period_max_us)
+	if (m_Period.m_nMax > Metrics.loop_period_max_us && !m_bSlept)
 	{
 		Metrics.loop_period_max_us = m_Period.m_nMax;
 	}
+	m_bSlept = FALSE;
+	m_nWakeups = 0;
 
 	m_Watch.m_nTelemetry = 0;
 	m_Watch.m_nOverruns = 0;
@@ -735,6 +805,22 @@ void CKernel::UpdateLED (uint64_t nNowUs)
 	{
 		unsigned nMs = (unsigned) (nNowUs / 1000 % 1000);
 		if (nMs < 100 || (nMs >= 200 && nMs < 300))
+		{
+			m_ActLED.On ();
+		}
+		else
+		{
+			m_ActLED.Off ();
+		}
+
+		return;
+	}
+
+	// Light sleep: off, but a 50 ms flash every 5 s, so that asleep is not
+	// mistaken for dead.
+	if (m_pMind->sleep ().asleep ())
+	{
+		if (nNowUs / 1000 % 5000 < 50)
 		{
 			m_ActLED.On ();
 		}

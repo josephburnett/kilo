@@ -42,7 +42,7 @@ CIRCLE_LIBDIRS := lib lib/usb lib/input lib/fs lib/sched lib/net addon/fatfs add
 MIND_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(patsubst %.cpp,$(BUILD)/%.o,$(MIND_SRCS)))
 
 OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/src/bootprobe.o \
-	$(BUILD)/src/net.o $(BUILD)/src/plannerbench.o $(BUILD)/src/bootcard.o $(MIND_OBJS)
+	$(BUILD)/src/net.o $(BUILD)/src/plannerbench.o $(BUILD)/src/bootcard.o $(BUILD)/src/power.o $(MIND_OBJS)
 
 # Build options (README "Body link", "Boot probe", "Planner bench", "mDNS",
 # "The Mind's settings"):
@@ -59,6 +59,8 @@ OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/
 #                           until the staged trials of docs/rear-up-trick.md are done)
 #   KILO_RECORD_SAVE=0|1    save the flight recorder to the SD card from the start (default 0: off until
 #                           `kilo bench sd --host` has measured the card and `kilo record save on --host`)
+#   KILO_LIGHT_SLEEP=1|0    light sleep after the remote's A7 and 30 s of nothing (default 1; 0: A7 is plain rest,
+#                           the awake baseline of docs/power.md)
 KILO_BODY_SERIAL ?= pl011
 KILO_BOOT_PROBE ?= 1
 KILO_PLANNER_BENCH ?= 1
@@ -66,6 +68,7 @@ KILO_MDNS ?= 1
 KILO_BEHAVIOUR ?= 0
 KILO_REAR_UP ?= 0
 KILO_RECORD_SAVE ?= 0
+KILO_LIGHT_SLEEP ?= 1
 ifeq ($(filter 0 1 2 3,$(KILO_REAR_UP)),)
 $(error KILO_REAR_UP must be 0, 1, 2 or 3)
 endif
@@ -75,7 +78,7 @@ else ifneq ($(KILO_BODY_SERIAL),auto)
 $(error KILO_BODY_SERIAL must be auto or pl011)
 endif
 KILO_DEFS += -DKILO_BOOT_PROBE=$(KILO_BOOT_PROBE) -DKILO_PLANNER_BENCH=$(KILO_PLANNER_BENCH) -DKILO_MDNS=$(KILO_MDNS) \
-	-DKILO_BEHAVIOUR=$(KILO_BEHAVIOUR) -DKILO_REAR_UP=$(KILO_REAR_UP) -DKILO_RECORD_SAVE=$(KILO_RECORD_SAVE)
+	-DKILO_BEHAVIOUR=$(KILO_BEHAVIOUR) -DKILO_REAR_UP=$(KILO_REAR_UP) -DKILO_RECORD_SAVE=$(KILO_RECORD_SAVE) -DKILO_LIGHT_SLEEP=$(KILO_LIGHT_SLEEP)
 LIBS := $(CIRCLE_LIBS)
 
 NETBOOT_SRC  := $(CIRCLEHOME)/sample/38-bootloader
