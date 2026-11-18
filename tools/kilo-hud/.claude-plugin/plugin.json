@@ -1,0 +1,6 @@
+{
+  "name": "kilo-hud",
+  "version": "0.1.0",
+  "description": "Kilo's status beside the chat: on the network or not, build, battery, pending updates; /kilo up and /kilo down tell Claude his state",
+  "types": "./types/index.d.ts"
+}
