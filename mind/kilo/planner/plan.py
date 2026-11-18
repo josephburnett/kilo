@@ -16,8 +16,9 @@ How a tick is made (docs/walking-and-balance.md §10):
   speed (stride / stance time); a swinging foot lifts on a cosine profile
   (step height at mid-swing, zero speed at lift-off and touchdown) from
   where it left the ground to half a stride ahead of its shoulder. Speed and
-  direction change the stride targets, which move at most 0.5 mm per tick,
-  and the stance time, which moves at most 2 % per tick, with each slot's
+  direction change the stride targets, which move at most the pattern's
+  stride_slew_mm per tick (1.5 mm in the walk and the trot, 0.5 in the
+  crawl), and the stance time, which moves at most 2 % per tick, with each slot's
   shift following the stance time as it is (so a slower speed never leaves
   a swing more than a stride to carry): any change at any tick is smooth. A change between the walk and the
   trot goes straight over at a slot start (``_switch_ok``); into or out
@@ -78,7 +79,6 @@ from kilo.planner.model import (FRONT, LEFT, LEGS, BodyModel, _solve3, fit_attit
 X_RANGE = (-60, 60)   # FEET x_mm (spec range)
 Z_RANGE = (30, 95)    # FEET z_mm
 ATT_MAX_DEG = 30.0    # FEET pitch / roll (the body refuses a FEET beyond it: BAD_ARG ends the stream)
-STRIDE_SLEW_MM = 0.5  # per tick
 HEIGHT_SLEW_MM = 0.5  # per tick
 RECENTRED_MM = 1.5    # a stopping leg this close to its target does not step again
 SWITCH_SLACK_MM = 4.0  # a pattern change: every foot within the new half stride plus this (_switch_ok)
@@ -154,7 +154,7 @@ class _LeanJob:
 class Planner:
     def __init__(self, model: BodyModel, pattern: str = pat.DEFAULT_PATTERN, direction: str = "forward",
                  speed_mm_s: float | None = None, tick: int = 0, config: PlannerConfig | None = None,
-                 start_height: float | None = None):
+                 start_height: float | None = None, steer: float = 0.0):
         self.model = model
         self.cfg = config or PlannerConfig()
         self.tick = tick
@@ -165,6 +165,7 @@ class Planner:
         self.settle = model.settle_ticks(pat.TICK_MS)
         self.pattern = pat.pattern(pattern)
         self.direction = pat.direction(direction)
+        self.steer = max(-1.0, min(1.0, float(steer)))  # forward / back: the path bends, + left (side_strides)
         self.speed_mm_s = pat.default_speed(self.pattern) if speed_mm_s is None else abs(float(speed_mm_s))
         self._pending_pattern: pat.Pattern | None = None
         self.xg = [0.0] * 4          # foot x in the gait frame (no lean shift)
@@ -182,7 +183,9 @@ class Planner:
         self.S = 0                   # this slot's shift ticks (may grow: the lean's move, a slower speed)
         self.held = 0                # ticks the gate held this slot
         self.swing = [0.0] * 4       # per leg: x at its lift-off
+        self.swing_h = [0.0] * 4     # ...and its lift at mid-swing (pat.step_height for its side's stride then)
         self.skip = False            # this slot's group does not step (stopping, already in place)
+        self.levelling = False       # this slot's shift levels the body out of the crawl's lean: strides held at 0
         self.caught: dict[int, tuple[int, float]] = {}  # leg -> (tick of the catch, lift at the catch)
         self.stopping = False
         self.finishing = False       # stopped: the last move back to level
@@ -240,10 +243,11 @@ class Planner:
         elif self._pending_pattern is not None:
             # changing: no stride longer than the new pattern's at this speed
             # (it switches once the strides and the feet allow, _switch_ok)
-            new = pat.timing(self._pending_pattern, self.speed_mm_s).stride_mm
-            self.s_tgt = list(pat.side_strides(self.direction, min(tm.stride_mm, new)))
+            # (a steer's outer side too: _switch_ok)
+            st = min(tm.stride_mm, pat.timing(self._pending_pattern, self.speed_mm_s).stride_mm)
+            self.s_tgt = list(pat.side_strides(self.direction, st, self.steer, cap=st))
         else:
-            self.s_tgt = list(pat.side_strides(self.direction, tm.stride_mm))
+            self.s_tgt = list(pat.side_strides(self.direction, tm.stride_mm, self.steer, cap=self.pattern.stride_mm))
         self._next = None  # the next slot's lean was solved for the old timing
 
     def set_speed(self, speed_mm_s: float) -> None:
@@ -257,6 +261,12 @@ class Planner:
 
     def set_direction(self, direction: str) -> None:
         self.direction = pat.direction(direction)
+        self._apply_timing()
+
+    def set_steer(self, steer: float) -> None:
+        """Bend the path of a forward or backward walk: -1..1, + left
+        (pat.side_strides). Ignored by the turns in place and the march."""
+        self.steer = max(-1.0, min(1.0, float(steer)))
         self._apply_timing()
 
     def set_pattern(self, name: str) -> None:
@@ -305,12 +315,12 @@ class Planner:
 
     def _switch_ok(self, p: pat.Pattern) -> bool:
         """The new pattern can take over at this slot start: the strides are
-        no longer than it walks at this speed (+0.5 mm, a tick's slew), every
+        no longer than it walks at this speed (+ a tick's slew), every
         foot is within half of that stride (+ SWITCH_SLACK_MM) of its
         shoulder, so its first swings carry no foot further than its own do,
         and the body is at its height (a lower crawl's lean reaches further)."""
         st = pat.timing(p, self.speed_mm_s).stride_mm
-        return (all(abs(v) <= st + STRIDE_SLEW_MM for v in self.s_cur)
+        return (all(abs(v) <= st + self.pattern.stride_slew_mm for v in self.s_cur)
                 and all(abs(x) <= st / 2 + SWITCH_SLACK_MM for x in self.xg)
                 and abs(self.h - self.model.stance_height(p.body_h_256)) <= HEIGHT_SLEW_MM)
 
@@ -346,6 +356,7 @@ class Planner:
         self.k = (self.k + 1) % len(self.pattern.groups)
         self.t = 0
         self.held = 0
+        self.levelling = False
         self.caught = {}
         g = self._group()
         self.skip = (self.stopping or (self.changing and not self._direct_change())) and all(
@@ -376,6 +387,9 @@ class Planner:
             if self.lean_to != self.lean_from:  # out of a leaning pattern: level first, as fast as gravity lets
                 tr = self._move_ticks(self.lean_from, self.lean_to, self.h)
                 self.S = max(self.S, tr + self.settle)
+                # ...with the feet still: the strides grow from the first lift on (with the walk's
+                # 1.5 mm a tick they would slide the feet 30 mm back in this 20-tick shift)
+                self.levelling = True
             self.tr_ticks = max(1, tr, self.S - (self.settle if tr else 0))
 
     def _move_ticks(self, a: Lean, b: Lean, height: float) -> int:
@@ -413,7 +427,9 @@ class Planner:
         """One tick of the strides, the stance time and the height toward
         their targets (the stance time by at most STANCE_SLEW of itself, so
         a speed change never jumps the feet's slide either)."""
-        s = [s[i] + max(-STRIDE_SLEW_MM, min(STRIDE_SLEW_MM, self.s_tgt[i] - s[i])) for i in (0, 1)]
+        d = self.pattern.stride_slew_mm
+        tgt = (0.0, 0.0) if self.levelling and self.t < self.S else self.s_tgt
+        s = [s[i] + max(-d, min(d, tgt[i] - s[i])) for i in (0, 1)]
         stance = min(stance * (1.0 + STANCE_SLEW), max(stance / (1.0 + STANCE_SLEW), self.stance_tgt))
         h += max(-HEIGHT_SLEW_MM, min(HEIGHT_SLEW_MM, self._height_target() - h))
         return s, stance, h
@@ -614,7 +630,7 @@ class Planner:
                     if leg in self.caught or not 1 <= j < W:
                         continue
                     if self._tip_toward(leg) > cfg.catch_deg:
-                        prev_lift = self.pattern.step_h_mm * (1 - math.cos(2 * math.pi * (j - 1) / W)) / 2
+                        prev_lift = self.swing_h[leg] * (1 - math.cos(2 * math.pi * (j - 1) / W)) / 2
                         self.caught[leg] = (self.t - self.S, prev_lift)
                         self.stats["catches"] += 1
                         self._next = None  # it lands elsewhere: the next slot's lean is solved when it starts
@@ -626,9 +642,14 @@ class Planner:
                     elif 1 <= j <= W:
                         if j == 1:
                             self.swing[leg] = self.xg[leg]  # where the foot leaves the ground
+                            # the lift for the longer of the stride now and the one it grows to (a
+                            # swing while the stride grows lands further than its lift-off stride)
+                            side = 0 if LEFT[leg] else 1
+                            self.swing_h[leg] = pat.step_height(
+                                self.pattern, max(abs(self.s_cur[side]), abs(self.s_tgt[side])))
                         x0 = self.swing[leg]
                         self.xg[leg] = x0 + (self._target_x(leg) - x0) * smooth(j / W)
-                        lift[leg] = self.pattern.step_h_mm * (1 - math.cos(2 * math.pi * j / W)) / 2
+                        lift[leg] = self.swing_h[leg] * (1 - math.cos(2 * math.pi * j / W)) / 2
                 if self.caught and all(lift[leg] < 1e-6 and (leg in self.caught or js[leg] >= 1) for leg in g):
                     self.t = self.S + self._span()  # every caught foot is down and no other is still to lift
                     for leg in g:

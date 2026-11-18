@@ -6,11 +6,13 @@ namespace planner {
 
 // The walk lifts LB then RF 60 ms later, then RB and LF (diagonal couplets);
 // the trot the diagonal pairs LF+RB, RF+LB; the crawl LB, LF, RB, RF one at
-// a time with the lean. Values (and why) as in patterns.py's PATTERNS.
+// a time with the lean. Values (and why) as in patterns.py's PATTERNS (the
+// trot's 44 mm stride and its lift tapering from 8 mm at 35 mm to 6 at 44,
+// the strides' 1.5 mm a tick in the walk and the trot: since 2026-11-17).
 const Pattern kPatternTable[kPatterns] = {
-    {"walk", 2, 2, {{LB, RF}, {RB, LF}, {0, 0}, {0, 0}}, 150, 30, 8, 205, 460, 20, 310, false, 60, 80},
-    {"trot", 2, 2, {{LF, RB}, {RF, LB}, {0, 0}, {0, 0}}, 150, 35, 8, 205, 340, 20, 190, false, 0, 144},
-    {"crawl", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 300, 50, 15, 179, 2550, 0, 4000, true, 0, -1},
+    {"walk", 2, 2, {{LB, RF}, {RB, LF}, {0, 0}, {0, 0}}, 150, 30, 8, 205, 460, 20, 310, false, 60, 80, -1, 0, 1.5},
+    {"trot", 2, 2, {{LF, RB}, {RF, LB}, {0, 0}, {0, 0}}, 150, 44, 8, 205, 340, 20, 190, false, 0, 144, 6, 35, 1.5},
+    {"crawl", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 300, 50, 15, 179, 2550, 0, 4000, true, 0, -1, -1, 0, 0.5},
 };
 
 const Pattern& default_pattern() { return kPatternTable[1]; }
@@ -94,14 +96,28 @@ Timing timing(const Pattern& p, real speed_mm_s) {
 
 Timing default_timing(const Pattern& p) { return timing(p, default_speed(p)); }
 
-void side_strides(Direction d, real stride, real out[2]) {
+real step_height(const Pattern& p, real stride) {
+  if (p.step_h_long_mm < 0 || stride <= p.taper_from_mm) return p.step_h_mm;
+  real f = m_min((real)1.0, (stride - p.taper_from_mm) / (p.stride_mm - p.taper_from_mm));
+  return p.step_h_mm + (p.step_h_long_mm - p.step_h_mm) * f;
+}
+
+void side_strides(Direction d, real stride, real out[2], real steer, real cap) {
   switch (d) {
     case Direction::Forward:
-      out[0] = out[1] = stride;
+    case Direction::Back: {
+      real s = d == Direction::Forward ? stride : -stride;
+      real w = m_max((real)-1.0, m_min((real)1.0, steer)) * m_fabs(s);
+      real left = s - w, right = s + w;
+      real m = m_max(m_fabs(left), m_fabs(right));
+      if (cap > 0 && m > cap) {
+        left = left * cap / m;
+        right = right * cap / m;
+      }
+      out[0] = left;
+      out[1] = right;
       return;
-    case Direction::Back:
-      out[0] = out[1] = -stride;
-      return;
+    }
     case Direction::March:
       out[0] = out[1] = 0;
       return;

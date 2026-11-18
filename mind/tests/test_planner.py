@@ -96,7 +96,13 @@ def test_pattern_tables_and_default_timing():
     assert (c.stride_mm, round(c.period_ms)) == (50, 2550) and c.speed_mm_s == pytest.approx(22.2, abs=0.1)
     assert pat.PATTERNS["crawl"].body_h_256 == 179 and pat.PATTERNS["walk"].body_h_256 == 205
     ranges = {n: pat.speed_range(n) for n in pat.PATTERN_NAMES}
-    assert ranges["trot"] == pytest.approx((42.1, 184.2), abs=0.1)
+    # the trot's top since 2026-11-17: a 44 mm stride (35 before: 184.2 mm/s), its lift tapering
+    # from 8 mm at 35 mm to 6 mm at 44 (the swing's fastest joint stays under 9.6 deg a tick)
+    assert ranges["trot"] == pytest.approx((42.1, 231.6), abs=0.1)
+    tr = pat.PATTERNS["trot"]
+    assert [pat.step_height(tr, s) for s in (8, 35, 39.5, 44, 50)] == [8, 8, 7, 6, 6]
+    assert {pat.step_height(pat.PATTERNS[n], 50) for n in ("walk", "crawl")} == {8, 15}
+    assert [pat.PATTERNS[n].stride_slew_mm for n in ("walk", "trot", "crawl")] == [1.5, 1.5, 0.5]
     assert ranges["walk"] == pytest.approx((25.8, 96.8), abs=0.1)
     assert ranges["crawl"][1] == pytest.approx(26.9, abs=0.1)
 
@@ -134,6 +140,13 @@ def test_the_crawl_shift_covers_the_lean_move():
 
 def test_side_strides():
     assert pat.side_strides("forward", 25) == (25, 25)
+    # a steer bends forward and backward walks (+ left: the right side pushes more, the nose turns left)
+    assert pat.side_strides("forward", 20, 0.25) == (15, 25)
+    assert pat.side_strides("back", 20, 0.5) == (-30, -10)  # backward: the left side pushes back more
+    assert pat.side_strides("forward", 20, -1.0) == (40, 0)  # the inner side steps in place
+    assert pat.side_strides("forward", 40, 0.5, cap=44) == pytest.approx((44 / 3, 44))  # both scaled to the cap
+    assert pat.side_strides("forward", 20, 3.0) == (0, 40)  # at most 1
+    assert pat.side_strides("left", 25, 0.5) == (-20, 20) and pat.side_strides("march", 25, 1) == (0, 0)
     assert pat.side_strides("backward", 25) == (-25, -25)
     assert pat.side_strides("left", 25) == (-20, 20)  # turning left: the right side pushes forward
     assert pat.side_strides("right", 12.5) == (10, -10)
@@ -174,16 +187,78 @@ def test_plan_fits_feet_and_the_slew(name):
     assert max(joint_step_deg(a, b) for a, b in zip(ticks, ticks[1:])) < M.slew_deg_per_tick
 
 
+def fast_bound(name: str, v: float, steer: float = 0.0) -> float:
+    """The fastest joint a fast gait may ask, deg a tick: 8.3 (415 deg/s; the
+    floor runs of 2026-11 asked up to 414 at 180 mm/s and kept up) up to the
+    trot's old top of 184 mm/s. Loosened to 9.6 (480 deg/s) for the trot
+    above it, and for the trot steering at any speed (its outer side takes
+    the longer stride), since 2026-11-17: its 44 mm stride is what makes it
+    faster, and the swing has to carry it in the same 8 ticks; still under
+    the body's 10 deg/tick slew, with 0.4 left for FEET's 1 mm rounding
+    (which alone moves the knee up to ~1 deg a tick: 34 mm steering asks 9.1,
+    35 mm straight 8.3). Not yet run on the floor."""
+    return 9.6 if name == "trot" and (v > 184.3 or steer) else 8.3
+
+
 @pytest.mark.parametrize("name", ("walk", "trot"))
 @pytest.mark.parametrize("direction", ("forward", "back", "left"))
 def test_every_speed_of_the_fast_gaits_stays_inside_the_slew(name, direction):
     """At their slowest, default and top speed every joint of the walk and the
-    trot moves at most 8.3 deg a tick (415 deg/s; the floor runs of 2026-11
-    asked up to 414 and kept up), under the body's 10 deg/tick slew."""
+    trot stays inside fast_bound(), under the body's 10 deg/tick slew."""
     lo, hi = pat.speed_range(name)
     for v in (lo, pat.default_speed(name), hi):
         _, ticks = plan(name, 300, direction=direction, speed_mm_s=v)
-        assert max(joint_step_deg(a, b) for a, b in zip(ticks, ticks[1:])) < 8.3, (v, direction)
+        assert max(joint_step_deg(a, b) for a, b in zip(ticks, ticks[1:])) < fast_bound(name, v), (v, direction)
+
+
+@pytest.mark.parametrize("name", pat.PATTERN_NAMES)
+@pytest.mark.parametrize("direction", ("forward", "back"))
+def test_steering_bends_the_path_inside_the_reach_and_the_slew(name, direction):
+    """The remote's A6 / C6 while walking (2026-11-17): the steer shortens
+    the inner side's stride and lengthens the outer's, never past the
+    pattern's longest stride, so every joint stays as it is at the top
+    speed: inside fast_bound() in the walk and the trot, the body's slew in
+    the crawl (whose backward swing at its top asked 11.9 deg a tick before
+    steering existed: §12.3; the steer does not add to it), every foot in
+    reach and inside FEET's range."""
+    lo, hi = pat.speed_range(name)
+    for v in (pat.default_speed(name), hi):
+        for steer in (0.25, 0.5, 1.0, -1.0):
+            p = Planner(M, name, direction, v, tick=1000, steer=steer)
+            ticks = [p.next() for _ in range(400)]
+            sl, sr = p.s_cur
+            cap = pat.PATTERNS[name].stride_mm
+            assert max(abs(sl), abs(sr)) <= cap + 1e-9
+            # the nose turns to the steer's side, forward and backward alike: the right side pushes more
+            assert (sr - sl) * steer > 0, (v, steer, p.s_cur)
+            # the bend: (right - left) / (right + left) = the steer (the cap scales both together)
+            assert abs((sr - sl) / (sr + sl)) == pytest.approx(abs(steer), rel=1e-6)
+            for t in ticks:
+                assert all(-60 <= x <= 60 for x in t.x) and all(M.reachable(t.x[i], t.z[i]) for i in LEGS)
+            worst = max(joint_step_deg(a, b) for a, b in zip(ticks, ticks[1:]))
+            bound = fast_bound(name, v, steer) if pat.fixed_cadence(pat.PATTERNS[name]) else (
+                12.0 if direction == "back" else M.slew_deg_per_tick)
+            assert worst < bound, (v, steer, worst)
+
+
+@pytest.mark.parametrize("name", ("walk", "trot"))
+@pytest.mark.parametrize("to", ("forward", "back"))
+def test_a_turn_in_place_goes_straight_within_a_second(name, to):
+    """The remote's B7 / B5 while turning in place (2026-11-17): the strides
+    move 1.5 mm a tick in the walk and the trot (0.5 before: 2 s from a turn
+    at 1x to straight), so the turn becomes a straight walk in under 0.7 s,
+    every foot in reach and every joint inside the bound."""
+    p = Planner(M, name, "left", tick=0)
+    ticks = [p.next() for _ in range(150)]
+    p.set_direction(to)
+    n = 0
+    while any(abs(a - b) > 1e-9 for a, b in zip(p.s_cur, p.s_tgt)):
+        ticks.append(p.next())
+        n += 1
+    assert n * 20 < 700, n
+    ticks += [p.next() for _ in range(100)]
+    check_ticks(ticks, (name, to))
+    assert max(joint_step_deg(a, b) for a, b in zip(ticks, ticks[1:])) < 8.3
 
 
 def test_the_walk_lifts_a_hind_leg_then_its_diagonal_fore_leg():
@@ -259,7 +334,7 @@ def test_speed_changes_mid_walk_are_smooth():
     """Down from the trot's default (144 mm/s) to 90 and 10 (its slowest, 42),
     and up again to its top: every joint inside the body's slew, feet on the
     ground slide at most the top speed's 3.7 mm a tick (plus the 1 mm
-    rounding). (At its fixed cadence only the stride moves, 0.5 mm a tick.)"""
+    rounding). (At its fixed cadence only the stride moves, 1.5 mm a tick.)"""
     p = Planner(M, "trot", tick=0)
     ticks = [p.next() for _ in range(200)]
     p.set_speed(90)
@@ -267,7 +342,7 @@ def test_speed_changes_mid_walk_are_smooth():
     p.set_speed(10)
     ticks += [p.next() for _ in range(300)]
     assert p.timing().speed_mm_s == pytest.approx(pat.speed_range("trot")[0])  # 42: the trot's slowest
-    p.set_speed(200)
+    p.set_speed(250)
     ticks += [p.next() for _ in range(300)]
     assert max(joint_step_deg(a, b) for a, b in zip(ticks, ticks[1:])) < M.slew_deg_per_tick
     hi = pat.speed_range("trot")[1]
@@ -280,7 +355,7 @@ def test_direction_and_pattern_changes():
     for _ in range(100):
         p.next()
     p.set_direction("back")
-    for _ in range(150):  # 0.5 mm a tick: 110 ticks from +27.4 to -27.4
+    for _ in range(150):  # 1.5 mm a tick (0.5 before 2026-11-17): 37 ticks from +27.4 to -27.4
         p.next()
     assert p.s_cur == pytest.approx([-27.36, -27.36])
     p.set_direction("left")
@@ -404,6 +479,26 @@ def test_the_lean_is_solved_during_the_swing_before():
             p.set_speed(5 + (i % 7))
         p.next()
     assert p.stats["waits"] < 40
+
+
+def test_out_of_the_crawl_the_feet_wait_for_the_level_out():
+    """Out of the crawl's lean into the walk the first slot's shift levels the
+    body (about 20 ticks): the strides stay at 0 until it ends. With the
+    walk's 1.5 mm a tick they would otherwise have slid every foot 30 mm
+    back before its first lift, and the next swings asked up to 16.6 deg a
+    tick (found by test_pattern_changes_one_after_another_stay_in_reach)."""
+    p = Planner(M, "crawl", tick=0)
+    for _ in range(200):
+        p.next()
+    p.set_pattern("walk")
+    while p.pattern.name != "walk":
+        p.next()
+    assert p.levelling and p.S > 10
+    while p.t < p.S:
+        p.next()
+        assert p.s_cur == [0.0, 0.0] and all(abs(x) < 1.5 for x in p.xg)  # the feet home, not sliding
+    p.next()
+    assert not p.levelling or p.t >= p.S
 
 
 @pytest.mark.parametrize("name", pat.PATTERN_NAMES)

@@ -41,6 +41,9 @@ struct Pattern {
   bool lean;             // one leg at a time: the body moves over the three feet that stay down
   real couple_ms;        // a group's second leg lifts (and lands) this long after its first
   real default_mm_s;     // the default speed (< 0: the stride over the default stance)
+  real step_h_long_mm;   // the lift at the longest stride (< 0: step_h_mm at every stride; step_height())
+  real taper_from_mm;    // ...tapering from step_h_mm at this stride
+  real stride_slew_mm;   // the strides move at most this much a tick (a speed, direction or steer change)
 
   bool in_group(int k, int leg) const {
     for (int i = 0; i < group_size; i++)
@@ -82,15 +85,20 @@ real shift_min_ms(const Pattern& p);
 inline bool fixed_cadence(const Pattern& p) { return !p.lean; }
 // The pattern's default speed: its table's, or its stride over its default stance.
 real default_speed(const Pattern& p);
+// patterns.py step_height(): the lift at mid-swing for a swing of |stride|:
+// step_h_mm, tapering to step_h_long_mm at the longest stride.
+real step_height(const Pattern& p, real stride);
 // (slowest, fastest) speed that timing() gives.
 void speed_range(const Pattern& p, real* lo, real* hi);
 // Stride, shift and period for walking at |speed_mm_s|, clamped to speed_range().
 Timing timing(const Pattern& p, real speed_mm_s);
 Timing default_timing(const Pattern& p);
 // (left, right) stride, + = the feet push the body forward: forward and back
-// both sides, left and right turn in place (kTurnFrac of the stride), march
-// in place.
-void side_strides(Direction d, real stride, real out[2]);
+// both sides, bent by steer (-1..1, + left: the left side's stride less steer
+// x its size, the right's plus it, both scaled down together when the longer
+// passes cap > 0, the pattern's longest stride); left and right turn in place
+// (kTurnFrac of the stride), march in place (steer ignored for these).
+void side_strides(Direction d, real stride, real out[2], real steer = 0, real cap = 0);
 
 }  // namespace planner
 }  // namespace kilo

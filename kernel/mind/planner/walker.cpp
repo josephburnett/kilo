@@ -162,6 +162,7 @@ const char* Walker::start(const WalkGoal& goal) {
 void Walker::update(const WalkGoal& goal) {
   planner_.set_pattern(*goal.pattern);
   planner_.set_direction(goal.direction);
+  planner_.set_steer(goal.steer);
   if (goal.speed_mm_s >= 0) planner_.set_speed(goal.speed_mm_s);
   goal_ = goal;
 }
@@ -269,7 +270,7 @@ bool Walker::begin_stream(uint64_t now) {
   int64_t first = (int64_t)now_tick;
   if ((double)first > now_tick) first--;
   tracker_.reset();
-  planner_.start(*goal_.pattern, goal_.direction, goal_.speed_mm_s, (uint32_t)(first + kLookahead));
+  planner_.start(*goal_.pattern, goal_.direction, goal_.speed_mm_s, (uint32_t)(first + kLookahead), -1, goal_.steer);
   const BodyState& st = link_.state();
   epoch_ = st.epoch;
   reboots_ = st.reboots;

@@ -152,6 +152,8 @@ int main(int argc, char** argv) {
       planner.set_speed((real)num(f[1]));
     } else if (k == "dir") {
       planner.set_direction(dir(f[1]));
+    } else if (k == "steer") {
+      planner.set_steer((real)num(f[1]));
     } else if (k == "pattern") {
       planner.set_pattern(pat(f[1]));
     } else if (k == "stop") {

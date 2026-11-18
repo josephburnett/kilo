@@ -373,6 +373,7 @@ void Recorder::goal_line(const char* word, const planner::WalkGoal& g, uint64_t 
   Line l(word);
   l.str("pattern", g.pattern->name);
   l.str("dir", planner::direction_name(g.direction));
+  if (g.steer != 0) l.fixed("steer", g.steer, 2);  // the remote's A6 / C6 while walking (+ left)
   if (g.speed_mm_s >= 0) l.fixed("speed_asked", g.speed_mm_s, 1);
   else l.str("speed_asked", "default");
   l.unum("balance", g.balance ? 1u : 0u);
@@ -386,6 +387,7 @@ void Recorder::timing_line(const char* word, const planner::Walker& w, uint64_t 
   l.unum("tick", (unsigned)p.tick());
   l.str("pattern", p.pattern().name);
   l.str("dir", planner::direction_name(p.direction()));
+  if (p.steer() != 0) l.fixed("steer", p.steer(), 2);
   l.fixed("speed", tm.speed_mm_s, 1);
   l.fixed("speed_set", p.speed_mm_s(), 1);
   l.fixed("stride_mm", tm.stride_mm, 1);

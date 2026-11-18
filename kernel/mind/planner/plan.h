@@ -6,8 +6,10 @@
 //   shift of S ticks, then a swing of W ticks per leg (the walk's second leg
 //   couple_ticks() after its first). Feet on the ground slide back at their
 //   side's stride / stance time; a swinging foot lifts on a cosine profile
-//   to half a stride ahead of its shoulder. Stride targets move at most
-//   0.5 mm a tick, the stance time 2 % a tick. A change between the walk
+//   to half a stride ahead of its shoulder. Stride targets move at most the
+//   pattern's stride_slew_mm a tick (1.5 mm in the walk and the trot, 0.5 in
+//   the crawl), the stance time 2 % a tick. A steer bends a forward or
+//   backward walk (side_strides). A change between the walk
 //   and the trot goes straight over at a slot start; into or out of the
 //   crawl through the legs' way home.
 // - The lean (the crawl): before each lift the body's centre of mass is
@@ -40,7 +42,6 @@ namespace planner {
 constexpr int kXMin = -60, kXMax = 60;  // FEET x_mm (spec range)
 constexpr int kZMin = 30, kZMax = 95;   // FEET z_mm
 constexpr real kAttMaxDeg = 30;         // FEET pitch / roll: the body refuses a FEET beyond it
-constexpr real kStrideSlewMm = (real)0.5;
 constexpr real kHeightSlewMm = (real)0.5;
 constexpr real kRecentredMm = (real)1.5;  // a stopping leg this close to its target does not step again
 constexpr real kSwitchSlackMm = (real)4.0;  // a pattern change: every foot within the new half stride plus this
@@ -198,10 +199,13 @@ class Planner {
   // A new walk (Python's Planner(...)): the first slot's lean is solved
   // here. speed_mm_s < 0: the pattern's default speed (Python's None; a
   // negative speed is a magnitude in Python). start_height < 0: STANCE's.
-  void start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tick, real start_height = -1);
+  void start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tick, real start_height = -1, real steer = 0);
 
   void set_speed(real speed_mm_s);
   void set_direction(Direction d);
+  // Bend the path of a forward or backward walk: -1..1, + left (side_strides;
+  // the remote's A6 / C6 while walking). Ignored by the turns in place.
+  void set_steer(real steer);
   // Change the pattern. Between the walk and the trot (both fixed cadence)
   // directly, at the first slot start where the strides, the feet and the
   // height allow (plan.py _switch_ok); into or out of the crawl every leg
@@ -230,6 +234,7 @@ class Planner {
   const Pattern& pattern() const { return *pattern_; }
   const Pattern* pending_pattern() const { return pending_; }
   Direction direction() const { return direction_; }
+  real steer() const { return steer_; }
   real speed_mm_s() const { return speed_mm_s_; }
   const PlannerStats& stats() const { return stats_; }
   const TickPlan& last() const { return last_; }
@@ -276,6 +281,7 @@ class Planner {
   int settle_ = 0;
   const Pattern* pattern_;
   Direction direction_ = Direction::Forward;
+  real steer_ = 0;
   real speed_mm_s_ = 0;
   const Pattern* pending_ = nullptr;
   real xg_[kLegs] = {};  // foot x in the gait frame (no lean shift)
@@ -291,7 +297,9 @@ class Planner {
   int S_ = 0;         // this slot's shift ticks
   int held_ = 0;      // ticks the gate held this slot
   real swing_[kLegs] = {};  // per leg: x at lift-off
+  real swing_h_[kLegs] = {};  // ...and its lift at mid-swing (step_height() for its side's stride then)
   bool skip_ = false;
+  bool levelling_ = false;  // this slot's shift levels the body out of the crawl's lean: strides held at 0
   bool caught_[kLegs] = {};
   int caught_j_[kLegs] = {};  // the slot tick (after the shift) of the catch
   real caught_lift_[kLegs] = {};
