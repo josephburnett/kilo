@@ -15,6 +15,7 @@
 #include "../hal/buzzer.h"
 #include "../hal/clock.h"
 #include "../hal/eeprom.h"
+#include "../hal/eyes.h"
 #include "../hal/gpio.h"
 #include "../hal/i2c.h"
 #include "../hal/ir.h"
@@ -163,6 +164,9 @@ int main(void) {
 #if KILO_IR
   ir_init();
 #endif
+#if KILO_EYES
+  eyes_init();
+#endif
   pcint2_init();
   sei();
   // Config first: it is only EEPROM reads, and the warm-boot pose needs the
@@ -188,7 +192,8 @@ int main(void) {
   body_init(g_body, &g_config, is_warm ? warm : 0, imu_present, sys_reset_record.epoch);
   // 4. HELLO and EVENT BOOT, then the watchdog.
   uint16_t caps = (KILO_BUZZER ? KILO_HELLO_CAPS_BUZZER : 0) | (imu_present ? KILO_HELLO_CAPS_DMP : 0) |
-                  (KILO_ULTRASONIC ? KILO_HELLO_CAPS_ULTRASONIC : 0) | (KILO_IR ? KILO_HELLO_CAPS_IR : 0);
+                  (KILO_ULTRASONIC ? KILO_HELLO_CAPS_ULTRASONIC : 0) | (KILO_IR ? KILO_HELLO_CAPS_IR : 0) |
+                  (KILO_EYES ? KILO_HELLO_CAPS_EYES : 0);
   link_init(FW_BUILD, caps);
   link_boot(g_stats.reset_cause, g_stats.last_alive_tick);
   events_push(g_body.ev, EV_BOOT, g_stats.reset_cause, 0, g_body.epoch);

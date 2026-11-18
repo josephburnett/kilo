@@ -128,7 +128,7 @@ static const std::map<std::string, Expect> EXPECT = {
     {"trick_commit", {ACK, KILO_ACK_STATUS_NO_TRICK}},
     {"trick_play_mirror", {ACK, KILO_ACK_STATUS_STALE}},  // epoch 3, body at 0
     {"trick_stop", {ACK, KILO_ACK_STATUS_OK}},  // nothing playing is not an error
-    {"set_eyes_left_green", {REFUSED, KILO_GOAL_REFUSED_REASON_UNKNOWN_TYPE}},
+    {"set_eyes_left_green", {NOTHING, 0}},  // shown (link_hal_eyes), never acked
     {"beep_1", {NOTHING, 0}},
     {"beep_8_max", {NOTHING, 0}},
     {"cal_get", {REPLY, KILO_MSG_CAL_VALUES}},
@@ -341,12 +341,15 @@ static void test_goals(void) {
   CHECK(cfg.state == CFG_OK);
   CHECK(rx(KILO_MSG_SET_POSTURE, 12, {0, POSTURE_STAND, 0, 0}).empty());
   CHECK(arbiter_idle_posture(b.arb) == POSTURE_STAND);
-  // BEEP queues its notes; goals never ACK. Unimplemented goals: UNKNOWN_TYPE.
+  // BEEP queues its notes; goals never ACK. SET_EYES goes to the eyes as it comes (every refresh).
   setup();
   CHECK(rx(KILO_MSG_BEEP, 13, {2, 12, 10, 0, 5}).empty());
   CHECK(b.notes.count == 2);
-  CHECK(is_refused(rx(KILO_MSG_SET_EYES, 14, {0x3F, 1, 2, 3}), KILO_MSG_SET_EYES,
-                   KILO_GOAL_REFUSED_REASON_UNKNOWN_TYPE));
+  int shown = g_lh.eyes_shown;
+  CHECK(rx(KILO_MSG_SET_EYES, 14, {0x3F, 1, 2, 3}).empty());
+  CHECK(rx(KILO_MSG_SET_EYES, 14, {0x3F, 1, 2, 3}).empty());
+  CHECK(g_lh.eyes_shown == shown + 2 && g_lh.eyes[0] == 0x3F && g_lh.eyes[1] == 1 && g_lh.eyes[3] == 3);
+  CHECK(is_refused(rx(KILO_MSG_SET_EYES, 16, {0x3F, 1, 2}), KILO_MSG_SET_EYES, KILO_GOAL_REFUSED_REASON_BAD_LEN));
   // Wrong length on a goal: GOAL_REFUSED BAD_LEN (not an ACK).
   CHECK(is_refused(rx(KILO_MSG_SET_POSTURE, 15, {0, 3, 0}), KILO_MSG_SET_POSTURE, KILO_GOAL_REFUSED_REASON_BAD_LEN));
 }

@@ -1,6 +1,9 @@
 // The hardware side of core/link: UART rings, PCA9685 read-back, MPU
 // offsets, reboot, and the STATS / TELEMETRY values the app measures.
 #include "../core/link.h"
+#include "../features.h"
+#include "../hal/eyes.h"
+#include "../hal/ultrasonic.h"
 #include "../hal/clock.h"
 #include "../hal/i2c.h"
 #include "../hal/mpu6050.h"
@@ -47,3 +50,12 @@ bool link_hal_pca_read(uint16_t counts[16]) { return pca_read_all(counts) == I2C
 void link_hal_imu_offsets(const int16_t offsets[6]) { mpu_set_offsets(offsets); }
 
 void link_hal_reboot(void) { sys_reboot(); }
+
+void link_hal_eyes(const uint8_t* p) {
+#if KILO_EYES
+  if (KILO_ULTRASONIC && us_busy()) return;  // never while an echo is timed: the next refresh shows it
+  eyes_show(p[0], p[1], p[2], p[3]);
+#else
+  (void)p;
+#endif
+}
