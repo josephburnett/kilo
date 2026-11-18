@@ -17,27 +17,32 @@ right, rows 1-7 bottom to top (B7 is the top middle). ``ACTIONS`` is what
 Key   Code    ``--remote``
 ====  ======  =========================================================
 A7    0xA2    sleep: stop a walk the planned way, then posture rest
-B7    0x62    faster: one speed level up (only while walking)
+B7    0x62    faster: one speed level up (only while walking); turning in
+              place, stop turning and walk straight forward
 C7    0xE2    freeze: abort the walk, stop a trick and the behaviour runner;
               then only B6 and A7 act
-A6    0x22    turn left (from standing: start the turn at 1x)
+A6    0x22    from standing: turn left in place at 1x; walking forward or
+              backward: steer one level more to the left (or one less to
+              the right), without stopping
 B6    0x02    stand and stop: stop a walk the planned way, then posture stand
-C6    0xC2    turn right
+C6    0xC2    the same to the right
 A5    0xE0    behaviour: start the behaviour runner
-B5    0xA8    slower: one speed level down, past the slowest into backward
+B5    0xA8    slower: one speed level down, past the slowest into backward;
+              turning in place, stop turning and walk straight backward
 C5    0x90    the calibration posture (CALIB), after stopping a walk
 A4    0x68    trot: start walking forward in it, or change to it
 B4    0x98    crawl
 C4    0xB0    walk
-B2    0x38    OFF by default (nothing, as rows 1-3). With the rear-up key
+A2    0x10    OFF by default (nothing, as rows 1-3). With the rear-up key
               on (``KILO_REAR_UP=1``, 2 or 3, below): rear up (trick
               ``rear_up``, ``rear_up_2`` or ``rear_up_3``,
               docs/rear-up-trick.md): stop a walk the planned way, then
               sit back on the hind feet and the tail, front paws up,
               hold, come down to sitting; pressed again while it plays,
               it comes down at once (TRICK_STOP over the trick's
-              stop_ticks, 1.5 to 2.5 s, to SIT)
-A3-C1         nothing (logged as ignored), but B2 when switched on
+              stop_ticks, 1.5 to 2.5 s, to SIT). It was B2 until
+              2026-11-17 (the owner: A2 matches the picture better)
+A3-C1         nothing (logged as ignored), but A2 when switched on
 ====  ======  =========================================================
 
 The rear-up key is off until the owner has done the staged, hand-supported
@@ -112,8 +117,24 @@ class Action:
     label: str = ""  # what the key does, for the log
 
 
-SPEED_FACTORS = (0.4, 0.7, 1.0, 1.15, 1.25)  # x the gait's default speed, levels 1..5 (and -1..-5 backward)
+# The speed levels, x the gait's default speed, levels 1..5 (and -1..-5
+# backward). The trot's go to 1.6 (230 mm/s; its top is 232 since
+# 2026-11-17, docs/walking-and-balance.md §13); the walk's and the crawl's
+# top two are their tops (97 and 27 mm/s).
+SPEED_FACTORS = (0.4, 0.7, 1.0, 1.15, 1.25)
+TROT_SPEED_FACTORS = (0.4, 0.7, 1.0, 1.3, 1.6)  # 57.6, 100.8, 144, 187.2, 230.4 mm/s
 DEFAULT_LEVEL = 3  # +3: 1x, the gait's spec defaults
+# A6 / C6 while walking forward or backward: the steer of each level
+# (kilo.planner.patterns.side_strides: the inner side's stride is the
+# stride less this share of it, the outer's the stride plus it). With the
+# feet scrubbing as the recordings show, about 1 m, 0.5 m and 0.25 m of
+# radius; 1.0: the inner side steps in place (docs/walking-and-balance.md §13).
+STEER_LEVELS = (0.25, 0.5, 1.0)
+
+
+def speed_factors(pattern: str) -> tuple:
+    """The remote's five speed levels for a gait, x its default speed."""
+    return TROT_SPEED_FACTORS if pattern == "trot" else SPEED_FACTORS
 _IGNORE = Action("ignore")  # a held-key repeat or another remote's key
 _NONE = Action("none", label="none")  # rows 1-3: no action
 ACTIONS: dict[str, Action] = {
@@ -131,24 +152,25 @@ ACTIONS: dict[str, Action] = {
     "C4": Action("gait", "walk", "walk"),
 }
 ACTIONS.update({k.grid: _NONE for k in KEYS if k.grid not in ACTIONS})
-# B2 with the rear-up key on, by stage (how high Kilo goes; docs/rear-up-trick.md).
+# A2 with the rear-up key on, by stage (how high Kilo goes; docs/rear-up-trick.md).
 REAR_UP_STAGES = {
     1: Action("trick", "rear_up", "rear up"),      # 28 deg
     2: Action("trick", "rear_up_2", "rear up 2"),  # 40 deg
     3: Action("trick", "rear_up_3", "rear up 3"),  # 54 deg, the owner's photo
 }
 REAR_UP = REAR_UP_STAGES[1]
+REAR_UP_GRID = "A2"  # the rear-up key (B2 until 2026-11-17)
 
 
 def set_rear_up_key(stage: int | bool) -> None:
-    """B2 starts the rear_up trick at ``stage`` (1, 2 or 3; True is 1) or
+    """A2 starts the rear_up trick at ``stage`` (1, 2 or 3; True is 1) or
     does nothing like rows 1-3 (0 or False, the default until the staged
-    trials are done; docs/rear-up-trick.md "The B2 switch"). The daemon
+    trials are done; docs/rear-up-trick.md, the switch). The daemon
     takes it from ``KILO_REAR_UP`` at start; anything but 1-3 is off."""
     global REAR_UP_KEY
     stage = int(stage)
     REAR_UP_KEY = stage if stage in REAR_UP_STAGES else 0
-    ACTIONS["B2"] = REAR_UP_STAGES[REAR_UP_KEY] if REAR_UP_KEY else _NONE
+    ACTIONS[REAR_UP_GRID] = REAR_UP_STAGES[REAR_UP_KEY] if REAR_UP_KEY else _NONE
 
 
 def _env_stage(v: str) -> int:
@@ -162,7 +184,7 @@ set_rear_up_key(_env_stage(os.environ.get("KILO_REAR_UP", "0")))
 FROZEN = "ignored (frozen: B6 or A7 to go on)"
 CANCELLED = "cancelled (C7 froze Kilo)"
 # rear_up holds Kilo's weight on two servos per hind leg for seconds: below
-# this pack voltage (TELEMETRY batt_mv, filtered) B2 refuses, so that the
+# this pack voltage (TELEMETRY batt_mv, filtered) A2 refuses, so that the
 # body's low-battery reflex (REST from wherever Kilo is, docs/rear-up-trick.md)
 # does not fire half way up. Also refused on USB power (no_battery).
 TRICK_MIN_MV = 7400
@@ -197,22 +219,29 @@ class RemoteControl:
     beside it). Every call returns the one line the daemon logs.
 
     State: the gait (trot at start), a signed speed level (+1..+5 forward at
-    SPEED_FACTORS x the gait's default speed, -1..-5 backward; no level 0)
-    and the heading (straight, left, right). Every stop (B6, A7, C5, C7, a
-    walk that ended by itself) puts the level back to +3 and the heading
-    straight.
+    speed_factors() x the gait's default speed, -1..-5 backward; no level
+    0), the heading (straight, or left / right: turning in place) and the
+    steer (-3..+3, + left: STEER_LEVELS, while walking straight). Every stop
+    (B6, A7, C5, C7, a walk that ended by itself) puts the level back to
+    +3, the heading straight and the steer to 0.
 
     - A gait key (A4 trot, B4 crawl, C4 walk): not walking, walk forward in
-      it at +3. Walking in another gait: change the gait (after every leg has
-      stepped home), level and heading kept. Walking in that gait: straight
-      forward at the level's magnitude (from a turn or from backward);
+      it at +3. Walking in another gait: change the gait (the walk and the
+      trot directly, the crawl after every leg has stepped home), level,
+      heading and steer kept. Walking in that gait: straight forward at the
+      level's magnitude, no steer (from a turn, a bend or backward);
       already straight forward, nothing changes.
-    - A6 / C6: turn left / right at the level's magnitude; not walking, start
-      the turn in the selected gait at 1x.
+    - A6 / C6: not walking, turn left / right in place in the selected gait
+      at 1x. Walking forward or backward: steer one level to the left /
+      right (... R1, straight, L1 ...; at most 3 each way), without
+      stopping: the nose turns that way forward and backward alike.
+      Turning in place: the other key turns the other way.
     - B7 / B5: one level up / down, through ... -2 -1 +1 +2 ..., stopping at
-      +5 and -5; during a turn the magnitude only (1..5). Not walking:
-      ignored. The line shows the real mm/s (kilo.planner.patterns.timing
-      clamps: the trot's top two levels are the same speed).
+      +5 and -5, the steer kept. Turning in place: stop turning and walk
+      straight forward (B7) or backward (B5) at the turn's level, without
+      stopping first. Not walking: ignored. The line shows the real mm/s
+      (kilo.planner.patterns.timing clamps: the walk's and the crawl's top
+      two levels are about the same speed).
     - A posture key (B6 stand, A7 rest, C5 calib) first stops the walk the
       planned way (each leg steps home, STANCE) and waits for it, then stops
       a playing trick, then takes the posture.
@@ -226,13 +255,13 @@ class RemoteControl:
       a walk and a trick. While it runs, B6, A7 and C7 stop it first
       (``behaviour.stop()``) and then do their own action, A5 does nothing
       and the other keys are ignored.
-    - B2 (``trick``, only with the rear-up key on: ``set_rear_up_key``):
+    - A2 (``trick``, only with the rear-up key on: ``set_rear_up_key``):
       not playing a trick, stop a walk the planned way and
       start the trick (``start_trick``: the key returns at once, the trick
-      plays on). While a trick plays (mode TRICK), B2 stops it: the toggle,
+      plays on). While a trick plays (mode TRICK), A2 stops it: the toggle,
       so a second press brings rear_up down. Refused below TRICK_MIN_MV or
       on USB power.
-    - Stopping a trick (B2, B6, A7, C5, a gait key, C7) sends TRICK_STOP over
+    - Stopping a trick (A2, B6, A7, C5, a gait key, C7) sends TRICK_STOP over
       the trick's ``stop_ticks`` (BodyClient.stop_trick); a key that then
       takes a posture or walks waits that long first, so the crossfade down
       finishes before the next move starts.
@@ -248,6 +277,7 @@ class RemoteControl:
         self.pattern = "trot"
         self.level = DEFAULT_LEVEL
         self.heading = "straight"
+        self.steer = 0  # -3..+3, + left: STEER_LEVELS (walking straight)
         self.frozen = False
         self._walking = False  # the remote started the walk going on
         self._freezes = 0
@@ -264,7 +294,14 @@ class RemoteControl:
         """The speed asked for: the level's factor of the gait's default speed (a magnitude)."""
         from kilo.planner.patterns import default_speed
 
-        return SPEED_FACTORS[abs(self.level) - 1] * default_speed(self.pattern)
+        return speed_factors(self.pattern)[abs(self.level) - 1] * default_speed(self.pattern)
+
+    def steer_value(self) -> float:
+        """The planner's steer for the steer level (-1..1, + left)."""
+        if self.steer == 0 or self.heading != "straight":
+            return 0.0
+        v = STEER_LEVELS[abs(self.steer) - 1]
+        return v if self.steer > 0 else -v
 
     def body_walking(self) -> bool:
         st = self.client.walk_status()
@@ -283,16 +320,23 @@ class RemoteControl:
         self._walking = False
         self.level = DEFAULT_LEVEL
         self.heading = "straight"
+        self.steer = 0
+
+    def _steer_text(self) -> str:
+        """", steering left 2"; "" when straight."""
+        if self.steer == 0 or self.heading != "straight":
+            return ""
+        return f", steering {'left' if self.steer > 0 else 'right'} {abs(self.steer)}"
 
     def _walk_text(self, suffix: str = "") -> str:
         from kilo.planner.patterns import timing
 
         v = timing(self.pattern, self.speed_mm_s()).speed_mm_s
-        return f"walk {self.direction()} ({self.pattern}) {v:.1f} mm/s{suffix}"
+        return f"walk {self.direction()} ({self.pattern}) {v:.1f} mm/s{self._steer_text()}{suffix}"
 
     def _go(self) -> str:
         try:
-            self.client.walk(self.direction(), self.pattern, self.speed_mm_s())
+            self.client.walk(self.direction(), self.pattern, self.speed_mm_s(), steer=self.steer_value())
         except Exception:
             self._reset()
             raise
@@ -357,7 +401,7 @@ class RemoteControl:
         trick = library.load(action.name)
         c.start_trick(trick)
         secs = (trick.duration_ticks or 0) * 0.02
-        return f"trick {action.name} started ({secs:.0f} s; B2 again, B6 or C7 bring it down)"
+        return f"trick {action.name} started ({secs:.0f} s; A2 again, B6 or C7 bring it down)"
 
     def _act(self, action: Action, gen: int) -> str:
         c = self.client
@@ -380,12 +424,13 @@ class RemoteControl:
         if action.kind == "gait":
             if self.walking():
                 same = action.name == self.pattern
-                was = (self.level, self.heading)
+                was = (self.level, self.heading, self.steer)
                 self.pattern = action.name
-                if same:  # that gait already: straight forward at the level's magnitude
+                if same:  # that gait already: straight forward at the level's magnitude, no steer
                     self.heading = "straight"
                     self.level = abs(self.level)
-                    if (self.level, self.heading) == was:
+                    self.steer = 0
+                    if (self.level, self.heading, self.steer) == was:
                         return self._walk_text(": unchanged")
                 return self._go()
             self._reset()
@@ -395,10 +440,17 @@ class RemoteControl:
             return self._go()
         if action.kind == "turn":
             if self.walking():
-                if self.heading == action.name:
-                    return self._walk_text(": unchanged")
-                self.heading = action.name
-                self.level = abs(self.level)
+                if self.heading != "straight":  # turning in place: the other key turns the other way
+                    if self.heading == action.name:
+                        return self._walk_text(": unchanged")
+                    self.heading = action.name
+                    return self._go()
+                # walking forward or backward: steer a level that way, without stopping
+                n = len(STEER_LEVELS)
+                sv = min(self.steer + 1, n) if action.name == "left" else max(self.steer - 1, -n)
+                if sv == self.steer:
+                    return self._walk_text(": already the tightest")
+                self.steer = sv
                 return self._go()
             self._reset()
             self.heading = action.name
@@ -411,24 +463,28 @@ class RemoteControl:
             if not self.walking():
                 return "ignored (not walking)"
             up = action.name == "faster"
-            n = len(SPEED_FACTORS)
+            if self.heading != "straight":  # turning in place: straight forward (B7) or backward (B5) at once
+                self.heading = "straight"
+                self.level = abs(self.level) if up else -abs(self.level)
+                self.steer = 0
+                return "turn ended: " + self._go()
+            factors = speed_factors(self.pattern)
+            n = len(factors)
             lv = self.level
-            if self.heading != "straight":  # a turn: the magnitude only
-                lv = min(lv + 1, n) if up else max(lv - 1, 1)
-            elif up:
+            if up:
                 lv = 1 if lv == -1 else min(lv + 1, n)
             else:
                 lv = -1 if lv == 1 else max(lv - 1, -n)
             end = ""
             if lv == self.level:
-                end = (": already the fastest" if up else ": already the slowest" if self.heading != "straight"
-                       else ": already the fastest back")
+                end = ": already the fastest" if up else ": already the fastest back"
             self.level = lv
             if not end:
                 self._go()
-            f = SPEED_FACTORS[abs(lv) - 1]
+            f = factors[abs(lv) - 1]
             v = timing(self.pattern, self.speed_mm_s()).speed_mm_s
-            return f"speed {'-' if lv < 0 else ''}{f:g}x ({self.pattern} {v:.1f} mm/s {self.direction()}){end}"
+            return (f"speed {'-' if lv < 0 else ''}{f:g}x ({self.pattern} {v:.1f} mm/s {self.direction()}"
+                    f"{self._steer_text()}){end}")
         return "ignored (no action on this key)"
 
     def freeze(self) -> str:

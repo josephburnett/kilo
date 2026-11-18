@@ -270,8 +270,8 @@ void test_trick_runs() {
   r.start();
   r.run_ms(500);
   record::Recorder& rec = r.mind.recorder();
-  // 1. B2: rear_up plays and ends DONE
-  r.body.event(KILO_EVENT_IR_KEY, 0x38);
+  // 1. A2: rear_up plays and ends DONE
+  r.body.event(KILO_EVENT_IR_KEY, 0x10);
   r.run_ms(200);
   CHECK(r.mind.player().playing() && rec.in_run());
   r.body.mode = KILO_MODE_TRICK;
@@ -310,8 +310,8 @@ void test_trick_runs() {
       tel_in++;
   CHECKF(tel_in >= 150, "%zu TELEMETRY during the play", tel_in);
 
-  // 2. B2 again, then B6: stopped by B6, the key marked in the run
-  r.body.event(KILO_EVENT_IR_KEY, 0x38);
+  // 2. A2 again, then B6: stopped by B6, the key marked in the run
+  r.body.event(KILO_EVENT_IR_KEY, 0x10);
   r.run_ms(300);
   CHECK(r.mind.player().playing());
   r.body.mode = KILO_MODE_TRICK;
@@ -332,10 +332,10 @@ void test_trick_runs() {
              e2->payload.find("end reason=STOPPED") == 0,
          "%s / %s", k2 ? k2->payload.c_str() : "-", e2 ? e2->payload.c_str() : "-");
 
-  // 3. a low battery: B2 refused, a REFUSED run
+  // 3. a low battery: A2 refused, a REFUSED run
   r.body.batt_mv = 7000;
   r.run_ms(100);
-  r.body.event(KILO_EVENT_IR_KEY, 0x38);
+  r.body.event(KILO_EVENT_IR_KEY, 0x10);
   r.run_ms(100);
   const record::Run* run3 = rec.find(3);
   CHECK(run3 != nullptr && std::string(run3->text, run3->text_len) == "trick=rear_up stage=1 end=REFUSED" &&
@@ -404,7 +404,7 @@ void test_play_session_log() {
     r.body.pitch = 0;
     run_s(10);
   }
-  hold(0x38, 1);  // B2: rear_up
+  hold(0x10, 1);  // A2: rear_up
   r.body.mode = KILO_MODE_TRICK;
   run_s(10);
   r.body.mode = KILO_MODE_IDLE;

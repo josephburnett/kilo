@@ -10,6 +10,12 @@ namespace kilo {
 namespace remote {
 
 const double kSpeedFactors[kSpeedSteps] = {0.4, 0.7, 1.0, 1.15, 1.25};
+const double kTrotSpeedFactors[kSpeedSteps] = {0.4, 0.7, 1.0, 1.3, 1.6};  // 57.6 .. 230.4 mm/s
+const double kSteerLevels[kSteerSteps] = {0.25, 0.5, 1.0};
+
+const double* speed_factors(const planner::Pattern& p) {
+  return str_eq(p.name, "trot") ? kTrotSpeedFactors : kSpeedFactors;
+}
 
 namespace {
 constexpr uint64_t kTrickStopWaitUs = 2000000;  // TRICK_STOP's ACK and the TRICK_DONE it brings
@@ -44,7 +50,28 @@ bool RemoteControl::direction(planner::Direction* d) const {
 }
 
 double RemoteControl::speed_mm_s() const {
-  return kSpeedFactors[iabs(level_) - 1] * (double)planner::default_speed(*pattern_);
+  return speed_factors(*pattern_)[iabs(level_) - 1] * (double)planner::default_speed(*pattern_);
+}
+
+double RemoteControl::steer_value() const {
+  if (steer_ == 0 || heading_ != Heading::Straight) return 0;
+  double v = kSteerLevels[iabs(steer_) - 1];
+  return steer_ > 0 ? v : -v;
+}
+
+void RemoteControl::steer_text(char* buf, uint32_t cap) const {
+  if (steer_ == 0 || heading_ != Heading::Straight) buf[0] = '\0';
+  else format(buf, cap, ", steering %s %d", steer_ > 0 ? "left" : "right", iabs(steer_));
+}
+
+planner::WalkGoal RemoteControl::walk_goal() const {
+  planner::WalkGoal g;
+  g.pattern = pattern_;
+  g.direction = dir();
+  g.speed_mm_s = (planner::real)speed_mm_s();
+  g.balance = true;
+  g.steer = (planner::real)steer_value();
+  return g;
 }
 
 planner::Direction RemoteControl::dir() const {
@@ -73,6 +100,7 @@ void RemoteControl::reset_motion() {
   walking_ = false;
   level_ = kDefaultLevel;
   heading_ = Heading::Straight;
+  steer_ = 0;
 }
 
 bool RemoteControl::perform(const Key& key, uint16_t arg) {
@@ -113,12 +141,14 @@ void RemoteControl::done(const char* what, bool failed) {
   logf(log_, failed ? LogLevel::Warn : LogLevel::Info, "remote %s: %s", text_, last_);
 }
 
-// The walk as it now is, or why it failed ("walk forward (trot) 55.6 mm/s").
-void RemoteControl::walk_done(const char* suffix) {
-  char what[96], v[16];
+// The walk as it now is ("walk forward (trot) 55.6 mm/s, steering left 1").
+void RemoteControl::walk_done(const char* suffix, const char* prefix) {
+  char what[112], v[16], st[24];
   planner::Timing t = planner::timing(*pattern_, (planner::real)speed_mm_s());
   format_speed(v, sizeof v, (double)t.speed_mm_s);
-  format(what, sizeof what, "walk %s (%s) %s mm/s%s", planner::direction_name(dir()), pattern_->name, v, suffix);
+  steer_text(st, sizeof st);
+  format(what, sizeof what, "%swalk %s (%s) %s mm/s%s%s", prefix, planner::direction_name(dir()), pattern_->name, v,
+         st, suffix);
   done(what, false);
 }
 
@@ -212,13 +242,14 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
       }
       if (walking()) {
         bool same = p == pattern_;
-        int was_level = level_;
+        int was_level = level_, was_steer = steer_;
         Heading was_heading = heading_;
         pattern_ = p;
-        if (same) {  // that gait already: straight forward at the level's magnitude
+        if (same) {  // that gait already: straight forward at the level's magnitude, no steer
           heading_ = Heading::Straight;
           level_ = iabs(level_);
-          if (level_ == was_level && heading_ == was_heading) {
+          steer_ = 0;
+          if (level_ == was_level && heading_ == was_heading && steer_ == was_steer) {
             walk_done(": unchanged");
             return;
           }
@@ -233,12 +264,23 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
     case Kind::Turn: {
       Heading h = str_eq(key.name, "left") ? Heading::Left : Heading::Right;
       if (walking()) {
-        if (heading_ == h) {
-          walk_done(": unchanged");
+        if (heading_ != Heading::Straight) {  // turning in place: the other key turns the other way
+          if (heading_ == h) {
+            walk_done(": unchanged");
+            return;
+          }
+          heading_ = h;
+          act();
           return;
         }
-        heading_ = h;
-        level_ = iabs(level_);
+        // walking forward or backward: steer a level that way, without stopping
+        int sv = h == Heading::Left ? (steer_ < kSteerSteps ? steer_ + 1 : steer_)
+                                    : (steer_ > -kSteerSteps ? steer_ - 1 : steer_);
+        if (sv == steer_) {
+          walk_done(": already the tightest");
+          return;
+        }
+        steer_ = sv;
         act();
         return;
       }
@@ -252,34 +294,39 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
         return;
       }
       bool up = str_eq(key.name, "faster");
+      if (heading_ != Heading::Straight) {  // turning in place: straight forward (B7) or backward (B5) at once
+        heading_ = Heading::Straight;
+        level_ = up ? iabs(level_) : -iabs(level_);
+        steer_ = 0;
+        const char* why = walker_.start(walk_goal());
+        if (why != nullptr) {  // ir.py _go: the walk's state starts over
+          reset_motion();
+          char what[96];
+          format(what, sizeof what, "turn ended: walk failed: %s", why);
+          done(what, true);
+          return;
+        }
+        walk_done("", "turn ended: ");
+        return;
+      }
       int l = level_;
-      if (heading_ != Heading::Straight) {  // a turn: the magnitude only
-        l = up ? (l < kSpeedSteps ? l + 1 : l) : (l > 1 ? l - 1 : l);
-      } else if (up) {
+      if (up) {
         l = l == -1 ? 1 : l < kSpeedSteps ? l + 1 : l;
       } else {
         l = l == 1 ? -1 : l > -kSpeedSteps ? l - 1 : l;
       }
-      const char* end = l == level_ ? (up ? ": already the fastest" : heading_ != Heading::Straight
-                                                                         ? ": already the slowest"
-                                                                         : ": already the fastest back")
-                                    : "";
+      const char* end = l == level_ ? (up ? ": already the fastest" : ": already the fastest back") : "";
       level_ = l;
       const char* why = nullptr;
-      if (end[0] == '\0') {
-        planner::WalkGoal g;
-        g.pattern = pattern_;
-        g.direction = dir();
-        g.speed_mm_s = (planner::real)speed_mm_s();
-        g.balance = true;
-        why = walker_.start(g);
-      }
-      char factor[16], v[16], what[96];
-      behaviour::format_g(factor, sizeof factor, kSpeedFactors[iabs(level_) - 1]);
+      if (end[0] == '\0') why = walker_.start(walk_goal());
+      char factor[16], v[16], st[24], what[128];
+      behaviour::format_g(factor, sizeof factor, speed_factors(*pattern_)[iabs(level_) - 1]);
       planner::Timing t = planner::timing(*pattern_, (planner::real)speed_mm_s());
       format_speed(v, sizeof v, (double)t.speed_mm_s);
-      format(what, sizeof what, "speed %s%sx (%s %s mm/s %s)%s%s%s", level_ < 0 ? "-" : "", factor, pattern_->name, v,
-             planner::direction_name(dir()), end, why != nullptr ? ": walk failed: " : "", why != nullptr ? why : "");
+      steer_text(st, sizeof st);
+      format(what, sizeof what, "speed %s%sx (%s %s mm/s %s%s)%s%s%s", level_ < 0 ? "-" : "", factor, pattern_->name,
+             v, planner::direction_name(dir()), st, end, why != nullptr ? ": walk failed: " : "",
+             why != nullptr ? why : "");
       done(what, why != nullptr);
       return;
     }
@@ -384,7 +431,7 @@ void RemoteControl::start_trick() {
   }
   uint32_t ticks = 0;
   tricks::total_ticks(*t, tricks::kSpeedUnity, &ticks);
-  format(what, sizeof what, "trick %s started (%u s; B2 again, B6 or C7 bring it down)", key_->name,
+  format(what, sizeof what, "trick %s started (%u s; A2 again, B6 or C7 bring it down)", key_->name,
          (unsigned)((ticks * KILO_TICK_MS + 500u) / 1000u));
   done(what, false);
 }
@@ -414,12 +461,7 @@ void RemoteControl::act() {
     }
     case Kind::Gait:
     case Kind::Turn: {
-      planner::WalkGoal g;
-      g.pattern = pattern_;
-      g.direction = dir();
-      g.speed_mm_s = (planner::real)speed_mm_s();
-      g.balance = true;
-      why = walker_.start(g);
+      why = walker_.start(walk_goal());
       if (why != nullptr) {
         reset_motion();
         format(what, sizeof what, "walk failed: %s", why);

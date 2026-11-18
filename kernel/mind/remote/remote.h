@@ -6,24 +6,33 @@
 // queues them). Keys by grid (keys.h): columns A-C left to right, rows 1-7
 // from the bottom.
 //
-// The remote's state: the gait (trot at start), a signed speed level and
-// the heading (straight, left, right). Levels +1..+5 walk forward at 0.4,
-// 0.7, 1, 1.15, 1.25 x the gait's default speed (kSpeedFactors), -1..-5
-// backward at the same factors; there is no level 0. Every stop (B6, A7, C5, C7, a walk that
-// ended by itself) puts the level back to +3 (1x) and the heading straight.
+// The remote's state: the gait (trot at start), a signed speed level, the
+// heading (straight, or left / right: turning in place) and the steer
+// (-3..+3, + left, while walking straight). Levels +1..+5 walk forward at
+// speed_factors() x the gait's default speed (the trot 0.4, 0.7, 1, 1.3, 1.6
+// since 2026-11-17; the walk and the crawl 0.4, 0.7, 1, 1.15, 1.25),
+// -1..-5 backward at the same factors; there is no level 0. Every stop (B6,
+// A7, C5, C7, a walk that ended by itself) puts the level back to +3 (1x),
+// the heading straight and the steer to 0.
 //
 // - A4 trot, B4 crawl, C4 walk: not walking, start walking forward in that
-//   gait at +3. Walking in another gait: change the gait (after every leg
-//   has stepped home), level and heading kept. Walking in that gait:
-//   straight forward at the current level's magnitude (from a turn or from
-//   backward); already straight forward, nothing changes.
-// - A6 / C6: turn left / right in place at the current level's magnitude;
-//   not walking, start the turn in the selected gait at 1x.
+//   gait at +3. Walking in another gait: change the gait (the walk and the
+//   trot directly, the crawl after every leg has stepped home), level,
+//   heading and steer kept. Walking in that gait: straight forward at the
+//   current level's magnitude, no steer (from a turn, a bend or backward);
+//   already straight forward, nothing changes.
+// - A6 / C6: not walking, turn left / right in place in the selected gait
+//   at 1x. Walking forward or backward: steer one level to the left / right
+//   (kSteerLevels: the inner side's stride 0.25, 0.5 or 1 of it shorter,
+//   the outer's longer; at most 3 each way), without stopping; the nose
+//   turns that way forward and backward alike. Turning in place: the other
+//   key turns the other way.
 // - B7 faster, B5 slower: one level up / down (... -2 -1 +1 +2 ...),
-//   stopping at +5 and -5; while turning, the magnitude only (1..5). Not
-//   walking: ignored (they never start a walk). A level the planner clamps
-//   to the same speed still changes the level, and the log shows the real
-//   mm/s (planner::timing()).
+//   stopping at +5 and -5, the steer kept. Turning in place: stop turning
+//   and walk straight forward (B7) or backward (B5) at the turn's level,
+//   without a stop first. Not walking: ignored (they never start a walk). A
+//   level the planner clamps to the same speed still changes the level, and
+//   the log shows the real mm/s (planner::timing()).
 // - B6 stand, A7 rest (sleep), C5 the calibration posture (CALIB): stop a
 //   walk the planned way and wait for it (up to stop_timeout), stop a
 //   playing trick, then take the posture.
@@ -37,21 +46,21 @@
 // - A5: start the behaviour runner (after stopping a walk and a trick as a
 //   posture key does). While it runs, B6, A7 and C7 stop it first and then
 //   do their own action, A5 again does nothing, every other key is ignored.
-// - B2 rear up (Kind::Trick, the trick rear_up, rear_up_2 or rear_up_3 by
-//   the stage, docs/rear-up-trick.md), only with the rear-up key switched
-//   on (keys.h set_rear_up_key, KILO_REAR_UP=1|2|3; off, B2 is a row 1-3
-//   key and never reaches perform()):
+// - A2 rear up (Kind::Trick, the trick rear_up, rear_up_2 or rear_up_3 by
+//   the stage, docs/rear-up-trick.md; B2 until 2026-11-17), only with the
+//   rear-up key switched on (keys.h set_rear_up_key, KILO_REAR_UP=1|2|3;
+//   off, A2 is a row 1-3 key and never reaches perform()):
 //   not playing a trick, stop a walk the planned way, then start the trick
 //   (the key is done once TRICK_PLAY is out; the trick plays on). While a
-//   trick plays, B2 stops it: the toggle, a second press brings rear_up
+//   trick plays, A2 stops it: the toggle, a second press brings rear_up
 //   down. Refused below kTrickMinMv or on USB power (NO_BATTERY), so that
 //   the body's low-battery reflex does not take Kilo to REST half way up.
-// - Stopping a trick (B2, the posture keys, a walk from standing, C7) sends
+// - Stopping a trick (A2, the posture keys, a walk from standing, C7) sends
 //   TRICK_STOP over the trick's stop_ticks (rear_up: 1.5 s to SIT, the
 //   higher stages 2 and 2.5 s, not the body's 0.2 s); a key that then
 //   takes a posture or walks waits for
 //   that crossfade first (Phase::Settle).
-// - Rows 1-3 (and B2 unless switched on) do nothing (Mind::ir_key logs them as ignored).
+// - Rows 1-3 (and A2 unless switched on) do nothing (Mind::ir_key logs them as ignored).
 // Every key leaves one log line, "remote <grid> (0x.., <label>): <outcome>".
 // Which keys never reach perform() (repeats, other remotes' keys, rows 1-3,
 // a laptop client holding the body) is the owner's call (Mind::ir_key,
@@ -68,9 +77,14 @@ namespace kilo {
 namespace remote {
 
 constexpr int kSpeedSteps = 5;
-extern const double kSpeedFactors[kSpeedSteps];  // ir.py SPEED_FACTORS
+extern const double kSpeedFactors[kSpeedSteps];      // ir.py SPEED_FACTORS: the walk's and the crawl's levels
+extern const double kTrotSpeedFactors[kSpeedSteps];  // ir.py TROT_SPEED_FACTORS
+// ir.py speed_factors(): the five levels of a gait, x its default speed.
+const double* speed_factors(const planner::Pattern& p);
+constexpr int kSteerSteps = 3;
+extern const double kSteerLevels[kSteerSteps];   // ir.py STEER_LEVELS
 constexpr int kDefaultLevel = 3;                  // +3: 1x, the gait's spec defaults
-constexpr uint16_t kTrickMinMv = 7400;            // ir.py TRICK_MIN_MV: B2 refuses below this pack voltage
+constexpr uint16_t kTrickMinMv = 7400;            // ir.py TRICK_MIN_MV: A2 refuses below this pack voltage
 
 enum class Heading : uint8_t { Straight, Left, Right };
 
@@ -122,6 +136,9 @@ class RemoteControl {
   const char* pattern() const { return pattern_->name; }
   int level() const { return level_; }
   Heading heading() const { return heading_; }
+  int steer() const { return steer_; }  // -3..+3, + left
+  // The planner's steer for the steer level (-1..1, + left; 0 turning in place).
+  double steer_value() const;
   bool frozen() const { return frozen_; }
   // The walk the remote started; false when not walking.
   bool direction(planner::Direction* d) const;
@@ -148,7 +165,10 @@ class RemoteControl {
   void step();
   void act();
   void done(const char* what, bool failed);
-  void walk_done(const char* suffix);
+  void walk_done(const char* suffix, const char* prefix = "");
+  // ", steering left 2", or "" when straight.
+  void steer_text(char* buf, uint32_t cap) const;
+  planner::WalkGoal walk_goal() const;
   void stop_then_act(uint64_t now);
 
   SerialLink& link_;
@@ -161,6 +181,7 @@ class RemoteControl {
   const planner::Pattern* pattern_;
   int level_ = kDefaultLevel;
   Heading heading_ = Heading::Straight;
+  int steer_ = 0;
   bool walking_ = false;  // the remote started the walker's walk
   bool frozen_ = false;
 

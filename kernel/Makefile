@@ -54,8 +54,8 @@ OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/
 #   KILO_PLANNER_BENCH=1|0  time the walking planner once at boot, no body involved (default 1)
 #   KILO_MDNS=1|0           answer mDNS queries for kilo.local and the _kilo._tcp service (default 1)
 #   KILO_BEHAVIOUR=0|1      run the behaviour runner, as kilo run --behaviour (default 0)
-#   KILO_REAR_UP=0|1|2|3    the remote's B2 starts the rear_up trick at that stage: 1 rear_up (28 deg),
-#                           2 rear_up_2 (40 deg), 3 rear_up_3 (54 deg) (default 0: B2 does nothing
+#   KILO_REAR_UP=0|1|2|3    the remote's A2 starts the rear_up trick at that stage: 1 rear_up (28 deg),
+#                           2 rear_up_2 (40 deg), 3 rear_up_3 (54 deg) (default 0: A2 does nothing
 #                           until the staged trials of docs/rear-up-trick.md are done)
 #   KILO_RECORD_SAVE=0|1    save the flight recorder to the SD card from the start (default 0: off until
 #                           `kilo bench sd --host` has measured the card and `kilo record save on --host`)

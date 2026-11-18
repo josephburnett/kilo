@@ -3,9 +3,11 @@
 The body relays the Petoi remote as EVENT IR_KEY; the daemon maps keys to
 actions on its own BodyClient (``kilo.ir.ACTIONS``, by grid: B6 stand and
 stop, A7 sleep, C5 the calibration posture, A4 / B4 / C4 walk forward in
-trot / crawl / walk, B7 / B5 faster / slower (into backward), A6 / C6 turn,
-C7 freeze, A5 the behaviour runner; rows 1-3 do nothing; held-key repeats and
-unknown keys are ignored). The key table and what each action does are in
+trot / crawl / walk, B7 / B5 faster / slower (into backward; turning in
+place, straight forward / backward), A6 / C6 turn in place from standing and
+steer while walking, C7 freeze, A5 the behaviour runner, A2 the rear-up trick
+when switched on; rows 1-3 do nothing; held-key repeats and unknown keys are
+ignored). The key table and what each action does are in
 kilo.ir and mind/README.md "IR remote".
 
 The event arrives on the loop (``_on_ir_key``, a link subscriber); the

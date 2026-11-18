@@ -69,7 +69,7 @@ struct MindConfig {
   uint32_t mind_build = 0;      // STATUS.mind_build (the git hash's first 8 hex digits)
   bool remote = false;          // kilo run --remote (the Pi's KILO_RUN_ARGS turns it on)
   bool behaviour = false;       // kilo run --behaviour (the remote's A5 starts the runner too)
-  uint8_t rear_up_key = 0;      // the stage the remote's B2 starts, 1-3, 0 off (KILO_REAR_UP; remote/keys.h): off until the trials
+  uint8_t rear_up_key = 0;      // the stage the remote's A2 starts, 1-3, 0 off (KILO_REAR_UP; remote/keys.h): off until the trials
   double balance_kp = -1;       // >= 0: SET_BALANCE on with this Kp from the start (kilo run --balance KP)
   uint64_t seed = 0;            // the behaviour RNG's seed (logged)
   const behaviour::Personality* personality = nullptr;  // null: behaviour::kPersonality
