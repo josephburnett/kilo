@@ -386,6 +386,11 @@ def host_frame_cases():
           "sync_us": 0, "close_us": 2500, "remove_us": 1800}, "the end: close and delete"),
         ("rec_save_on", "REC_SAVE", 26, {"mode": 1}, "saving on"),
         ("rec_delete_all", "REC_DELETE", 27, {"boot": 0xFFFFFFFF}, "every earlier boot's recordings"),
+        ("guard_off", "GUARD", 28, {"mode": 0}, "the distance guard off"),
+        ("guard_status", "GUARD_STATUS", 28,
+         {"enabled": 1, "zone": 1, "action": 3, "eyes": 1, "eyes_driven": 1, "dist_mm": 287, "raw_mm": 291,
+          "blue_mm": 316, "red_mm": 150, "speed_mm_s": 180, "zone_changes": 4, "stops": 1, "pullbacks": 0,
+          "refused": 2}, "holding after a stop at BLUE"),
     ]
 
 
