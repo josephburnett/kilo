@@ -128,7 +128,7 @@ kilo balance on --kp 0.6 --kd 0.05 --for 30   # SET_BALANCE gains (live, not per
 kilo walk --for 5            # trot forward 5 s, then stop (ON THE FLOOR ONLY; see Walking)
 kilo walk left --pattern crawl   # turn left in place until Ctrl-C; `kilo walk stop` stops any walk
 kilo pose --pitch 5 --posture stance --for 10   # body pose over STANCE
-kilo cal [show] | cal set JOINT DEG | cal save | cal revert
+kilo cal [show] | cal set JOINT DEG | cal nudge JOINT DEG | cal save | cal revert   (also --host; docs/calibration.md)
 kilo param list | param get ID | param set ID VALUE [--persist]   # ID = number or name
 kilo pca                     # read back the 16 PCA9685 OFF counts
 kilo eeprom dump 0 283       # hex dump of the body EEPROM (EEPROM_READ, 56 B per request)

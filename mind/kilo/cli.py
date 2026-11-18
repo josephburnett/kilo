@@ -149,15 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--for", dest="hold", type=float, default=None, metavar="S",
                    help="hold for S seconds, then exit")
 
-    s = sub.add_parser("cal", help="joint calibration")
-    cs = s.add_subparsers(dest="cal_cmd", metavar="ACTION")
-    cs.add_parser("show", help="read the 16 offsets (default)")
-    c = cs.add_parser("set", help="set one joint's absolute offset")
-    c.add_argument("joint", type=int)
-    c.add_argument("degrees", type=float, help="absolute offset in degrees (±25)")
-    c = cs.add_parser("save", help="queue a calibration slot write")
-    c.add_argument("--no-wait", action="store_true", help="do not wait for EEPROM_SAVED")
-    cs.add_parser("revert", help="reload calibration from the slot")
+    __import__("kilo.cli_cal").cli_cal.add_parser(sub)  # kilo cal (cli_cal.py; also over --host)
 
     s = sub.add_parser("param", help="live tuning parameters")
     ps = s.add_subparsers(dest="param_cmd", required=True, metavar="ACTION")
@@ -669,22 +661,7 @@ def cmd_balance(args: argparse.Namespace, client: BodyClient) -> int:
 
 
 def cmd_cal(args: argparse.Namespace, client: BodyClient) -> int:
-    client.wait_ready(args.timeout, require_telemetry=False)
-    if args.cal_cmd == "show":
-        offs = client.cal_get()
-        for j, v in enumerate(offs):
-            print(f"joint {j:2d}  {v / 16:+7.2f}°  ({v:+d} a16)")
-    elif args.cal_cmd == "set":
-        client.cal_set(args.joint, int(round(args.degrees * 16)))
-        print(f"joint {args.joint} offset {args.degrees:+.2f}° (not saved; `kilo cal save`)")
-    elif args.cal_cmd == "save":
-        ok = client.cal_save(None if args.no_wait else 2.0)
-        print("saved" if ok else "queued, but no EEPROM_SAVED within 2 s")
-        return EXIT_OK if ok else EXIT_ERR
-    elif args.cal_cmd == "revert":
-        client.cal_revert()
-        print("reverted to the saved calibration")
-    return EXIT_OK
+    return __import__("kilo.cli_cal").cli_cal.cmd_cal_link(args, client)
 
 
 def cmd_param(args: argparse.Namespace, client: BodyClient) -> int:

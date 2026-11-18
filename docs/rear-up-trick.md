@@ -280,37 +280,108 @@ never touch the floor in any case checked).
 **What is wrong.** Each servo turns as far as its pulse says, and the body
 keeps every pulse between 500 and 2500 microseconds (the legacy firmware
 did the same). The calibration of the right hind shoulder (joint 10) is -16
-degrees: its upper leg sits on the servo's splined shaft 16 degrees off the
-servo's middle, toward the back. So at -57 degrees (upper leg forward) its
-pulse is already 2500 and the leg goes no further; the left one, calibrated
-+2, reaches -80. Walking never needs more than about -45, so nobody
-noticed; SIT asks -80 (so in SIT the right hind leg is 23 degrees short
-too); the rear-up trick needs -78.
+degrees: its upper leg sits on the servo's splined shaft 16 degrees off,
+toward the back. So at -57 degrees (upper leg forward) its pulse is already
+2500 and the leg goes no further; the left one, calibrated +2, reaches -80.
+The walk and the trot never ask more than -54 of it (the top speed), so
+nobody noticed; SIT asks -80 (so in SIT the right hind leg is 23 degrees
+short too), the crawl at its top speed -79, the rear-up trick -78.
 
-**The fix: move the right hind upper leg on its servo shaft by about two
-spline teeth, so that it sits further forward, then recalibrate it.** After
-that the calibration offset is about +10 instead of -16 and the shoulder
-reaches -80. Your hands, your tools, any time; nothing here is timed.
+**How I know joint 10 is the right hind upper leg.** The protocol's joint
+table names joint 10 `rb_shoulder` (right back) and the body drives it on
+servo channel 6 (`protocol/spec.toml` [[joints]], `body/src/core/joints.cpp`;
+the legacy OpenCat order, which the EEPROM's offsets follow). And it fits
+what happened: in the trials of 2026-11-17 the right hind leg was the one
+that did not come forward (the video, `docs/rear-up-trick-results.md`), and
+the same arithmetic on joint 12 explains your P1 finding that the left front
+knee does not fold as far at REST. Step 2 below checks it on Kilo before
+anything comes off.
 
-1. Kilo switched off, on its back or held.
-2. Take out the screw in the middle of the right hind shoulder (the joint
-   where the right hind upper leg meets the body), and pull the upper leg
-   straight off the servo shaft. Do not turn the shaft.
-3. Put it back on the shaft turned forward (toward the nose) by two teeth of
-   the spline: about 25-35 degrees. With the shaft where it was, the upper
-   leg should now point clearly further forward than before. Screw it in.
-4. Switch on, put Kilo in the calibration pose (`kilo --host kilo.local
-   posture calib`, every joint at 0: the upper legs straight down) and set
-   joint 10 so that the right hind upper leg is straight down like the left
-   one: `kilo --host kilo.local cal set 10 DEGREES` (start at +10, adjust),
-   then `kilo --host kilo.local cal save`.
-5. `kilo cal show`: joint 10's offset must be between +7 and +20. Tell me
-   the number. (Less than +7: one more tooth.)
-6. Check: `kilo --host kilo.local posture sit`. Looking from above, both
-   hind upper legs should now point forward the same amount.
+**What offset to aim for** (arithmetic from the firmware and the EEPROM, not
+measured on Kilo). With offset `o`, joint 10 reaches forward to -73.3 - o
+degrees and back to +109.1 - o, and never past its limits, -80 and +100:
+
+| Offset | Reaches | Pulse at 0 degrees | |
+|---|---|---|---|
+| -16 (now) | -57.3 .. +100 | 1872 us | SIT, the crawl and the rear-up fall short |
+| 0 | -73.3 .. +100 | 1696 us | still 7 degrees short forward |
+| +7 | -80 .. +100 | 1620 us | the least that reaches -80 |
+| +9 | -80 .. +100 | 1598 us | the most that still reaches +100 |
+| +16 (the target) | -80 .. +93 | 1521 us | |
+| +18 | -80 .. +91 | 1500 us | the servo's middle |
+| +25 (the body's limit) | -80 .. +84 | 1422 us | |
+
+What is asked of it: forward -80 (SIT, the rear-up, the crawl); backward
+nothing past -8 while walking, 0 in the calibration pose, and only the
+getting-up-after-a-fall moves (+100) and the legacy push-up trick (+95) go
+further. Only offsets +7 to +9 reach everything, a 2-degree window, smaller
+than one tooth of the spline, so the leg cannot be put on to hit it. The
+forward end is the one Kilo uses every time he sits; the back end only when
+he pushes himself over after a fall on his side. So aim forward of the
+window: **+16**. Wherever the teeth then put the leg, within half a tooth
+(8 or 9 degrees) the offset that makes it straight lands between +7 and
++25, which always reaches -80; at worst the fall move stops at +84 instead
+of +100.
+
+Your idea of putting the shaft at the middle of its travel first is nearly
+this: offset 0 is not the middle for this joint (1696 us, because of the
+legacy firmware's built-in shift for this servo); the middle, 1500 us, is
+offset +18. +16 is 21 us from it.
+
+**The procedure** (your idea; your hands, your tools, any time; nothing here
+is timed, and every command can be run again):
+
+1. Switch Kilo on and lay him on his back, or hold him, so the legs hang
+   free. In one window hold the calibration pose (every joint at 0, the
+   upper legs straight down), and leave it running:
+
+       kilo posture calib --host kilo.local
+
+   It holds until you press Ctrl-C there. While it holds, the remote does
+   nothing and Kilo cannot fall asleep.
+2. In a second window, check which leg is joint 10:
+
+       kilo cal nudge 10 5 --host kilo.local
+       kilo cal nudge 10 -5 --host kilo.local
+
+   The right hind upper leg should turn 5 degrees back, then return. If
+   another leg moves, stop and tell me.
+3. Put the shaft where a straight-down leg will be:
+
+       kilo cal set 10 16 --host kilo.local
+
+4. Take out the screw in the middle of the right hind shoulder and pull the
+   upper leg straight off the shaft (the servo holds the shaft; do not turn
+   it). Press it back on pointing straight down, as close as the teeth
+   allow, and put the screw back in.
+5. Nudge it until it points straight down like the left one; each command
+   prints the new offset:
+
+       kilo cal nudge 10 1 --host kilo.local     turns it back (toward the tail)
+       kilo cal nudge 10 -1 --host kilo.local    turns it forward
+
+   If it is straight with the offset between +7 and +25, go on. Below +7:
+   the leg sits a tooth too far back; take it off again, put it on one
+   tooth further forward, and go back to step 3. If a nudge is refused at
+   +25 and the leg is still not straight: one tooth further back, step 3.
+6. Save:
+
+       kilo cal save --host kilo.local
+
+   It answers `saved to the body's EEPROM`.
+7. Press Ctrl-C in the first window (Kilo lies down), then check:
+
+       kilo posture sit --host kilo.local
+
+   Looking from above, both hind upper legs should point forward the same
+   amount. Ctrl-C ends it.
+8. `kilo cal show --host kilo.local`: tell me joint 10's offset. Its line
+   should no longer say SHORT under postures for -80 (an offset above +9
+   shows +100 of the fall move as not reached: expected).
 
 If your servo's shaft has a different number of teeth, what matters is the
-end result in step 5.
+end result in step 5. `docs/calibration.md` has the commands in general and
+the other joints' numbers.
 
 ## 3. The A2 switch, and the stage
 
@@ -348,7 +419,7 @@ only at a stage that has gone well.
 ## 4. Before every trial
 
 - **The right hind shoulder** re-seated and calibrated (section 2):
-  `kilo --host kilo.local cal show`, joint 10 between +7 and +20.
+  `kilo cal show --host kilo.local`, joint 10 between +7 and +25.
 - **The Pi.** Foam or folded cardboard taped over it: it is what lands if
   Kilo goes over backwards.
 - **The tail** firmly on its servo, straight back in stand. It carries
@@ -577,7 +648,7 @@ from the trick's own entry in the library.
 - **A2 says "refused: battery ... mV"**: charge the battery.
 - **The log says "guard gather: roll ..."**: a hind leg is not where it was
   asked. Is the right hind shoulder re-seated (`kilo cal show` joint 10
-  between +7 and +20)? Did a foot land short or slide? Tell me the numbers.
+  between +7 and +25)? Did a foot land short or slide? Tell me the numbers.
 - **"guard low: nose up ... outside ..."**: lower than the window: the tail
   is not down; higher: the rear went further down than the model says.
 - **"guard paws: ..."**: the paws stayed down or came back down: the centre

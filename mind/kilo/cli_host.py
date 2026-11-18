@@ -16,6 +16,8 @@ today, and so what works here:
     kilo update --host IP [--image PATH] [--force] [--wait S]   write a new kernel onto the mind's SD card;
                                                    it reboots into it, and this waits for it to come back
     kilo guard [on|off|status] --host IP [--json]  the distance guard (docs/distance-guard.md)
+    kilo cal [show|set J DEG|nudge J DEG|save|revert] --host IP   joint calibration (kilo.cli_cal,
+                                                   docs/calibration.md)
     kilo runs --host IP [--json] | --fetch ... | --delete ...   the walks and tricks recorded (kilo.cli_record;
                                                    kilo walks is the same), record, bench sd, metrics
 
@@ -583,7 +585,8 @@ def _prepare_flash(args: argparse.Namespace) -> int | None:
 
 HOST_COMMANDS = {"status": cmd_status, "posture": cmd_posture, "monitor": cmd_monitor, "log": cmd_log,
                  "flash": cmd_flash, "reboot": cmd_reboot, "update": cmd_update, "guard": cmd_guard,
-                 **cli_record.HOST_COMMANDS, "power": cli_power.cmd_power}
+                 **cli_record.HOST_COMMANDS, "power": cli_power.cmd_power,
+                 "cal": lambda args, hl: __import__("kilo.cli_cal").cli_cal.cmd_cal_host(args, hl)}
 
 
 def parse_log_argv(argv: list[str], host: str | None, key: str | None = None) -> argparse.Namespace:

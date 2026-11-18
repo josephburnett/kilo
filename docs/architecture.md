@@ -2568,7 +2568,7 @@ reference; this table is the overview.
 | `kilo pose [set\|release] [--pitch DEG] [--roll DEG] [--height MM] [--xshift MM] [--posture stance] [--for S]` | Body pose over STANCE (and the walk's reference, §3f; `SET_BODY_POSE`) |
 | `kilo look PAN TILT [--tail T] [--speed DPS] [--for S] [--posture P]` | Head (P1, `mind/kilo/cli_head.py`: `SET_HEAD` hold, released on exit). *`kilo eyes`, `kilo beep`*: not yet as commands (the messages exist). Since 2026-11-17 the body drives the six WS2812 eyes from `SET_EYES` (`body/src/hal/eyes.cpp`, HELLO caps EYES) and the C++ mind sets them by the distance guard's zone (`docs/distance-guard.md`) |
 | `kilo trick list\|show NAME\|upload NAME [--force]\|play NAME [--mirror] [--speed X] [--repeats N] [--for S] [--posture P] [--then-watch T]\|stop` | Tricks (P1, `mind/kilo/cli_trick.py`); *`import-legacy FILE` and `edit NAME`* later (the library itself is regenerated from the legacy skills by `python -m kilo.tricks.import_legacy`) |
-| `kilo cal show\|set JOINT DEG\|save\|revert` | Joint calibration. *`kilo cal imu`* (IMU offset iteration on the Pi from IMU_RAW) not yet |
+| `kilo cal show\|set JOINT DEG\|nudge JOINT DEG\|save\|revert` | Joint calibration, also over `--host` (the mind relays CAL; docs/calibration.md). *`kilo cal imu`* (IMU offset iteration on the Pi from IMU_RAW) not yet |
 | `kilo param list\|get ID\|set ID VALUE [--persist]` | Live tuning (names or ids from the spec's param table) |
 | `kilo pca`, `kilo eeprom dump START END` | PCA9685 OFF counts read back; EEPROM hex dump (`eeprom dump 0 283` was the P0 legacy dump) |
 | `kilo flash [--legacy] [--no-build] [--hex HEX] [--reset auto\|gpio\|dtr\|none] [--dry-run] [--force] ...` | Appendix F |

@@ -8,7 +8,7 @@ prints the per-keyframe table (section 6 of the procedure).
 ## YYYY-MM-DD, run N
 
 Build (mind kernel, with `KILO_REAR_UP=1`, `2` or `3`): ...   Battery at the start: ... mV
-Right hind shoulder re-seated, `kilo cal show` joint 10: ...  (needs +7 to +20)
+Right hind shoulder re-seated, `kilo cal show` joint 10: ...  (needs +7 to +25)
 Floor: ...   Foam or cardboard over the Pi: yes / no   Tail straight back in stand: yes / no
 
 | Keyframe | Pitch from `kilo log trick` (model) | What you saw |

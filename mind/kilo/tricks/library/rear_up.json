@@ -6,7 +6,7 @@
     "doc": "docs/rear-up-trick.md",
     "stage": 1,
     "design_version": 2,
-    "requires": "the right hind shoulder (joint 10) reaching -78 deg: calibration offset +7..+20 (kilo cal show), docs/rear-up-trick.md section 2",
+    "requires": "the right hind shoulder (joint 10) reaching -78 deg: calibration offset +7..+25 (kilo cal show), docs/rear-up-trick.md section 2",
     "keyframes": [
       "lean",
       "lift_l",
