@@ -53,6 +53,8 @@ void test_library_matches_python() {
                st->end_posture == KILO_POSTURE_SIT && st->flags == 0 && st->n_frames > ru->n_frames,
            "%s", stage_name[i]);
   }
+  CHECK(ru->n_guards >= 5 && ru->guards != nullptr && std::strcmp(ru->guards[0].name, "gather") == 0 &&
+        ru->roll_max_a16 == 8 * 16 && find_trick("stand")->n_guards == 0);
   const Trick* s = find_trick("stretch");  // test_trick_id_and_header_carry_expected_attitude
   kilo_trick_begin_t b;
   trick_begin(*s, 9, &b);
@@ -276,6 +278,53 @@ void test_stop_while_uploading() {
 
 }  // namespace
 
+// test_rear_up.py test_guard_watch, the same cases (TELEMETRY: pitch nose down +, a16)
+const kilo_keyframe_t kGuardFrames[] = {
+    {10, 30, 1, {-128, -128, 0, -128, -128, -128, -128, -128, -128, -128, -128}},
+    {10, 30, 1, {-128, -128, 0, -128, -128, -128, -128, -128, -128, -128, -128}},
+    {10, 30, 1, {-128, -128, 0, -128, -128, -128, -128, -128, -128, -128, -128}},
+};
+const TrickGuard kGuardMid[] = {{1, 10 * 16, 14 * 16, 3 * 16, "mid"}};
+
+const char* feed_until(GuardWatch& w, int n, double (*nose)(double), double (*roll)(double), uint64_t* at,
+                       bool (*skip)(double) = nullptr) {
+  for (int i = 0; i < n; i++) {
+    double t = i * 0.04;
+    if (skip != nullptr && skip(t)) continue;
+    const char* why = w.feed((uint64_t)(i * 40000), (int16_t)(-nose(t) * 16), (int16_t)(roll(t) * 16));
+    if (why != nullptr) {
+      *at = (uint64_t)(i * 40000);
+      return why;
+    }
+  }
+  return nullptr;
+}
+
+void test_guard_watch() {
+  Trick t = {"g", "", 3, 0, 0, 0, 0x0004, 0, KILO_POSTURE_STAND, 0, 0, kGuardFrames, 0, kGuardMid, 1, 8 * 16};
+  uint64_t at = 0;
+  GuardWatch w;
+  w.reset(t, kSpeedUnity);
+  CHECK(w.decide_us(0) == 78u * 20000u);
+  CHECK(feed_until(w, 60, [](double) { return 12.0; }, [](double) { return 0.5; }, &at) == nullptr);
+  w.reset(t, kSpeedUnity);
+  const char* why = feed_until(w, 60, [](double x) { return x > 1.0 ? 8.0 : 12.0; }, [](double) { return 0.5; }, &at);
+  CHECKF(why != nullptr && std::strncmp(why, "guard mid: nose up 8.0", 22) == 0 && at > 1560000 && at < 1640000,
+         "%s at %u", why ? why : "-", (unsigned)at);
+  w.reset(t, kSpeedUnity);
+  why = feed_until(w, 60, [](double) { return 12.0; }, [](double x) { return x > 1.4 ? 4.0 : 0.0; }, &at);
+  CHECKF(why != nullptr && std::strcmp(why, "guard mid: roll 4.0 deg past 3.0") == 0, "%s", why ? why : "-");
+  w.reset(t, kSpeedUnity);
+  why = feed_until(w, 60, [](double) { return 12.0; }, [](double x) { return x >= 0.2 ? 9.0 : 0.0; }, &at);
+  CHECKF(why != nullptr && std::strcmp(why, "roll 9.0 deg past 8.0") == 0 && at == 240000, "%s", why ? why : "-");
+  w.reset(t, kSpeedUnity);
+  why = feed_until(w, 60, [](double) { return 12.0; }, [](double) { return 0.0; }, &at,
+                   [](double x) { return x > 1.25 && x < 1.6; });
+  CHECK(why != nullptr && std::strstr(why, "no TELEMETRY") != nullptr);
+  w.reset(t, 32);  // half speed: the hold comes twice as late
+  CHECK(feed_until(w, 120, [](double) { return 12.0; }, [](double) { return 0.0; }, &at) == nullptr);
+}
+
 int main() {
   test_library_matches_python();
   test_timing();
@@ -283,5 +332,6 @@ int main() {
   test_play_refusals_and_no_trick();
   test_play_timeout_stops_the_trick();
   test_stop_while_uploading();
+  test_guard_watch();
   return report("tricks");
 }

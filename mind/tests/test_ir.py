@@ -392,7 +392,7 @@ def test_remote_rear_up_key(monkeypatch, rear_up_on):
     monkeypatch.setattr(ir.time, "sleep", slept.append)
     c, rc, key = rig()
     assert key("B2") == "ignored (no action on this key)" and c.calls == []  # B2 until 2026-11-17: nothing now
-    assert key("A2") == "trick rear_up started (12 s; A2 again, B6 or C7 bring it down)"
+    assert key("A2") == "trick rear_up started (18 s; A2 again, B6 or C7 bring it down)"
     assert c.calls == [("start_trick", "rear_up")] and c.started.stop_ticks == 75
     # pressed again while it plays: it comes down (TRICK_STOP over its stop_ticks, from the client)
     assert key("A2") == "trick stopped: coming down" and c.calls[-1] == ("stop_trick",) and slept == []

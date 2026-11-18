@@ -18,6 +18,10 @@
 //    PREEMPTED, FELL), or after the expected duration + 1 s
 //    (TRICK_DONE_MARGIN_S; none for a trick that loops until stopped): then
 //    TRICK_STOP goes out and the play fails.
+// 4. While it plays, the trick's guards (model.h TrickGuard, Trick.roll_max;
+//    player.py GuardWatch) read every TELEMETRY; one that fails sends
+//    TRICK_STOP (the trick's stop_ticks) and the play ends STOPPED with
+//    result().guard saying why.
 // cancel() is what cancelling Python's play() coroutine does: a play not yet
 // done is stopped on the body (TRICK_STOP) and ends STOPPED.
 //
@@ -56,6 +60,7 @@ struct PlayResult {
   bool has_expected;
   uint32_t expected_ticks;
   const char* error;     // Failed: why
+  const char* guard;     // the mind stopped it: which guard and why (null: it did not)
 };
 
 const char* done_reason_name(uint8_t reason);
@@ -143,6 +148,9 @@ class TrickPlayer {
   uint8_t cached_tid_ = 0;
   uint16_t cached_crc_ = 0;
   uint32_t cached_reboots_ = 0;
+
+  GuardWatch watch_;
+  uint32_t seen_telemetry_ = 0;
 
   uint32_t plays_ = 0;
   PlayResult result_ = {};

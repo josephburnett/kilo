@@ -31,6 +31,18 @@ constexpr uint8_t kSpeedMin = 16;                             // 0.25x (client.p
 // Wire order of the 11 driven joints as legacy slots (model.py CANONICAL).
 extern const uint8_t kCanonical[KILO_JOINT_COUNT];
 
+// A check the mind makes while the body plays the trick (model.py Guard,
+// mind-side only): over the second half of frame `frame`'s hold the
+// TELEMETRY nose-up pitch (-pitch) must average inside lo..hi and |roll|
+// stay within roll_max (all a16, 1/16 deg), or the player sends TRICK_STOP.
+struct TrickGuard {
+  uint8_t frame;
+  int16_t lo_a16;
+  int16_t hi_a16;
+  int16_t roll_a16;
+  const char* name;
+};
+
 struct Trick {
   const char* name;    // the Kilo name (library.names())
   const char* legacy;  // the legacy token library.load() also accepts ("up", "wsf"); "" for an authored trick
@@ -45,6 +57,36 @@ struct Trick {
   int8_t exp_pitch;
   const kilo_keyframe_t* frames;
   uint8_t stop_ticks;   // mind-side: TRICK_STOP's transition for this trick (0 = the body's), Trick.stop_ticks
+  const TrickGuard* guards = nullptr;  // mind-side: Trick.guards
+  uint8_t n_guards = 0;
+  int16_t roll_max_a16 = 0;            // mind-side: Trick.roll_max (0 = none), a16
+};
+
+// player.py GuardWatch: fed every TELEMETRY (microseconds since TRICK_PLAY's
+// ACK, TELEMETRY pitch and roll, a16), feed() returns why the trick must be
+// stopped (once; the text lives in the watch), else null.
+class GuardWatch {
+ public:
+  static constexpr uint8_t kMaxGuards = 8;
+  static constexpr uint32_t kEarlyTicks = 2;  // player.py GUARD_EARLY_TICKS
+  void reset(const Trick& t, uint8_t speed_q6);
+  const char* feed(uint64_t t_us, int16_t pitch_a16, int16_t roll_a16);
+  bool fired() const { return fired_; }
+  const char* why() const { return why_; }
+  // when guard i decides (us since the play), for the tests
+  uint64_t decide_us(uint8_t i) const { return i < n_ ? decide_us_[i] : 0; }
+
+ private:
+  const Trick* t_ = nullptr;
+  uint8_t n_ = 0;
+  uint64_t from_us_[kMaxGuards] = {};
+  uint64_t decide_us_[kMaxGuards] = {};
+  int32_t sum_[kMaxGuards] = {};
+  uint16_t count_[kMaxGuards] = {};
+  bool done_[kMaxGuards] = {};
+  uint8_t over_ = 0;
+  bool fired_ = false;
+  char why_[96] = {};
 };
 
 // TRICK_BEGIN for trick_id.

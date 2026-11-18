@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import binascii
+import logging
 import threading
 import time
 from dataclasses import dataclass
@@ -30,6 +31,8 @@ from typing import Any
 from kilo.link import consts
 from kilo.link.serial_link import LinkError, LinkTimeout, SerialLink
 from kilo.protocol import kilo_protocol as P
+
+log = logging.getLogger(__name__)
 
 
 class ProtocolMismatch(LinkError):
@@ -75,6 +78,7 @@ class TrickResult:
     elapsed_s: float
     expected_ticks: int | None
     epoch: int
+    guard: str | None = None  # the mind stopped it: why (kilo.tricks.player.GuardWatch)
 
 
 def trick_id_for(trick: Any) -> int:
@@ -561,14 +565,33 @@ class BodyClient:
             timeout = (ticks + 1) * P.TICK_MS / 1000.0 + TRICK_DONE_MARGIN_S
         tid, n = self.start_trick(trick, mirror, speed)
         t0 = self.link.clock()
+        watch = None
+        if getattr(trick, "guards", ()) or getattr(trick, "roll_max", 0):
+            from kilo.tricks.player import GuardWatch
+
+            watch = GuardWatch(trick, self.speed_q6(speed))
+            with self.state.lock:
+                seen = self.state.telemetry_count
         try:
             while True:
                 if self.stamp_liveness:
                     self.link.mark_alive()
+                if watch is not None and watch.fired is None:
+                    with self.state.lock:
+                        new = min(self.state.telemetry_count - seen, len(self.state.history))
+                        rows = list(self.state.history)[-new:] if new > 0 else []
+                        seen = self.state.telemetry_count
+                    for at, tm in rows:
+                        why = watch.feed(at - t0, -tm.pitch / 16.0, tm.roll / 16.0)
+                        if why is not None:
+                            log.warning("trick %s: %s: stopping", getattr(trick, "name", "?"), why)
+                            self._stop_quietly()
+                            break
                 m = self.trick_done_since(n, tid)
                 if m is not None:
                     reason = P.TrickDoneReason((m.arg & 0xFFFF) >> 8).name
-                    return TrickResult(reason, tid, self.link.clock() - t0, ticks, m.epoch)
+                    return TrickResult(reason, tid, self.link.clock() - t0, ticks, m.epoch,
+                                       watch.fired if watch is not None else None)
                 if timeout is not None and self.link.clock() - t0 > timeout:
                     self._stop_quietly()
                     raise TrickError(f"no TRICK_DONE within {timeout:.2f} s")
