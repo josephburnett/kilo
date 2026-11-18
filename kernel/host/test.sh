@@ -763,7 +763,8 @@ grep "loop: " "$OUT/host_walks.log" | awk '{for(i=1;i<=NF;i++) if($i=="max") m=(
 
 # ---- the flight recorder: a trick by the remote, every record, the card, the next boot ----------------
 # The rear-up key on (--rear-up): B2 plays rear_up on the virtual body (which plays it tick-exact but
-# does not tip: its IMU stays level, so the analysis sees the design's pitch never reached). Then the
+# does not tip: its IMU stays level), so the trick's first guard ("gather", which wants 1.8..6.8 deg
+# nose up; the level IMU reads 0) stops it: TRICK_STOP, STOPPED, the guard in the log. Then the
 # recorder's status, a time range fetched and decoded, the metrics, the log's whole history, the card
 # saver on (kilo-mind-host's --card DIR stands for the SD card), and a second boot on the same card
 # that lists the first boot's run and shows its log (kilo log --previous).
@@ -789,16 +790,18 @@ ctl ir 0x02                   # B6: stand
 sleep 1
 ctl ir 0x38                   # B2: rear_up (stage 1)
 for _ in $(seq 1 120); do grep -q "TRICK_DONE" "$OUT/host_flight.log" && break; sleep 0.25; done
-expect "$OUT/host_flight.log" "trick rear_up: TRICK_DONE DONE" "the trick played to its end"
+expect "$OUT/host_flight.log" "trick rear_up: guard gather: nose up 0.0 deg outside 1.8..6.8: stopping" \
+    "the mind's guard stopped the trick"
+expect "$OUT/host_flight.log" "trick rear_up: TRICK_DONE STOPPED" "the trick stopped"
 sleep 2.5                     # the run's post-roll
 KPY -m kilo.cli --host "$F" runs | tee "$OUT/flight_runs.txt"
 expect "$OUT/flight_runs.txt" "1 runs this boot \(0 walks, 1 tricks\)" "the list: one trick"
-expect "$OUT/flight_runs.txt" "^1 +[0-9-]+ [0-9:]+ +trick +rear_up stage 1 .* DONE" "the list: run 1, rear_up stage 1, DONE"
+expect "$OUT/flight_runs.txt" "^1 +[0-9-]+ [0-9:]+ +trick +rear_up stage 1 .* STOPPED" "the list: run 1, rear_up stage 1, STOPPED"
 KPY -m kilo.cli --host "$F" runs --fetch last --out "$REC/runs" | tee "$OUT/flight_fetch.txt"
 expect "$OUT/flight_fetch.txt" "trick 1: [0-9]+ bytes in [0-9.]+ s -> .*run-[0-9-]+-trick-1\.krec" "fetch: the trick run written"
 expect "$OUT/flight_fetch.txt" "trick run 1: rear_up \(stage 1\)" "the trick analysis"
-expect "$OUT/flight_fetch.txt" "end +DONE" "the analysis: how it ended"
-expect "$OUT/flight_fetch.txt" "^ +5  up " "the analysis: keyframe 5, up"
+expect "$OUT/flight_fetch.txt" "end +STOPPED" "the analysis: how it ended"
+expect "$OUT/flight_fetch.txt" "^ +5  place_r " "the analysis: keyframe 5, place_r"
 KREC="$(ls "$REC"/runs/run-*-trick-1.krec)"
 KPY -m kilo.cli log trick "$KREC" --csv "$OUT/trick1.csv" --json > "$OUT/trick1.json"
 KPY -m kilo.cli --host "$F" record status | tee "$OUT/flight_status.txt"
@@ -815,7 +818,7 @@ KPY -m kilo.cli --host "$F" metrics | tee "$OUT/flight_metrics.txt"
 expect "$OUT/flight_metrics.txt" "^[a-z_]+: " "kilo metrics: group lines"
 KPY -m kilo.cli log --host "$F" --no-follow --save "$REC/logs" > "$OUT/flight_log.txt"
 expect "$OUT/flight_log.txt" "I remote B2 \(0x38, rear up\)" "kilo log --host: the session's key in the history"
-expect "$OUT/flight_log.txt" "I trick rear_up: TRICK_DONE DONE" "kilo log --host: the trick's end in the history"
+expect "$OUT/flight_log.txt" "I trick rear_up: TRICK_DONE STOPPED" "kilo log --host: the trick's end in the history"
 ls "$REC"/logs/kilo-*.log > /dev/null || { echo "FAILED: kilo log --save wrote nothing"; exit 1; }
 KPY -m kilo.cli --host "$F" record save on | tee "$OUT/flight_save.txt"
 KPY -m kilo.cli --host "$F" record save now > /dev/null
@@ -832,9 +835,10 @@ rng = list(csv.DictReader(open(sys.argv[3])))
 def check(cond, what):
     if not cond:
         print(f"FAILED: the trick run: {what}\n{json.dumps(a, indent=1)[:3000]}"); sys.exit(1)
-check(a["trick"] == "rear_up" and a["stage"] == "1" and a["played"] and a["end"]["reason"] == "DONE", "rear_up, played, DONE")
-check(a["has_prediction"] and len(a["keyframes"]) == 12, "12 keyframes with a prediction")
-check(all(k["reached"] for k in a["keyframes"]), "every keyframe seen in the telemetry")
+check(a["trick"] == "rear_up" and a["stage"] == "1" and a["played"] and a["end"]["reason"] == "STOPPED", "rear_up, played, STOPPED by its guard")
+check(a["has_prediction"] and len(a["keyframes"]) == 15, "15 keyframes with a prediction")
+check(all(k["reached"] for k in a["keyframes"][:7]) and not any(k["reached"] for k in a["keyframes"][8:]),
+      "the keyframes up to the guard at gather seen in the telemetry, none after it")
 check(sum(1 for r in rows if r["mode"] == "TRICK") > 100, "TRICK telemetry in the CSV")
 check(any(r["body_keyframe"] for r in rows), "the body's keyframe in the telemetry")
 check(any(r["trick"] == "rear_up" for r in rng) and any(r["key"] for r in rng), "the decoded range: the trick, the key")
@@ -860,7 +864,7 @@ F="127.0.0.1:$FPORT"
 sleep 2
 KPY -m kilo.cli --host "$F" runs | tee "$OUT/flight2_runs.txt"
 expect "$OUT/flight2_runs.txt" "1 from earlier boots" "the next boot lists the first boot's run"
-expect "$OUT/flight2_runs.txt" "^b1:1 .*trick +rear_up stage 1 .*card +DONE" "the first boot's trick, on the card"
+expect "$OUT/flight2_runs.txt" "^b1:1 .*trick +rear_up stage 1 .*card +STOPPED" "the first boot's trick, on the card"
 KPY -m kilo.cli log --host "$F" --previous > "$OUT/flight2_prev.txt"
 head -3 "$OUT/flight2_prev.txt"
 expect "$OUT/flight2_prev.txt" "boot 1's log as saved on the SD card" "kilo log --previous"

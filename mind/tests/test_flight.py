@@ -228,9 +228,10 @@ def test_trick_tip_over_is_found_at_its_keyframe():
     assert a["has_prediction"] and a["played"]
     kf = {k["name"]: k for k in a["keyframes"]}
     # before the tip the measurement follows the design: the errors are small
-    for n in ("tuck", "sink", "step", "ready", "paws", "up"):
+    for n in ("lean", "lift_l", "place_l", "lean_r", "lift_r", "place_r", "gather", "sit_back", "low", "onto",
+              "paws", "up"):
         assert kf[n]["reached"] and abs(kf[n]["max_err_deg"]) < 0.5, (n, kf[n])
-    assert kf["up"]["pred_end_deg"] == pytest.approx(28.1)
+    assert kf["up"]["pred_end_deg"] == pytest.approx(26.0)
     tip = a["tip_over"]
     assert tip is not None and tip["keyframe_name"] == "rise" and tip["axis"] == "pitch"
     assert tip["direction"].startswith("back")

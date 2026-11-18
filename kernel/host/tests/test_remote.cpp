@@ -415,7 +415,7 @@ void test_rear_up_key() {
   CHECK(t != nullptr && t->stop_ticks == 75 && t->legacy[0] == '\0' && tricks::find_trick("") == nullptr);
   {
     Rig r;
-    LAST_IS(r, "B2", "trick rear_up started (12 s; B2 again, B6 or C7 bring it down)");
+    LAST_IS(r, "B2", "trick rear_up started (18 s; B2 again, B6 or C7 bring it down)");
     CHECK(r.body.count(KILO_MSG_TRICK_PLAY) == 1 && r.player.busy());
     CHECK(r.log.has("remote B2 (0x38, rear up): trick rear_up started"));
     r.body.mode = KILO_MODE_TRICK;
