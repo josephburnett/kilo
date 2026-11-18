@@ -464,6 +464,27 @@ void test_tx_deferred() {
   CHECK(r.link.stats().hello_polls == 1);
 }
 
+// The first HELLO lost (on the Pi: the loop stalled by the SD card's mount, the PL011 overran):
+// the body is alive (TELEMETRY) but there is no HELLO, so HELLO_REQ goes again once a second
+// until one comes, and then no more.
+void test_hello_lost_asked_again() {
+  Rig r;
+  uint16_t tick = 10;
+  r.link.connect();
+  r.step();
+  CHECK(count_type(r.serial.take_sent(), KILO_MSG_HELLO_REQ) == 1);  // its answer never arrives
+  r.run(2500, &tick, 1);
+  std::vector<Sent> s = r.serial.take_sent();
+  CHECKF(count_type(s, KILO_MSG_HELLO_REQ) == 2, "%zu HELLO_REQ in 2.5 s alive without a HELLO",
+         count_type(s, KILO_MSG_HELLO_REQ));
+  CHECK(r.link.state().alive(r.clock.now_us(), LinkConfig().body_lost_us) && !r.link.state().has_hello);
+  r.hello(2, KILO_RESET_CAUSE_COLD, 0, 1);
+  r.run(3000, &tick, 1);
+  s = r.serial.take_sent();
+  CHECK(r.link.state().has_hello && r.solicited && r.reboots == 0);
+  CHECK(count_type(s, KILO_MSG_HELLO_REQ) == 0 && r.link.stats().hello_polls == 3);
+}
+
 }  // namespace
 
 int main() {
@@ -482,5 +503,6 @@ int main() {
   test_trick_play_needs_contact();
   test_serial_trouble();
   test_tx_deferred();
+  test_hello_lost_asked_again();
   return report("link");
 }

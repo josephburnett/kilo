@@ -27,7 +27,11 @@ class FakeCard final : public RecordCard {
   std::map<std::string, std::vector<uint8_t>> files;   // what is on the card
   std::map<std::string, size_t> synced;                // the open file's bytes that survive a cut
 
-  bool ready() override { return present; }
+  uint32_t ready_calls = 0;     // ready(): the first one mounts a real card
+  bool ready() override {
+    ready_calls++;
+    return present;
+  }
   Result make_dir(const char* p) override {
     tick(100);
     dirs_.insert({p, true});

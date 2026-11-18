@@ -90,11 +90,15 @@ bool Mind::body_limp() const {
 // and so for kCardQuietUs.
 bool Mind::safe_for_card(uint64_t now) {
   constexpr uint64_t kCardQuietUs = 2000000;
+  constexpr uint64_t kCardHelloWaitUs = 3000000;  // as the kernel's boot flash check (BootHelloWaitUs)
   const BodyState& b = link_.state();
+  // Not before the body's first HELLO (or 3 s without one): the card's first call mounts it,
+  // which stalls the loop (1.5 s on the Pi), and the HELLO's answer was lost in that stall.
+  bool booting = !b.has_hello && now - started_us_ < kCardHelloWaitUs;
   bool moving = b.has_telemetry && (b.telemetry.mode == KILO_MODE_GAIT || b.telemetry.mode == KILO_MODE_TRICK ||
                                     b.telemetry.mode == KILO_MODE_FALLEN || b.telemetry.mode == KILO_MODE_RECOVERING ||
                                     b.telemetry.mode == KILO_MODE_CALIB || b.telemetry.mode == KILO_MODE_BOOT);
-  bool busy = moving || walker_.active() || player_.busy() || remote_.busy() || recorder_.recording() ||
+  bool busy = booting || moving || walker_.active() || player_.busy() || remote_.busy() || recorder_.recording() ||
               host_.link_paused() || host_.flashing() || host_.updating() || behaviour_active();
   if (busy) unsafe_at_us_ = now;
   return !busy && now - unsafe_at_us_ >= kCardQuietUs;

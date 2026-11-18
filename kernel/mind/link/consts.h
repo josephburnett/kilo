@@ -36,6 +36,7 @@ struct LinkConfig {
   uint32_t ack_timeout_us = KILO_CMD_RETRY_MS * 1000u;          // a command is retried after 50 ms
   uint8_t retries = KILO_CMD_MAX_RETRIES;                       // ... up to 3 times
   uint32_t hello_poll_us = 1000000u / KILO_HELLO_POLL_HZ;       // HELLO_REQ at 2 Hz while the body is lost
+  uint32_t hello_retry_us = 1000000u;                           // ... and at 1 Hz while alive without a HELLO yet
   uint32_t body_lost_us = KILO_BODY_LOST_MS * 1000u;            // no TELEMETRY this long: the body is lost
   uint32_t hello_solicit_window_us = 1000000u;  // a HELLO this soon after a HELLO_REQ answers it
   uint32_t reboot_debounce_us = 3000000u;       // one reboot's HELLO and tick reset count once

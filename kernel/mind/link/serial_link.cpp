@@ -136,7 +136,11 @@ void SerialLink::housekeeping(uint64_t now) {
   }
 
   if (!mind_ok) return;  // a stalled mind sends nothing on its own: let the body's watchdog trip
-  if (hello_on_connect_ || (!alive && (!ever_hello_poll_ || now - last_hello_poll_ >= cfg_.hello_poll_us))) {
+  // HELLO_REQ: once per connect; at 2 Hz while the body is lost; and once a second while it is
+  // alive but no HELLO has come (the first answer lost: on the Pi the SD card's mount once stalled
+  // the loop 1.5 s right after the first HELLO_REQ, and the PL011 dropped the reply).
+  bool hello_due = !ever_hello_poll_ || now - last_hello_poll_ >= (alive ? cfg_.hello_retry_us : cfg_.hello_poll_us);
+  if (hello_on_connect_ || ((!alive || !state_.has_hello) && hello_due)) {
     hello_on_connect_ = false;
     ever_hello_poll_ = true;
     last_hello_poll_ = now;

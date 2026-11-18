@@ -13,8 +13,9 @@
 //   queries with a fresh one (answered by their data reply, never
 //   de-duplicated);
 // - housekeeping: sends goals set or changed since the last pass, refreshes
-//   every latched goal at 5 Hz, polls HELLO_REQ once per connect and at 2 Hz
-//   while the body is lost (no TELEMETRY for 300 ms), and sends a HEARTBEAT
+//   every latched goal at 5 Hz, polls HELLO_REQ once per connect, at 2 Hz
+//   while the body is lost (no TELEMETRY for 300 ms) and at 1 Hz while it is
+//   alive but its HELLO has not come (a lost answer), and sends a HEARTBEAT
 //   after 100 ms without any frame. The refresh, HELLO_REQ and HEARTBEAT are
 //   sent only while the mind's liveness stamp (mark_alive()) is < 1 s old,
 //   so a stalled mind trips the body's watchdog (stop at 0.5 s, REST at

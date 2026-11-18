@@ -25,6 +25,7 @@ struct FakeBody {
   uint16_t batt_mv = 8000;
   bool telemetry_on = true;
   bool eyes = false;  // HELLO caps EYES (the body firmware of 2026-11-17 on)
+  int drop_hellos = 0;  // this many HELLO_REQ go unanswered (the answer lost in a stalled loop)
   uint64_t next_tel = 0;
   std::vector<Sent> sent;  // every frame the mind wrote
   // the ACK status for a command (return 0xFF: no answer)
@@ -73,6 +74,10 @@ struct FakeBody {
       }
       if (s.type == 0xFF || kilo_msg_kind(s.type) != KILO_KIND_COMMAND) continue;
       if (s.type == KILO_MSG_HELLO_REQ) {
+        if (drop_hellos > 0) {
+          drop_hellos--;
+          continue;
+        }
         hello();
         continue;
       }

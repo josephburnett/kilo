@@ -686,6 +686,39 @@ void test_saver_failures() {
 
 }  // namespace
 
+// The body's first HELLO lost (on the Pi the SD card's mount stalled the loop 1.5 s right after
+// the first HELLO_REQ, and the PL011 dropped the answer): the mind asks again once a second, so
+// the HELLO comes and with it the body build and the eyes (caps EYES). The card is not touched
+// before the HELLO, so its mount no longer falls on the first exchange.
+void test_hello_lost_at_boot() {
+  MindConfig cfg;
+  cfg.remote = true;
+  FakeCard card;
+  CardRig r(cfg, card, true);
+  r.body.eyes = true;
+  r.body.drop_hellos = 1;
+  r.start();
+  r.run_ms(800);
+  CHECK(!r.mind.link().state().has_hello && card.ready_calls == 0 && !r.mind.guard().eyes_driven());
+  r.run_ms(500);  // 1.4 s: asked again at 1 s
+  CHECK(r.mind.link().state().has_hello && r.mind.guard().eyes_driven());
+  CHECK(r.mind.link().stats().hello_polls == 2 && r.body.count(KILO_MSG_SET_EYES) >= 1);
+  r.run_ms(4000);  // then the card (2 s of quiet after the HELLO)
+  CHECK(card.ready_calls > 0 && r.saver.scanned());
+  CHECK(r.mind.link().stats().hello_polls == 2);  // and no more HELLO_REQ
+  {  // no body answering at all: the card waits 3 s, not forever; HELLO_REQ at 1 Hz at most
+    FakeCard card2;
+    CardRig r2(cfg, card2, true);
+    r2.body.drop_hellos = 1000;
+    r2.start();
+    r2.run_ms(2800);
+    CHECK(card2.ready_calls == 0);
+    r2.run_ms(3000);
+    CHECK(card2.ready_calls > 0);
+    CHECKF(r2.mind.link().stats().hello_polls <= 7, "%u HELLO_REQ in 5.9 s", (unsigned)r2.mind.link().stats().hello_polls);
+  }
+}
+
 int main() {
   test_flight_store();
   test_records_from_boot();
@@ -694,6 +727,7 @@ int main() {
   test_play_session_log();
   test_saver();
   test_saver_failures();
+  test_hello_lost_at_boot();
   std::printf("  sizeof(Recorder) %zu B, sizeof(Saver) %zu B, sizeof(Mind) %zu B, LogEntry %zu B\n",
               sizeof(record::Recorder), sizeof(record::Saver), sizeof(Mind), sizeof(LogEntry));
   return report("record");
