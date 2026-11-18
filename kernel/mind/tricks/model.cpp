@@ -1,5 +1,6 @@
 #include "tricks/model.h"
 #include "proto/crc16.h"
+#include "util/fmt.h"
 #include "util/mem.h"
 
 namespace kilo {
@@ -100,6 +101,93 @@ bool total_ticks(const Trick& t, uint8_t speed_q6, uint32_t* ticks) {
   }
   *ticks = total;
   return true;
+}
+
+namespace {
+// a16 as "-12.3" (tenths, truncated toward zero)
+const char* deg(char* buf, int a16) {
+  int t = a16 * 10 / 16;
+  format(buf, 12, "%s%d.%d", t < 0 ? "-" : "", (t < 0 ? -t : t) / 10, (t < 0 ? -t : t) % 10);
+  return buf;
+}
+}  // namespace
+
+void GuardWatch::reset(const Trick& t, uint8_t speed_q6) {
+  t_ = &t;
+  n_ = t.guards != nullptr ? (t.n_guards < kMaxGuards ? t.n_guards : kMaxGuards) : 0;
+  over_ = 0;
+  fired_ = false;
+  why_[0] = 0;
+  // when each guarded frame's hold first starts, in play order (player.py play_order; a forever loop once)
+  uint32_t plays = t.repeats == kRepeatForever ? 1u : (t.repeats > 1 ? t.repeats : 1u);
+  for (uint8_t i = 0; i < n_; i++) {
+    sum_[i] = 0;
+    count_[i] = 0;
+    done_[i] = false;
+    uint8_t g = t.guards[i].frame < t.n_frames ? t.guards[i].frame : 0;
+    uint32_t acc = 0, h0 = 0;
+    bool found = false;
+    auto visit = [&](uint8_t f) {
+      if (found) return;
+      acc += phase_ticks(t.frames[f].dur, speed_q6);
+      if (f == g) {
+        h0 = acc;
+        found = true;
+        return;
+      }
+      acc += phase_ticks(t.frames[f].hold, speed_q6);
+    };
+    for (uint8_t f = 0; f <= t.loop_end && f < t.n_frames; f++) visit(f);
+    for (uint32_t p = 1; p < plays; p++)
+      for (uint8_t f = t.loop_start; f <= t.loop_end; f++) visit(f);
+    for (uint32_t f = t.loop_end + 1u; f < t.n_frames; f++) visit((uint8_t)f);
+    uint32_t h = phase_ticks(t.frames[g].hold, speed_q6);
+    from_us_[i] = (uint64_t)(2u * h0 + h) * KILO_TICK_MS * 500u;  // h0 + h / 2 ticks
+    decide_us_[i] = (uint64_t)(h0 + h - (h > kEarlyTicks ? kEarlyTicks : h)) * KILO_TICK_MS * 1000u;
+  }
+}
+
+const char* GuardWatch::feed(uint64_t t_us, int16_t pitch_a16, int16_t roll_a16) {
+  if (t_ == nullptr || fired_) return nullptr;
+  char a[12], b[12], c[12];
+  int aroll = roll_a16 < 0 ? -roll_a16 : roll_a16;
+  if (t_->roll_max_a16 > 0 && aroll > t_->roll_max_a16) {
+    if (++over_ >= 2) {
+      fired_ = true;
+      format(why_, sizeof why_, "roll %s deg past %s", deg(a, roll_a16), deg(b, t_->roll_max_a16));
+      return why_;
+    }
+  } else {
+    over_ = 0;
+  }
+  for (uint8_t i = 0; i < n_; i++) {
+    if (done_[i]) continue;
+    const TrickGuard& g = t_->guards[i];
+    if (t_us >= from_us_[i] && t_us <= decide_us_[i]) {
+      if (aroll > g.roll_a16) {
+        done_[i] = fired_ = true;
+        format(why_, sizeof why_, "guard %s: roll %s deg past %s", g.name, deg(a, roll_a16), deg(b, g.roll_a16));
+        return why_;
+      }
+      sum_[i] += -pitch_a16;
+      count_[i]++;
+    } else if (t_us > decide_us_[i]) {
+      done_[i] = true;
+      if (count_[i] == 0) {
+        fired_ = true;
+        format(why_, sizeof why_, "guard %s: no TELEMETRY during its hold", g.name);
+        return why_;
+      }
+      int32_t avg = sum_[i] / (int32_t)count_[i];
+      if (avg < g.lo_a16 || avg > g.hi_a16) {
+        fired_ = true;
+        format(why_, sizeof why_, "guard %s: nose up %s deg outside %s..%s", g.name, deg(a, (int)avg),
+               deg(b, g.lo_a16), deg(c, g.hi_a16));
+        return why_;
+      }
+    }
+  }
+  return nullptr;
 }
 
 uint32_t KeyframeTimer::len() const {

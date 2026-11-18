@@ -56,6 +56,7 @@ uint32_t TrickPlayer::start(const Trick& trick, bool mirror, uint8_t speed_q6, c
   result_.has_expected = total_ticks(trick, speed_q6, &ticks);
   result_.expected_ticks = ticks;
   timeout_us_ = result_.has_expected ? (uint64_t)(ticks + 1) * KILO_TICK_MS * 1000u + kDoneMarginUs : 0;
+  watch_.reset(trick, speed_q6);
   return result_.play;
 }
 
@@ -153,6 +154,7 @@ void TrickPlayer::answered(uint8_t type, bool done, uint8_t status, uint64_t now
       if (ok) {
         step_ = Step::Playing;
         played_at_ = now;
+        seen_telemetry_ = link_.state().telemetry_count;
         logf(log_, LogLevel::Info, "trick %s: playing (id %u, speed %u/64%s)", trick_->name, tid_, speed_,
              mirror_ ? ", mirrored" : "");
         return;
@@ -237,6 +239,18 @@ void TrickPlayer::poll() {
       return;
     }
     case Step::Playing:
+      if (!done_seen_ && !watch_.fired() && link_.state().telemetry_count != seen_telemetry_) {
+        seen_telemetry_ = link_.state().telemetry_count;
+        const BodyState& st = link_.state();
+        uint64_t at = st.telemetry_at_us > played_at_ ? st.telemetry_at_us - played_at_ : 0;
+        const char* why = watch_.feed(at, st.telemetry.pitch, st.telemetry.roll);
+        if (why != nullptr) {
+          result_.guard = why;
+          logf(log_, LogLevel::Warn, "trick %s: %s: stopping", trick_->name, why);
+          stop_pending_ = true;
+          stop_ticks_ = stop_ticks();
+        }
+      }
       if (done_seen_) {
         finish(done_reason_, now);
       } else if (timeout_us_ != 0 && now - played_at_ > timeout_us_) {

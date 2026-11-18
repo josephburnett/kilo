@@ -88,3 +88,79 @@ class Player:
                         return True
         self.pos += self.speed
         return False
+
+
+# ---- the mind's guards (kilo.tricks.model.Guard, Trick.roll_max) ------------------------------
+GUARD_EARLY_TICKS = 2  # a guard decides this many ticks before its hold ends
+
+
+@dataclass
+class GuardWatch:
+    """What the mind checks while the body plays a trick: fed every
+    TELEMETRY as (seconds since TRICK_PLAY's ACK, nose up deg, roll deg),
+    it returns why the trick must be stopped (once), else None.
+
+    - Each Guard: over the second half of its frame's hold (at the play's
+      speed, by the body's timing) the nose-up readings must average
+      inside the window and every |roll| stay within roll_max; decided
+      GUARD_EARLY_TICKS before the hold ends. No reading there: stop.
+    - Trick.roll_max: |roll| past it on two readings in a row: stop.
+    kernel/mind/tricks/model.cpp GuardWatch does the same; the same cases
+    test both (mind/tests/test_rear_up.py test_guard_watch,
+    kernel/host/tests/test_tricks.cpp test_guard_watch)."""
+    trick: object
+    speed: int = SPEED_UNITY
+    windows: list = field(default_factory=list, init=False)  # (guard, t_from, t_decide)
+    sums: dict = field(default_factory=dict, init=False)     # guard index -> [sum, n]
+    done: set = field(default_factory=set, init=False)
+    over: int = field(default=0, init=False)
+    fired: str | None = field(default=None, init=False)
+
+    def __post_init__(self):
+        t = self.trick
+        frames = t.frames
+        starts = []
+        acc = 0
+        order = play_order(len(frames), t.loop_start, t.loop_end, t.repeats, max_plays=1)
+        first_hold = {}
+        for f in order:
+            acc += phase_ticks(frames[f].dur, self.speed)
+            if f not in first_hold:
+                first_hold[f] = acc
+            acc += phase_ticks(frames[f].hold, self.speed)
+        for i, g in enumerate(t.guards):
+            h0 = first_hold[g.frame]
+            h = phase_ticks(frames[g.frame].hold, self.speed)
+            self.windows.append((g, (h0 + h / 2) * TICK_S, (h0 + h - GUARD_EARLY_TICKS) * TICK_S))
+            self.sums[i] = [0.0, 0]
+
+    def feed(self, t_s: float, nose_up: float, roll: float) -> str | None:
+        if self.fired is not None:
+            return None
+        rm = getattr(self.trick, "roll_max", 0) or 0
+        self.over = self.over + 1 if rm and abs(roll) > rm else 0
+        if self.over >= 2:
+            return self._fire(f"roll {roll:+.1f} deg past {rm:g}")
+        for i, (g, t_from, t_dec) in enumerate(self.windows):
+            if i in self.done:
+                continue
+            if t_from <= t_s <= t_dec:
+                if abs(roll) > g.roll_max:
+                    self.done.add(i)
+                    return self._fire(f"guard {g.name or g.frame}: roll {roll:+.1f} deg past {g.roll_max:g}")
+                self.sums[i][0] += nose_up
+                self.sums[i][1] += 1
+            elif t_s > t_dec:
+                self.done.add(i)
+                s, n = self.sums[i]
+                if n == 0:
+                    return self._fire(f"guard {g.name or g.frame}: no TELEMETRY during its hold")
+                avg = s / n
+                if not g.nose_up[0] <= avg <= g.nose_up[1]:
+                    return self._fire(f"guard {g.name or g.frame}: nose up {avg:.1f} deg outside "
+                                      f"{g.nose_up[0]:g}..{g.nose_up[1]:g}")
+        return None
+
+    def _fire(self, why: str) -> str:
+        self.fired = why
+        return why

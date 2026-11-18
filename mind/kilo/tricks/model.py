@@ -81,6 +81,32 @@ class Trigger:
 
 
 @dataclass(frozen=True)
+class Guard:
+    """A check the MIND makes while the body plays a trick (mind-side only,
+    not on the wire): over the second half of frame ``frame``'s hold the
+    measured attitude (TELEMETRY: nose up = -pitch; roll, left side down +)
+    must average inside ``nose_up`` = (lo, hi) degrees, and |roll| must stay
+    at most ``roll_max``; otherwise the mind sends TRICK_STOP (over the
+    trick's stop_ticks, down to its end posture). The frame's hold must be
+    at least GUARD_MIN_HOLD ticks. ``name`` is for the logs."""
+    frame: int
+    nose_up: tuple
+    roll_max: float
+    name: str = ""
+
+    def to_dict(self) -> dict:
+        return {"frame": self.frame, "name": self.name, "nose_up": [_num(v) for v in self.nose_up],
+                "roll_max": _num(self.roll_max)}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Guard":
+        return cls(frame=d["frame"], nose_up=tuple(d["nose_up"]), roll_max=d["roll_max"], name=d.get("name", ""))
+
+
+GUARD_MIN_HOLD = 20  # ticks (0.4 s): the guard averages the second half of the hold
+
+
+@dataclass(frozen=True)
 class Keyframe:
     """One keyframe. `angles` has 16 slots in degrees, None = not driven by
     this frame (wire -128, "unchanged"). `dur` is ticks to move from the
@@ -192,6 +218,12 @@ class Trick:
     # must come down slowly when stopped (rear_up) sets it; the remotes
     # (ir.py, kernel/mind/remote) and BodyClient.play() use it.
     stop_ticks: int = 0
+    # Mind-side only: checks of the measured attitude while it plays (Guard),
+    # and a roll limit for the whole play (deg, 0 = none): past it on two
+    # TELEMETRY in a row the mind sends TRICK_STOP. kilo.body.client.play()
+    # and kernel/mind/tricks/player.cpp apply both.
+    guards: tuple = ()
+    roll_max: float = 0
     source: dict = field(default_factory=dict, compare=False)
     notes: tuple = field(default=(), compare=False)
 
@@ -199,6 +231,7 @@ class Trick:
         object.__setattr__(self, "frames", tuple(self.frames))
         object.__setattr__(self, "notes", tuple(self.notes))
         object.__setattr__(self, "end_posture", Posture(self.end_posture))
+        object.__setattr__(self, "guards", tuple(self.guards))
 
     # -- derived -----------------------------------------------------------
     @property
@@ -258,6 +291,18 @@ class Trick:
             out.append(f"stop_ticks {self.stop_ticks} outside 0..255")
         if self.joint_mask == 0:
             out.append("no joint is driven")
+        for g in self.guards:
+            tag = f"guard {g.name or g.frame}"
+            if not 0 <= g.frame < n:
+                out.append(f"{tag}: frame {g.frame} outside 0..{n - 1}")
+            elif self.frames[g.frame].hold < GUARD_MIN_HOLD:
+                out.append(f"{tag}: frame {g.frame}'s hold {self.frames[g.frame].hold} is under {GUARD_MIN_HOLD} ticks")
+            if not (len(g.nose_up) == 2 and -90 <= g.nose_up[0] < g.nose_up[1] <= 90):
+                out.append(f"{tag}: nose_up {g.nose_up} is not lo < hi within +-90")
+            if not 0 < g.roll_max <= 90:
+                out.append(f"{tag}: roll_max {g.roll_max} outside 0..90")
+        if not 0 <= self.roll_max <= 90:
+            out.append(f"roll_max {self.roll_max} outside 0..90")
         for i, f in enumerate(self.frames):
             if not 1 <= f.dur <= 255:
                 out.append(f"frame {i}: dur {f.dur} outside 1..255")
@@ -349,6 +394,8 @@ class Trick:
             "fall_ok": self.fall_ok,
             "end_posture": self.end_posture.name,
             **({"stop_ticks": self.stop_ticks} if self.stop_ticks else {}),
+            **({"guards": [g.to_dict() for g in self.guards]} if self.guards else {}),
+            **({"roll_max": _num(self.roll_max)} if self.roll_max else {}),
             "frames": [f.to_dict() for f in self.frames],
         }
 
@@ -363,6 +410,7 @@ class Trick:
                    balance=d.get("balance", False), fall_ok=d.get("fall_ok", False),
                    end_posture=Posture[d.get("end_posture", "STAND")],
                    stop_ticks=d.get("stop_ticks", 0),
+                   guards=tuple(Guard.from_dict(g) for g in d.get("guards", ())), roll_max=d.get("roll_max", 0),
                    source=d.get("source", {}), notes=tuple(d.get("notes", ())))
 
     def to_json(self) -> str:
