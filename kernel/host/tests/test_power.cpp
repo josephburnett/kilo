@@ -451,16 +451,16 @@ void test_metric_lines() {
     CHECKF(std::strlen(line) <= 200 && std::strlen(line) > 0, "line %u: %zu bytes", (unsigned)i, std::strlen(line));
     got.push_back(line);
   }
-  const std::string& p = got[9];
+  const std::string& p = got[11];
   CHECKF(p.find("power: state=awake ") == 0 && p.find(" sleeps=1 wakes=1 last_wake=key:B6 ") != std::string::npos &&
              p.find(" asleep_s=12") != std::string::npos && p.find("light_sleep=on") != std::string::npos,
          "%s", p.c_str());
-  CHECKF(got[10].find("power_hw: net=on net_device=yes net_saves=1 ") == 0 &&
-             got[10].find("arm_mhz=600 temp_c=41 throttled=0x0") != std::string::npos,
-         "%s", got[10].c_str());
-  CHECKF(got[11].find("battery: mv=7600 min_mv=7600 mv_per_min_1m=0.0 5m=0.0 ") == 0, "%s", got[11].c_str());
-  CHECKF(got[12].find("power_segments: asleep:12") == 0 && got[12].find("7600-7600mV:0.0") != std::string::npos,
+  CHECKF(got[12].find("power_hw: net=on net_device=yes net_saves=1 ") == 0 &&
+             got[12].find("arm_mhz=600 temp_c=41 throttled=0x0") != std::string::npos,
          "%s", got[12].c_str());
+  CHECKF(got[13].find("battery: mv=7600 min_mv=7600 mv_per_min_1m=0.0 5m=0.0 ") == 0, "%s", got[13].c_str());
+  CHECKF(got[14].find("power_segments: asleep:12") == 0 && got[14].find("7600-7600mV:0.0") != std::string::npos,
+         "%s", got[14].c_str());
 }
 
 }  // namespace
