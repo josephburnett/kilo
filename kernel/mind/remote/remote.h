@@ -36,7 +36,9 @@
 //   A7 is ignored ("frozen") until one of them is pressed.
 // - A5: start the behaviour runner (after stopping a walk and a trick as a
 //   posture key does). While it runs, B6, A7 and C7 stop it first and then
-//   do their own action, A5 again does nothing, every other key is ignored.
+//   do their own action, A5 again does nothing, every other key is ignored
+//   (but those the hook yields() to: the distance guard's sitting runner
+//   gives way to the walking keys; docs/distance-guard.md).
 // - B2 rear up (Kind::Trick, the trick rear_up, rear_up_2 or rear_up_3 by
 //   the stage, docs/rear-up-trick.md), only with the rear-up key switched
 //   on (keys.h set_rear_up_key, KILO_REAR_UP=1|2|3; off, B2 is a row 1-3
@@ -87,6 +89,9 @@ class BehaviourHook {
   }
   // Stop it now, leaving nothing it started running (its trick cancelled).
   virtual void stop() {}
+  // A key that stops it and then acts, like B6 / A7 (the distance guard's
+  // runner gives way to the walking keys: docs/distance-guard.md).
+  virtual bool yields(const Key& /*key*/) { return false; }
 
  protected:
   ~BehaviourHook() = default;

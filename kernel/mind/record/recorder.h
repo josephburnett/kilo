@@ -86,6 +86,8 @@ class Recorder final : public FrameTap, public planner::WalkObserver, public Log
   // A remote key's line: a MARK into the open runs (and remembered: a trick
   // started within 5 s of one is "by=remote").
   void key(const char* text);
+  // A MARK line into the stream, run or not (the distance guard's zone changes and actions).
+  void note(const char* line) { mark_line(line, clock_.now_us()); }
 
   // A run is open or in its post-roll.
   bool recording() const { return walk_ != 0 || trick_ != 0 || tail_end_us_ != 0; }

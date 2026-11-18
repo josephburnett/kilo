@@ -24,6 +24,7 @@ struct FakeBody {
   uint16_t dist_mm = 0;
   uint16_t batt_mv = 8000;
   bool telemetry_on = true;
+  bool eyes = false;  // HELLO caps EYES (the body firmware of 2026-11-17 on)
   uint64_t next_tel = 0;
   std::vector<Sent> sent;  // every frame the mind wrote
   // the ACK status for a command (return 0xFF: no answer)
@@ -36,6 +37,7 @@ struct FakeBody {
     h.joint_count = KILO_JOINT_COUNT;
     h.trick_capacity = KILO_TRICK_CAPACITY;
     h.epoch = epoch;
+    h.caps = eyes ? KILO_HELLO_CAPS_EYES : 0;
     serial.feed_frame(KILO_MSG_HELLO, seq++, &h, sizeof h);
   }
   void telemetry() {

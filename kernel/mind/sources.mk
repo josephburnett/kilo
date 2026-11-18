@@ -58,6 +58,8 @@ MIND_SRCS += \
 	mind/behaviour/selector.cpp \
 	mind/behaviour/library.cpp \
 	mind/behaviour/runner.cpp \
+	mind/behaviour/alive.cpp \
+	mind/guard/guard.cpp \
 	mind/remote/client.cpp \
 	mind/remote/keys.cpp \
 	mind/remote/remote.cpp \

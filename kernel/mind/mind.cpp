@@ -6,6 +6,7 @@
 #include "util/fmt.h"
 #include "util/log.h"
 #include "util/mem.h"
+#include "util/str.h"
 
 namespace kilo {
 
@@ -36,6 +37,8 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
       runner_(body_, personality(cfg), log_, cfg.seed),
       runner_hook_(*this),
       remote_(link_, walker_, player_, clock, log_),
+      guard_(link_, walker_, clock, log_),
+      alive_(link_, player_, log_, cfg.seed),
       recorder_(clock, link_) {
   remote::set_rear_up_key(cfg.rear_up_key);
   link_.set_listener(this);
@@ -44,6 +47,9 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
   remote_.set_trick_notes(this);
   recorder_.set_metrics(&metrics_);
   host_.attach_metrics(*this);
+  host_.attach_guard(guard_);
+  guard_.set_host(this);
+  guard_.set_enabled(cfg.guard);
   if (cfg.random != nullptr) host_.set_keys(cfg.authorized_keys, cfg.authorized_key_count, *cfg.random);
   runner_.set_clock(seconds, this);
   runner_.set_percept_source(&body_);
@@ -105,6 +111,8 @@ void Mind::start() {
     logf(log_, LogLevel::Info, "behaviour runner: seed %u, personality %s", (unsigned)cfg_.seed,
          personality(cfg_).name);
   if (cfg_.remote) logf(log_, LogLevel::Info, "IR remote on");
+  logf(log_, LogLevel::Info, "distance guard %s (BLUE from %d mm standing, RED below %d mm; docs/distance-guard.md)",
+       guard_.enabled() ? "on" : "off", (int)guard::kBlueMinMm, (int)guard::kRedMm);
   if (saver_ != nullptr && cfg_.record_save) saver_->set_mode(1);
   link_.connect();
 }
@@ -144,6 +152,12 @@ void Mind::poll() {
   player_.poll();
   if (cfg_.remote) remote_.poll();
   if (behaviour_on_) runner_.poll((double)clock_.now_us() / 1e6);
+  {
+    const behaviour::Choice* c = runner_.record().choice;
+    bool calm = c != nullptr && (c->chosen == behaviour::kIdle || c->chosen == behaviour::kExplore);
+    alive_.poll((double)clock_.now_us() / 1e6, behaviour_active() && !host_controls(), calm, head_held(2));
+  }
+  guard_.poll();
   recorder_.poll(player_);
   card_safe_ = safe_for_card(clock_.now_us());
   if (saver_ != nullptr) saver_->poll(card_safe_, body_limp());
@@ -185,6 +199,7 @@ void Mind::on_hello(const kilo_hello_t& hello, bool solicited) {
 
 void Mind::on_telemetry(const kilo_telemetry_t& t) {
   walker_.on_telemetry(t);
+  guard_.on_telemetry(t, head_held(4));
   if (t.batt_mv != 0 && !(t.flags & KILO_TELEMETRY_FLAGS_NO_BATTERY)) {
     metrics_.battery_mv = t.batt_mv;
     if (metrics_.battery_min_mv == 0 || t.batt_mv < metrics_.battery_min_mv) metrics_.battery_min_mv = t.batt_mv;
@@ -260,7 +275,19 @@ void Mind::ir_key(const kilo_event_t& e) {
     metrics_.keys_laptop++;
     return;
   }
+  if (guard_.holds() && forward_key(*key)) {  // the distance guard: only the safe directions
+    char why[96];
+    format(why, sizeof why, "remote %s: refused (distance guard %s: %s, %d mm ahead; turn, back up or B6)", text,
+           guard::action_name(guard_.action()), guard::zone_name(guard_.zone()),
+           guard_.filter().has() ? (int)guard_.filter().mm() : -1);
+    logf(log_, LogLevel::Info, "%s", why);
+    recorder_.note(why);
+    guard_.count_refused();
+    metrics_.refusals.add("guard forward key");
+    return;
+  }
   metrics_.keys_acted++;
+  guard_.key_took_over();  // a key the guard lets through overrides what it was doing (it keeps holding)
   recorder_.key(text);  // into a trick or walk run: which key stopped it
   remote_.perform(*key, arg);
 }
@@ -276,7 +303,7 @@ void named(char* out, uint32_t n, size_t* len, const record::NamedCounts& c) {
 
 }  // namespace
 
-uint32_t Mind::metric_lines() { return 9; }
+uint32_t Mind::metric_lines() { return 11; }
 
 void Mind::metric_line(uint32_t i, char* out, uint32_t n) {
   const record::Metrics& m = metrics_;
@@ -351,9 +378,58 @@ void Mind::metric_line(uint32_t i, char* out, uint32_t n) {
              (unsigned)st.writes, (unsigned)st.write_max_us, (unsigned)st.slow_writes, (unsigned)st.card_errors);
       return;
     }
+    case 9:
+      guard_.metrics_line(out, n);
+      return;
+    case 10:
+      alive_.metrics_line(out, n);
+      return;
     default:
       return;
   }
+}
+
+// ---- the distance guard ---------------------------------------------------------------------
+
+// The SET_HEAD goal's pan (field 2) or tilt (field 4), degrees; 0 when not held.
+double Mind::head_held(int field) const {
+  const Goal* g = const_cast<SerialLink&>(link_).goal(KILO_MSG_SET_HEAD);
+  if (g == nullptr || g->payload[1] != KILO_HEAD_MODE_HOLD) return 0;
+  int16_t v = (int16_t)(g->payload[field] | (g->payload[field + 1] << 8));
+  return v == KILO_HEAD_NOT_HELD ? 0 : (double)v / 16.0;
+}
+
+// A key that would walk forward now (remote.h): the gait keys (start forward, or straight forward
+// from a turn or from backward), and B7 while walking straight forward or from -1 to +1.
+bool Mind::forward_key(const remote::Key& key) const {
+  if (key.kind == remote::Kind::Gait) return true;
+  if (key.kind != remote::Kind::Speed || !str_eq(key.name, "faster")) return false;
+  planner::Direction d;
+  if (!remote_.direction(&d) || remote_.heading() != remote::Heading::Straight) return false;
+  return remote_.level() > 0 || remote_.level() == -1;
+}
+
+bool Mind::may_act() {
+  const BodyState& b = link_.state();
+  bool trick = player_.busy() || (b.has_telemetry && b.telemetry.mode == KILO_MODE_TRICK);
+  return !host_controls() && !paused_ && !trick && !percepts_.picked_up();
+}
+
+// BLUE (after the stop) and RED (after backing off): sit, and the behaviour runner's sitting variant.
+void Mind::sit_and_behave() {
+  sitting_variant_ = true;
+  if (behaviour_active()) {
+    runner_.context().data.forget_goals();  // the tree re-asserts its posture, now as a sit
+    bool ok = client_posture(link_, &walker_, "sit");
+    logf(log_, LogLevel::Info, "guard: the behaviour runner goes on sitting%s", ok ? "" : " (SIT refused)");
+    return;
+  }
+  const char* what = nullptr;
+  bool ok = runner_hook_.start(&what);
+  runner_by_guard_ = ok;
+  if (ok) client_posture(link_, &walker_, "sit");
+  logf(log_, ok ? LogLevel::Info : LogLevel::Warn, "guard: behaviour runner %s (sitting variant%s%s)",
+       ok ? "started" : "not started", what != nullptr ? ": " : "", what != nullptr ? what : "");
 }
 
 // ---- the behaviour runner, as the remote starts and stops it --------------------------------
@@ -374,7 +450,19 @@ bool Mind::RunnerHook::start(const char** what) {
   return true;
 }
 
-void Mind::RunnerHook::stop() { m_.runner_.stop(); }
+void Mind::RunnerHook::stop() {
+  m_.runner_.stop();
+  m_.alive_.stop();
+  m_.sitting_variant_ = false;
+  m_.runner_by_guard_ = false;
+}
+
+// The runner the guard started gives way to the walking keys (turn, back up; a forward key the guard
+// refuses before it gets here), so Kilo can be steered away from what stopped him.
+bool Mind::RunnerHook::yields(const remote::Key& key) {
+  return m_.runner_by_guard_ && (key.kind == remote::Kind::Gait || key.kind == remote::Kind::Turn ||
+                                 key.kind == remote::Kind::Speed);
+}
 
 // ---- the behaviour layer's body -------------------------------------------------------------
 
@@ -399,6 +487,11 @@ void Mind::Body::snapshot(behaviour::Snapshot& out) {
 
 bool Mind::Body::posture(const char* name, int8_t balance) {
   m_.percepts_.notify_self_motion(seconds(&m_), kPostureMoveS);
+  if (m_.sitting_variant_ && (str_eq(name, "stand") || str_eq(name, "balance") || str_eq(name, "stance"))) {
+    logf(m_.log_, LogLevel::Info, "behaviour: posture %s: sit (the sitting variant)", name);
+    name = "sit";
+    balance = -1;
+  }
   bool ok = client_posture(m_.link_, &m_.walker_, name, balance);
   logf(m_.log_, ok ? LogLevel::Info : LogLevel::Warn, "behaviour: posture %s%s%s", name, balance == 1 ? " +balance" : "",
        ok ? "" : ": refused");

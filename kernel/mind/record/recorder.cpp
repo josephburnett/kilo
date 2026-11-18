@@ -168,7 +168,14 @@ void Recorder::poll(const tricks::TrickPlayer& p) {
   const tricks::PlayResult& r = p.result();
   if (r.play != 0 && r.play != trick_play_) {  // a new play
     if (trick_ != 0) end_trick("FAILED", "another play began", 0, 0, now);
-    begin_trick(p, now);
+    const tricks::Trick* t = p.trick();
+    if (t != nullptr && t->name[0] == 'a' && t->name[1] == 'l' && t->name[2] == 'i' && t->name[3] == 'v' &&
+        t->name[4] == 'e') {  // the alive layer's small sitting moves (behaviour/alive.h): a MARK, not a run
+      trick_play_ = r.play;
+      mark_line("alive trick=alive_sit", now);
+    } else {
+      begin_trick(p, now);
+    }
   }
   if (trick_ != 0) {
     if (r.uploaded && !upload_marked_) {

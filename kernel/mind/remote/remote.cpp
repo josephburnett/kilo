@@ -184,7 +184,7 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
       done("behaviour runner already running", false);
       return;
     }
-    if (!stop_key(key)) {
+    if (!stop_key(key) && !behaviour_->yields(key)) {
       done("ignored (behaviour runner active)", false);
       return;
     }

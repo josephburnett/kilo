@@ -61,6 +61,8 @@ TESTS += test_tricks test_perception test_behaviour test_remote test_mind
 TESTS += test_record
 # The mDNS responder (net/mdns.h): what it answers, to whom, its probes and announcements.
 TESTS += test_mdns
+# The distance guard and the alive layer (guard/, behaviour/alive): a walk at a wall in the Mind.
+TESTS += test_guard
 
 .PHONY: all check bench freestanding clean
 all: $(B)/kilo-mind-host $(B)/walk-demo
@@ -184,11 +186,14 @@ clean:
 # the drives' arousal decay needs exp, their optional gaussian noise log, sin
 # and cos (GCC fuses the pair into sincos). Circle links libm, which has them.
 ALLOWED += exp log sin cos sincos
-# The remote, the flight recorder (and the host server that serves it) and the Mind use the planner's float types:
+# The remote, the flight recorder (and the host server that serves it), the distance guard, the alive layer
+# and the Mind use the planner's float types:
 # the double-planner builds (the vector test's twin, the bench) leave them out
 # (their recipes expand these at run time).
-DBL_OBJS := $(filter-out $(B)/san/mind/remote/% $(B)/san/mind/record/% $(B)/san/mind/net/host_% $(B)/san/mind/mind.o,$(DBL_OBJS))
-BENCH_DBL_OBJS := $(filter-out $(B)/obj/mind/remote/% $(B)/obj/mind/record/% $(B)/obj/mind/net/host_% $(B)/obj/mind/mind.o,$(BENCH_DBL_OBJS))
+DBL_OBJS := $(filter-out $(B)/san/mind/remote/% $(B)/san/mind/record/% $(B)/san/mind/net/host_% $(B)/san/mind/mind.o \
+                          $(B)/san/mind/guard/% $(B)/san/mind/behaviour/alive.o,$(DBL_OBJS))
+BENCH_DBL_OBJS := $(filter-out $(B)/obj/mind/remote/% $(B)/obj/mind/record/% $(B)/obj/mind/net/host_% $(B)/obj/mind/mind.o \
+                                $(B)/obj/mind/guard/% $(B)/obj/mind/behaviour/alive.o,$(BENCH_DBL_OBJS))
 
 # ---- finding Kilo by name (net/mdns.h) ----------------------------------------------------
 # The responder on a loopback UDP port, for test.sh's `kilo find --ask`.
