@@ -375,8 +375,9 @@ def test_contract_d_goals():
     assert s.send("SET_POSTURE", epoch=9, posture=P.Posture.SIT) == []
     assert s.send("SET_POSTURE", epoch=9, posture=P.Posture.REST) == []  # REST is never stale
     assert s.vb.posture == "REST"
-    cls = P.MESSAGES[M.SET_EYES]
-    assert events(s.raw(cls.ID, cls().pack())) == [refused(cls.ID, R.UNKNOWN_TYPE)]
+    cls = P.MESSAGES[M.SET_EYES]  # the eyes (2026-11-17): kept, never refused
+    assert events(s.raw(cls.ID, cls(led_mask=0x3F, g=0x30).pack())) == []
+    assert s.vb.eyes == (0x3F, 0, 0x30, 0)
     # SET_BODY_POSE is accepted; FEET (a stream: never acked) is refused STALE for another epoch
     assert events(s.raw(M.SET_BODY_POSE, P.SetBodyPose().pack())) == []
     assert events(s.raw(M.FEET, P.Feet(epoch=9, tick=s.vb.tick + 2, z_mm=[76] * 4).pack())) == [
