@@ -166,6 +166,14 @@ expect "$OUT/cli_status.txt" "firmware +proto 2\.[0-9]+ +build 45524f43" "status
 expect "$OUT/cli_status.txt" "link +connected=True alive=True" "status: the link alive"
 KPY -m kilo.cli status --host "$H" --json > "$OUT/cli_status.json"
 expect "$OUT/cli_status.json" '"mind_build": "[0-9a-f]{8}"' "status --json: the mind build"
+expect "$OUT/cli_status.txt" "^guard +on +zone (green|blue|red)" "status: the distance guard's line"
+KPY -m kilo.cli guard off --host "$H" > "$OUT/cli_guard_off.txt"
+KPY -m kilo.cli guard --host "$H" --json > "$OUT/cli_guard.json"
+KPY -m kilo.cli guard on --host "$H" > "$OUT/cli_guard_on.txt"
+expect "$OUT/cli_guard_off.txt" "^guard +OFF" "kilo guard off --host"
+expect "$OUT/cli_guard.json" '"enabled": 0' "kilo guard --json: still off"
+expect "$OUT/cli_guard_on.txt" "^guard +on" "kilo guard on --host"
+expect "$OUT/host_listen.log" "distance guard off" "the mind logs the guard switched"
 expect "$OUT/host_listen.log" "noise: client [0-9]+: handshake with key [0-9a-f]{16} \(test@kernel-host\) in [0-9]+\.[0-9] ms, slowest step [0-9]+ us" \
     "the mind's handshake line"
 grep -o "noise: client [0-9]*: handshake .*" "$OUT/host_listen.log" | head -1 | sed 's/^/   /'

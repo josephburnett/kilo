@@ -1,4 +1,4 @@
-// LINK: src/core/*.cpp src/hal/uart.cpp src/hal/i2c.cpp src/hal/mpu6050.cpp src/hal/pca9685.cpp src/hal/sys.cpp src/hal/eeprom.cpp src/hal/adc.cpp src/hal/buzzer.cpp src/hal/ir.cpp src/hal/pcint2.cpp src/hal/ultrasonic.cpp src/app/link_hal.cpp
+// LINK: src/core/*.cpp src/hal/uart.cpp src/hal/i2c.cpp src/hal/mpu6050.cpp src/hal/pca9685.cpp src/hal/sys.cpp src/hal/eeprom.cpp src/hal/adc.cpp src/hal/buzzer.cpp src/hal/ir.cpp src/hal/pcint2.cpp src/hal/ultrasonic.cpp src/app/link_hal.cpp src/hal/eyes.cpp
 //
 // app/main.cpp, the whole firmware on the fake AVR: every hal/ and core/
 // source as built for Kilo except hal/clock.cpp, replaced by a virtual clock
@@ -177,7 +177,7 @@ int main() {
     kilo_hello_t h;
     CHECK(hello(&h));
     CHECK(h.reset_cause == RESET_COLD && h.fw_build == FW_BUILD);
-    CHECK(h.caps == (KILO_HELLO_CAPS_BUZZER | KILO_HELLO_CAPS_DMP | KILO_HELLO_CAPS_ULTRASONIC | KILO_HELLO_CAPS_IR));
+    CHECK(h.caps == (KILO_HELLO_CAPS_BUZZER | KILO_HELLO_CAPS_DMP | KILO_HELLO_CAPS_ULTRASONIC | KILO_HELLO_CAPS_IR | KILO_HELLO_CAPS_EYES));
     int16_t arg = -1;
     CHECK(events(KILO_EVENT_BOOT, &arg) == 1 && arg == RESET_COLD);
     CHECK(events(KILO_EVENT_CONFIG_DEFAULTED) == 1);  // blank EEPROM, no legacy data

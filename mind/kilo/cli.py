@@ -171,6 +171,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("pca", help="read back the 16 PCA9685 OFF counts (PCA_READ)")
 
+    s = sub.add_parser("guard", help="the distance guard of a C++ mind over --host: on, off, or how it stands "
+                                     "(docs/distance-guard.md)")
+    s.add_argument("mode", nargs="?", choices=["on", "off", "status"], default="status")
+    s.add_argument("--json", action="store_true")
+
     s = sub.add_parser("reboot", help="restart a C++ mind over --host: the body gets REST, then the Pi reboots "
                                       "(on the netboot card: the loader waits for the next kernel)")
 

@@ -70,6 +70,7 @@
 #include <stdint.h>
 #include "flash/flasher.h"
 #include "flash/image.h"
+#include "guard/guard.h"
 #include "link/serial_link.h"
 #include "net/authorized_keys.h"
 #include "net/host_frame.h"
@@ -147,6 +148,8 @@ class HostServer final : public record::BenchSink {
   void attach_saver(record::Saver& saver) { saver_ = &saver; }
   // METRICS_REQ's lines.
   void attach_metrics(record::MetricsSource& m) { metrics_ = &m; }
+  // GUARD -> GUARD_STATUS: the distance guard (any client).
+  void attach_guard(guard::DistanceGuard& g) { guard_ = &g; }
   // record::BenchSink: REC_BENCH's results, to the client that asked.
   void bench_result(const kilo_host_bench_result_t& r) override;
   // The laptops' public keys a connection may name (they outlive the
@@ -326,6 +329,7 @@ class HostServer final : public record::BenchSink {
   const record::Recorder* rec_ = nullptr;  // attach_recorder()
   record::Saver* saver_ = nullptr;         // attach_saver()
   record::MetricsSource* metrics_ = nullptr;
+  guard::DistanceGuard* guard_ = nullptr;
   int32_t bench_client_ = -1;
 };
 

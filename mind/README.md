@@ -173,7 +173,9 @@ never overwritten), `kilo key show` prints the line for
 another key file (`kilo.hostkey`). The handshake and the encrypted records
 are `kilo.hostsecure`, on the `noiseprotocol` package. It serves `status`, `posture NAME [--transition T] [--for
 S]`, `monitor [--rate HZ] [--duration S] [--json]`, `kilo log --host`,
-`flash`, `reboot`, `update` and `walks` (the walk recordings, see Logs);
+`flash`, `reboot`, `update`, `walks` (the walk recordings, see Logs) and
+`guard [on|off|status]` (the distance guard, `docs/distance-guard.md`; its
+zone, the eye colour and its counters are also in `status`);
 every other command says it is not available over --host yet. `posture`
 takes control of the mind (one controller at a time; other clients only
 watch) and gives it back at the end, and the mind then latches REST, as the
@@ -580,6 +582,19 @@ the behaviour runner (after stopping a walk and a trick): while it runs, B6,
 A7 and C7 stop it and then do their own action, A5 again does nothing, and
 the other keys are ignored; `--behaviour` still starts it at boot, and
 without it the runner is off until A5.
+
+In the C++ mind (on Kilo), A5's behaviour also moves the body a little
+(`kernel/mind/behaviour/alive.h`): standing, slow weight shifts, leans,
+height changes, a shoulder dip, a sway, a lean toward where the head looks
+and now and then a stretch, all on four feet within a few degrees and mm;
+sitting, small leg and tail moves (a lean, a shoulder dip, the hips, a
+sway, a stretch of the front legs) played as short tricks from SIT and back.
+Seeded by the runner's seed, a 1.5-6 s pause between moves, never the same
+move twice in a row; B6, A7 and C7 stop them with the runner. The head's
+glances reach a little further than before (personality.yaml: idle 40° pan,
+20° tilt; explore 70°, 30°). The distance guard (`docs/distance-guard.md`)
+stops a forward walk that gets too close, sits Kilo and starts this
+behaviour in its sitting form; while it holds, forward keys are refused.
 
 Repeats (a held key) are ignored. Every key leaves one line in the daemon's
 log, `remote <grid> (0x.., <what the key does>): <outcome>`, for example

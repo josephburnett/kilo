@@ -70,6 +70,11 @@ void link_hal_imu_offsets(const int16_t offsets[6]) {
 
 void link_hal_reboot(void) { g_lh.reboots++; }
 
+void link_hal_eyes(const uint8_t* p) {
+  std::memcpy(g_lh.eyes, p, sizeof g_lh.eyes);
+  g_lh.eyes_shown++;
+}
+
 std::vector<uint8_t> unhex(const std::string& s) {
   std::vector<uint8_t> v;
   for (size_t i = 0; i + 1 < s.size(); i += 2) v.push_back((uint8_t)std::stoi(s.substr(i, 2), nullptr, 16));

@@ -22,6 +22,7 @@ in protocol/spec.toml ``[host]`` and ``[[host_messages]]``; the dataclasses
     hl.rec_fetch(from_ms, to_ms, boot=0)        # the blocks of a time range (REC_FETCH), bytes
     hl.rec_fetch(0, 0xFFFFFFFF, boot=6, what=P.RecFetchWhat.LOG)   # boot 6's saved log, text bytes
     hl.metrics()                                # [str]: the session metrics lines (METRICS_REQ)
+    hl.guard(mode)                              # the distance guard: 0 off, 1 on, 2 ask (GUARD_STATUS)
     hl.bench(count=32)                          # [P.HostBenchResult]: the SD card's write times (controller)
     hl.rec_save(1); hl.rec_delete(boot)         # the card saver on; earlier boots' recordings off the card
     hl.close()                                  # the mind latches REST if this was the controller
@@ -378,6 +379,13 @@ class HostLink:
             out.append(bytes(r.text).decode("ascii", "replace"))
             i += 1
         return out
+
+    def guard(self, mode: int = 2) -> Any:
+        """GUARD: 0 off, 1 on, 2 only ask. P.HostGuardStatus (HostRefused UNKNOWN_TYPE from a mind without it)."""
+        r = self.command(P.HostGuard(mode=int(mode)))
+        if not isinstance(r, P.HostGuardStatus):
+            raise HostError(f"GUARD: unexpected reply {type(r).__name__}")
+        return r
 
     def bench(self, count: int = 32, timeout: float = BENCH_TIMEOUT_S,
               on_result: Callable[[Any], None] | None = None) -> list[Any]:

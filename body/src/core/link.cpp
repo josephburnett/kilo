@@ -198,9 +198,9 @@ static void goal(uint8_t t, const uint8_t* p) {
       // A full queue drops the rest: BEEP is sent once, not refreshed.
       for (uint8_t i = 0; i < p[0]; i++) notes_push(B->notes, (int8_t)p[1 + 2 * i], p[2 + 2 * i]);
       return;
-    default:
-      // SET_EYES.
-      refuse(t, KILO_GOAL_REFUSED_REASON_UNKNOWN_TYPE);
+    default:  // SET_EYES (the only other goal that passes the length check)
+      link_hal_eyes(p);
+      return;
   }
 }
 

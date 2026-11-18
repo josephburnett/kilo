@@ -375,6 +375,19 @@ enum kilo_record_card_state {
     KILO_RECORD_CARD_STATE_FAILED = 5,
 };
 
+enum kilo_guard_zone {
+    KILO_GUARD_ZONE_GREEN = 0,
+    KILO_GUARD_ZONE_BLUE = 1,
+    KILO_GUARD_ZONE_RED = 2,
+};
+
+enum kilo_guard_action {
+    KILO_GUARD_ACTION_WATCH = 0,
+    KILO_GUARD_ACTION_STOPPING = 1,
+    KILO_GUARD_ACTION_BACKING = 2,
+    KILO_GUARD_ACTION_HOLDING = 3,
+};
+
 enum kilo_rec_fetch_what {
     KILO_REC_FETCH_WHAT_BLOCKS = 0,
     KILO_REC_FETCH_WHAT_LOG = 1,
@@ -1508,6 +1521,7 @@ enum kilo_host_msg_id {
     KILO_HOST_MSG_REC_BENCH = 0x55,
     KILO_HOST_MSG_REC_SAVE = 0x56,
     KILO_HOST_MSG_REC_DELETE = 0x57,
+    KILO_HOST_MSG_GUARD = 0x58,
     KILO_HOST_MSG_RESULT = 0x80,
     KILO_HOST_MSG_STATUS = 0x81,
     KILO_HOST_MSG_TELEM = 0x82,
@@ -1518,6 +1532,7 @@ enum kilo_host_msg_id {
     KILO_HOST_MSG_REC_STATUS = 0x87,
     KILO_HOST_MSG_METRICS = 0x88,
     KILO_HOST_MSG_BENCH_RESULT = 0x89,
+    KILO_HOST_MSG_GUARD_STATUS = 0x8A,
     KILO_HOST_MSG_FLASH_STATUS = 0xC0,
     KILO_HOST_MSG_UPDATE_STATUS = 0xC1,
 };
@@ -1728,6 +1743,14 @@ typedef struct KILO_PACKED kilo_host_rec_delete_s {
 } kilo_host_rec_delete_t;
 KILO_STATIC_ASSERT(sizeof(kilo_host_rec_delete_t) == 4, kilo_sa_host_rec_delete_size);
 KILO_STATIC_ASSERT(offsetof(kilo_host_rec_delete_t, boot) == 0, kilo_sa_host_rec_delete_boot);
+
+/* host 0x58 GUARD: command. The distance guard: mode 0 off, 1 on, 2 only ask. Answered by GUARD_STATUS. Any client (it moves nothing; kilo guard on|off --host). */
+#define KILO_HOST_GUARD_LEN 1u
+typedef struct KILO_PACKED kilo_host_guard_s {
+    uint8_t mode; /* range 0..2 */
+} kilo_host_guard_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_guard_t) == 1, kilo_sa_host_guard_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_guard_t, mode) == 0, kilo_sa_host_guard_mode);
 
 /* host 0x80 RESULT: event. The answer to a command without a reply message of its own, and to any refused command: its seq, its type, a code and a short reason. */
 #define KILO_HOST_RESULT_MIN_LEN 2u
@@ -1969,6 +1992,40 @@ KILO_STATIC_ASSERT(offsetof(kilo_host_bench_result_t, sync_us) == 19, kilo_sa_ho
 KILO_STATIC_ASSERT(offsetof(kilo_host_bench_result_t, close_us) == 23, kilo_sa_host_bench_result_close_us);
 KILO_STATIC_ASSERT(offsetof(kilo_host_bench_result_t, remove_us) == 27, kilo_sa_host_bench_result_remove_us);
 
+/* host 0x8A GUARD_STATUS: event, reply to GUARD. The distance guard (docs/distance-guard.md): on or off, the zone, what it does, the eye colour, the filtered and the last raw range, the thresholds at the speed now, and its counters since boot. */
+#define KILO_HOST_GUARD_STATUS_LEN 31u
+typedef struct KILO_PACKED kilo_host_guard_status_s {
+    uint8_t enabled; /* 1 on (the kernel's default), 0 off */
+    uint8_t zone; /* enum guard_zone */
+    uint8_t action; /* enum guard_action */
+    uint8_t eyes; /* enum guard_zone; the eye colour the mind asks for (green, blue, red) */
+    uint8_t eyes_driven; /* 1: SET_EYES goes to the body (HELLO caps EYES); 0: the firmware has no eyes */
+    uint16_t dist_mm; /* mm; filtered range; 0 = none (no echo, or the readings ignored) */
+    uint16_t raw_mm; /* mm; the last fresh reading as the body sent it (0 = no echo) */
+    uint16_t blue_mm; /* mm; BLUE below this, at the speed now */
+    uint16_t red_mm; /* mm */
+    uint16_t speed_mm_s; /* mm/s; the forward walk's speed the thresholds use (0: not walking forward) */
+    uint32_t zone_changes;
+    uint32_t stops; /* walks stopped at BLUE */
+    uint32_t pullbacks; /* walks backed off at RED */
+    uint32_t refused; /* forward keys refused while it held */
+} kilo_host_guard_status_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_guard_status_t) == 31, kilo_sa_host_guard_status_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, enabled) == 0, kilo_sa_host_guard_status_enabled);
+KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, zone) == 1, kilo_sa_host_guard_status_zone);
+KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, action) == 2, kilo_sa_host_guard_status_action);
+KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, eyes) == 3, kilo_sa_host_guard_status_eyes);
+KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, eyes_driven) == 4, kilo_sa_host_guard_status_eyes_driven);
+KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, dist_mm) == 5, kilo_sa_host_guard_status_dist_mm);
+KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, raw_mm) == 7, kilo_sa_host_guard_status_raw_mm);
+KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, blue_mm) == 9, kilo_sa_host_guard_status_blue_mm);
+KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, red_mm) == 11, kilo_sa_host_guard_status_red_mm);
+KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, speed_mm_s) == 13, kilo_sa_host_guard_status_speed_mm_s);
+KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, zone_changes) == 15, kilo_sa_host_guard_status_zone_changes);
+KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, stops) == 19, kilo_sa_host_guard_status_stops);
+KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, pullbacks) == 23, kilo_sa_host_guard_status_pullbacks);
+KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, refused) == 27, kilo_sa_host_guard_status_refused);
+
 /* host 0xC0 FLASH_STATUS: stream. Progress of a flash, to the client that committed it: on every phase change and page, last DONE or FAILED. */
 #define KILO_HOST_FLASH_STATUS_LEN 21u
 typedef struct KILO_PACKED kilo_host_flash_status_s {
@@ -2071,6 +2128,8 @@ static inline uint8_t kilo_host_payload_len_check(uint8_t type, uint16_t len)
         return len == 1u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_REC_DELETE:
         return len == 4u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_GUARD:
+        return len == 1u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_RESULT:
         return (len >= 2u && len <= 62u) ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_STATUS:
@@ -2090,6 +2149,8 @@ static inline uint8_t kilo_host_payload_len_check(uint8_t type, uint16_t len)
     case KILO_HOST_MSG_METRICS:
         return (len >= 2u && len <= 202u) ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_BENCH_RESULT:
+        return len == 31u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_GUARD_STATUS:
         return len == 31u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_FLASH_STATUS:
         return len == 21u ? KILO_LEN_OK : KILO_LEN_BAD;
@@ -2126,6 +2187,7 @@ static inline uint8_t kilo_host_msg_kind(uint8_t type)
     case KILO_HOST_MSG_REC_BENCH:
     case KILO_HOST_MSG_REC_SAVE:
     case KILO_HOST_MSG_REC_DELETE:
+    case KILO_HOST_MSG_GUARD:
         return KILO_KIND_COMMAND;
     case KILO_HOST_MSG_KEEPALIVE:
     case KILO_HOST_MSG_BRIDGE_TX:
@@ -2144,6 +2206,7 @@ static inline uint8_t kilo_host_msg_kind(uint8_t type)
     case KILO_HOST_MSG_WALK_INFO:
     case KILO_HOST_MSG_REC_STATUS:
     case KILO_HOST_MSG_METRICS:
+    case KILO_HOST_MSG_GUARD_STATUS:
         return KILO_KIND_EVENT;
     default:
         return KILO_KIND_UNKNOWN;
@@ -2162,6 +2225,8 @@ static inline uint8_t kilo_host_query_reply(uint8_t type)
         return KILO_HOST_MSG_REC_STATUS;
     case KILO_HOST_MSG_METRICS_REQ:
         return KILO_HOST_MSG_METRICS;
+    case KILO_HOST_MSG_GUARD:
+        return KILO_HOST_MSG_GUARD_STATUS;
     default:
         return 0u;
     }

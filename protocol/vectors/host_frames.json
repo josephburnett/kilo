@@ -1015,6 +1015,47 @@
    "payload": "ffffffff",
    "wire": "0800571bffffffffafc7",
    "note": "every earlier boot's recordings"
+  },
+  {
+   "name": "guard_off",
+   "msg": "GUARD",
+   "type": 88,
+   "dir": "client_to_mind",
+   "kind": "command",
+   "seq": 28,
+   "fields": {
+    "mode": 0
+   },
+   "payload": "00",
+   "wire": "0500581c00ed7d",
+   "note": "the distance guard off"
+  },
+  {
+   "name": "guard_status",
+   "msg": "GUARD_STATUS",
+   "type": 138,
+   "dir": "mind_to_client",
+   "kind": "event",
+   "seq": 28,
+   "fields": {
+    "enabled": 1,
+    "zone": 1,
+    "action": 3,
+    "eyes": 1,
+    "eyes_driven": 1,
+    "dist_mm": 287,
+    "raw_mm": 291,
+    "blue_mm": 316,
+    "red_mm": 150,
+    "speed_mm_s": 180,
+    "zone_changes": 4,
+    "stops": 1,
+    "pullbacks": 0,
+    "refused": 2
+   },
+   "payload": "01010301011f0123013c019600b40004000000010000000000000002000000",
+   "wire": "23008a1c01010301011f0123013c019600b40004000000010000000000000002000000855d",
+   "note": "holding after a stop at BLUE"
   }
  ],
  "errors": [

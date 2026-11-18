@@ -49,7 +49,9 @@
 #ifndef KILO_MIND_MIND_H
 #define KILO_MIND_MIND_H
 #include <stdint.h>
+#include "behaviour/alive.h"
 #include "behaviour/runner.h"
+#include "guard/guard.h"
 #include "link/serial_link.h"
 #include "net/host_server.h"
 #include "perception/percepts.h"
@@ -77,6 +79,7 @@ struct MindConfig {
   uint32_t stats_period_ms = 0;  // > 0: STATS_REQ this often, the answer logged ("body STATS: ...")
   bool record_save = false;     // the card saver on from the start (KILO_RECORD_SAVE; the card's SAVE_ON also turns it on)
   bool light_sleep = false;     // A7, then 30 s of nothing: light sleep (power/sleep.h; KILO_LIGHT_SLEEP)
+  bool guard = guard::kDefaultOn;  // the distance guard (guard/guard.h; kilo guard on|off --host at run time)
   // The laptop interface's keys (net/host_server.h set_keys(); they outlive
   // the Mind) and the source of its ephemeral keys. Without a Random every
   // connection is refused.
@@ -85,7 +88,10 @@ struct MindConfig {
   Random* random = nullptr;
 };
 
-class Mind final : public LinkListener, public remote::TrickNotes, public record::MetricsSource {
+class Mind final : public LinkListener,
+                   public remote::TrickNotes,
+                   public record::MetricsSource,
+                   public guard::GuardHost {
  public:
   static constexpr uint64_t kRunnerStallUs = 1000000;       // daemon/behaviour.py RUNNER_STALL_S
   static constexpr uint64_t kRunnerStartGraceUs = 10000000;  // RUNNER_START_GRACE_S
@@ -146,6 +152,15 @@ class Mind final : public LinkListener, public remote::TrickNotes, public record
   // record::MetricsSource
   uint32_t metric_lines() override;
   void metric_line(uint32_t i, char* out, uint32_t n) override;
+  // guard::GuardHost
+  void sit_and_behave() override;
+  bool may_act() override;
+  void mark(const char* line) override { recorder_.note(line); }
+
+  guard::DistanceGuard& guard() { return guard_; }
+  behaviour::Alive& alive() { return alive_; }
+  // The behaviour runner's sitting variant (the guard started it): every stand the tree asks for is a sit.
+  bool sitting_variant() const { return sitting_variant_; }
 
  private:
   // the behaviour layer's body (behaviour/adapter.py BodyAdapter) and percepts (runner.py PerceptFeed)
@@ -173,6 +188,7 @@ class Mind final : public LinkListener, public remote::TrickNotes, public record
     bool active() override { return m_.behaviour_active(); }
     bool start(const char** what) override;
     void stop() override;
+    bool yields(const remote::Key& key) override;
 
    private:
     Mind& m_;
@@ -189,6 +205,8 @@ class Mind final : public LinkListener, public remote::TrickNotes, public record
   static double seconds(void* arg) { return (double)static_cast<Mind*>(arg)->clock_.now_us() / 1e6; }
   bool liveness(uint64_t now);
   void ir_key(const kilo_event_t& e);
+  bool forward_key(const remote::Key& key) const;
+  double head_held(int field) const;  // the SET_HEAD goal's pan (2) or tilt (4) in degrees, 0 when not held
   void stats(uint64_t now);
   bool safe_for_card(uint64_t now);
   bool body_limp() const;
@@ -208,6 +226,10 @@ class Mind final : public LinkListener, public remote::TrickNotes, public record
   RunnerHook runner_hook_;
   remote::RemoteControl remote_;
   power::Sleep sleep_;  // light sleep after A7 (power/sleep.h)
+  guard::DistanceGuard guard_;
+  behaviour::Alive alive_;
+  bool sitting_variant_ = false;  // the runner's sitting variant (the guard's)
+  bool runner_by_guard_ = false;  // the guard started the runner: the remote's walking keys stop it
   record::Recorder recorder_;
   record::Metrics metrics_;
   record::Saver* saver_ = nullptr;

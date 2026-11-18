@@ -1,7 +1,7 @@
 // Build-time feature switches shared by app/ and hal/ (the shared PCINT2 ISR
 // needs to know which of its users are built). Side peripherals that §7
 // schedules for P1 are on by default; -DKILO_ULTRASONIC=0 / -DKILO_BUZZER=0 /
-// -DKILO_IR=0 drop them from the build if flash gets tight.
+// -DKILO_IR=0 / -DKILO_EYES=0 drop them from the build if flash gets tight.
 #ifndef KILO_FEATURES_H
 #define KILO_FEATURES_H
 
@@ -15,6 +15,11 @@
 // mind as EVENT IR_KEY). Owner's request 2026-10-11.
 #ifndef KILO_IR
 #define KILO_IR 1
+#endif
+// The six WS2812 LEDs of the RGB ultrasonic module on D7 (SET_EYES, HELLO
+// caps EYES; hal/eyes.h). Owner's request 2026-11-17: eye colour by distance.
+#ifndef KILO_EYES
+#define KILO_EYES 1
 #endif
 
 #endif

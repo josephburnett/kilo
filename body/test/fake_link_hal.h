@@ -27,6 +27,8 @@ struct FakeLinkHal {
   uint16_t pca[16] = {};
   bool pca_ok = true;
   int reboots = 0, offset_writes = 0;
+  int eyes_shown = 0;
+  uint8_t eyes[4] = {};  // the last SET_EYES shown: mask, r, g, b
   int16_t offsets[6] = {};
   LinkSample sample = {};
   kilo_stats_t stats = {};

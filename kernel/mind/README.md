@@ -50,6 +50,8 @@ update/updater    the mind's own kernel onto the SD card: receive, check (CRC, m
 tricks/           the trick model, the compiled-in library (library.gen.cpp) and the player (upload, play)
 perception/       ultrasonic and IMU detectors, the Percepts aggregator (kilo/perception)
 behaviour/        tree engine, drives, utility selector, library, 10 Hz runner, personality.gen.cpp (kilo/behaviour)
+behaviour/alive   small body moves while the runner idles or explores (no Python counterpart)
+guard/            the distance guard: the range filtered, zones, stop / back off / sit, forward keys refused, the eyes
 remote/           the IR key map and RemoteControl (kilo/ir.py); client.cpp: BodyClient's posture/balance/look
 mind.h, mind.cpp  Mind: all of the above, the link and the laptop server in one object
 util/dmath, str   double helpers with Python's sums (dmath), string compare (str)

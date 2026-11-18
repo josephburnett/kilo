@@ -21,7 +21,9 @@ both the same frames and compares the replies:
   releases (never stale), mode 1 holds (STALE, FALLEN, LOW_BATT) until
   HEAD_HOLD_MS without a refresh or an epoch bump: TELEMETRY flag HEAD_HELD
   and head owner PI_HOLD (unless a trick owns the head or a reflex holds
-  it); SET_EYES is refused UNKNOWN_TYPE. At most one GOAL_REFUSED per goal
+  it); SET_EYES is kept as `eyes` (mask, r, g, b; HELLO caps EYES), or
+  refused UNKNOWN_TYPE with eyes=False (a firmware before the eyes,
+  2026-11-17). At most one GOAL_REFUSED per goal
   type per second;
 - GAIT (P2, §3d; protocol 2.0): the body plays the mind's FEET stream
   (kilo.vbody.feet: the queue, tick matching, late and too-early drops, the
@@ -126,6 +128,7 @@ EEPROM_SIZE = 1024
 P0_GOALS = frozenset({P.MsgId.HEARTBEAT, P.MsgId.SET_POSTURE, P.MsgId.BEEP, P.MsgId.SET_BALANCE,
                       P.MsgId.SET_HEAD})
 P2_GOALS = frozenset({P.MsgId.SET_BODY_POSE})
+EYES_GOALS = frozenset({P.MsgId.SET_EYES})  # the WS2812 eyes (body/src/hal/eyes.h)
 # Fake joint angles (degrees, canonical order: pan, tilt, tail, shoulders
 # LF RF RB LB, knees LF RF RB LB) for the JOINTS stream. Not the body's tables.
 FAKE_ANGLES = {"REST": (0, 0, 0, -60, -60, 60, 60, 60, 60, -60, -60),
@@ -204,7 +207,7 @@ class VirtualBody:
                  fw_build: int = FW_BUILD, save_busy_s: float = 0.1,
                  clock: Callable[[], float] = time.monotonic, boot_delay: float = 0.0, p2: bool = True,
                  model: BodyModel | None = None, lag_ms: float | None = None, tau_ms: float | None = None,
-                 imu_offset: tuple[float, float] = (0.0, 0.0)):
+                 imu_offset: tuple[float, float] = (0.0, 0.0), eyes: bool = True):
         self.t = transport
         # p2=False: the P1 body (FEET / SET_BODY_POSE refused UNKNOWN_TYPE,
         # SET_POSTURE STANCE BAD_ARG), for the cross-check against a firmware
@@ -218,6 +221,10 @@ class VirtualBody:
         self.tau_ms = tau_ms
         self.imu_offset = imu_offset
         self.goal_types = P0_GOALS | P2_GOALS if p2 else P0_GOALS
+        self.has_eyes = eyes
+        if eyes:
+            self.goal_types = self.goal_types | EYES_GOALS
+        self.eyes: tuple[int, int, int, int] | None = None  # the last SET_EYES shown
         self.codec = codec or default_codec()
         self.msgs = messages or default_messages()
         self.decoder = self.codec.new_decoder()
@@ -505,7 +512,8 @@ class VirtualBody:
         self._send("HELLO", proto_major=P.PROTO_MAJOR, proto_minor=P.PROTO_MINOR,
                    fw_build=self.fw_build, reset_cause=self.reset_cause,
                    last_alive_tick=self.last_alive_tick,
-                   caps=int(P.HelloCaps.BUZZER | P.HelloCaps.IR | P.HelloCaps.DMP | P.HelloCaps.ULTRASONIC),
+                   caps=int(P.HelloCaps.BUZZER | P.HelloCaps.IR | P.HelloCaps.DMP | P.HelloCaps.ULTRASONIC
+                            | (P.HelloCaps.EYES if self.has_eyes else 0)),
                    max_payload=P.MAX_PAYLOAD, trick_capacity=P.TRICK_CAPACITY, joint_count=P.JOINT_COUNT,
                    config_state=self.config_state, epoch=self.epoch)
 
@@ -744,6 +752,13 @@ class VirtualBody:
         if type == P.MsgId.HEARTBEAT:
             return
         if type == P.MsgId.BEEP:
+            self.goals[name] = payload
+            return
+        if type == P.MsgId.SET_EYES:
+            eyes = (int(msg.led_mask), int(msg.r), int(msg.g), int(msg.b))
+            if eyes != self.eyes:
+                self._say(f"eyes mask 0x{eyes[0]:02X} rgb {eyes[1]} {eyes[2]} {eyes[3]}")
+            self.eyes = eyes
             self.goals[name] = payload
             return
         if type == P.MsgId.SET_HEAD:

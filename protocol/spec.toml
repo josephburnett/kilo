@@ -1460,6 +1460,17 @@ SAVING = 3                     # writing, a chunk a pass
 BACKOFF = 4                    # a write was slow or failed: waiting before the next
 FAILED = 5                     # the card refused too often: saving stopped until REC_SAVE
 
+[enums.guard_zone]             # GUARD_STATUS.zone, .eyes
+GREEN = 0                      # clear (or nothing seen)
+BLUE = 1                       # too close: a forward walk stops, Kilo sits
+RED = 2                        # very close: a forward walk backs off first
+
+[enums.guard_action]           # GUARD_STATUS.action
+WATCH = 0                      # nothing to do
+STOPPING = 1                   # the planned stop of a forward walk
+BACKING = 2                    # walking backward a short way (RED)
+HOLDING = 3                    # sitting; forward keys refused until clear
+
 [enums.rec_fetch_what]         # REC_FETCH.what
 BLOCKS = 0                     # the flight recorder's blocks covering the range
 LOG = 1                        # the boot's saved log (text lines "t_ms L text"), the range ignored
@@ -1808,6 +1819,17 @@ fields = [
 ]
 
 [[host_messages]]
+name = "GUARD"
+id = 0x58
+dir = "client_to_mind"
+kind = "command"
+query = true
+doc = "The distance guard: mode 0 off, 1 on, 2 only ask. Answered by GUARD_STATUS. Any client (it moves nothing; kilo guard on|off --host)."
+fields = [
+  { name = "mode", type = "u8", range = [0, 2] },
+]
+
+[[host_messages]]
 name = "RESULT"
 id = 0x80
 dir = "mind_to_client"
@@ -1986,6 +2008,30 @@ fields = [
   { name = "sync_us", type = "u32", unit = "us", note = "f_sync after this size's writes" },
   { name = "close_us", type = "u32", unit = "us", note = "the scratch file's close (write_bytes 0 only)" },
   { name = "remove_us", type = "u32", unit = "us", note = "write_bytes 0 only: the scratch file's delete" },
+]
+
+[[host_messages]]
+name = "GUARD_STATUS"
+id = 0x8A
+dir = "mind_to_client"
+kind = "event"
+reply_to = "GUARD"
+doc = "The distance guard (docs/distance-guard.md): on or off, the zone, what it does, the eye colour, the filtered and the last raw range, the thresholds at the speed now, and its counters since boot."
+fields = [
+  { name = "enabled", type = "u8", note = "1 on (the kernel's default), 0 off" },
+  { name = "zone", type = "u8", enum = "guard_zone" },
+  { name = "action", type = "u8", enum = "guard_action" },
+  { name = "eyes", type = "u8", enum = "guard_zone", note = "the eye colour the mind asks for (green, blue, red)" },
+  { name = "eyes_driven", type = "u8", note = "1: SET_EYES goes to the body (HELLO caps EYES); 0: the firmware has no eyes" },
+  { name = "dist_mm", type = "u16", unit = "mm", note = "filtered range; 0 = none (no echo, or the readings ignored)" },
+  { name = "raw_mm", type = "u16", unit = "mm", note = "the last fresh reading as the body sent it (0 = no echo)" },
+  { name = "blue_mm", type = "u16", unit = "mm", note = "BLUE below this, at the speed now" },
+  { name = "red_mm", type = "u16", unit = "mm" },
+  { name = "speed_mm_s", type = "u16", unit = "mm/s", note = "the forward walk's speed the thresholds use (0: not walking forward)" },
+  { name = "zone_changes", type = "u32" },
+  { name = "stops", type = "u32", note = "walks stopped at BLUE" },
+  { name = "pullbacks", type = "u32", note = "walks backed off at RED" },
+  { name = "refused", type = "u32", note = "forward keys refused while it held" },
 ]
 
 [[host_messages]]

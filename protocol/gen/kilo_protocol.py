@@ -363,6 +363,19 @@ class RecordCardState(enum.IntEnum):
     FAILED = 5
 
 
+class GuardZone(enum.IntEnum):
+    GREEN = 0
+    BLUE = 1
+    RED = 2
+
+
+class GuardAction(enum.IntEnum):
+    WATCH = 0
+    STOPPING = 1
+    BACKING = 2
+    HOLDING = 3
+
+
 class RecFetchWhat(enum.IntEnum):
     BLOCKS = 0
     LOG = 1
@@ -3160,6 +3173,7 @@ class HostMsgId(enum.IntEnum):
     REC_BENCH = 0x55
     REC_SAVE = 0x56
     REC_DELETE = 0x57
+    GUARD = 0x58
     RESULT = 0x80
     STATUS = 0x81
     TELEM = 0x82
@@ -3170,6 +3184,7 @@ class HostMsgId(enum.IntEnum):
     REC_STATUS = 0x87
     METRICS = 0x88
     BENCH_RESULT = 0x89
+    GUARD_STATUS = 0x8A
     FLASH_STATUS = 0xC0
     UPDATE_STATUS = 0xC1
 
@@ -4248,6 +4263,46 @@ class HostRecDelete:
 
 
 @dataclass
+class HostGuard:
+    """host 0x58 GUARD (command). The distance guard: mode 0 off, 1 on, 2 only ask. Answered by GUARD_STATUS. Any client (it moves nothing; kilo guard on|off --host)."""
+    ID: ClassVar[int] = 0x58
+    NAME: ClassVar[str] = 'GUARD'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = True
+    REPLY: ClassVar[int | None] = 0x8A
+    MIN_LEN: ClassVar[int] = 1
+    MAX_LEN: ClassVar[int] = 1
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<B')
+    mode: int = 0  # range 0..2
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.mode)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['mode'] = v[0]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
 class HostResult:
     """host 0x80 RESULT (event). The answer to a command without a reply message of its own, and to any refused command: its seq, its type, a code and a short reason."""
     ID: ClassVar[int] = 0x80
@@ -4885,6 +4940,85 @@ class HostBenchResult:
 
 
 @dataclass
+class HostGuardStatus:
+    """host 0x8A GUARD_STATUS (event). The distance guard (docs/distance-guard.md): on or off, the zone, what it does, the eye colour, the filtered and the last raw range, the thresholds at the speed now, and its counters since boot."""
+    ID: ClassVar[int] = 0x8A
+    NAME: ClassVar[str] = 'GUARD_STATUS'
+    KIND: ClassVar[Kind] = Kind.EVENT
+    DIR: ClassVar[str] = 'mind_to_client'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 31
+    MAX_LEN: ClassVar[int] = 31
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BBBBBHHHHHIIII')
+    enabled: int = 0  # 1 on (the kernel's default), 0 off
+    zone: int = 0  # enum guard_zone
+    action: int = 0  # enum guard_action
+    eyes: int = 0  # enum guard_zone; the eye colour the mind asks for (green, blue, red)
+    eyes_driven: int = 0  # 1: SET_EYES goes to the body (HELLO caps EYES); 0: the firmware has no eyes
+    dist_mm: int = 0  # mm; filtered range; 0 = none (no echo, or the readings ignored)
+    raw_mm: int = 0  # mm; the last fresh reading as the body sent it (0 = no echo)
+    blue_mm: int = 0  # mm; BLUE below this, at the speed now
+    red_mm: int = 0  # mm
+    speed_mm_s: int = 0  # mm/s; the forward walk's speed the thresholds use (0: not walking forward)
+    zone_changes: int = 0
+    stops: int = 0  # walks stopped at BLUE
+    pullbacks: int = 0  # walks backed off at RED
+    refused: int = 0  # forward keys refused while it held
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.enabled)
+        v.append(self.zone)
+        v.append(self.action)
+        v.append(self.eyes)
+        v.append(self.eyes_driven)
+        v.append(self.dist_mm)
+        v.append(self.raw_mm)
+        v.append(self.blue_mm)
+        v.append(self.red_mm)
+        v.append(self.speed_mm_s)
+        v.append(self.zone_changes)
+        v.append(self.stops)
+        v.append(self.pullbacks)
+        v.append(self.refused)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['enabled'] = v[0]
+        kw['zone'] = v[1]
+        kw['action'] = v[2]
+        kw['eyes'] = v[3]
+        kw['eyes_driven'] = v[4]
+        kw['dist_mm'] = v[5]
+        kw['raw_mm'] = v[6]
+        kw['blue_mm'] = v[7]
+        kw['red_mm'] = v[8]
+        kw['speed_mm_s'] = v[9]
+        kw['zone_changes'] = v[10]
+        kw['stops'] = v[11]
+        kw['pullbacks'] = v[12]
+        kw['refused'] = v[13]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
 class HostFlashStatus:
     """host 0xC0 FLASH_STATUS (stream). Progress of a flash, to the client that committed it: on every phase change and page, last DONE or FAILED."""
     ID: ClassVar[int] = 0xC0
@@ -5036,6 +5170,7 @@ HOST_MESSAGES: dict[int, type] = {
     0x55: HostRecBench,
     0x56: HostRecSave,
     0x57: HostRecDelete,
+    0x58: HostGuard,
     0x80: HostResult,
     0x81: HostStatus,
     0x82: HostTelem,
@@ -5046,6 +5181,7 @@ HOST_MESSAGES: dict[int, type] = {
     0x87: HostRecStatus,
     0x88: HostMetrics,
     0x89: HostBenchResult,
+    0x8A: HostGuardStatus,
     0xC0: HostFlashStatus,
     0xC1: HostUpdateStatus,
 }
@@ -5106,6 +5242,8 @@ def host_payload_len_status(msg_type: int, payload: bytes) -> int:
         return LEN_OK if n == 1 else LEN_BAD
     if msg_type == 0x57:
         return LEN_OK if n == 4 else LEN_BAD
+    if msg_type == 0x58:
+        return LEN_OK if n == 1 else LEN_BAD
     if msg_type == 0x80:
         return LEN_OK if 2 <= n <= 62 else LEN_BAD
     if msg_type == 0x81:
@@ -5125,6 +5263,8 @@ def host_payload_len_status(msg_type: int, payload: bytes) -> int:
     if msg_type == 0x88:
         return LEN_OK if 2 <= n <= 202 else LEN_BAD
     if msg_type == 0x89:
+        return LEN_OK if n == 31 else LEN_BAD
+    if msg_type == 0x8A:
         return LEN_OK if n == 31 else LEN_BAD
     if msg_type == 0xC0:
         return LEN_OK if n == 21 else LEN_BAD

@@ -78,5 +78,9 @@ void link_hal_imu_raw(int16_t raw[6]);                 // last packet: accel xyz
 bool link_hal_pca_read(uint16_t counts[16]);           // false on an I2C error
 void link_hal_imu_offsets(const int16_t offsets[6]);   // write the MPU offset registers
 void link_hal_reboot(void);                            // after the ACK is queued
+// SET_EYES (led_mask, r, g, b): shown at once unless an echo is being
+// timed; then the goal's 5 Hz refresh shows it within 200 ms. Nothing is
+// stored (the body's RAM is full): every refresh is shown again (hal/eyes.h).
+void link_hal_eyes(const uint8_t* p);
 
 #endif

@@ -14,6 +14,7 @@ constexpr uint32_t kResultTextMax = KILO_HOST_RESULT_MAX_LEN - 2;
 const char* name_of(uint8_t type) {
   switch (type) {
     case KILO_HOST_MSG_STATUS_REQ: return "STATUS_REQ";
+    case KILO_HOST_MSG_GUARD: return "GUARD";
     case KILO_HOST_MSG_CONTROL: return "CONTROL";
     case KILO_HOST_MSG_POSTURE: return "POSTURE";
     case KILO_HOST_MSG_PARAM_GET: return "PARAM_GET";
@@ -387,6 +388,19 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
       return rec_save(i, f.seq, p);
     case KILO_HOST_MSG_REC_DELETE:
       return rec_delete(i, f.seq, p);
+    case KILO_HOST_MSG_GUARD: {
+      if (guard_ == nullptr) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no distance guard");
+      if (p[0] > 2) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_BAD_ARG, "mode: 0 off, 1 on, 2 ask");
+      if (p[0] < 2) {
+        if ((p[0] == 1) != guard_->enabled())
+          logf(log_, LogLevel::Info, "host: client %d: distance guard %s", (int)i, p[0] ? "on" : "off");
+        guard_->set_enabled(p[0] == 1);
+      }
+      kilo_host_guard_status_t st;
+      guard_->fill(st);
+      reply(i, f.seq, &st, sizeof st, KILO_HOST_MSG_GUARD_STATUS);
+      return;
+    }
     default:
       return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UNSUPPORTED, name_of(f.type));
   }

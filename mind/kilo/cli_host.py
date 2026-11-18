@@ -15,6 +15,7 @@ today, and so what works here:
                                                    e.g. the netboot loader); the body gets REST first
     kilo update --host IP [--image PATH] [--force] [--wait S]   write a new kernel onto the mind's SD card;
                                                    it reboots into it, and this waits for it to come back
+    kilo guard [on|off|status] --host IP [--json]  the distance guard (docs/distance-guard.md)
     kilo runs --host IP [--json] | --fetch ... | --delete ...   the walks and tricks recorded (kilo.cli_record;
                                                    kilo walks is the same), record, bench sd, metrics
 
@@ -117,7 +118,47 @@ def print_status(st: Any) -> None:
     print("link stats  " + " ".join(f"{k}={v}" for k, v in P.to_dict(st.link).items() if v))
 
 
+def guard_dict(g: Any) -> dict[str, Any]:
+    """`kilo guard --json`: GUARD_STATUS as plain data."""
+    d = P.to_dict(g)
+    d["zone"] = _name(P.GuardZone, g.zone).lower()
+    d["action"] = _name(P.GuardAction, g.action).lower()
+    d["eyes"] = _name(P.GuardZone, g.eyes).lower()
+    return d
+
+
+def guard_lines(g: Any) -> list[str]:
+    """`kilo status --host`'s and `kilo guard`'s lines."""
+    zone = _name(P.GuardZone, g.zone).lower()
+    dist = f"{g.dist_mm} mm" if g.dist_mm else "no range"
+    eyes = _name(P.GuardZone, g.eyes).lower()
+    lights = "on the eyes" if g.eyes_driven else "not shown: the body firmware has no eyes yet (flash it)"
+    speed = f"  at {g.speed_mm_s} mm/s" if g.speed_mm_s else ""
+    return [f"guard       {'on' if g.enabled else 'OFF'}  zone {zone}  {_name(P.GuardAction, g.action).lower()}  "
+            f"{dist} (raw {g.raw_mm or '-'})  blue < {g.blue_mm} mm  red < {g.red_mm} mm{speed}",
+            f"eyes        {eyes} ({lights})",
+            f"guard count stops {g.stops}  pullbacks {g.pullbacks}  forward keys refused {g.refused}  "
+            f"zone changes {g.zone_changes}"]
+
+
 # ---- commands ---------------------------------------------------------------------
+def _guard(hl: HostLink) -> Any:
+    """GUARD_STATUS, or None from a mind without the guard."""
+    try:
+        return hl.guard(2)
+    except (HostRefused, HostError):
+        return None
+
+
+def cmd_guard(args: argparse.Namespace, hl: HostLink) -> int:
+    g = hl.guard({"off": 0, "on": 1}.get(args.mode, 2))
+    if args.json:
+        print(json.dumps(guard_dict(g), indent=2))
+    else:
+        print("\n".join(guard_lines(g)))
+    return EXIT_OK
+
+
 def _extras(hl: HostLink) -> tuple[Any, list[str]]:
     """REC_STATUS and the metrics lines, or (None, []) from a mind without them."""
     rs, lines = None, []
@@ -135,6 +176,7 @@ def _extras(hl: HostLink) -> tuple[Any, list[str]]:
 def cmd_status(args: argparse.Namespace, hl: HostLink) -> int:
     st = hl.status()
     rs, lines = _extras(hl)
+    g = _guard(hl)
     if args.json:
         d = status_dict(st)
         if rs is not None:
@@ -142,9 +184,13 @@ def cmd_status(args: argparse.Namespace, hl: HostLink) -> int:
             d["recorder"]["card_state"] = _name(P.RecordCardState, rs.card_state)
         if lines:
             d["metrics"] = lines
+        if g is not None:
+            d["guard"] = guard_dict(g)
         print(json.dumps(d, indent=2))
     else:
         print_status(st)
+        if g is not None:
+            print("\n".join(guard_lines(g)))
         if rs is not None:
             print(cli_record.recorder_line(rs))
         for ln in lines:
@@ -536,8 +582,8 @@ def _prepare_flash(args: argparse.Namespace) -> int | None:
 
 
 HOST_COMMANDS = {"status": cmd_status, "posture": cmd_posture, "monitor": cmd_monitor, "log": cmd_log,
-                 "flash": cmd_flash, "reboot": cmd_reboot, "update": cmd_update, **cli_record.HOST_COMMANDS,
-                 "power": cli_power.cmd_power}
+                 "flash": cmd_flash, "reboot": cmd_reboot, "update": cmd_update, "guard": cmd_guard,
+                 **cli_record.HOST_COMMANDS, "power": cli_power.cmd_power}
 
 
 def parse_log_argv(argv: list[str], host: str | None, key: str | None = None) -> argparse.Namespace:
@@ -558,7 +604,7 @@ def parse_log_argv(argv: list[str], host: str | None, key: str | None = None) ->
 
 
 # Commands only a C++ mind serves: without --host they find Kilo by mDNS (kilo.mdns).
-HOST_ONLY = ("walks", "runs", "bench", "metrics", "reboot", "update")
+HOST_ONLY = ("walks", "runs", "bench", "metrics", "reboot", "update", "guard")
 
 
 def wants_host(args: argparse.Namespace) -> bool:

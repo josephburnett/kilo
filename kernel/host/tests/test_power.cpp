@@ -443,7 +443,7 @@ void test_metric_lines() {
   r.run_ms(120000);
   r.key(kB6);
   uint32_t n = r.mind.metric_lines();
-  CHECK(n == 9 + power::Sleep::kMetricLines);
+  CHECK(n == 11 + power::Sleep::kMetricLines);
   std::vector<std::string> got;
   for (uint32_t i = 0; i < n; i++) {
     char line[256];
