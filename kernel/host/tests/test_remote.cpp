@@ -1,10 +1,11 @@
 // The IR remote: the key table and map (mind/tests/test_ir.py), and
 // RemoteControl on the real link, walker and trick player over a scripted
 // body: the posture keys (B6, A7, C5), the gait keys (A4, B4, C4), the turn
-// keys (A6, C6), the speed ladder (B7, B5) through zero into backward, the
-// freeze (C7), the behaviour key (A5) on a fake runner and the rear-up key
-// (B2: off by default, like rows 1-3; switched on: start, the toggle, the
-// slow stop, the battery guard).
+// keys (A6, C6: in place from standing, steering while walking), out of a
+// turn straight on (B7, B5), the speed ladder (B7, B5) through zero into
+// backward, the freeze (C7), the behaviour key (A5) on a fake runner and the
+// rear-up key (A2 since 2026-11-17, B2 before: off by default, like rows
+// 1-3; switched on: start, the toggle, the slow stop, the battery guard).
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -31,7 +32,7 @@ uint8_t cmd_of(const char* grid) {
 }
 
 void test_key_table(uint8_t stage) {
-  // the rear-up key's stage: 0 off, 1-3 the trick B2 starts (rear_up, rear_up_2, rear_up_3)
+  // the rear-up key's stage: 0 off, 1-3 the trick A2 starts (rear_up, rear_up_2, rear_up_3)
   static const char* const kStageTrick[] = {"", "rear_up", "rear_up_2", "rear_up_3"};
   static const char* const kStageLabel[] = {"none", "rear up", "rear up 2", "rear up 3"};
   set_rear_up_key(stage);
@@ -46,20 +47,20 @@ void test_key_table(uint8_t stage) {
     // row by row from the top: A7 B7 C7, A6 ...
     char want[3] = {(char)('A' + i % 3), (char)('0' + 7 - i / 3), 0};
     CHECKF(std::strcmp(k.grid, want) == 0, "%s at %d", k.grid, i);
-    // B2 with the rear-up key off: an Ignore entry; at stage 2 or 3 another Trick entry
-    const bool off_b2 = k.kind == Kind::Trick && stage != 1;
-    CHECK((action_for(k.command) == &k) != off_b2 && action_for((uint16_t)(k.command | kRepeat)) == nullptr);
+    // A2 with the rear-up key off: an Ignore entry; at stage 2 or 3 another Trick entry
+    const bool off_a2 = k.kind == Kind::Trick && stage != 1;
+    CHECK((action_for(k.command) == &k) != off_a2 && action_for((uint16_t)(k.command | kRepeat)) == nullptr);
     if (k.kind == Kind::Trick) {
-      const Key* b2 = action_for(k.command);
-      CHECK(b2->kind == (rear_up ? Kind::Trick : Kind::Ignore) && std::strcmp(b2->label, kStageLabel[stage]) == 0 &&
-            std::strcmp(b2->name, kStageTrick[stage]) == 0 && std::strcmp(b2->grid, "B2") == 0);
-      if (rear_up) CHECKF(tricks::find_trick(b2->name) != nullptr, "trick %s", b2->name);
+      const Key* a2 = action_for(k.command);
+      CHECK(a2->kind == (rear_up ? Kind::Trick : Kind::Ignore) && std::strcmp(a2->label, kStageLabel[stage]) == 0 &&
+            std::strcmp(a2->name, kStageTrick[stage]) == 0 && std::strcmp(a2->grid, "A2") == 0);
+      if (rear_up) CHECKF(tricks::find_trick(a2->name) != nullptr, "trick %s", a2->name);
     }
     if (k.kind == Kind::Posture) CHECKF(posture_code(k.name) >= 0, "posture %s", k.name);
     if (k.kind == Kind::Gait) CHECKF(planner::find_pattern(k.name) != nullptr, "gait %s", k.name);
     if (k.kind == Kind::Trick) CHECKF(tricks::find_trick(k.name) != nullptr, "trick %s", k.name);
-    // rows 1-3 do nothing, but B2
-    CHECKF((k.grid[1] <= '3' && std::strcmp(k.grid, "B2") != 0) == (k.kind == Kind::Ignore), "%s", k.grid);
+    // rows 1-3 do nothing, but A2
+    CHECKF((k.grid[1] <= '3' && std::strcmp(k.grid, "A2") != 0) == (k.kind == Kind::Ignore), "%s", k.grid);
   }
   CHECK(cmds.size() == 21 && grids.size() == 21);
   CHECK(action_for(0x45) == nullptr);
@@ -72,7 +73,8 @@ void test_key_table(uint8_t stage) {
               {"A6", Kind::Turn, "left"},     {"B6", Kind::Posture, "stand"}, {"C6", Kind::Turn, "right"},
               {"A5", Kind::Behaviour, ""},    {"B5", Kind::Speed, "slower"},  {"C5", Kind::Posture, "calib"},
               {"A4", Kind::Gait, "trot"},     {"B4", Kind::Gait, "crawl"},    {"C4", Kind::Gait, "walk"},
-              {"B2", rear_up ? Kind::Trick : Kind::Ignore, kStageTrick[stage]}};
+              {"A2", rear_up ? Kind::Trick : Kind::Ignore, kStageTrick[stage]},
+              {"B2", Kind::Ignore, ""}};  // the rear-up key until 2026-11-17: nothing now
   for (const auto& w : want) {
     const Key* k = action_for(cmd_of(w.grid));
     CHECKF(k != nullptr && k->kind == w.kind && std::strcmp(k->name, w.name) == 0, "%s", w.grid);
@@ -90,10 +92,12 @@ void test_key_table(uint8_t stage) {
   CHECK(std::strcmp(d, "B3 (0x18, none)") == 0);
   describe(0x45, d, sizeof d);
   CHECK(std::strcmp(d, "? (0x45)") == 0);
+  describe(0x10, d, sizeof d);
+  char want_a2[32];
+  std::snprintf(want_a2, sizeof want_a2, "A2 (0x10, %s)", kStageLabel[stage]);
+  CHECKF(std::strcmp(d, want_a2) == 0, "%s", d);
   describe(0x38, d, sizeof d);
-  char want_b2[32];
-  std::snprintf(want_b2, sizeof want_b2, "B2 (0x38, %s)", kStageLabel[stage]);
-  CHECKF(std::strcmp(d, want_b2) == 0, "%s", d);
+  CHECKF(std::strcmp(d, "B2 (0x38, none)") == 0, "%s", d);
   set_rear_up_key(0);
 }
 
@@ -217,7 +221,7 @@ void test_gait_keys() {
   CHECK(r.walker.active() && r.body.count(KILO_MSG_FEET) > feet);
   // another gait while walking: changed, the level kept
   r.key("B7");  // +4
-  LAST_IS(r, "A4", "walk forward (trot) 165.6 mm/s");  // 1.15x
+  LAST_IS(r, "A4", "walk forward (trot) 187.2 mm/s");  // the trot's 1.3x
   CHECK(r.remote.level() == 4 && std::strcmp(r.remote.pattern(), "trot") == 0);
   LAST_IS(r, "B4", "walk forward (crawl) 25.6 mm/s");
   // backward, then the gait in use: forward again at the level's magnitude
@@ -247,62 +251,102 @@ void test_speed_ladder() {
   CHECK(r.log.has("remote B7 (0x62, faster): ignored (not walking)"));
   r.key("A4", 800);
   CHECK(r.walker.active());
-  // down from 1x through zero into backward (since 2026-11-16 the levels are 0.4, 0.7, 1, 1.15,
-  // 1.25 x the default: the trot 58 to 180 mm/s, inside its 42..184)
+  // down from 1x through zero into backward (since 2026-11-17 the trot's levels are 0.4, 0.7, 1,
+  // 1.3, 1.6 x its default: 58 to 230 mm/s, inside its 42..232; the walk's and the crawl's still
+  // 0.4, 0.7, 1, 1.15, 1.25)
   LAST_IS(r, "B5", "speed 0.7x (trot 100.8 mm/s forward)");
   LAST_IS(r, "B5", "speed 0.4x (trot 57.6 mm/s forward)");
   LAST_IS(r, "B5", "speed -0.4x (trot 57.6 mm/s back)");
   CHECK(r.remote.level() == -1 && r.dir() == planner::Direction::Back);
   LAST_IS(r, "B5", "speed -0.7x (trot 100.8 mm/s back)");
   LAST_IS(r, "B5", "speed -1x (trot 144.0 mm/s back)");
-  LAST_IS(r, "B5", "speed -1.15x (trot 165.6 mm/s back)");
-  LAST_IS(r, "B5", "speed -1.25x (trot 180.0 mm/s back)");
-  LAST_IS(r, "B5", "speed -1.25x (trot 180.0 mm/s back): already the fastest back");
-  CHECK(r.remote.level() == -5 && std::fabs(r.speed() - 180.0) < 0.05);
+  LAST_IS(r, "B5", "speed -1.3x (trot 187.2 mm/s back)");
+  LAST_IS(r, "B5", "speed -1.6x (trot 230.4 mm/s back)");
+  LAST_IS(r, "B5", "speed -1.6x (trot 230.4 mm/s back): already the fastest back");
+  CHECK(r.remote.level() == -5 && std::fabs(r.speed() - 230.4) < 0.05);
   // and up again, through zero into forward, to the top
   for (int i = 0; i < 4; i++) r.key("B7");
   CHECK(r.remote.level() == -1);
   LAST_IS(r, "B7", "speed 0.4x (trot 57.6 mm/s forward)");
   CHECK(r.dir() == planner::Direction::Forward);
   for (int i = 0; i < 3; i++) r.key("B7");
-  LAST_IS(r, "B7", "speed 1.25x (trot 180.0 mm/s forward)");
-  LAST_IS(r, "B7", "speed 1.25x (trot 180.0 mm/s forward): already the fastest");
+  LAST_IS(r, "B7", "speed 1.6x (trot 230.4 mm/s forward)");
+  LAST_IS(r, "B7", "speed 1.6x (trot 230.4 mm/s forward): already the fastest");
   CHECK(r.remote.level() == 5);
-  LAST_IS(r, "B5", "speed 1.15x (trot 165.6 mm/s forward)");
+  LAST_IS(r, "B5", "speed 1.3x (trot 187.2 mm/s forward)");
   LAST_IS(r, "B5", "speed 1x (trot 144.0 mm/s forward)");
-  CHECK(r.log.has("remote B5 (0xA8, slower): speed 1.15x (trot 165.6 mm/s forward)"));
+  CHECK(r.log.has("remote B5 (0xA8, slower): speed 1.3x (trot 187.2 mm/s forward)"));
   LAST_IS(r, "C4", "walk forward (walk) 80.0 mm/s");
+  r.key("B7");  // the walk's levels: its top two are about its top
+  LAST_IS(r, "B7", "speed 1.25x (walk 96.8 mm/s forward)");
 }
 
 void test_turn_keys() {
   Rig r;
-  // from standing: the turn in the selected gait at 1x
+  // from standing: the turn in place in the selected gait at 1x
   LAST_IS(r, "A6", "walk left (trot) 144.0 mm/s");
   r.run_ms(800);
   CHECK(r.walker.active() && r.dir() == planner::Direction::Left);
   LAST_IS(r, "A6", "walk left (trot) 144.0 mm/s: unchanged");
-  LAST_IS(r, "C6", "walk right (trot) 144.0 mm/s");
+  LAST_IS(r, "C6", "walk right (trot) 144.0 mm/s");  // turning in place: the other key turns the other way
   CHECK(r.dir() == planner::Direction::Right);
-  // the magnitude only, 1..5, no sign flip during a turn
-  LAST_IS(r, "B5", "speed 0.7x (trot 100.8 mm/s right)");
-  LAST_IS(r, "B5", "speed 0.4x (trot 57.6 mm/s right)");
-  LAST_IS(r, "B5", "speed 0.4x (trot 57.6 mm/s right): already the slowest");
-  CHECK(r.remote.level() == 1 && r.dir() == planner::Direction::Right);
-  LAST_IS(r, "B7", "speed 0.7x (trot 100.8 mm/s right)");
-  // the gait in use: back to straight forward at the magnitude
-  LAST_IS(r, "A4", "walk forward (trot) 100.8 mm/s");
+  // B7 while turning: straight forward at once, the walk going on (no planned stop)
+  LAST_IS(r, "B7", "turn ended: walk forward (trot) 144.0 mm/s");
+  CHECK(r.walker.active() && !r.walker.planner().stopping() && r.dir() == planner::Direction::Forward);
+  CHECK(r.remote.level() == 3 && r.remote.heading() == Heading::Straight);
+  CHECK(r.log.has("remote B7 (0x62, faster): turn ended: walk forward (trot) 144.0 mm/s"));
+  r.run_ms(700);  // the strides 1.5 mm a tick: straight within 0.7 s
+  CHECK(r.walker.planner().s_cur()[0] == r.walker.planner().s_cur()[1]);
+  LAST_IS(r, "B7", "speed 1.3x (trot 187.2 mm/s forward)");  // then the ladder as ever
+  // B5 while turning: straight backward
+  CHECK(std::strcmp(r.key_done("B6"), "posture stand") == 0);
+  r.key("C6", 800);
+  LAST_IS(r, "B5", "turn ended: walk back (trot) 144.0 mm/s");
+  CHECK(r.remote.level() == -3 && r.dir() == planner::Direction::Back && r.walker.active());
+  // the gait in use during a turn: straight forward; another gait: the turn goes on in it
+  CHECK(std::strcmp(r.key_done("B6"), "posture stand") == 0);
+  r.key("C6", 800);
+  LAST_IS(r, "C4", "walk right (walk) 80.0 mm/s");
+  LAST_IS(r, "C4", "walk forward (walk) 80.0 mm/s");
   CHECK(r.remote.heading() == Heading::Straight && r.dir() == planner::Direction::Forward);
-  // another gait during a turn: the turn goes on in it
-  r.key("C6");
-  LAST_IS(r, "C4", "walk right (walk) 56.0 mm/s");
-  // backward, then a turn: the turn at the magnitude, then the gait key forward
-  r.key("C4");
-  r.key("B5");
-  r.key("B5");  // +2: +1, -1
-  CHECK(r.remote.level() == -1);
-  LAST_IS(r, "A6", "walk left (walk) 32.0 mm/s");
-  CHECK(r.remote.level() == 1);
+}
+
+void test_steering() {
+  Rig r;
+  r.key("A4", 800);
+  CHECK(r.walker.active());
+  // A6 while walking forward: steer a level more to the left, without stopping (ir.py STEER_LEVELS)
+  LAST_IS(r, "A6", "walk forward (trot) 144.0 mm/s, steering left 1");
+  CHECK(r.dir() == planner::Direction::Forward && std::fabs(r.walker.planner().steer() - 0.25) < 1e-6);
+  CHECK(r.walker.goal().steer == (planner::real)0.25 && !r.walker.planner().stopping());
+  LAST_IS(r, "A6", "walk forward (trot) 144.0 mm/s, steering left 2");
+  LAST_IS(r, "A6", "walk forward (trot) 144.0 mm/s, steering left 3");
+  LAST_IS(r, "A6", "walk forward (trot) 144.0 mm/s, steering left 3: already the tightest");
+  CHECK(r.remote.steer() == 3 && std::fabs(r.walker.planner().steer() - 1.0) < 1e-6);
+  r.run_ms(1200);  // the inner (left) side steps in place, the outer at the longest stride: 44 mm
+  const planner::real* s = r.walker.planner().s_cur();
+  CHECKF(std::fabs(s[0]) < 1e-4 && std::fabs(s[1] - 44) < 1e-3, "%g %g", (double)s[0], (double)s[1]);
+  CHECK(r.log.has("remote A6 (0x22, turn left): walk forward (trot) 144.0 mm/s, steering left 3"));
+  // C6 back through straight to the right
+  LAST_IS(r, "C6", "walk forward (trot) 144.0 mm/s, steering left 2");
+  LAST_IS(r, "C6", "walk forward (trot) 144.0 mm/s, steering left 1");
+  LAST_IS(r, "C6", "walk forward (trot) 144.0 mm/s");
+  CHECK(r.walker.planner().steer() == 0);
+  LAST_IS(r, "C6", "walk forward (trot) 144.0 mm/s, steering right 1");
+  // the speed keys keep the bend, into backward too
+  LAST_IS(r, "B7", "speed 1.3x (trot 187.2 mm/s forward, steering right 1)");
+  for (int i = 0; i < 4; i++) r.key("B5");
+  CHECK(r.remote.level() == -1 && r.dir() == planner::Direction::Back);
+  CHECK(std::fabs(r.walker.planner().steer() + 0.25) < 1e-6);
+  LAST_IS(r, "C6", "walk back (trot) 57.6 mm/s, steering right 2");
+  // another gait keeps it; the gait in use straightens it, forward
+  LAST_IS(r, "C4", "walk back (walk) 32.0 mm/s, steering right 2");
   LAST_IS(r, "C4", "walk forward (walk) 32.0 mm/s");
+  CHECK(r.remote.steer() == 0 && r.walker.planner().steer() == 0);
+  // a stop forgets it
+  r.key("A6");
+  CHECK(std::strcmp(r.key_done("B6"), "posture stand") == 0 && r.remote.steer() == 0);
+  LAST_IS(r, "A4", "walk forward (trot) 144.0 mm/s");
 }
 
 void test_freeze() {
@@ -399,10 +443,10 @@ uint8_t stop_ticks_sent(const Rig& r) {
 }
 
 void test_rear_up_key_off() {
-  // the default until the owner's staged trials: B2 is a row 1-3 key
+  // the default until the owner's staged trials: A2 is a row 1-3 key
   CHECK(!rear_up_key());
   Rig r;
-  const Key* k = action_for(cmd_of("B2"));
+  const Key* k = action_for(cmd_of("A2"));
   CHECK(k != nullptr && k->kind == Kind::Ignore);
   r.remote.perform(*k, k->command);
   r.run_ms(40);
@@ -415,18 +459,18 @@ void test_rear_up_key() {
   CHECK(t != nullptr && t->stop_ticks == 75 && t->legacy[0] == '\0' && tricks::find_trick("") == nullptr);
   {
     Rig r;
-    LAST_IS(r, "B2", "trick rear_up started (12 s; B2 again, B6 or C7 bring it down)");
+    LAST_IS(r, "A2", "trick rear_up started (12 s; A2 again, B6 or C7 bring it down)");
     CHECK(r.body.count(KILO_MSG_TRICK_PLAY) == 1 && r.player.busy());
-    CHECK(r.log.has("remote B2 (0x38, rear up): trick rear_up started"));
+    CHECK(r.log.has("remote A2 (0x10, rear up): trick rear_up started"));
     r.body.mode = KILO_MODE_TRICK;
     r.run_ms(40);
     // pressed again while it plays: down, over the trick's stop_ticks
-    LAST_IS(r, "B2", "trick stopped: coming down");
+    LAST_IS(r, "A2", "trick stopped: coming down");
     CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1 && stop_ticks_sent(r) == 75);
   }
   {  // B6 while it plays: TRICK_STOP over 75 ticks, the crossfade (to SIT) waited for, then STAND
     Rig r;
-    r.key("B2");
+    r.key("A2");
     r.body.mode = KILO_MODE_TRICK;
     r.run_ms(40);
     r.key("B6", 40);
@@ -438,20 +482,20 @@ void test_rear_up_key() {
     r.run_ms(400);
     CHECK(!r.remote.busy() && r.posture_goal() == KILO_POSTURE_STAND && std::strcmp(r.remote.last(), "posture stand") == 0);
   }
-  {  // C7 while it plays: stopped the same way (it comes down), frozen; B2 does not unfreeze
+  {  // C7 while it plays: stopped the same way (it comes down), frozen; A2 does not unfreeze
     Rig r;
-    r.key("B2");
+    r.key("A2");
     r.body.mode = KILO_MODE_TRICK;
     r.run_ms(40);
     LAST_IS(r, "C7", "frozen (trick stopped): only B6 or A7 act now");
     CHECK(stop_ticks_sent(r) == 75);
-    LAST_IS(r, "B2", "ignored (frozen: B6 or A7 to go on)");
+    LAST_IS(r, "A2", "ignored (frozen: B6 or A7 to go on)");
   }
   {  // walking: the planned stop first, then the trick
     Rig r;
     r.key("A4", 800);
     CHECK(r.walker.active());
-    CHECK(std::strncmp(r.key_done("B2"), "trick rear_up started", 21) == 0 && !r.walker.active());
+    CHECK(std::strncmp(r.key_done("A2"), "trick rear_up started", 21) == 0 && !r.walker.active());
     r.run_ms(100);  // the player's TRICK_COMMIT, then TRICK_PLAY
     CHECKF(r.body.count(KILO_MSG_TRICK_PLAY) == 1 && r.remote.level() == 3, "plays %zu level %d",
            r.body.count(KILO_MSG_TRICK_PLAY), r.remote.level());
@@ -460,11 +504,11 @@ void test_rear_up_key() {
     Rig r;
     r.body.batt_mv = 7300;
     r.run_ms(40);
-    LAST_IS(r, "B2", "rear_up refused: battery 7300 mV (needs 7400)");
+    LAST_IS(r, "A2", "rear_up refused: battery 7300 mV (needs 7400)");
     r.body.batt_mv = 0;
     r.body.flags |= KILO_TELEMETRY_FLAGS_NO_BATTERY;
     r.run_ms(40);
-    LAST_IS(r, "B2", "rear_up refused: on USB power (no battery)");
+    LAST_IS(r, "A2", "rear_up refused: on USB power (no battery)");
     CHECK(r.body.count(KILO_MSG_TRICK_PLAY) == 0 && r.body.count(KILO_MSG_TRICK_COMMIT) == 0);
   }
   // the higher stages (KILO_REAR_UP=2, 3): the same key, the stage's trick, its own slower stop
@@ -477,12 +521,12 @@ void test_rear_up_key() {
     Rig r;
     char want[40];
     std::snprintf(want, sizeof want, "trick %s started", name);
-    CHECKF(std::strncmp(r.key_done("B2"), want, std::strlen(want)) == 0, "%s", r.remote.last());
-    std::snprintf(want, sizeof want, "remote B2 (0x38, rear up %u): %s", (unsigned)stage, "trick");
+    CHECKF(std::strncmp(r.key_done("A2"), want, std::strlen(want)) == 0, "%s", r.remote.last());
+    std::snprintf(want, sizeof want, "remote A2 (0x10, rear up %u): %s", (unsigned)stage, "trick");
     CHECKF(r.log.has(want), "%s", want);
     r.body.mode = KILO_MODE_TRICK;
     r.run_ms(40);
-    LAST_IS(r, "B2", "trick stopped: coming down");
+    LAST_IS(r, "A2", "trick stopped: coming down");
     CHECK(stop_ticks_sent(r) == stop);
   }
   set_rear_up_key(0);
@@ -498,7 +542,7 @@ void test_keys_queue() {
   for (int i = 0; i < 3000 && r.remote.busy(); i++) r.pass();
   CHECK(r.log.has("remote B6 (0x02, stand): posture stand") &&
         r.log.has("remote C4 (0xB0, walk): walk forward (walk) 80.0 mm/s") &&
-        std::strcmp(r.remote.last(), "speed 1.15x (walk 92.0 mm/s forward)") == 0);
+        std::strcmp(r.remote.last(), "speed 1.15x (walk 92.0 mm/s forward)") == 0);  // the walk's levels
 }
 
 }  // namespace
@@ -511,6 +555,7 @@ int main() {
   test_gait_keys();
   test_speed_ladder();
   test_turn_keys();
+  test_steering();
   test_freeze();
   test_behaviour_key();
   test_rear_up_key_off();

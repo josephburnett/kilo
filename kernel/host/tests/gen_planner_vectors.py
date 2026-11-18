@@ -13,7 +13,8 @@ Line format (space separated; SPEED -1 is the pattern's default speed):
     fit X0..X3 Z0..Z3 SUPPORT PP PR  pitch roll               fit_attitude with prev (PP, PR)
     stab X0..X3 Z0..Z3 SUPPORT P R  margin                    stability
     S NAME PATTERN DIRECTION SPEED TICK                       a new Planner
-    speed V | dir D | pattern P | stop | observe EP ER        a command before the next tick
+    speed V | dir D | steer K | pattern P | stop | observe EP ER
+                                                              a command before the next tick
     t TICK X0..X3 Z0..Z3 SUPPORT PITCH ROLL PLAN_PITCH PLAN_ROLL MARGIN LIFTING
                                                               one Planner.next() (LIFTING: a bit mask)
     end DONE HOLDS CATCHES WAITS MIN_MARGIN PATTERN           the planner after its scenario
@@ -99,6 +100,9 @@ def scenario(name, pattern, direction="forward", speed=None, tick=1000, script=(
         elif kind == "dir":
             line("dir", item[1])
             p.set_direction(item[1])
+        elif kind == "steer":
+            line("steer", repr(float(item[1])))
+            p.set_steer(item[1])
         elif kind == "pattern":
             line("pattern", item[1])
             p.set_pattern(item[1])
@@ -147,6 +151,17 @@ def scenarios() -> None:
     scenario("walk_gate_catch", "walk", script=[("observe", 0.0, 8.0), ("run", 40), ("observe", 0.0, 0.0),
                                                 ("run", 2), ("observe", -3.0, 6.0), ("run", 4),
                                                 ("observe", 0.0, 0.0), ("run", 40)])
+    # steering (the remote's A6 / C6 while walking, 2026-11-17): the levels, both ways, at the top
+    # speed (the outer side at the longest stride, the lift tapered), backward, then the stop
+    scenario("trot_steer", "trot", script=[("run", 40), ("steer", 0.25), ("run", 40), ("steer", 1.0), ("run", 50),
+                                           ("steer", -0.5), ("run", 50), ("speed", 230.4), ("run", 50),
+                                           ("dir", "back"), ("run", 70), ("stop",), ("until_done", 400)])
+    # a steer through the gait changes, into the crawl and its lean
+    scenario("walk_steer_changes", "walk", script=[("steer", 0.5), ("run", 60), ("pattern", "trot"), ("run", 60),
+                                                   ("pattern", "crawl"), ("run", 300)])
+    scenario("crawl_steer", "crawl", "back", script=[("steer", -1.0), ("run", 260)])
+    # a turn in place, then straight on (the remote's B7 while turning)
+    scenario("trot_turn_go", "trot", "right", script=[("run", 60), ("dir", "forward"), ("run", 60)])
     scenario("trot_gate", "trot", speed=2 * pat.default_speed("trot"),
              script=[("run", 40), ("observe", 6.0, 0.0), ("run", 40), ("observe", 0.0, 0.0), ("run", 30)])
 

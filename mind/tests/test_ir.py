@@ -1,7 +1,8 @@
 """The IR remote on the mind: the key table (against the legacy src/infrared.h),
 the --remote key map by grid, its RemoteControl actions on a mock client (the
-posture keys, the gait keys, the speed ladder into backward, the turns, the
-freeze, the behaviour key, the rear-up key with its switch off and on), the
+posture keys, the gait keys, the speed ladder into backward, the turns in
+place and out of them, steering while walking, the freeze, the behaviour key,
+the rear-up key A2 with its switch off and on), the
 renderings, and the daemon acting on EVENT IR_KEY from the virtual body.
 kernel/host/tests/test_remote.cpp checks the kernel's port the same way."""
 
@@ -104,13 +105,13 @@ def test_key_map(stage):
 def _check_key_map(stage):
     on = stage != 0
     trick = {1: "rear_up", 2: "rear_up_2", 3: "rear_up_3"}.get(stage)
-    expected = dict(EXPECTED, B2=("trick", trick)) if on else EXPECTED
+    expected = dict(EXPECTED, A2=("trick", trick)) if on else EXPECTED
     assert set(ir.ACTIONS) == set(ir.BY_GRID)
     for k in ir.KEYS:
         a = ir.action_for(k.command)
         assert (a.kind, a.name) == expected.get(k.grid, ("none", "")), k.grid
-        # rows 1-3 do nothing, but B2 with the rear-up key on
-        assert (a.kind == "none") == (int(k.grid[1]) <= 3 and not (on and k.grid == "B2"))
+        # rows 1-3 do nothing, but A2 with the rear-up key on
+        assert (a.kind == "none") == (int(k.grid[1]) <= 3 and not (on and k.grid == "A2"))
         assert ir.action_for(k.command | ir.REPEAT).kind == "ignore"  # held keys do nothing
     assert ir.action_for(0x45).kind == "ignore"  # another remote
     from kilo.planner.patterns import PATTERNS
@@ -156,8 +157,8 @@ class FakeClient:
     def started_trick(self):
         return self.started
 
-    def walk(self, direction, pattern, speed_mm_s):
-        self.calls.append(("walk", direction, pattern, round(speed_mm_s, 1)))
+    def walk(self, direction, pattern, speed_mm_s, steer=0.0):
+        self.calls.append(("walk", direction, pattern, round(speed_mm_s, 1)) + ((steer,) if steer else ()))
         self.status = {"active": True, "period_ms": 600}
 
     def stop_walk(self, wait_s=None):
@@ -227,8 +228,8 @@ def test_remote_gait_keys():
     n = len(c.calls)
     assert key("C4") == "walk forward (walk) 80.0 mm/s: unchanged" and len(c.calls) == n  # idempotent
     key("B7")  # +4
-    assert key("A4") == "walk forward (trot) 165.6 mm/s"  # another gait: changed, the level kept
-    assert c.calls[-1] == ("walk", "forward", "trot", 165.6) and rc.level == 4  # 1.15x
+    assert key("A4") == "walk forward (trot) 187.2 mm/s"  # another gait: changed, the level kept
+    assert c.calls[-1] == ("walk", "forward", "trot", 187.2) and rc.level == 4  # the trot's 1.3x
     assert key("B4") == "walk forward (crawl) 25.6 mm/s"
     for _ in range(5):
         key("B5")  # +4 +3 +2 +1 -1 -2
@@ -252,26 +253,29 @@ def test_remote_speed_ladder():
     assert key("B7") == "ignored (not walking)" and key("B5") == "ignored (not walking)"
     assert c.calls == []  # they never start a walk
     key("A4")
-    # since 2026-11-16 the levels are 0.4, 0.7, 1, 1.15, 1.25 x the default (the trot 58 to 180 mm/s,
-    # inside its 42..184; before 1.1 and 1.2, both capped at the old trot's 152)
+    # since 2026-11-17 the trot's levels are 0.4, 0.7, 1, 1.3, 1.6 x its default (58 to 230 mm/s,
+    # inside its 42..232; 2026-11-16: 1.15 and 1.25, 166 and 180 mm/s, under the old top of 184)
     assert [key("B5") for _ in range(8)] == [
         "speed 0.7x (trot 100.8 mm/s forward)", "speed 0.4x (trot 57.6 mm/s forward)",
         "speed -0.4x (trot 57.6 mm/s back)", "speed -0.7x (trot 100.8 mm/s back)",
-        "speed -1x (trot 144.0 mm/s back)", "speed -1.15x (trot 165.6 mm/s back)",
-        "speed -1.25x (trot 180.0 mm/s back)", "speed -1.25x (trot 180.0 mm/s back): already the fastest back"]
-    assert rc.level == -5 and c.calls[-1] == ("walk", "back", "trot", 180.0)
+        "speed -1x (trot 144.0 mm/s back)", "speed -1.3x (trot 187.2 mm/s back)",
+        "speed -1.6x (trot 230.4 mm/s back)", "speed -1.6x (trot 230.4 mm/s back): already the fastest back"]
+    assert rc.level == -5 and c.calls[-1] == ("walk", "back", "trot", 230.4)
     for _ in range(4):
         key("B7")
     assert rc.level == -1
     assert key("B7") == "speed 0.4x (trot 57.6 mm/s forward)" and c.calls[-1][1] == "forward"
     for _ in range(3):
         key("B7")
-    assert key("B7") == "speed 1.25x (trot 180.0 mm/s forward)"
+    assert key("B7") == "speed 1.6x (trot 230.4 mm/s forward)"
     n = len(c.calls)
-    assert key("B7") == "speed 1.25x (trot 180.0 mm/s forward): already the fastest" and len(c.calls) == n
-    assert key("B5") == "speed 1.15x (trot 165.6 mm/s forward)"
+    assert key("B7") == "speed 1.6x (trot 230.4 mm/s forward): already the fastest" and len(c.calls) == n
+    assert key("B5") == "speed 1.3x (trot 187.2 mm/s forward)"
     assert key("B5") == "speed 1x (trot 144.0 mm/s forward)"
     assert key("C4") == "walk forward (walk) 80.0 mm/s"
+    # the walk's and the crawl's levels stay 0.4, 0.7, 1, 1.15, 1.25 (their tops: 96.8 and 26.9)
+    key("B7")
+    assert key("B7") == "speed 1.25x (walk 96.8 mm/s forward)"
     # a level the planner clamps (the crawl's top: 1.25 x 22.2 asked, its top 26.9): the real mm/s shown
     key("B4")
     key("B7")
@@ -279,25 +283,65 @@ def test_remote_speed_ladder():
     assert rc.level == 5 and key("B4").startswith("walk forward (crawl) 26.9 mm/s")
 
 
-def test_remote_turns():
+def test_remote_turns_in_place_and_out_of_them():
+    """From standing A6 / C6 turn in place (at 1x); B7 or B5 then ends the
+    turn and walks straight forward or backward at once, without a stop
+    first (the owner, 2026-11-17)."""
     c, rc, key = rig()
     assert key("A6") == "walk left (trot) 144.0 mm/s"  # from standing: the turn at 1x
     assert c.calls[-1] == ("walk", "left", "trot", 144.0)
     assert key("A6") == "walk left (trot) 144.0 mm/s: unchanged"
-    assert key("C6") == "walk right (trot) 144.0 mm/s"
-    assert key("B5") == "speed 0.7x (trot 100.8 mm/s right)"
-    assert key("B5") == "speed 0.4x (trot 57.6 mm/s right)"
-    assert key("B5") == "speed 0.4x (trot 57.6 mm/s right): already the slowest"  # no sign flip in a turn
-    assert key("B7") == "speed 0.7x (trot 100.8 mm/s right)"
-    assert key("A4") == "walk forward (trot) 100.8 mm/s" and rc.heading == "straight"  # the gait: straight again
+    assert key("C6") == "walk right (trot) 144.0 mm/s"  # turning in place: the other key turns the other way
+    n = len(c.calls)
+    assert key("B7") == "turn ended: walk forward (trot) 144.0 mm/s"  # no stop_walk: the walk goes on
+    assert c.calls[n:] == [("walk", "forward", "trot", 144.0)] and rc.heading == "straight" and rc.level == 3
+    assert key("B7") == "speed 1.3x (trot 187.2 mm/s forward)"  # then the ladder as ever
+    key("B6")
     key("C6")
-    assert key("C4") == "walk right (walk) 56.0 mm/s"  # another gait: the turn goes on in it
-    key("C4")
-    key("B5")
-    key("B5")  # +2: +1, -1
-    assert rc.level == -1
-    assert key("A6") == "walk left (walk) 32.0 mm/s" and rc.level == 1  # backward, then a turn: the magnitude
-    assert key("C4") == "walk forward (walk) 32.0 mm/s"
+    n = len(c.calls)
+    assert key("B5") == "turn ended: walk back (trot) 144.0 mm/s" and rc.level == -3
+    assert c.calls[n:] == [("walk", "back", "trot", 144.0)]
+    key("B6")
+    # the gait key of the turn's gait: straight forward too; another gait: the turn goes on in it
+    key("C6")
+    assert key("C4") == "walk right (walk) 80.0 mm/s"
+    assert key("C4") == "walk forward (walk) 80.0 mm/s" and rc.heading == "straight"
+    # every stop puts the heading back
+    key("B6")
+    assert rc.heading == "straight" and rc.steer == 0 and key("B7") == "ignored (not walking)"
+
+
+def test_remote_steering_while_walking():
+    """A6 / C6 while walking forward or backward bend the path a level at a
+    time (STEER_LEVELS: 0.25, 0.5, 1 of the stride), without stopping;
+    the speed keys keep the bend; the gait key straightens it; a stop
+    forgets it."""
+    c, rc, key = rig()
+    key("A4")
+    n = len(c.calls)
+    assert key("A6") == "walk forward (trot) 144.0 mm/s, steering left 1"
+    assert key("A6") == "walk forward (trot) 144.0 mm/s, steering left 2"
+    assert key("A6") == "walk forward (trot) 144.0 mm/s, steering left 3"
+    assert key("A6") == "walk forward (trot) 144.0 mm/s, steering left 3: already the tightest"
+    assert c.calls[n:] == [("walk", "forward", "trot", 144.0, 0.25), ("walk", "forward", "trot", 144.0, 0.5),
+                           ("walk", "forward", "trot", 144.0, 1.0)]  # no stop_walk: the walk goes on
+    for want in ("left 2", "left 1"):
+        assert key("C6") == f"walk forward (trot) 144.0 mm/s, steering {want}"
+    assert key("C6") == "walk forward (trot) 144.0 mm/s" and c.calls[-1] == ("walk", "forward", "trot", 144.0)
+    assert key("C6") == "walk forward (trot) 144.0 mm/s, steering right 1"
+    assert c.calls[-1] == ("walk", "forward", "trot", 144.0, -0.25)
+    # the speed keys keep the bend, into backward too (the nose still turns right)
+    assert key("B7") == "speed 1.3x (trot 187.2 mm/s forward, steering right 1)"
+    for _ in range(4):
+        key("B5")
+    assert rc.level == -1 and c.calls[-1] == ("walk", "back", "trot", 57.6, -0.25)
+    assert key("C6") == "walk back (trot) 57.6 mm/s, steering right 2"
+    # another gait keeps it; the gait key in use straightens it, forward
+    assert key("C4") == "walk back (walk) 32.0 mm/s, steering right 2"
+    assert key("C4") == "walk forward (walk) 32.0 mm/s" and rc.steer == 0
+    key("A6")
+    assert key("B6") == "posture stand" and rc.steer == 0
+    assert key("A4") == "walk forward (trot) 144.0 mm/s"
 
 
 def test_remote_freeze():
@@ -321,15 +365,17 @@ def test_remote_freeze():
 
 
 def test_rear_up_key_is_off_by_default():
-    """Off until the owner has done the staged trials (docs/rear-up-trick.md
-    "The B2 switch"): the daemon takes KILO_REAR_UP from its environment."""
-    code = "from kilo import ir; print(ir.REAR_UP_KEY, ir.action_for(0x38).kind, ir.describe(0x38))"
+    """Off until the owner has done the staged trials (docs/rear-up-trick.md,
+    the switch): the daemon takes KILO_REAR_UP from its environment. The key
+    is A2 since 2026-11-17 (B2 before); B2 does nothing in any stage."""
+    code = ("from kilo import ir; print(ir.REAR_UP_KEY, ir.action_for(0x10).kind, ir.describe(0x10), "
+            "ir.action_for(0x38).kind)")
     env = {k: v for k, v in os.environ.items() if k != "KILO_REAR_UP"}
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
-    for val, want in ((None, "0 none B2 (0x38, none)"), ("0", "0 none B2 (0x38, none)"),
-                      ("1", "1 trick B2 (0x38, rear up)"), ("2", "2 trick B2 (0x38, rear up 2)"),
-                      ("3", "3 trick B2 (0x38, rear up 3)"), ("4", "0 none B2 (0x38, none)"),
-                      ("yes", "0 none B2 (0x38, none)")):
+    for val, want in ((None, "0 none A2 (0x10, none) none"), ("0", "0 none A2 (0x10, none) none"),
+                      ("1", "1 trick A2 (0x10, rear up) none"), ("2", "2 trick A2 (0x10, rear up 2) none"),
+                      ("3", "3 trick A2 (0x10, rear up 3) none"), ("4", "0 none A2 (0x10, none) none"),
+                      ("yes", "0 none A2 (0x10, none) none")):
         e = dict(env) if val is None else dict(env, KILO_REAR_UP=val)
         out = subprocess.run([sys.executable, "-c", code], env=e, capture_output=True, text=True, check=True).stdout
         assert out.strip() == want, val
@@ -337,42 +383,43 @@ def test_rear_up_key_is_off_by_default():
 
 def test_remote_rear_up_key_off(rear_up_off):
     c, rc, key = rig()
-    assert key("B2") == "ignored (no action on this key)" and c.calls == []
-    assert ir.describe(0x38) == "B2 (0x38, none)"
+    assert key("A2") == "ignored (no action on this key)" and c.calls == []
+    assert ir.describe(0x10) == "A2 (0x10, none)" and ir.describe(0x38) == "B2 (0x38, none)"
 
 
 def test_remote_rear_up_key(monkeypatch, rear_up_on):
     slept = []
     monkeypatch.setattr(ir.time, "sleep", slept.append)
     c, rc, key = rig()
-    assert key("B2") == "trick rear_up started (12 s; B2 again, B6 or C7 bring it down)"
+    assert key("B2") == "ignored (no action on this key)" and c.calls == []  # B2 until 2026-11-17: nothing now
+    assert key("A2") == "trick rear_up started (12 s; A2 again, B6 or C7 bring it down)"
     assert c.calls == [("start_trick", "rear_up")] and c.started.stop_ticks == 75
     # pressed again while it plays: it comes down (TRICK_STOP over its stop_ticks, from the client)
-    assert key("B2") == "trick stopped: coming down" and c.calls[-1] == ("stop_trick",) and slept == []
+    assert key("A2") == "trick stopped: coming down" and c.calls[-1] == ("stop_trick",) and slept == []
     # B6 while it plays: stopped, the 1.5 s crossfade (to SIT) waited for, then STAND
-    key("B2")
+    key("A2")
     assert key("B6") == "posture stand" and c.calls[-2:] == [("stop_trick",), ("posture", "stand")]
     assert slept == [pytest.approx(75 * 0.02 + 0.1)]
-    # C7 while it plays: stopped (it comes down), frozen; B2 is not a way out of a freeze
-    key("B2")
+    # C7 while it plays: stopped (it comes down), frozen; A2 is not a way out of a freeze
+    key("A2")
     assert key("C7") == "frozen (trick stopped): only B6 or A7 act now" and c.calls[-1] == ("stop_trick",)
-    assert key("B2") == "ignored (frozen: B6 or A7 to go on)"
+    assert key("A2") == "ignored (frozen: B6 or A7 to go on)"
     # walking: the planned stop first, then the trick
     c, rc, key = rig()
     key("A4")
     n = len(c.calls)
-    assert key("B2").startswith("trick rear_up started")
+    assert key("A2").startswith("trick rear_up started")
     assert c.calls[n:] == [("stop_walk",), ("start_trick", "rear_up")] and rc.level == 3
     # a flat pack or USB power: refused, nothing moves
     for flags, mv, why in ((set(), 7300, "battery 7300 mV (needs 7400)"), ({"no_battery"}, 0, "on USB power (no battery)"),
                            (set(), None, "battery None mV (needs 7400)")):
         c, rc, key = rig()
         c.state.flags, c.state.batt_mv = flags, mv
-        assert key("B2") == f"rear_up refused: {why}" and c.calls == []
+        assert key("A2") == f"rear_up refused: {why}" and c.calls == []
     # the behaviour runner active: ignored like every key but the stop keys
     c, rc, key = rig()
     key("A5")
-    assert key("B2") == "ignored (behaviour runner active)"
+    assert key("A2") == "ignored (behaviour runner active)"
 
 
 @pytest.mark.parametrize("stage,name,stop", [(2, "rear_up_2", 100), (3, "rear_up_3", 125)])
@@ -384,10 +431,10 @@ def test_remote_rear_up_stages(monkeypatch, stage, name, stop):
     try:
         monkeypatch.setattr(ir.time, "sleep", lambda s: None)
         c, rc, key = rig()
-        assert key("B2").startswith(f"trick {name} started (")
+        assert key("A2").startswith(f"trick {name} started (")
         assert c.calls == [("start_trick", name)] and c.started.stop_ticks == stop
-        assert key("B2") == "trick stopped: coming down" and c.calls[-1] == ("stop_trick",)
-        assert ir.describe(0x38) == f"B2 (0x38, rear up {stage})"
+        assert key("A2") == "trick stopped: coming down" and c.calls[-1] == ("stop_trick",)
+        assert ir.describe(0x10) == f"A2 (0x10, rear up {stage})" and ir.describe(0x38) == "B2 (0x38, none)"
     finally:
         ir.set_rear_up_key(was)
 
@@ -491,8 +538,9 @@ def test_daemon_remote_walks_and_freezes(start_daemon):  # noqa: F811
         assert wait_for(lambda: body.conn.call("daemon")["walk"]["changing_to"] == "trot", 1)
         assert wait_for(lambda: body.conn.call("daemon")["walk"]["pattern"] == "trot", 8)
         assert vb.gait_stops == []
-        vb.ir_key(0x22)  # A6: turn left
-        assert wait_for(lambda: body.conn.call("daemon")["walk"]["direction"] == "left", 2)
+        vb.ir_key(0x22)  # A6 while walking: steer left (a level), still forward
+        assert wait_for(lambda: body.conn.call("daemon")["walk"]["steer"] == 0.25, 2)
+        assert body.conn.call("daemon")["walk"]["direction"] == "forward"
         # C7: the stream ends at once; the body holds, settles the swing feet, stays in STANCE (GAIT_STOPPED 1)
         vb.ir_key(0xE2)
         assert wait_for(lambda: vb.feet is None and vb.gait_stops == [1], 3)

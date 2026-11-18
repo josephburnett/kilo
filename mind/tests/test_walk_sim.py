@@ -156,6 +156,79 @@ def test_the_fast_gaits_at_every_level_shrug_off_the_model_errors(pattern, direc
             assert st["holds"] == 0 or (pattern == "walk" and kw.get("lag_ms") == 20 and st["holds"] < 10), what
 
 
+@pytest.mark.slow
+@pytest.mark.parametrize("pattern", ("walk", "trot"))
+@pytest.mark.parametrize("direction", ("forward", "back"))
+def test_steering_shrugs_off_the_model_errors(pattern, direction):
+    """The remote's A6 / C6 while walking (2026-11-17): the walk and the trot
+    at their default and top speed, steering a little (0.25) and as tight as
+    the remote goes (1: the inner side steps in place), each model error:
+    up, within the bounds of the straight walk (the trot 5 deg, the walk 6),
+    no catch, and gate holds only where the straight walk has them."""
+    errs = SERVOS + (dict(body_model=wrong_mass(10, 5, 50)), dict(body_model=wrong_mass(-10, -5, 50)),
+                     dict(body_model=wrong_mass(10, -5, 50)), dict(imu_offset=(2.0, 1.5)))
+    for speed in (default_speed(pattern), speed_range(pattern)[1]):
+        for steer in (0.25, -1.0):
+            for kw in errs:
+                sim = WalkSim(pattern, direction, speed, **kw)
+                sim.planner.set_steer(steer)
+                assert sim.run(TICKS) == TICKS and not sim.fell()
+                st = sim.planner.stats
+                what = (speed, steer, kw, sim.max_error(), st)
+                assert sim.max_error() < (5.0 if pattern == "trot" else 6.0) and st["catches"] == 0, what
+                assert st["holds"] == 0 or (pattern == "walk" and kw.get("lag_ms") == 20 and st["holds"] < 10), what
+
+
+def test_steering_the_crawl_stays_on_its_plan():
+    """The crawl steers too (its lean is solved for whatever strides the feet
+    have): forward and backward as tight as the remote goes, within the
+    straight crawl's bounds, no catch, no hold."""
+    for direction in ("forward", "back"):
+        sim = WalkSim("crawl", direction)
+        sim.planner.set_steer(1.0)
+        assert sim.run(TICKS) == TICKS and not sim.fell()
+        # 4 backward (the straight crawl backward reaches 4.4 with the fitted servos: §12.2)
+        assert sim.max_error() < (3.5 if direction == "forward" else 4.5), (direction, sim.max_error())
+        assert sim.planner.stats["catches"] == 0 and sim.planner.stats["holds"] == 0
+        assert sim.planner.stats["min_margin"] > 7
+
+
+@pytest.mark.parametrize("pattern", ("walk", "trot"))
+def test_a_turn_in_place_then_straight_steering_then_stop(pattern):
+    """The remote's turn in place (A6 from standing), B7 straight forward at
+    once, A6 A6 A6 steering left as tight as it goes, C6 x6 to the right,
+    a gait change (the walk and the trot directly), B5 into backward, then
+    the planned stop: all in one walk, up, near the plan, the straight walk
+    reached within 0.7 s of B7, and the stop inside stop_timeout."""
+    from kilo.planner.walker import stop_timeout
+    sim = WalkSim(pattern, "left")
+    other = "trot" if pattern == "walk" else "walk"
+    reached = {}
+
+    def each(i):
+        p = sim.planner
+        if i == 150:
+            p.set_direction("forward")
+        if i > 150 and "fwd" not in reached and p.s_cur == p.s_tgt:
+            reached["fwd"] = i - 150
+        if i == 250:
+            p.set_steer(1.0)
+        elif i == 400:
+            p.set_steer(-1.0)
+        elif i == 550:
+            p.set_pattern(other)
+        elif i == 700:
+            p.set_direction("back")
+        elif i == 850:
+            p.stop()
+    n = sim.run(1400, each=each)
+    assert sim.stream.ended == "stopped" and sim.stream.ok and not sim.fell()
+    assert reached["fwd"] * 20 < 700 and sim.planner.pattern.name == other
+    assert (n - 850) * 0.02 < stop_timeout(sim.planner.timing().period_ms) - 1.0
+    assert sim.max_error() < 4.5 and sim.planner.stats["catches"] == 0 and sim.planner.stats["holds"] == 0
+    assert sim.vb.feet_underruns == 0 and not sim.vb.feet_refused
+
+
 def test_the_trot_no_longer_rocks_at_mid_speeds():
     """Until 2026-11-16 the trot at 75 to 140 mm/s (four-foot phases of 4 to 8
     ticks) rocked with the body's balance loop, up to ~10 deg off the plan

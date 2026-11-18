@@ -602,12 +602,12 @@ each key does):
 | A7 | sleep: the planned stop, then REST; 30 s later, if nothing else happened, light sleep (servos off, the Pi idles; any key or the laptop wakes him: `power/sleep.h`, docs/power.md) |
 | C5 | the planned stop, then the calibration posture (CALIB) |
 | A4, B4, C4 | trot, crawl, walk: walk forward in that gait from standing; change the gait while walking; the gait in use: straight forward again |
-| B7, B5 | faster, slower by one speed level (0.4, 0.7, 1, 1.1, 1.2 × the gait's speed); past the slowest B5 goes backward; only while walking |
-| A6, C6 | turn left, right in place |
+| B7, B5 | faster, slower by one speed level (the trot 0.4, 0.7, 1, 1.3, 1.6 × its speed: 58 to 230 mm/s; the walk and the crawl 0.4, 0.7, 1, 1.15, 1.25); past the slowest B5 goes backward; only while walking. Turning in place: stop turning and walk straight forward (B7) or backward (B5) at once |
+| A6, C6 | from standing: turn left, right in place; walking forward or backward: steer one level left or right (0.25, 0.5, 1 of the stride off the inner side, at most 3 each way), without stopping (docs/walking-and-balance.md §13) |
 | C7 | freeze: the walk aborted at once (the body settles in STANCE, powered), a trick and the behaviour runner stopped; then only B6 and A7 act |
 | A5 | start the behaviour runner |
-| B2 | off unless built with `KILO_REAR_UP=1`, `2` or `3`: rear up (the trick `rear_up`, `rear_up_2` or `rear_up_3` by that stage, docs/rear-up-trick.md): sit up on the hind feet and the tail at 28, 40 or 54 degrees, hold 2 s, come down to SIT (12 to 18 s); pressed again while it plays, it comes down at once (1.5 to 2.5 s); refused below 7400 mV |
-| rows 1-3 but B2 | nothing (logged as ignored) |
+| A2 | off unless built with `KILO_REAR_UP=1`, `2` or `3`: rear up (the trick `rear_up`, `rear_up_2` or `rear_up_3` by that stage, docs/rear-up-trick.md): sit up on the hind feet and the tail at 28, 40 or 54 degrees, hold 2 s, come down to SIT (12 to 18 s); pressed again while it plays, it comes down at once (1.5 to 2.5 s); refused below 7400 mV. B2 until 2026-11-17 |
+| rows 1-3 but A2 | nothing (logged as ignored), B2 too |
 
 The daemon's blocking waits are phases of `poll()` and keys that come
 meanwhile queue (4), as its lock queues them; C7 does not queue: it cancels
@@ -620,7 +620,7 @@ Integration (`kernel/host/test.sh`): `python -m kilo.vbody.core --control
 FIFO` takes `ir CODE`, `att P R`, `batt MV` and `imu ...` lines
 (`CoreBody.serve_control`; the harness has no IR decoder, so IR_KEY frames
 are made in Python), and the script by IR keys stands, trots, speeds up
-and slows down, turns, stands after the planned stop, freezes a trot (the
+and slows down, steers, stands after the planned stop, freezes a trot (the
 walk aborted, the virtual body settling in STANCE), rests, takes the
 calibration posture and starts and stops the behaviour runner, idles the behaviour
 runner 5 s at 10 Hz, and tilts and drops the virtual body for perception

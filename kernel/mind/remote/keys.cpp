@@ -20,8 +20,8 @@ const Key kKeyTable[kKeys] = {
     {0x30, "A3", "trot", Kind::Ignore, "", "none"},
     {0x18, "B3", "sit", Kind::Ignore, "", "none"},
     {0x7A, "C3", "stretch", Kind::Ignore, "", "none"},
-    {0x10, "A2", "hi", Kind::Ignore, "", "none"},
-    {0x38, "B2", "push-up", Kind::Trick, "rear_up", "rear up"},
+    {0x10, "A2", "hi", Kind::Trick, "rear_up", "rear up"},  // B2 until 2026-11-17
+    {0x38, "B2", "push-up", Kind::Ignore, "", "none"},
     {0x5A, "C2", "pee", Kind::Ignore, "", "none"},
     {0x42, "A1", "wash face", Kind::Ignore, "", "none"},
     {0x4A, "B1", "butt-up", Kind::Ignore, "", "none"},
@@ -29,12 +29,12 @@ const Key kKeyTable[kKeys] = {
 };
 
 namespace {
-// B2 with the rear-up key off: a row 1-3 key that does nothing.
-const Key kRearUpOff = {0x38, "B2", "push-up", Kind::Ignore, "", "none"};
-// B2 with the key on at stage 2 or 3 (stage 1 is the table's own entry).
+// A2 with the rear-up key off: a row 1-3 key that does nothing.
+const Key kRearUpOff = {0x10, "A2", "hi", Kind::Ignore, "", "none"};
+// A2 with the key on at stage 2 or 3 (stage 1 is the table's own entry).
 const Key kRearUpStage[2] = {
-    {0x38, "B2", "push-up", Kind::Trick, "rear_up_2", "rear up 2"},
-    {0x38, "B2", "push-up", Kind::Trick, "rear_up_3", "rear up 3"},
+    {0x10, "A2", "hi", Kind::Trick, "rear_up_2", "rear up 2"},
+    {0x10, "A2", "hi", Kind::Trick, "rear_up_3", "rear up 3"},
 };
 uint8_t g_rear_up_stage = 0;
 }  // namespace

@@ -351,10 +351,14 @@ Kilo to finish moving before the next:
 
 What the other keys do, for later: **B7** faster and **B5** slower while
 walking (B5 past the slowest walks backward), **A6** and **C6** turn left and
-right, **B4** crawl and **C4** walk (the two slower gaits), **C5** the
-calibration posture, **A5** Kilo's own behaviour (B6 or A7 ends it), and
-**C7** freeze: Kilo stops where he is, feet on the ground, and ignores
-every key except B6 and A7. The keys in rows 1 to 3 do nothing.
+right on the spot when Kilo stands, and steer left and right while he walks
+(each press bends the path a little more, up to three presses; the other
+key bends it back), **B7** or **B5** while he turns on the spot sets off
+straight forward or backward, **B4** crawl and **C4** walk (the two slower
+gaits), **C5** the calibration posture, **A5** Kilo's own behaviour (B6 or
+A7 ends it), and **C7** freeze: Kilo stops where he is, feet on the ground,
+and ignores every key except B6 and A7. The keys in rows 1 to 3 do nothing
+(A2, the rear-up trick, only when it is switched on: docs/rear-up-trick.md).
 
 If a key does nothing and no `remote` line appears, the key did not reach
 the mind: note which key. If the line says `ignored (a laptop client holds
@@ -511,7 +515,7 @@ The mind records everything while it runs (the *flight recorder*), so you
 can play with Kilo with the remote and no cable, then look at what
 happened. Words used:
 
-- **Run**: one walk (from a gait key to its stop) or one trick (from B2 to
+- **Run**: one walk (from a gait key to its stop) or one trick (from A2 to
   its end), a stretch of the recording. Each has a number.
 - **Recording**: what the mind wrote down from the moment it started:
   every message between the Pi and Kilo's board (each 20 ms tick: where

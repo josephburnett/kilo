@@ -87,6 +87,7 @@ struct WalkGoal {
   Direction direction = Direction::Forward;
   real speed_mm_s = -1;  // < 0: the pattern's default
   bool balance = true;   // false: the body's balance off for this walk
+  real steer = 0;        // -1..1, + left: bends a forward or backward walk (Planner::set_steer)
 };
 
 enum class WalkPhase : uint8_t {
@@ -138,8 +139,8 @@ class Walker {
   void on_telemetry(const kilo_telemetry_t& t);
   void on_event(const kilo_event_t& e);
 
-  // Walk, or while walking change pattern, direction and speed at once (a
-  // pattern after every leg has stepped home). Null when accepted, else why
+  // Walk, or while walking change pattern, direction, speed and steer at
+  // once (a pattern into or out of the crawl after every leg has stepped home). Null when accepted, else why
   // not (Python's WalkError): nothing changed then.
   const char* start(const WalkGoal& goal);
   // The planned stop (each leg steps home, the body levels, then STANCE).

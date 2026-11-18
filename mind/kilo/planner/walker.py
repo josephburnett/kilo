@@ -357,7 +357,7 @@ class Walker:
         if s is None or p is None:
             return None
         tm = p.timing()
-        return {"active": self.active, "pattern": p.pattern.name, "direction": p.direction,
+        return {"active": self.active, "pattern": p.pattern.name, "direction": p.direction, "steer": p.steer,
                 "speed_mm_s": round(tm.speed_mm_s, 1), "stride_mm": round(tm.stride_mm, 1),
                 "period_ms": round(tm.period_ms), "stopping": p.stopping, "ended": s.ended, "ok": s.ok,
                 "sent": s.sent, "skipped": s.skipped, "underruns": s.underruns, "max_behind": s.max_behind,
@@ -368,13 +368,14 @@ class Walker:
 
     # ---- commands -------------------------------------------------------------------------------
     def start(self, pattern: str = pat.DEFAULT_PATTERN, direction: str = "forward",
-              speed_mm_s: float | None = None, balance: bool = True) -> dict[str, Any]:
-        """Walk (or, while walking, change pattern, direction and speed).
+              speed_mm_s: float | None = None, balance: bool = True, steer: float = 0.0) -> dict[str, Any]:
+        """Walk (or, while walking, change pattern, direction, speed and
+        steer: -1..1, + left, bends a forward or backward walk; Planner.set_steer).
         Blocks for the STANCE transition on a start. Returns status()."""
         pattern, direction = pat.pattern(pattern).name, pat.direction(direction)
         with self._lock:
             if self.active and self.planner is not None and not self.planner.stopping:
-                return self.update(pattern, direction, speed_mm_s)
+                return self.update(pattern, direction, speed_mm_s, steer)
             if self.active and not self.wait(START_WAIT_S):
                 # a planned stop still under way (a walk's can take ~10 s): cut
                 # it short, so two streams never send FEET for the same ticks
@@ -383,14 +384,14 @@ class Walker:
                     raise WalkError("the previous walk's stream did not end")
             self._setup(balance)
             try:
-                self._begin(pattern, direction, speed_mm_s)
+                self._begin(pattern, direction, speed_mm_s, steer)
             except BaseException:
                 self._teardown(None)
                 raise
         return self.status() or {}
 
     def update(self, pattern: str | None = None, direction: str | None = None,
-               speed_mm_s: float | None = None) -> dict[str, Any]:
+               speed_mm_s: float | None = None, steer: float | None = None) -> dict[str, Any]:
         with self._lock:
             p = self.planner
             if p is None or not self.active:
@@ -401,6 +402,8 @@ class Walker:
                 p.set_direction(direction)
             if speed_mm_s is not None:
                 p.set_speed(speed_mm_s)
+            if steer is not None:
+                p.set_steer(steer)
         return self.status() or {}
 
     def stop(self, wait_s: float | None = None) -> bool | None:
@@ -464,7 +467,7 @@ class Walker:
         self._sleep(self.stance_wait_s)
         self.link.clear_goal("SET_POSTURE")
 
-    def _begin(self, pattern: str, direction: str, speed_mm_s: float | None) -> None:
+    def _begin(self, pattern: str, direction: str, speed_mm_s: float | None, steer: float = 0.0) -> None:
         st = self.link.state
         bc = BodyClock()
         with st.lock:
@@ -477,7 +480,7 @@ class Walker:
             raise WalkError("no telemetry from the body")
         self.tracker = ErrorTracker()
         planner = Planner(self.model, pattern, direction, speed_mm_s, tick=int(math.floor(now_tick)) + LOOKAHEAD,
-                          config=self.config)
+                          config=self.config, steer=steer)
         self.planner = planner
         self.stream = Stream(self.link, planner, epoch, bc, self._handover, self.tracker)
         self._stop_thread.clear()

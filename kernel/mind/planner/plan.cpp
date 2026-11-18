@@ -260,7 +260,7 @@ Planner::Planner(const BodyModel& model, const PlannerConfig& cfg)
   stats_.min_margin = m_inf();
 }
 
-void Planner::start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tick, real start_height) {
+void Planner::start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tick, real start_height, real steer) {
   tick_ = tick;
   lag_ = model_.lag_ticks(kTickMs);
   lead_ = round_i(kLeanLeadMs / kTickMs);
@@ -269,11 +269,13 @@ void Planner::start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tic
   resp_ = {0, 0};
   pattern_ = &p;
   direction_ = d;
+  steer_ = m_max((real)-1.0, m_min((real)1.0, steer));
   speed_mm_s_ = speed_mm_s < 0 ? default_speed(p) : speed_mm_s;
   pending_ = nullptr;
   for (int leg = 0; leg < kLegs; leg++) {
     xg_[leg] = 0;
     swing_[leg] = 0;
+    swing_h_[leg] = 0;
     caught_[leg] = false;
   }
   h_ = start_height < 0 ? model_.stance_height(205) : start_height;
@@ -337,7 +339,7 @@ bool Planner::direct_change() const {
 bool Planner::switch_ok(const Pattern& p) const {
   real st = planner::timing(p, speed_mm_s_).stride_mm;
   for (int i = 0; i < 2; i++)
-    if (!(m_fabs(s_cur_[i]) <= st + kStrideSlewMm)) return false;
+    if (!(m_fabs(s_cur_[i]) <= st + pattern_->stride_slew_mm)) return false;
   for (int leg = 0; leg < kLegs; leg++)
     if (!(m_fabs(xg_[leg]) <= st / 2 + kSwitchSlackMm)) return false;
   return m_fabs(h_ - model_.stance_height(p.body_h_256)) <= kHeightSlewMm;
@@ -370,11 +372,11 @@ void Planner::apply_timing() {
   stance_tgt_ = (n * (shift + pattern_->span_ms()) - pattern_->swing_ms) / kTickMs;
   if (stopping_ || (pending_ != nullptr && !direct_change())) {
     s_tgt_[0] = s_tgt_[1] = 0;
-  } else if (pending_ != nullptr) {  // changing directly: no stride longer than the new pattern's
-    real nw = planner::timing(*pending_, speed_mm_s_).stride_mm;
-    side_strides(direction_, m_min(tm.stride_mm, nw), s_tgt_);
+  } else if (pending_ != nullptr) {  // changing directly: no stride longer than the new pattern's (a steer's outer side too)
+    real st = m_min(tm.stride_mm, planner::timing(*pending_, speed_mm_s_).stride_mm);
+    side_strides(direction_, st, s_tgt_, steer_, st);
   } else {
-    side_strides(direction_, tm.stride_mm, s_tgt_);
+    side_strides(direction_, tm.stride_mm, s_tgt_, steer_, pattern_->stride_mm);
   }
   has_next_ = false;  // the next slot's lean was solved for the old timing
 }
@@ -393,6 +395,11 @@ void Planner::set_speed(real speed_mm_s) {
 
 void Planner::set_direction(Direction d) {
   direction_ = d;
+  apply_timing();
+}
+
+void Planner::set_steer(real steer) {
+  steer_ = m_max((real)-1.0, m_min((real)1.0, steer));
   apply_timing();
 }
 
@@ -440,6 +447,7 @@ void Planner::start_slot() {
   k_ = (k_ + 1 + pattern_->n_groups) % pattern_->n_groups;
   t_ = 0;
   held_ = 0;
+  levelling_ = false;
   for (int leg = 0; leg < kLegs; leg++) caught_[leg] = false;
   skip_ = false;
   if (stopping_ || (changing() && !direct_change())) {
@@ -475,6 +483,7 @@ void Planner::start_slot() {
     if (lean_to_ != lean_from_) {  // out of a leaning pattern: level first, as fast as gravity lets
       tr = move_ticks(lean_from_, lean_to_, h_);
       if (tr + settle_ > S_) S_ = tr + settle_;
+      levelling_ = true;  // ...with the feet still: the strides grow from the first lift on (plan.py)
     }
     int a = S_ - (tr ? settle_ : 0);
     int m = tr > 1 ? tr : 1;
@@ -500,7 +509,9 @@ int Planner::move_ticks(const Lean& a, const Lean& b, real height) const {
 }
 
 void Planner::slewed(real s[2], real* stance, real* h) const {
-  for (int i = 0; i < 2; i++) s[i] = s[i] + m_max(-kStrideSlewMm, m_min(kStrideSlewMm, s_tgt_[i] - s[i]));
+  real d = pattern_->stride_slew_mm;
+  bool hold = levelling_ && t_ < S_;
+  for (int i = 0; i < 2; i++) s[i] = s[i] + m_max(-d, m_min(d, (hold ? (real)0 : s_tgt_[i]) - s[i]));
   *stance = m_min(*stance * ((real)1.0 + kStanceSlew), m_max(*stance / ((real)1.0 + kStanceSlew), stance_tgt_));
   *h += m_max(-kHeightSlewMm, m_min(kHeightSlewMm, height_target() - *h));
 }
@@ -676,7 +687,7 @@ const TickPlan& Planner::next() {
         if (tip_toward(leg) > cfg.catch_deg) {
           caught_[leg] = true;
           caught_j_[leg] = t_ - S_;
-          caught_lift_[leg] = pattern_->step_h_mm * ((real)1.0 - m_cos(2 * kPi * (real)(j - 1) / (real)W)) / 2;
+          caught_lift_[leg] = swing_h_[leg] * ((real)1.0 - m_cos(2 * kPi * (real)(j - 1) / (real)W)) / 2;
           stats_.catches++;
           has_next_ = false;  // it lands elsewhere: the next slot's lean is solved when it starts
         }
@@ -689,11 +700,15 @@ const TickPlan& Planner::next() {
           any_caught = true;
           lift[leg] = caught_lift_[leg] * ((real)1.0 - smooth((real)(t_ - S_ - caught_j_[leg] + 1) / (real)3.0));
         } else if (j >= 1 && j <= W) {
-          if (j == 1) swing_[leg] = xg_[leg];  // where the foot leaves the ground
+          if (j == 1) {
+            swing_[leg] = xg_[leg];  // where the foot leaves the ground
+            int side = kLeft[leg] ? 0 : 1;  // the longer of the stride now and the one it grows to
+            swing_h_[leg] = step_height(*pattern_, m_max(m_fabs(s_cur_[side]), m_fabs(s_tgt_[side])));
+          }
           real x0 = swing_[leg];
           real sj = (real)j / (real)W;
           xg_[leg] = x0 + (target_x(leg) - x0) * smooth(sj);
-          lift[leg] = pattern_->step_h_mm * ((real)1.0 - m_cos(2 * kPi * sj)) / 2;
+          lift[leg] = swing_h_[leg] * ((real)1.0 - m_cos(2 * kPi * sj)) / 2;
         }
       }
       if (any_caught) {

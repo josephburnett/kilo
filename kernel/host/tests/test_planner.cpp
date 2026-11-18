@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 #include "planner/errors.h"
 #include "planner/plan.h"
@@ -154,7 +155,8 @@ void test_pattern_tables_and_default_timing() {
   Timing c = default_timing(P("crawl"));
   CHECK(c.stride_mm == 50 && std::lround(c.period_ms) == 2550 && near(c.speed_mm_s, 22.2, 0.1));
   CHECK(P("crawl").body_h_256 == 179 && P("walk").body_h_256 == 205);
-  const double los[3] = {25.8, 42.1, -1}, tops[3] = {96.8, 184.2, 26.9};  // walk, trot, crawl
+  // walk, trot, crawl; the trot's top 231.6 since 2026-11-17 (a 44 mm stride, 184.2 with 35 before)
+  const double los[3] = {25.8, 42.1, -1}, tops[3] = {96.8, 231.6, 26.9};
   for (int i = 0; i < kPatterns; i++) {
     real lo, hi;
     speed_range(kPatternTable[i], &lo, &hi);
@@ -162,6 +164,12 @@ void test_pattern_tables_and_default_timing() {
            lo, hi);
   }
   CHECK(&default_pattern() == &P("trot"));
+  // the trot's lift tapers from 8 mm at 35 mm to 6 at 44 (patterns.py step_height); the strides' slew
+  const real sh[5] = {8, 35, 39.5, 44, 50}, want_h[5] = {8, 8, 7, 6, 6};
+  for (int i = 0; i < 5; i++) CHECKF(near(step_height(P("trot"), sh[i]), want_h[i], 1e-5), "%g", (double)sh[i]);
+  CHECK(step_height(P("walk"), 50) == 8 && step_height(P("crawl"), 50) == 15);
+  CHECK(P("walk").stride_slew_mm == (real)1.5 && P("trot").stride_slew_mm == (real)1.5 &&
+        P("crawl").stride_slew_mm == (real)0.5);
 }
 
 void test_timing_clamps() {
@@ -208,6 +216,19 @@ void test_side_strides_and_names() {
   CHECK(s[0] == 10 && s[1] == -10);
   side_strides(Direction::March, 25, s);
   CHECK(s[0] == 0 && s[1] == 0);
+  // a steer bends forward and backward walks (+ left: the nose turns left), capped at the longest stride
+  side_strides(Direction::Forward, 20, s, 0.25);
+  CHECK(s[0] == 15 && s[1] == 25);
+  side_strides(Direction::Back, 20, s, 0.5);
+  CHECK(s[0] == -30 && s[1] == -10);
+  side_strides(Direction::Forward, 20, s, -1);
+  CHECK(s[0] == 40 && s[1] == 0);  // the inner side steps in place
+  side_strides(Direction::Forward, 40, s, 0.5, 44);
+  CHECK(near(s[0], 44.0 / 3, 1e-4) && near(s[1], 44, 1e-4));
+  side_strides(Direction::Forward, 20, s, 3);
+  CHECK(s[0] == 0 && s[1] == 40);
+  side_strides(Direction::Left, 25, s, 0.5);
+  CHECK(s[0] == -20 && s[1] == 20);
   CHECK(!find_direction("sideways", &d) && find_pattern("gallop") == nullptr);
   CHECK(find_direction("LEFT", &d) && d == Direction::Left && find_pattern("Trot") == &p);
 }
@@ -233,8 +254,15 @@ void test_plan_fits_feet_and_the_slew() {
   }
 }
 
+// test_planner.py fast_bound(): 8.3 deg a tick (the floor ran 414 deg/s at 180 mm/s) up to the
+// trot's old top of 184 mm/s; loosened to 9.6 (480 deg/s, under the body's 10) for the trot above it
+// and steering, since 2026-11-17: its 44 mm stride in the same 8-tick swing. Not yet run on the floor.
+double fast_bound(const char* name, real v, real steer = 0) {
+  return std::strcmp(name, "trot") == 0 && (v > (real)184.3 || steer != 0) ? 9.6 : 8.3;
+}
+
 void test_every_speed_of_the_fast_gaits_stays_inside_the_slew() {
-  // slowest, default and top, forward, back and turning: at most 8.3 deg a tick (test_planner.py)
+  // slowest, default and top, forward, back and turning: inside fast_bound() (test_planner.py)
   for (const char* name : {"walk", "trot"}) {
     real lo, hi;
     speed_range(P(name), &lo, &hi);
@@ -244,9 +272,73 @@ void test_every_speed_of_the_fast_gaits_stays_inside_the_slew() {
         p.start(P(name), d, v, 1000);
         std::vector<TickPlan> t;
         plan(&t, p, 300);
-        CHECKF(max_joint_step(t) < 8.3, "%s %g: %.2f", name, v, max_joint_step(t));
+        CHECKF(max_joint_step(t) < fast_bound(name, v), "%s %g: %.2f", name, v, max_joint_step(t));
       }
   }
+}
+
+void test_steering_bends_the_path_inside_the_reach_and_the_slew() {
+  // test_planner.py: the steer never takes a side past the longest stride, so every joint stays as at
+  // the top speed (the crawl backward at its top asked 11.9 deg a tick before steering existed)
+  for (const Pattern& pat : kPatternTable)
+    for (Direction d : {Direction::Forward, Direction::Back}) {
+      real lo, hi;
+      speed_range(pat, &lo, &hi);
+      for (real v : {default_speed(pat), hi})
+        for (real steer : {(real)0.25, (real)0.5, (real)1.0, (real)-1.0}) {
+          Planner p;
+          p.start(pat, d, v, 1000, -1, steer);
+          std::vector<TickPlan> t;
+          plan(&t, p, 400);
+          real sl = p.s_cur()[0], sr = p.s_cur()[1];
+          CHECK(std::fmax(std::fabs(sl), std::fabs(sr)) <= pat.stride_mm + 1e-4);
+          CHECKF((sr - sl) * steer > 0 && near(std::fabs((sr - sl) / (sr + sl)), std::fabs(steer), 1e-4),
+                 "%s %g %g: %g %g", pat.name, (double)v, (double)steer, (double)sl, (double)sr);
+          for (const TickPlan& k : t)
+            for (int i = 0; i < 4; i++) CHECK(k.x[i] >= -60 && k.x[i] <= 60 && M.reachable(k.x[i], k.z[i]));
+          double bound = fixed_cadence(pat) ? fast_bound(pat.name, v, steer)
+                                            : (d == Direction::Back ? 12.0 : (double)M.slew_deg_per_tick);
+          CHECKF(max_joint_step(t) < bound, "%s %g %g: %.2f", pat.name, (double)v, (double)steer, max_joint_step(t));
+        }
+    }
+}
+
+void test_a_turn_in_place_goes_straight_within_a_second() {
+  // the remote's B7 / B5 while turning: the strides 1.5 mm a tick, straight in under 0.7 s
+  for (const char* name : {"walk", "trot"})
+    for (Direction to : {Direction::Forward, Direction::Back}) {
+      Planner p;
+      p.start(P(name), Direction::Left, -1, 0);
+      std::vector<TickPlan> t;
+      plan(&t, p, 150);
+      p.set_direction(to);
+      int n = 0;
+      real want[2];
+      side_strides(to, p.timing().stride_mm, want);
+      while ((p.s_cur()[0] != want[0] || p.s_cur()[1] != want[1]) && n < 200) {
+        t.push_back(p.next());
+        n++;
+      }
+      CHECKF(n * 20 < 700, "%s: %d ticks", name, n);
+      plan(&t, p, 100);
+      check_ticks(t, name);
+      CHECKF(max_joint_step(t) < 8.3, "%s: %.2f", name, max_joint_step(t));
+    }
+}
+
+void test_out_of_the_crawl_the_feet_wait_for_the_level_out() {
+  // test_planner.py: the strides stay at 0 while the first walk slot levels the crawl's lean
+  Planner& p = fresh("crawl", 0);
+  for (int i = 0; i < 200; i++) p.next();
+  p.set_pattern(P("walk"));
+  int n = 0;
+  while (&p.pattern() != &P("walk") && n++ < 1000) p.next();
+  int held = 0;
+  for (int i = 0; i < 15; i++) {
+    p.next();
+    if (p.s_cur()[0] == 0 && p.s_cur()[1] == 0) held++;
+  }
+  CHECKF(held == 15, "%d of 15 ticks with the strides at 0", held);
 }
 
 void test_the_walk_lifts_a_hind_leg_then_its_diagonal_fore_leg() {
@@ -360,7 +452,7 @@ void test_speed_changes_mid_walk_are_smooth() {
   real lo0, hi0;
   speed_range(P("trot"), &lo0, &hi0);
   CHECK(near(p.timing().speed_mm_s, lo0, 1e-4));  // 42: the trot's slowest
-  p.set_speed(200);
+  p.set_speed(250);
   plan(&t, p, 300);
   CHECK(max_joint_step(t) < M.slew_deg_per_tick);
   int jump = 0;  // feet on the ground never jump: at most the top speed's slide a tick, plus the rounding
@@ -602,6 +694,9 @@ int main() {
   test_side_strides_and_names();
   test_plan_fits_feet_and_the_slew();
   test_every_speed_of_the_fast_gaits_stays_inside_the_slew();
+  test_steering_bends_the_path_inside_the_reach_and_the_slew();
+  test_a_turn_in_place_goes_straight_within_a_second();
+  test_out_of_the_crawl_the_feet_wait_for_the_level_out();
   test_the_walk_lifts_a_hind_leg_then_its_diagonal_fore_leg();
   test_the_lean_keeps_the_mass_inside_three_feet();
   test_trot_stays_level_on_diagonal_pairs();

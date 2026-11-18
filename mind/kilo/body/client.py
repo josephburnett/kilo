@@ -280,17 +280,19 @@ class BodyClient:
         return self._walker
 
     def walk(self, direction: str = "forward", pattern: str = "trot", speed_mm_s: float | None = None,
-             balance: bool = True) -> dict[str, Any]:
+             balance: bool = True, steer: float = 0.0) -> dict[str, Any]:
         """Walk ``direction`` (forward, back, left, right: turn in place,
         march: in place) with ``pattern`` (walk, trot, crawl) at
         ``speed_mm_s`` (default: the pattern's; kilo.planner.patterns). While
         walking, changes the walk at once (a pattern after every leg has
-        stepped home). ``balance=False`` turns the body's balance off for this walk
+        stepped home). ``steer`` (-1..1, + left) bends a forward or
+        backward walk (kilo.planner.patterns.side_strides; the remote's A6 /
+        C6 while walking). ``balance=False`` turns the body's balance off for this walk
         (restored after). Blocks about 0.6 s on a start (the STANCE
         posture). Returns the walk's status (Walker.status()). ValueError for
         an unknown pattern or direction; WalkError if the body cannot walk."""
         self._check_drivable()
-        return self.walker.start(pattern, direction, speed_mm_s, balance)
+        return self.walker.start(pattern, direction, speed_mm_s, balance, steer)
 
     def stop_walk(self, wait_s: float | None = None) -> bool | None:
         """The planned stop (each leg steps home, the body levels, then the

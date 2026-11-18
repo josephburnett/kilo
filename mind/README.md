@@ -256,7 +256,7 @@ protocol/spec.toml with SET_GAIT; the code is `kilo/planner/patterns.py`):
 
 | pattern | lifts (in order) | swing | stride | step height | body height | cycle at the default speed | default speed | speed range |
 |---|---|---|---|---|---|---|---|---|
-| trot | LF+RB, RF+LB (diagonal pairs) | 150 ms | up to 35 mm (27.4 by default) | 8 mm | 205/256 of (L1 + L2) = 76 mm | 340 ms at every speed (shift 20) | 144 mm/s | 42..184 mm/s |
+| trot | LF+RB, RF+LB (diagonal pairs) | 150 ms | up to 44 mm (27.4 by default; 35 until 2026-11-17) | 8 mm, tapering to 6 mm from a 35 mm to a 44 mm stride | 205/256 of (L1 + L2) = 76 mm | 340 ms at every speed (shift 20) | 144 mm/s | 42..232 mm/s (184 until 2026-11-17) |
 | walk | LB then RF 60 ms later, RB then LF (diagonal couplets) | 150 ms | up to 30 mm (24.8 by default) | 8 mm | 205/256 = 76 mm | 460 ms at every speed (shift 20) | 80 mm/s | 26..97 mm/s |
 | crawl | LB, LF, RB, RF (one leg at a time, with the lean) | 300 ms | 50 mm | 15 mm | 179/256 = 66 mm | 2550 ms (shift 338) | 22.2 mm/s | 2..26.9 mm/s |
 
@@ -272,10 +272,11 @@ lean first: it is the gait for 30 to 100 mm/s. The crawl is the careful
 gait, statically stable, one leg at a time with the lean (below). Before,
 the walk was the crawl's sequence at 9 to 21.5 mm/s and the trot ran 6 to
 152 mm/s. What limits each top speed, as far as the virtual body can show:
-the walk and the trot, the servos (the fastest joint at 365 and 414°/s at
+the walk and the trot, the servos (the fastest joint at 365 and 476°/s at
 their tops, under the body's 500°/s slew; the floor runs of 2026-11-15 asked
-414 and kept up); the crawl, the body's move over the next three feet
-before each lift (a side may drop no faster than gravity lets it).
+414 and kept up; the trot's 476 since 2026-11-17 has not run on the floor,
+docs/walking-and-balance.md §13); the crawl, the body's move over the next
+three feet before each lift (a side may drop no faster than gravity lets it).
 
 **Speed** (docs/walking-and-balance.md §2, §3, §12): the swing time is
 fixed per pattern (short enough that the body does not tip far while a leg
@@ -292,16 +293,24 @@ ms) the stride shrinks, down to 8 mm; faster than its stride at the
 shortest shift allows (240 ms: the body's typical 300 ms move over the
 next three feet, the lift starting 60 ms before that move ends), the speed
 is capped. The speed can change at any tick while walking (the stride
-moves at most 0.5 mm per tick toward the new one and the crawl's ground
-time at most 2 % per tick, so nothing jumps); a direction change does the
-same. A change between the walk and the trot takes over at the next slot
+moves at most 1.5 mm per tick toward the new one in the walk and the trot,
+0.5 mm in the crawl, and the crawl's ground time at most 2 % per tick, so
+nothing jumps); a direction change and a steer do the same. A change between the walk and the trot takes over at the next slot
 once the strides fit the new gait (under a second); a change into or out
 of the crawl goes through the legs' way home: the strides go to 0 and each
 leg steps under its shoulder as for a stop, then the new pattern starts
 from its first lift (up to ~5 s out of the crawl, ~1.5 s into it); a
 second change meanwhile only changes where it goes.
 A turn in place moves each side 0.8 of the stride (22 mm per side in the
-trot at its default speed, less at a lower speed).
+trot at its default speed, less at a lower speed). **Steering** (since
+2026-11-17; `client.walk(..., steer=S)`, the remote's A6 / C6 while
+walking): a forward or backward walk bends with S from -1 to 1 (+ left: the
+nose turns left, forward and backward alike). The left side's stride is the
+stride less S times it, the right side's the stride plus it, both scaled
+down together when the longer one passes the pattern's longest stride (so
+at the top speed a steer slows the walk); S = 1 keeps the inner side
+stepping in place. With the feet scrubbing as the recordings show, the
+radius is about 0.25 m / S (docs/walking-and-balance.md §13).
 
 **The lean** (the crawl). On three feet the body stands on a triangle
 whose long edge runs right under its middle, so a leg that lifts leaves
@@ -501,46 +510,64 @@ the passive timeline as `EVENT IR_KEY ...`. The key table is `kilo.ir.KEYS`
 like `--behaviour`; on the Pi add it to `KILO_RUN_ARGS` in
 `~/.config/kilo/env`) acts on the keys through the daemon's own BodyClient,
 and the mind kernel does the same (`kernel/mind/remote/`, a port of
-`kilo.ir`). The owner's map (2026-11-15):
+`kilo.ir`). The owner's map (2026-11-15; the steering, the way out of a
+turn and A2 since 2026-11-17):
 
 | Key | Command | `--remote` |
 |---|---|---|
 | A7 | 0xA2 | sleep: stop a walk the planned way, then posture rest |
-| B7 | 0x62 | faster: one speed level up (only while walking) |
+| B7 | 0x62 | faster: one speed level up (only while walking); turning in place, stop turning and walk straight forward |
 | C7 | 0xE2 | freeze: abort the walk, stop a trick and the behaviour runner; then only B6 and A7 act |
-| A6 | 0x22 | turn left in place (from standing: start the turn in the selected gait at 1×) |
+| A6 | 0x22 | from standing: turn left in place in the selected gait at 1×; walking forward or backward: steer one level more to the left (or one less to the right), without stopping |
 | B6 | 0x02 | stand and stop: stop a walk the planned way, then posture stand |
-| C6 | 0xC2 | turn right in place |
+| C6 | 0xC2 | the same to the right |
 | A5 | 0xE0 | start the behaviour runner |
-| B5 | 0xA8 | slower: one speed level down, past the slowest into backward |
+| B5 | 0xA8 | slower: one speed level down, past the slowest into backward; turning in place, stop turning and walk straight backward |
 | C5 | 0x90 | the calibration posture (CALIB), after stopping a walk the planned way |
 | A4 | 0x68 | trot: walk forward in it, or change the walk to it |
 | B4 | 0x98 | crawl: likewise |
 | C4 | 0xB0 | walk: likewise |
-| B2 | 0x38 | off unless `KILO_REAR_UP=1`, `2` or `3`: rear up (the trick `rear_up`, `rear_up_2` or `rear_up_3` by that stage, docs/rear-up-trick.md); pressed again while it plays, it comes down (TRICK_STOP over 1.5 to 2.5 s to SIT); refused below 7400 mV |
-| rows 1-3 but B2 | | nothing (logged as ignored) |
+| A2 | 0x10 | off unless `KILO_REAR_UP=1`, `2` or `3`: rear up (the trick `rear_up`, `rear_up_2` or `rear_up_3` by that stage, docs/rear-up-trick.md); pressed again while it plays, it comes down (TRICK_STOP over 1.5 to 2.5 s to SIT); refused below 7400 mV. It was B2 until 2026-11-17 |
+| rows 1-3 but A2 | | nothing (logged as ignored), B2 too |
 
 **The gait and turn keys make Kilo walk: use the remote with Kilo on the
 floor only, never on a desk.** The remote keeps a gait (trot at start), a
-speed level and a heading. Levels +1 to +5 walk forward at 0.4, 0.7, 1, 1.15
-and 1.25 × the gait's default speed, −1 to −5 backward at the same factors;
-there is no level 0, so from +1 B5 goes to −1 (backward at 0.4×), and from
-−1 B7 goes to +1. B7 stops at +5, B5 at −5; while turning they change only
-the magnitude (1 to 5). The speeds are clamped like `kilo walk --speed`
-(the crawl's 1.25× is its 26.9 mm/s cap), and the log line shows the real
-speed. In mm/s, levels 1 to 5: crawl 8.9, 15.6, 22.2, 25.6, 26.9; walk 32,
-56, 80, 92, 97; trot 57.6, 100.8, 144, 165.6, 180 (since 2026-11-16; before,
-1.1× and 1.2× with the walk at 7 to 21 and the trot capped at 152). B7 and
-B5 while not walking do nothing.
+speed level, a heading (straight, or turning in place) and a steer. Levels
++1 to +5 walk forward at 0.4, 0.7, 1, 1.3 and 1.6 × the trot's default
+speed (the walk's and the crawl's: 0.4, 0.7, 1, 1.15, 1.25), −1 to −5
+backward at the same factors; there is no level 0, so from +1 B5 goes to −1
+(backward at 0.4×), and from −1 B7 goes to +1. B7 stops at +5, B5 at −5.
+The speeds are clamped like `kilo walk --speed` (the crawl's 1.25× is its
+26.9 mm/s cap), and the log line shows the real speed. In mm/s, levels 1 to
+5: crawl 8.9, 15.6, 22.2, 25.6, 26.9; walk 32, 56, 80, 92, 97; trot 57.6,
+100.8, 144, 187.2, 230.4 (since 2026-11-17; 165.6 and 180 at levels 4 and 5
+before). B7 and B5 while not walking do nothing.
+
+**Turning and steering** (2026-11-17). From standing, A6 / C6 turn in place
+at 1×; while turning, the other key turns the other way, and B7 or B5 stops
+the turn and walks straight forward or backward at once (no stop first; the
+strides change 1.5 mm a tick, straight within 0.7 s). While walking forward
+or backward, A6 / C6 steer instead of turning: each press bends the path one
+level further (left 1, 2, 3 or right 1, 2, 3; the opposite key steps back
+through straight), without stopping; the nose turns toward the key's side
+whether Kilo walks forward or backward. The levels shorten the inner side's
+stride by 0.25, 0.5 and 1 of it and lengthen the outer's as much (scaled
+down together to the longest stride, so at level 5 a steer slows the trot);
+about 1 m, 0.5 m and 0.25 m of radius, estimated from the turns in the
+recordings (docs/walking-and-balance.md §13). Each press, not holding the
+key: the remote's held-key repeats are ignored, and a hold would need
+the mind to guess the release from a gap in the repeats. B7 and B5 keep the
+steer; the gait key in use straightens it (straight forward); every stop
+forgets it. The log line ends `, steering left 2`.
 
 A gait key while standing walks forward in that gait at +3 (1×). While
 walking it changes the gait (between the walk and the trot at the next
 step, under a second; into or out of the crawl after every leg has stepped
-home, up to ~5 s out of the crawl), keeping the level and the heading; the gait already in use
-brings Kilo back to straight forward at the current magnitude (from a turn
-or from backward), and does nothing when he already walks straight forward.
+home, up to ~5 s out of the crawl), keeping the level, the heading and the steer; the gait already in use
+brings Kilo back to straight forward at the current magnitude (from a turn,
+a steer or from backward), and does nothing when he already walks straight forward.
 Every stop (B6, A7, C5, C7, a walk that ended by itself) puts the level back
-to +3 and the heading to straight. A posture key first stops the walk the
+to +3, the heading to straight and the steer to 0. A posture key first stops the walk the
 planned way and waits for it (each leg steps home, STANCE), then stops a
 playing trick, then takes the posture. C7 ends the walk at once instead (no
 planned stop): the body holds the last pose for `link.feet_hold_ticks`

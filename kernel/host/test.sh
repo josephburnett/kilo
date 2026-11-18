@@ -585,14 +585,14 @@ ctl ir 0x02                   # B6: stand (from LIMP)
 sleep 1
 ctl ir 0x68                   # A4: trot forward at 1x
 sleep 2
-ctl ir 0x62                   # B7: faster (1.4x)
+ctl ir 0x62                   # B7: faster (1.3x)
 sleep 0.5
 ctl ir 0xA8                   # B5: slower (1x)
 sleep 0.5
-ctl ir 0x22                   # A6: turn left
+ctl ir 0x22                   # A6: steer left (walking: the path bends, no stop)
 sleep 1
 ctl ir 0x18                   # B3: row 3, nothing
-ctl ir 0x38                   # B2: nothing either (the rear-up key is off without --rear-up)
+ctl ir 0x10                   # A2: nothing either (the rear-up key is off without --rear-up)
 ctl ir 0x02                   # B6: stand (the planned stop, then the posture)
 sleep 4
 ctl ir 0x68                   # A4: trot forward again, at 1x
@@ -615,11 +615,11 @@ grep -E "remote|trick|walk|behaviour" "$OUT/host_ir.log"
 expect "$OUT/host_ir.log" "remote B6 \(0x02, stand\): posture stand" "B6 stood"
 expect "$OUT/host_ir.log" "remote A4 \(0x68, trot\): walk forward \(trot\) 144\.0 mm/s" "A4 walked"
 expect "$OUT/host_ir.log" "walk trot forward at 144\.0 mm/s" "the trot started"
-expect "$OUT/host_ir.log" "remote B7 \(0x62, faster\): speed 1\.15x \(trot 165\.6 mm/s forward\)" "B7 sped up"
+expect "$OUT/host_ir.log" "remote B7 \(0x62, faster\): speed 1\.3x \(trot 187\.2 mm/s forward\)" "B7 sped up"
 expect "$OUT/host_ir.log" "remote B5 \(0xA8, slower\): speed 1x \(trot 144\.0 mm/s forward\)" "B5 slowed"
-expect "$OUT/host_ir.log" "remote A6 \(0x22, turn left\): walk left \(trot\) 144\.0 mm/s" "A6 turned"
+expect "$OUT/host_ir.log" "remote A6 \(0x22, turn left\): walk forward \(trot\) 144\.0 mm/s, steering left 1" "A6 steered"
 expect "$OUT/host_ir.log" "remote B3 \(0x18, none\): ignored \(no action on this key\)" "B3 did nothing"
-expect "$OUT/host_ir.log" "remote B2 \(0x38, none\): ignored \(no action on this key\)" "B2 did nothing (rear-up key off)"
+expect "$OUT/host_ir.log" "remote A2 \(0x10, none\): ignored \(no action on this key\)" "A2 did nothing (rear-up key off)"
 expect "$OUT/host_ir.log" "walk ended: stopped" "the planned stop"
 expect "$OUT/host_ir.log" "remote C7 \(0xE2, freeze\): frozen \(walk aborted\): only B6 or A7 act now" "C7 froze"
 expect "$OUT/host_ir.log" "I walk ended: aborted \\(C7 freeze\\)" "the freeze aborted the walk"
@@ -762,12 +762,12 @@ EOF
 grep "loop: " "$OUT/host_walks.log" | awk '{for(i=1;i<=NF;i++) if($i=="max") m=($(i+1)>m?$(i+1):m)} END {print "   mind.poll max over the run: " m " us"}'
 
 # ---- the flight recorder: a trick by the remote, every record, the card, the next boot ----------------
-# The rear-up key on (--rear-up): B2 plays rear_up on the virtual body (which plays it tick-exact but
+# The rear-up key on (--rear-up): A2 plays rear_up on the virtual body (which plays it tick-exact but
 # does not tip: its IMU stays level, so the analysis sees the design's pitch never reached). Then the
 # recorder's status, a time range fetched and decoded, the metrics, the log's whole history, the card
 # saver on (kilo-mind-host's --card DIR stands for the SD card), and a second boot on the same card
 # that lists the first boot's run and shows its log (kilo log --previous).
-echo "== flight recorder: a trick (B2), kilo runs/record/metrics/log --host, the card, the next boot"
+echo "== flight recorder: a trick (A2), kilo runs/record/metrics/log --host, the card, the next boot"
 REC="$OUT/flight"
 rm -rf "$REC"
 mkdir -p "$REC/card"
@@ -787,7 +787,7 @@ F="127.0.0.1:$FPORT"
 sleep 1
 ctl ir 0x02                   # B6: stand
 sleep 1
-ctl ir 0x38                   # B2: rear_up (stage 1)
+ctl ir 0x10                   # A2: rear_up (stage 1)
 for _ in $(seq 1 120); do grep -q "TRICK_DONE" "$OUT/host_flight.log" && break; sleep 0.25; done
 expect "$OUT/host_flight.log" "trick rear_up: TRICK_DONE DONE" "the trick played to its end"
 sleep 2.5                     # the run's post-roll
@@ -810,11 +810,11 @@ expect "$OUT/flight_range.txt" "run +1 trick" "the range holds the trick run"
 KRANGE="$(ls "$REC"/range/rec-*.krec)"
 KPY -m kilo.cli record decode "$KRANGE" --csv "$OUT/flight_range.csv" > /dev/null
 KPY -m kilo.cli record decode "$KRANGE" --log > "$OUT/flight_range_log.txt"
-expect "$OUT/flight_range_log.txt" "remote B2 \(0x38, rear up\)" "the decoded range: the remote's line for B2"
+expect "$OUT/flight_range_log.txt" "remote A2 \(0x10, rear up\)" "the decoded range: the remote's line for A2"
 KPY -m kilo.cli --host "$F" metrics | tee "$OUT/flight_metrics.txt"
 expect "$OUT/flight_metrics.txt" "^[a-z_]+: " "kilo metrics: group lines"
 KPY -m kilo.cli log --host "$F" --no-follow --save "$REC/logs" > "$OUT/flight_log.txt"
-expect "$OUT/flight_log.txt" "I remote B2 \(0x38, rear up\)" "kilo log --host: the session's key in the history"
+expect "$OUT/flight_log.txt" "I remote A2 \(0x10, rear up\)" "kilo log --host: the session's key in the history"
 expect "$OUT/flight_log.txt" "I trick rear_up: TRICK_DONE DONE" "kilo log --host: the trick's end in the history"
 ls "$REC"/logs/kilo-*.log > /dev/null || { echo "FAILED: kilo log --save wrote nothing"; exit 1; }
 KPY -m kilo.cli --host "$F" record save on | tee "$OUT/flight_save.txt"
@@ -864,7 +864,7 @@ expect "$OUT/flight2_runs.txt" "^b1:1 .*trick +rear_up stage 1 .*card +DONE" "th
 KPY -m kilo.cli log --host "$F" --previous > "$OUT/flight2_prev.txt"
 head -3 "$OUT/flight2_prev.txt"
 expect "$OUT/flight2_prev.txt" "boot 1's log as saved on the SD card" "kilo log --previous"
-expect "$OUT/flight2_prev.txt" "remote B2 \(0x38, rear up\)" "the previous boot's log: the key"
+expect "$OUT/flight2_prev.txt" "remote A2 \(0x10, rear up\)" "the previous boot's log: the key"
 wait_mind "$OUT/host_flight2.log"
 stop_body
 trap - EXIT
