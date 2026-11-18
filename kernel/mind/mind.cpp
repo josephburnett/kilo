@@ -36,7 +36,9 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
       runner_(body_, personality(cfg), log_, cfg.seed),
       runner_hook_(*this),
       remote_(link_, walker_, player_, clock, log_),
+      sleep_(link_, walker_, clock, log_),
       recorder_(clock, link_) {
+  sleep_.set_enabled(cfg.light_sleep);
   remote::set_rear_up_key(cfg.rear_up_key);
   link_.set_listener(this);
   link_.set_quiet_log(&log_.status());  // a held IR key's repeats: not into the ring unless a laptop reads it
@@ -66,6 +68,7 @@ void Mind::attach_recorder(uint8_t* storage, uint32_t bytes) {
 
 void Mind::attach_saver(record::Saver& saver) {
   saver_ = &saver;
+  sleep_.set_saver(&saver);
   saver.set_metrics(this);
   host_.attach_saver(saver);
 }
@@ -147,6 +150,11 @@ void Mind::poll() {
   recorder_.poll(player_);
   card_safe_ = safe_for_card(clock_.now_us());
   if (saver_ != nullptr) saver_->poll(card_safe_, body_limp());
+  power::Activity act;  // after the saver: a save it was asked for has started by now
+  act.busy = walker_.active() || player_.busy() || remote_.busy() || behaviour_active();
+  act.host_events = host_.stats().accepted + host_.stats().requests;
+  act.host_clients = listener_ != nullptr ? host_.clients() : 0;
+  sleep_.poll(act);
 }
 
 void Mind::stats(uint64_t now) {
@@ -185,6 +193,7 @@ void Mind::on_hello(const kilo_hello_t& hello, bool solicited) {
 
 void Mind::on_telemetry(const kilo_telemetry_t& t) {
   walker_.on_telemetry(t);
+  sleep_.on_telemetry(t);
   if (t.batt_mv != 0 && !(t.flags & KILO_TELEMETRY_FLAGS_NO_BATTERY)) {
     metrics_.battery_mv = t.batt_mv;
     if (metrics_.battery_min_mv == 0 || t.batt_mv < metrics_.battery_min_mv) metrics_.battery_min_mv = t.batt_mv;
@@ -214,6 +223,7 @@ void Mind::on_event(const kilo_event_t& e) {
   if (e.code == KILO_EVENT_RECOVERED) metrics_.recovered++;
   if (e.code == KILO_EVENT_WATCHDOG) metrics_.watchdogs++;
   if (e.code == KILO_EVENT_LOW_BATTERY) metrics_.low_battery++;
+  if (e.code == KILO_EVENT_IR_KEY) sleep_.key((uint16_t)e.arg, cfg_.remote && !host_controls());  // wakes first
   if (e.code == KILO_EVENT_IR_KEY) ir_key(e);
   if (tap_ != nullptr) tap_->on_event(e);
 }
@@ -276,7 +286,7 @@ void named(char* out, uint32_t n, size_t* len, const record::NamedCounts& c) {
 
 }  // namespace
 
-uint32_t Mind::metric_lines() { return 9; }
+uint32_t Mind::metric_lines() { return 9 + power::Sleep::kMetricLines; }
 
 void Mind::metric_line(uint32_t i, char* out, uint32_t n) {
   const record::Metrics& m = metrics_;
@@ -352,6 +362,7 @@ void Mind::metric_line(uint32_t i, char* out, uint32_t n) {
       return;
     }
     default:
+      sleep_.metric_line(i - 9, out, n);  // power, power_hw, battery, power_segments
       return;
   }
 }
