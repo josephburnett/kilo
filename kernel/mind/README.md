@@ -599,7 +599,7 @@ each key does):
 | Key | Does |
 |---|---|
 | B6 | stand and stop: the planned stop of a walk, then STAND |
-| A7 | sleep: the planned stop, then REST |
+| A7 | sleep: the planned stop, then REST; 30 s later, if nothing else happened, light sleep (servos off, the Pi idles; any key or the laptop wakes him: `power/sleep.h`, docs/power.md) |
 | C5 | the planned stop, then the calibration posture (CALIB) |
 | A4, B4, C4 | trot, crawl, walk: walk forward in that gait from standing; change the gait while walking; the gait in use: straight forward again |
 | B7, B5 | faster, slower by one speed level (0.4, 0.7, 1, 1.1, 1.2 × the gait's speed); past the slowest B5 goes backward; only while walking |

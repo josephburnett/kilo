@@ -139,7 +139,9 @@ int usage() {
   fprintf(stderr,
           "usage: kilo-mind-host --port PATH [--listen [ADDR:]PORT] [--authorized-keys FILE] [--reset-fifo PATH]\n"
           "                      [--card DIR] [--duration SECONDS] [--verbose] [--remote] [--behaviour] [--seed N]\n"
-          "                      [--balance KP] [--rear-up[=N]] [--record-mb N] [--record-save]\n"
+          "                      [--balance KP] [--rear-up[=N]] [--record-mb N] [--record-save] [--light-sleep]\n"
+          "  --light-sleep  the remote's A7, then 30 s of nothing: LIMP (mind/power/sleep.h; the loop\n"
+          "                 itself does not slow down here; KILO_LIGHT_SLEEP on the Pi)\n"
           "  --record-mb N  the flight recorder's RAM, MB (default 16; the Pi has 64)\n"
           "  --record-save  save it to --card DIR/kilorec at safe moments from the start (else REC_SAVE)\n"
           "  --rear-up[=N]  the remote's B2 starts the rear_up trick at stage N (1 rear_up, the default,\n"
@@ -183,6 +185,8 @@ int main(int argc, char** argv) {
     } else if (strcmp(argv[i], "--record-mb") == 0 && i + 1 < argc) {
       record_mb = strtoul(argv[++i], &end, 10);
       if (*end != '\0' || record_mb < 1 || record_mb > 256) return usage();
+    } else if (strcmp(argv[i], "--light-sleep") == 0) {
+      cfg.light_sleep = true;
     } else if (strcmp(argv[i], "--record-save") == 0) {
       cfg.record_save = true;
     } else if (strcmp(argv[i], "--duration") == 0 && i + 1 < argc) {

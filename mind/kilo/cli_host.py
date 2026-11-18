@@ -48,7 +48,7 @@ import zlib
 from pathlib import Path
 from typing import Any
 
-from kilo import cli_record, hostkey, mdns
+from kilo import cli_power, cli_record, hostkey, mdns
 from kilo.hostlink import REBOOT_CLOSE_WAIT_S, HostError, HostKeyRefused, HostLink, HostRefused, has_kernel_marker
 from kilo.protocol import kilo_protocol as P
 
@@ -536,7 +536,8 @@ def _prepare_flash(args: argparse.Namespace) -> int | None:
 
 
 HOST_COMMANDS = {"status": cmd_status, "posture": cmd_posture, "monitor": cmd_monitor, "log": cmd_log,
-                 "flash": cmd_flash, "reboot": cmd_reboot, "update": cmd_update, **cli_record.HOST_COMMANDS}
+                 "flash": cmd_flash, "reboot": cmd_reboot, "update": cmd_update, **cli_record.HOST_COMMANDS,
+                 "power": cli_power.cmd_power}
 
 
 def parse_log_argv(argv: list[str], host: str | None, key: str | None = None) -> argparse.Namespace:
@@ -563,6 +564,7 @@ HOST_ONLY = ("walks", "runs", "bench", "metrics", "reboot", "update")
 def wants_host(args: argparse.Namespace) -> bool:
     return (bool(getattr(args, "host", None)) or args.cmd in HOST_ONLY
             or (args.cmd == "record" and getattr(args, "rec_cmd", None) != "decode")
+            or (args.cmd == "power" and not getattr(args, "file", None))
             or (args.cmd == "log" and "--host" in (args.log_argv or [])))
 
 

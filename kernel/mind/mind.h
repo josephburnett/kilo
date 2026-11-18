@@ -56,6 +56,7 @@
 #include "planner/walker.h"
 #include "platform.h"
 #include "platform_net.h"
+#include "power/sleep.h"
 #include "record/metrics.h"
 #include "record/recorder.h"
 #include "record/saver.h"
@@ -75,6 +76,7 @@ struct MindConfig {
   const behaviour::Personality* personality = nullptr;  // null: behaviour::kPersonality
   uint32_t stats_period_ms = 0;  // > 0: STATS_REQ this often, the answer logged ("body STATS: ...")
   bool record_save = false;     // the card saver on from the start (KILO_RECORD_SAVE; the card's SAVE_ON also turns it on)
+  bool light_sleep = false;     // A7, then 30 s of nothing: light sleep (power/sleep.h; KILO_LIGHT_SLEEP)
   // The laptop interface's keys (net/host_server.h set_keys(); they outlive
   // the Mind) and the source of its ephemeral keys. Without a Random every
   // connection is refused.
@@ -121,6 +123,7 @@ class Mind final : public LinkListener, public remote::TrickNotes, public record
   HostServer& host() { return host_; }
   record::Recorder& recorder() { return recorder_; }
   behaviour::Runner& runner() { return runner_; }
+  power::Sleep& sleep() { return sleep_; }
   bool behaviour_active() const { return behaviour_on_ && !runner_.stopped(); }
   bool poweroff_requested() const { return runner_.poweroff_requested(); }
   // A laptop's controller sent REBOOT (and has its OK): restart the platform.
@@ -204,6 +207,7 @@ class Mind final : public LinkListener, public remote::TrickNotes, public record
   behaviour::Runner runner_;
   RunnerHook runner_hook_;
   remote::RemoteControl remote_;
+  power::Sleep sleep_;  // light sleep after A7 (power/sleep.h)
   record::Recorder recorder_;
   record::Metrics metrics_;
   record::Saver* saver_ = nullptr;

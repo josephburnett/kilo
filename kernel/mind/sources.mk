@@ -61,6 +61,8 @@ MIND_SRCS += \
 	mind/remote/client.cpp \
 	mind/remote/keys.cpp \
 	mind/remote/remote.cpp \
+	mind/power/battery.cpp \
+	mind/power/sleep.cpp \
 	mind/mind.cpp
 
 # The flight recorder (record/): every frame, log line, walk and trick in RAM, the card saver, the metrics.

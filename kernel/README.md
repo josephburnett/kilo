@@ -732,6 +732,7 @@ a frame only when `tx_free()` covers all of it; otherwise it counts
 | 2 Hz | the body is alive: TELEMETRY flowing |
 | 5 Hz | the body's HELLO has another protocol major: the kernel stays up and keeps the heartbeat, but sends no goals or FEET (kilo-mind-host exits 2 instead) |
 | double flash (two 100 ms flashes, once a second) | flashing the body, from the laptop or the SD card, until the new firmware's HELLO (or FAILED); or writing a kernel update to the card (the flashes stretch: the loop stalls on each 16 KB slice) |
+| one 50 ms flash every 5 s | light sleep (docs/power.md): A7, then 30 s of nothing |
 | steady on or off for more than ~20 s | stopped: `Initialize` failed or a crash (Circle halts, the LED freezes) |
 
 The LED says nothing about the network (the log does). The blink freezes
@@ -755,6 +756,7 @@ no settings file on the card, so they are compiled in (`src/kernel.cpp`):
 | `rear_up_key` | 0 (off); `make -C kernel KILO_REAR_UP=1` (or `2`, `3`) turns it on at that stage | the remote's B2 starts the rear-up trick only when switched on (docs/rear-up-trick.md "The B2 switch"): off until the owner's staged trials are done, B2 does nothing like the other keys of rows 1-3. The value is the stage: 1 `rear_up` (28 degrees), 2 `rear_up_2` (40), 3 `rear_up_3` (54). The daemon's switch is `KILO_REAR_UP=N` in its environment, `kilo-mind-host`'s is `--rear-up[=N]`. Built in, the kernel logs `Kilo mind, build ... (rear-up key B2 on: rear_up_2, stage 2)` |
 | `seed` | 32 bits from the hardware RNG | the behaviour runner logs it (`seed N`, at boot or in the remote's A5 line), so a run can be replayed on the laptop |
 | `stats_period_ms` | 1000 | a STATS_REQ to the body each second, logged `body STATS: ...`, as `kilo-mind-host` does |
+| `light_sleep` | on; `make -C kernel KILO_LIGHT_SLEEP=0` turns it off | the remote's A7, then 30 s of nothing: light sleep (servos off, the loop idles in wfi, the Ethernet PHY powered down while no cable is in; docs/power.md, `mind/power/sleep.h`). Logged at boot: `power: ARM 600 MHz, SoC .. C, throttled 0x..; light sleep on`. Off, A7 is plain REST: the awake baseline docs/power.md compares against. `kilo-mind-host --light-sleep` runs the same state machine on Linux (no wfi there) |
 
 The runner's wind-down ends in a poweroff, which the daemon ran through
 systemd. The kernel cannot switch the Pi off: it logs `behaviour runner
@@ -1106,6 +1108,16 @@ every number about the card (`kilo bench sd` gives them), FatFs's
 `f_mkdir`, `f_opendir`, `f_lseek`, `f_sync` and `FA_OPEN_APPEND` on
 Circle, whether a write's stall shows in the loop line as expected, and a
 real power cut in the middle of a save (the tests cut a fake card).
+
+Light sleep (docs/power.md, `src/power.cpp`, `mind/power/sleep.h`): that
+the ARM runs at 600 MHz (the boot line `power: ARM ...`); how much `wfi`
+saves and how often interrupts wake the core (`light sleep: N wfi
+wakeups/s`); that the LAN9514's PHY takes its energy-detect power-down
+(`power: Ethernet PHY register 17 ...`), comes back by itself when a cable
+is plugged in, and that the USB control transfers from the main loop do
+not upset Circle's net and PHY tasks; that the 10 ms passes keep the link
+clean (no WATCHDOG, no PL011 overruns); that Kilo lying limp and standing
+up from LIMP with B6 is fine; and the battery slopes awake and asleep.
 
 All of it: nothing here has run on a Pi. In particular: the netboot loader
 on the 2 B; Circle's USB host finding the CH343 behind the LAN9514 hub and

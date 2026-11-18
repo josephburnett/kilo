@@ -17,6 +17,7 @@
     kilo record status|fetch [--last 10m|--all ...]|save on|off|now --host IP   the flight recorder (kilo.cli_record)
     kilo record decode FILE [--csv OUT] [--json] [--log] [--plot PNG]   a downloaded recording, readable
     kilo bench sd --host IP   the SD card's write times;   kilo metrics --host IP   the session's counters
+    kilo power --host IP | FILE.krec   light sleep and the battery's trend (kilo.cli_power, docs/power.md)
     kilo vbody [--fall-after S] [--no-keys]
     kilo run [--port P] [--socket PATH] [--log] [--kilolog [FILE]] [--behaviour] [--remote] [--balance [KP]]
     kilo daemon [status|stop]
@@ -194,6 +195,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "(default 30; 0: do not wait)")
 
     __import__("kilo.cli_record").cli_record.add_parsers(sub)  # kilo runs (walks), record, bench, metrics
+    __import__("kilo.cli_power").cli_power.add_parsers(sub)  # kilo power: light sleep, the battery trend
 
     s = sub.add_parser("eeprom", help="read the body's EEPROM (EEPROM_READ)")
     es = s.add_subparsers(dest="eeprom_cmd", required=True, metavar="ACTION")
@@ -1019,7 +1021,8 @@ LINK_COMMANDS = {"status": cmd_status, "monitor": cmd_monitor, "posture": cmd_po
 PORT_COMMANDS = {"flash": cmd_flash, "vbody": cmd_vbody, "run": cmd_run, "daemon": cmd_daemon,
                  "log": cmd_log, "reboot": cmd_reboot, "update": cmd_update, "runs": cmd_recorder,
                  "walks": cmd_recorder, "record": cmd_recorder, "bench": cmd_recorder, "metrics": cmd_recorder,
-                 "key": cmd_key, "find": lambda args: __import__("kilo.cli_find").cli_find.cmd_find(args)}
+                 "key": cmd_key, "find": lambda args: __import__("kilo.cli_find").cli_find.cmd_find(args),
+                 "power": lambda args: __import__("kilo.cli_power").cli_power.offline(args)}
 # Link-command modes that must send nothing, so they cannot share the daemon's port.
 SILENT_MODES = {"monitor": ("passive", "--passive"), "posture": ("then_watch", "--then-watch"),
                 "trick": ("then_watch", "--then-watch")}
