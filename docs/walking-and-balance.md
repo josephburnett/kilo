@@ -836,3 +836,257 @@ recordings of the old gaits. Not verified: that the real servos follow
 tips no more than about twice the virtual one; any speed above 152 mm/s;
 foot slip; the fore-leading fallback on the floor; the direct gait change
 on the floor; the cause of the pitch offset.
+
+## 13. Steering, out of a turn, and a faster trot (2026-11-17)
+
+The owner, after run 5: "investigate if you can have kilo turn while moving
+forward. Would be nice to steer without stopping"; "when turning in a
+stopped position I would like an up or down button press stop the turn and
+go forward or backward"; "I want the trot to go faster. Maybe lengthen out
+the strides." (And the rear-up trick moved from B2 to A2: "matches the
+picture better".)
+
+**[measured]** marks what comes from the floor recordings, **[virtual
+body]** what comes from `mind/tests/walksim.py` with the fitted servos and
+the model errors of §12.3, **[estimate]** an inference from both.
+
+### 13.1 What A6 / C6 did before
+
+While walking forward, A6 asked the planner for the direction `left`: a
+turn in place, each side 0.8 of the stride, the left side backward. Nothing
+stopped: the strides moved 0.5 mm a tick toward their new values, so the
+trot at 1x (27.4 mm on each side) went from straight to an arc that
+tightened as the left stride shrank, crossed zero after about 1.1 s and
+reached the turn in place after about 2 s (-21.9 / +21.9 mm). From then on
+it turned on the spot. B7 and B5 during a turn changed only its speed; the
+way back to straight was the gait key, another 2 s of arc. So there was no
+steady curve, and no way from a turn straight into walking backward.
+
+The turns in place on the floor **[measured]** (the gyro's yaw rate in the
+recordings; Kilo's IMU reports it in every TELEMETRY):
+
+| recording | turn | side's slide | yaw rate | yaw rate if the feet did not slip | share |
+|---|---|---|---|---|---|
+| 2026-11-15 walk 2 | trot left, 144 (35 mm, 243 ms on the ground) | 115 mm/s | +27.7°/s | 203°/s | 0.14 |
+| 2026-11-16 walk 2 | trot right, 144 | 115 mm/s | -27.0°/s | 203°/s | 0.13 |
+| 2026-11-16 walk 7 | trot left, 144 | 115 mm/s | +23.6°/s | 203°/s | 0.12 |
+| 2026-11-16 walk 4 | walk left, 80 | 64 mm/s | +16.5°/s | 113°/s | 0.15 |
+| 2026-11-17 walk 3 | trot right, 144 | 115 mm/s | -18.0°/s | 203°/s | 0.09 |
+| 2026-11-17 walk 8 | trot left, 57.6 | 46 mm/s | +10.4°/s | 81°/s | 0.13 |
+
+The legs move only fore and aft, so in a turn the feet scrub sideways and
+Kilo turns at about an eighth of the rate the strides alone would give: the
+two sides act as if they were about 500 mm apart (440 to 730 in these six),
+not the 65 mm of the track. Walking straight, the gyro reads -3 to +6°/s
+(a slight drift of the path or the gyro's offset): the smaller turns above
+are within that of each other.
+
+### 13.2 Steering
+
+**How.** A forward or backward walk now takes a steer S from -1 to 1 (+
+left; `Planner.set_steer`, `WalkGoal.steer`, `client.walk(..., steer=S)`).
+The left side's stride is the stride less S times it, the right side's the
+stride plus it; when the longer of the two would pass the pattern's longest
+stride (the trot 44 mm, the walk 30, the crawl 50), both are scaled down
+together, which keeps the bend and slows the walk. S = 1: the inner side
+steps in place. Backward the same S turns the nose the same way (A6 = nose
+left, forward and backward alike, as the turn in place does). There is no
+other way to steer this body: with two servos per leg in one plane the feet
+cannot be placed sideways or turned. The strides change 1.5 mm a tick
+(below), so a steer takes effect within a cycle or two, smoothly.
+
+**The remote.** While walking forward or backward, each press of A6 bends
+the path one level further left (C6 one further right; the other key steps
+back through straight), levels S = 0.25, 0.5, 1, at most 3 each way, without
+stopping. From standing, A6 / C6 still turn in place. I chose a level per
+press over holding the key: the body relays a held key as repeats about
+every 110 ms, but there is no release, so the mind would have to guess it
+from a gap in the repeats, and a gap also comes from the remote pointing a
+little away; a steer that flicks back to straight on its own while walking
+at 230 mm/s is worse than one more press. B7 / B5 keep the steer; the gait
+key in use straightens it; every stop forgets it.
+
+**Radius per level.** The bend's ratio sets the radius, not the speed: R =
+(half the effective track) / S. With the 500 mm of the recordings
+**[estimate: the scrub measured in turns in place, assumed the same in a
+curve]**, and with the 65 mm track as if no foot slipped (a lower bound):
+
+| level | S | radius, estimated | radius, no slip | trot at level 3: speed, turn rate (est.) | trot at level 5 | walk at level 3 |
+|---|---|---|---|---|---|---|
+| 1 | 0.25 | about 1.0 m | 130 mm | 144 mm/s, 8°/s | 185 mm/s, 11°/s | 77 mm/s, 4°/s |
+| 2 | 0.5 | about 0.5 m | 65 mm | 144 mm/s, 17°/s | 154 mm/s, 18°/s | 65 mm/s, 7°/s |
+| 3 | 1 | about 0.25 m | 33 mm | 116 mm/s, 27°/s | 116 mm/s, 27°/s | 48 mm/s, 11°/s |
+
+(The crawl: the same radii at 6 to 22 mm/s.) Level 3 turns about as fast as
+the turn in place does (24 to 28°/s) while still walking forward. The real
+radius may differ by half either way; the floor will tell (§13.5).
+
+**In the virtual body [virtual body]** (it has no yaw: it checks the
+attitude, the margins, the joints and the reach, not the curve). The trot
+at levels 1, 3 and 5 and the walk at 1, 3 and 5, each steer level both ways,
+forward and backward, each model error, 10 s: no fall, no catch, no gate
+hold, every foot in reach and inside FEET's range. The largest error from
+the plan: trot 2.5 to 3.6° nominal, 3.9 to 5.0 worst; walk 2.2 to 3.7°
+nominal, 3.8 to 5.2 worst, the same as walking straight, but one case: the
+trot at levels 1 and 2 backward, S = 1, with the old pure 140 ms servo
+model, 5.4 to 6.6° (no catch, no hold; 2.5 with the fitted model). Fastest
+joint: the outer side's stride never passes the pattern's longest, so the
+joints ask no more than at the top speed (trot 476°/s, walk 408, the crawl
+as before). The crawl steers too, nominal 1.1 to 3.7° forward and 1.4 to
+6.3 backward (its backward swing at its top already asked past the slew,
+§12.3), no hold, no catch, the margin above 7 mm. Changes while steering: steering left 3 to right 3, the
+planned stop (inside stop_timeout), the walk-trot change, and into the crawl
+(home first) all stay up; the trot steering into the crawl reaches 7.4° in
+the worst model case, with one gate hold (the crawl's own worst is 8.4).
+
+### 13.3 Out of a turn: B7 and B5
+
+While turning in place, B7 now ends the turn and walks straight forward at
+the turn's level (3 from standing), B5 straight backward, without a stop.
+To make that quick, the walk and the trot move their strides 1.5 mm a tick
+(0.5 before; the crawl keeps 0.5): from the turn at 1x to straight takes 33
+ticks (0.66 s) in the trot, 30 in the walk, about two cycles; it was 2 s.
+Any stride change stays inside the pattern's longest stride, so a swing
+never carries a foot further than at the top speed, and the feet on the
+ground change speed by at most 0.16 mm a tick each tick (about 0.04 g, a 3
+mm shift of the zero-moment point at the body's height). The same faster
+slew makes B7 / B5 and the steer act within a cycle. **[virtual body]** the
+turn to forward and to backward, each model error: up, within 2.6 to 3.6°
+nominal and 4.0 to 5.1 worst, no hold, no catch, the fastest joint 367°/s.
+
+One thing the faster slew broke, and the fix: out of the crawl the first
+walk or trot slot levels the body from the crawl's lean (about 20 ticks on
+four feet), and the strides grew during it, sliding every foot 30 mm back
+before its first lift; the next swings then asked up to 830°/s (found by
+the test of two gait changes in a row). Now the strides stay at 0 until
+that level-out ends.
+
+### 13.4 A faster trot
+
+**What limits it.** The trot's speed is its stride over the time a foot is
+on the ground, which at its fixed cadence is the swing plus two ticks
+(190 ms). So it goes faster with a longer stride, a shorter swing, or both;
+each makes the swinging leg move faster. The legs' reach is not the limit:
+at the 76 mm stance height a foot reaches 48 mm fore and aft (the IK's 95 %
+of 95 mm), and at 44 mm the feet go to 23 mm. A lower body reaches further
+but asks more of the knee for the same stride; a higher one the reverse,
+with less reach to spare; neither changed the joint speed by more than the
+FEET's 1 mm rounding (192/256 to 225/256 tried). The limit is the joint
+speed: the body slews a joint at most 10° a tick (500°/s), the floor runs
+asked up to 414 at 180 mm/s and kept up, and the servos' speed under load
+was never measured (an MG90S is rated 600°/s with no load).
+
+The fastest joint of the swing **[planned, the FEET stream]**:
+
+| stride | swing | lift | top speed | fastest joint |
+|---|---|---|---|---|
+| 35 mm | 150 ms | 8 mm | 184 mm/s (before) | 414°/s |
+| 40 | 150 | 8 | 210 | 465 |
+| 44 | 150 | 8 | 232 | 517: past the slew |
+| 44 | 150 | 6 | 232 | 473 |
+| 40 | 140 | 6 | 222 | 458 |
+| 44 | 140 | 6 | 244 | 506: past the slew |
+| 50 | 150 | 6 | 263 | 539: past the slew |
+
+The cheapest lever is the lift: the swing's fastest moment is the leg
+lifting and moving forward at once, and 2 mm less lift saves about 45°/s.
+A shorter swing (140 ms, 7 ticks) gives about the same speed for the same
+joint speed, but through the fitted servo response (50 ms + 70 ms) a 7-tick
+lift reaches 54 % of what is asked against 58 % for 8 ticks: less clearance
+for nothing. **Chosen:** the stride to 44 mm (from 35), the swing unchanged
+(150 ms), the lift 8 mm up to a 35 mm stride and tapering to 6 mm at 44
+(so every speed up to the old top is exactly as on the floor). Top speed
+232 mm/s (from 184); the fastest joint 476°/s at the top and while steering,
+in every direction (414 at 184 and below, as before). The body height, the
+cycle and the other gaits are unchanged.
+
+The trade-offs: the swing joint asks 476°/s, 5 % under the body's slew and
+15 % more than the floor ever asked; the feet on the ground slide at 249°/s
+at the knee (196 before); the foot clears the floor by less at the top
+(6 mm asked, about 3.5 mm reached through the servo response, against
+about 4.6 before), so a rug or a seam will catch a toe sooner.
+
+**A flight phase** (a running trot) is out of reach: the feet would have to
+push the body up faster than gravity pulls it down, and the joints are
+already at 95 % of the body's slew just carrying the swing.
+
+**The remote's levels** for the trot are now 0.4, 0.7, 1, 1.3, 1.6 × 144
+(were 1.15 and 1.25 at the top); the walk and the crawl keep 0.4, 0.7, 1,
+1.15, 1.25 (their tops are their tops):
+
+| level | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| trot, before | 57.6 | 100.8 | 144 | 165.6 | 180 |
+| trot, now | 57.6 | 100.8 | 144 | 187.2 | 230.4 |
+
+**[virtual body]** the trot at each level, forward and backward, nominal
+and the worst of the model errors (servos faster and slower, the old pure
+delay, the centre of mass 10 mm and 5 mm off with 50 g more battery three
+ways, the IMU 2° and 1.5° off), 10 s each:
+
+| speed | stride | lift | error, nominal fwd / back | roll rms, fwd / back | error, worst | tilt, worst | holds / catches / falls | fastest joint, swing / on the ground |
+|---|---|---|---|---|---|---|---|---|
+| 57.6 | 10.9 | 8 | 2.5 / 2.6 | 0.76 / 1.48 | 4.1 | 4.0 | 0 / 0 / 0 | 300 / 78°/s |
+| 100.8 | 19.2 | 8 | 2.5 / 2.5 | 0.68 / 1.44 | 4.0 | 4.0 | 0 / 0 / 0 | 316 / 114 |
+| 144 | 27.4 | 8 | 2.5 / 3.2 | 0.62 / 1.81 | 4.7 | 3.9 | 0 / 0 / 0 | 364 / 139 |
+| 187.2 | 35.6 | 7.9 | 2.5 / 3.1 | 0.60 / 1.84 | 4.6 | 3.9 | 0 / 0 / 0 | 414 / 196 |
+| 230.4 | 43.8 | 6.0 | 2.1 / 2.4 | 0.50 / 1.54 | 3.9 | 3.4 | 0 / 0 / 0 | 444 to 476 / 249 |
+
+The faster trot is no less steady in the virtual body (the lower lift even
+tips it a little less). On the floor the trot rocks about twice what the
+virtual body shows (§12.2), and nothing here models a foot slipping, which
+the faster slide on the ground makes more likely.
+
+### 13.5 On the floor: risks, a first run, the next recordings
+
+**Risks, most likely first.**
+
+1. *The curve is not the estimated one.* The radii come from the scrub in
+   turns in place; a curve may scrub differently, and foot slip is not
+   modelled. Level 1 may barely bend, or level 3 may turn nearly on the
+   spot. Harmless; the levels can be retuned from the gyro.
+2. *The servos do not keep up above 414°/s* (the trot at level 5, and any
+   steer at level 3 or above, whose outer side takes the longer stride): the
+   swing lands late or short, the foot drags; seen as the error growing
+   with the speed, catches, or a stumble.
+3. *The lower lift catches a toe* at the top (6 mm asked, about 3.5
+   reached): on a rug or a seam.
+4. *Foot slip* at 230 mm/s (the feet on the ground slide faster): the real
+   speed lower than planned; nothing measures it but a tape on the floor.
+5. *The quicker changes* (1.5 mm a tick) feel abrupt: a jerk when B7 / B5
+   ends a turn or when the speed steps. The virtual body cannot show
+   inertia on four feet.
+6. *Steering backward slowly with the tightest level* tipped 6.6° in the
+   virtual body with the old servo model (2.5 with the fitted one).
+
+**A first floor run**, Kilo on the floor with room around him, battery
+charged, after `kilo update --host`:
+
+1. A4 (trot), wait 3 s. A6 once, 5 s; A6 again, 5 s; A6 a third time, 5 s.
+   Then C6 three times, a few seconds apart (back to straight), then C6
+   three more (to the right). B6.
+2. A6 from standing (the turn in place), 3 s, then B7: he should walk
+   straight forward within a second, without stopping. B6. C6, 3 s, then
+   B5: straight backward. B6.
+3. A4, then B7 once (187 mm/s), 5 s; B7 again (230 mm/s), 5 s; B6. Stop at
+   once (B6, or C7 to freeze) at a stumble or a toe catching. Then
+   backward: A4, B5 five times (to level -3, 144 mm/s backward), 5 s; B5
+   twice more (-5, 230 mm/s backward), 5 s; B6.
+4. C4 (walk), A6 twice, 5 s, C6 twice, B6.
+5. With the rear-up key switched on only: A2 (it was B2).
+
+Fetch the recordings (`kilo runs --host IP --fetch all`) and analyse them
+(`kilo log walk FILE.krec`; the walk lines carry `steer=` now).
+
+**What the next recordings should check.**
+
+- The yaw rate per steer level (the gyro's `rate_yaw` in the recording's
+  TELEMETRY), against the estimates above (8, 17, 27°/s at level 3), and
+  with the turns in place again for the effective track.
+- The trot's error and rocking at 187 and 230 mm/s, forward and backward,
+  against 144; holds and catches (expected 0).
+- Whether the swing keeps up at 230: a slow-motion phone video from the
+  side, the feet clearing the floor and landing where planned.
+- The real speed at 230 (a tape, the time for 1 m): slip.
+- The change out of a turn: how long until the yaw rate is near zero after
+  B7.
