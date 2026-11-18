@@ -57,14 +57,14 @@ behaviours:
     posture: sit
     look_every_s: 6.0
     look_chance: 0.5
-    look_pan_deg: 30
-    look_tilt_deg: 15
+    look_pan_deg: 40         # 30 until 2026-11-17: the owner asked for a little more head
+    look_tilt_deg: 20
   explore:
     posture: stand
     look_every_s: 1.5
     looks: 12
-    look_pan_deg: 60
-    look_tilt_deg: 25
+    look_pan_deg: 70
+    look_tilt_deg: 30
   nap:
     posture: rest
     min_s: 40.0              # once asleep, stay at least this long (a longer dwell)

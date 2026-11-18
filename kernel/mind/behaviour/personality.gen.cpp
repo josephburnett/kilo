@@ -45,13 +45,13 @@ const Personality kPersonality = {
     "sit",  // behaviours.idle.posture
     6.0,  // behaviours.idle.look_every_s
     0.5,  // behaviours.idle.look_chance
-    30.0,  // behaviours.idle.look_pan_deg
-    15.0,  // behaviours.idle.look_tilt_deg
+    40.0,  // behaviours.idle.look_pan_deg
+    20.0,  // behaviours.idle.look_tilt_deg
     "stand",  // behaviours.explore.posture
     1.5,  // behaviours.explore.look_every_s
     12,  // behaviours.explore.looks
-    60.0,  // behaviours.explore.look_pan_deg
-    25.0,  // behaviours.explore.look_tilt_deg
+    70.0,  // behaviours.explore.look_pan_deg
+    30.0,  // behaviours.explore.look_tilt_deg
     "rest",  // behaviours.nap.posture
     40.0,  // behaviours.nap.min_s
     "hi",  // behaviours.greet.trick

@@ -51,9 +51,9 @@ DEFAULTS: dict[str, Any] = {
     "percepts": {"near_mm": 250.0, "approach_mm_s": 400.0},
     "behaviours": {
         "idle": {"posture": "sit", "look_every_s": 6.0, "look_chance": 0.5,
-                 "look_pan_deg": 30.0, "look_tilt_deg": 15.0},
+                 "look_pan_deg": 40.0, "look_tilt_deg": 20.0},
         "explore": {"posture": "stand", "look_every_s": 1.5, "looks": 12,
-                    "look_pan_deg": 60.0, "look_tilt_deg": 25.0},
+                    "look_pan_deg": 70.0, "look_tilt_deg": 30.0},
         "nap": {"posture": "rest", "min_s": 40.0},
         "greet": {"trick": "hi", "cooldown_s": 30.0},
         "startle": {"hold_s": 2.0},
