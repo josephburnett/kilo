@@ -91,7 +91,8 @@ struct MindConfig {
 class Mind final : public LinkListener,
                    public remote::TrickNotes,
                    public record::MetricsSource,
-                   public guard::GuardHost {
+                   public guard::GuardHost,
+                   public CalGate {
  public:
   static constexpr uint64_t kRunnerStallUs = 1000000;       // daemon/behaviour.py RUNNER_STALL_S
   static constexpr uint64_t kRunnerStartGraceUs = 10000000;  // RUNNER_START_GRACE_S
@@ -155,6 +156,8 @@ class Mind final : public LinkListener,
   // guard::GuardHost
   void sit_and_behave() override;
   bool may_act() override;
+  // CalGate: no calibration change over the host channel while a walk or trick runs.
+  const char* cal_refusal() override;
   void mark(const char* line) override { recorder_.note(line); }
 
   guard::DistanceGuard& guard() { return guard_; }

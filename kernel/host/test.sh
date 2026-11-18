@@ -211,6 +211,34 @@ expect "$OUT/cli_posture.txt" "holding stand" "posture stand over --host"
 expect "$OUT/cli_posture.txt" "released" "posture: control released at the end"
 expect "$OUT/host_listen.log" "host: client [0-9]+: posture 3" "the mind latched STAND"
 
+# Calibration over --host (docs/calibration.md): the mind relays CAL to the real body core.
+KPY -m kilo.cli cal show --host "$H" > "$OUT/cli_cal_show.txt"
+expect "$OUT/cli_cal_show.txt" "^10 rb_shoulder +[+-][0-9]+\.[0-9]{2} +[+-][0-9]+\.[0-9] \.\. +[+-][0-9]+\.[0-9]" \
+    "cal show over --host: joint 10's offset and reach"
+if KPY -m kilo.cli cal nudge 10 2 --host "$H" > "$OUT/cli_cal_refused.txt" 2>&1; then
+    echo "FAILED: cal nudge without control or the calibration posture"; exit 1
+fi
+expect "$OUT/cli_cal_refused.txt" "take control, or hold the calibration posture" "cal nudge refused with nothing held"
+KPY -m kilo.cli --host "$H" posture calib --for 8 > "$OUT/cli_calib.txt" &
+CALIB_PID=$!
+sleep 1.5
+KPY -m kilo.cli cal set 10 16 --host "$H" > "$OUT/cli_cal_set.txt"
+expect "$OUT/cli_cal_set.txt" "joint 10 \(right hind upper leg\): offset [+-][0-9.]+ -> \+16\.00 deg" "cal set over --host"
+KPY -m kilo.cli cal nudge 10 -2.5 --host "$H" > "$OUT/cli_cal_nudge.txt"
+expect "$OUT/cli_cal_nudge.txt" "offset \+16\.00 -> \+13\.50 deg" "cal nudge over --host, from a second client"
+expect "$OUT/cli_cal_nudge.txt" "reaches -80\.0 \.\. \+95\.6" "cal nudge: the joint's new reach"
+if KPY -m kilo.cli cal nudge 10 12 --host "$H" > "$OUT/cli_cal_far.txt" 2>&1; then
+    echo "FAILED: cal nudge past +25"; exit 1
+fi
+expect "$OUT/cli_cal_far.txt" "outside the body's offset range -25 \.\. \+25 deg \(now \+13\.50; a nudge of at most \+11\.50 fits\)" \
+    "cal nudge past the range: refused, with the range"
+KPY -m kilo.cli cal save --host "$H" > "$OUT/cli_cal_save.txt"
+expect "$OUT/cli_cal_save.txt" "saved to the body's EEPROM" "cal save over --host (EEPROM_SAVED)"
+wait "$CALIB_PID"
+expect "$OUT/cli_calib.txt" "holding calib" "the calibration posture held over --host"
+expect "$OUT/host_listen.log" "host: client [0-9]+: calibration joint 10 offset \+13\.50 deg" "the mind's log of the nudge"
+expect "$OUT/host_listen.log" "host: calibration saved \(EEPROM_SAVED\)" "the mind's log of the save"
+
 KPY -m kilo.cli log --host "$H" --lines 30 --duration 1 > "$OUT/cli_log.txt"
 expect "$OUT/cli_log.txt" "[0-9]+\.[0-9]{3} I host: client [0-9]+ gave up control \(released\): REST latched" \
     "log tail over --host: the history"

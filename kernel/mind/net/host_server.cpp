@@ -15,6 +15,7 @@ const char* name_of(uint8_t type) {
   switch (type) {
     case KILO_HOST_MSG_STATUS_REQ: return "STATUS_REQ";
     case KILO_HOST_MSG_GUARD: return "GUARD";
+    case KILO_HOST_MSG_CAL: return "CAL";
     case KILO_HOST_MSG_CONTROL: return "CONTROL";
     case KILO_HOST_MSG_POSTURE: return "POSTURE";
     case KILO_HOST_MSG_PARAM_GET: return "PARAM_GET";
@@ -97,6 +98,7 @@ void HostServer::poll() {
     }
   }
   if (bridge_) pump_bridge();
+  cal_step(now);
   if (flasher_ != nullptr) {
     flasher_->poll();
     flash_status();
@@ -388,6 +390,8 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
       return rec_save(i, f.seq, p);
     case KILO_HOST_MSG_REC_DELETE:
       return rec_delete(i, f.seq, p);
+    case KILO_HOST_MSG_CAL:
+      return cal_request(i, f.seq, p);
     case KILO_HOST_MSG_GUARD: {
       if (guard_ == nullptr) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no distance guard");
       if (p[0] > 2) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_BAD_ARG, "mode: 0 off, 1 on, 2 ask");

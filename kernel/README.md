@@ -636,8 +636,14 @@ or started by the remote's A5). A laptop client holding control (`kilo posture`)
 the remote and pauses the runner meanwhile. The distance guard (`mind/guard/`,
 `docs/distance-guard.md`) is on from boot (`MindConfig::guard`); `kilo guard
 on|off --host` (GUARD, any client) switches it, and GUARD_STATUS, `kilo
-status --host` and the metrics' `guard:` line report it. A walk the raw bridge or a
-flash cut off is aborted when the pause ends.
+status --host` and the metrics' `guard:` line report it. Calibration
+(`kilo cal show|set|nudge|save|revert --host`, `docs/calibration.md`): CAL is
+relayed to the body as CAL_GET / CAL_SET / CAL_SAVE / CAL_REVERT through the
+link's command slot (`mind/net/host_cal.cpp`), one at a time, and answered
+with CAL_STATUS, the offsets read back after it (SAVE waits for the body's
+EEPROM_SAVED); reading is open to any client, changing needs control or the
+calibration posture held by any client, and no walk or trick. A walk the raw
+bridge or a flash cut off is aborted when the pause ends.
 
 ### Body link: two serial back ends
 

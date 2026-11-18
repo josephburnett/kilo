@@ -50,6 +50,7 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
   recorder_.set_metrics(&metrics_);
   host_.attach_metrics(*this);
   host_.attach_guard(guard_);
+  host_.attach_cal_gate(*this);
   guard_.set_host(this);
   guard_.set_enabled(cfg.guard);
   if (cfg.random != nullptr) host_.set_keys(cfg.authorized_keys, cfg.authorized_key_count, *cfg.random);
@@ -152,6 +153,7 @@ void Mind::poll() {
     if (walker_.active()) walker_.abort();
   }
   link_.poll();
+  host_.collect();  // a CAL's answer, before anyone else uses the command slot
   // the command slot's answer, to its owner, before anyone sends another
   player_.collect();
   stats(now);
@@ -230,6 +232,7 @@ void Mind::on_telemetry(const kilo_telemetry_t& t) {
 
 void Mind::on_event(const kilo_event_t& e) {
   walker_.on_event(e);
+  host_.on_body_event(e);
   player_.on_event(e);
   if (n_events_ == behaviour::Snapshot::kEvents) {
     for (int i = 1; i < n_events_; i++) events_[i - 1] = events_[i];
@@ -435,6 +438,14 @@ bool Mind::forward_key(const remote::Key& key) const {
   if (key.kind == remote::Kind::Turn) return straight && remote_.level() > 0;
   if (key.kind != remote::Kind::Speed || !str_eq(key.name, "faster")) return false;
   return !straight || remote_.level() > 0 || remote_.level() == -1;
+}
+
+const char* Mind::cal_refusal() {
+  if (walker_.active()) return "a walk is running: stop it first";
+  const BodyState& b = link_.state();
+  if (player_.busy() || (b.has_telemetry && b.telemetry.mode == KILO_MODE_TRICK)) return "a trick is playing";
+  if (behaviour_active() && !host_controls()) return "the behaviour runner is on (B6 stops it)";
+  return nullptr;
 }
 
 bool Mind::may_act() {

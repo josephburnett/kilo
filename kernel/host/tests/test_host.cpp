@@ -64,6 +64,7 @@ struct Rig {
     link.mark_alive();
     server.poll();
     if (!server.bridge_open()) link.poll();
+    server.collect();
   }
   void run_ms(uint32_t ms, uint32_t step = 5) {
     for (uint32_t t = 0; t < ms; t += step) {
@@ -1008,6 +1009,144 @@ void test_slots() {
 
 }  // namespace
 
+// CAL: the calibration relayed to the body. The body here is the test: it
+// answers CAL_GET with CAL_VALUES and acks CAL_SET / CAL_SAVE / CAL_REVERT.
+struct CalBody {
+  Rig& r;
+  int16_t off[16] = {0, 0, 0, 0, 0, 0, 0, 0, 32, -48, -256, 32, 16, 0, -16, 8};
+  uint8_t refuse = KILO_ACK_STATUS_OK;  // the status CAL_SET / CAL_SAVE get
+  bool saved_event = true;              // CAL_SAVE: EVENT EEPROM_SAVED follows
+  std::vector<uint8_t> seen;            // the body commands, in order
+  uint8_t bseq = 0;
+  explicit CalBody(Rig& rig) : r(rig) {}
+  void answer() {
+    for (const Sent& s : r.serial.take_sent()) {
+      if (s.type == KILO_MSG_CAL_GET) {
+        seen.push_back(s.type);
+        r.serial.feed_frame(KILO_MSG_CAL_VALUES, bseq++, off, sizeof off);
+      } else if (s.type == KILO_MSG_CAL_SET || s.type == KILO_MSG_CAL_SAVE || s.type == KILO_MSG_CAL_REVERT) {
+        seen.push_back(s.type);
+        if (s.type == KILO_MSG_CAL_SET && refuse == KILO_ACK_STATUS_OK)
+          off[s.payload[0]] = (int16_t)(s.payload[1] | (s.payload[2] << 8));
+        kilo_ack_t a = {s.seq, s.type, refuse};
+        r.serial.feed_frame(KILO_MSG_ACK, bseq++, &a, sizeof a);
+        if (s.type == KILO_MSG_CAL_SAVE && refuse == KILO_ACK_STATUS_OK && saved_event) {
+          kilo_event_t e = {KILO_EVENT_EEPROM_SAVED, 0, 0, 1};
+          r.server.on_body_event(e);  // the Mind forwards every EVENT (Mind::on_event)
+        }
+      }
+    }
+  }
+  void run_ms(uint32_t ms) {
+    for (uint32_t t = 0; t < ms; t += 5) {
+      r.clock.advance_ms(5);
+      r.pass();
+      answer();
+    }
+  }
+};
+
+const HostFrame* cal_status(const std::vector<HostFrame>& fs, uint8_t seq) {
+  for (const HostFrame& f : fs)
+    if (f.type == KILO_HOST_MSG_CAL_STATUS && f.seq == seq) return &f;
+  return nullptr;
+}
+
+int16_t status_offset(const HostFrame* f, int j) {
+  return (int16_t)(f->payload[2 + 2 * j] | (f->payload[3 + 2 * j] << 8));
+}
+
+void test_cal() {
+  Rig r;
+  CalBody body(r);
+  kilo_hello_t h = {};
+  h.proto_major = KILO_PROTO_MAJOR;
+  h.epoch = 1;
+  r.serial.feed_frame(KILO_MSG_HELLO, 0, &h, sizeof h);
+  kilo_telemetry_t t = {};
+  t.epoch = 1;
+  r.serial.feed_frame(KILO_MSG_TELEMETRY, 1, &t, sizeof t);
+  FakeConn& a = r.connect(0);
+  FakeConn& b = r.connect(1);
+  body.run_ms(20);
+  a.take();
+  b.take();
+  // GET: any client
+  kilo_host_cal_t get = {KILO_CAL_OP_GET, 0, 0};
+  b.send(KILO_HOST_MSG_CAL, 1, &get, sizeof get);
+  body.run_ms(50);
+  std::vector<HostFrame> fb = b.take();
+  const HostFrame* st = cal_status(fb, 1);
+  CHECK(st != nullptr && st->payload[0] == KILO_CAL_OP_GET && status_offset(st, 10) == -256 && status_offset(st, 9) == -48);
+  // SET from an observer with nothing held: refused; out of range: refused with the range
+  kilo_host_cal_t set = {KILO_CAL_OP_SET, 10, 136};
+  b.send(KILO_HOST_MSG_CAL, 2, &set, sizeof set);
+  kilo_host_cal_t far = {KILO_CAL_OP_SET, 10, 401};
+  b.send(KILO_HOST_MSG_CAL, 3, &far, sizeof far);
+  kilo_host_cal_t badj = {KILO_CAL_OP_SET, 16, 0};
+  b.send(KILO_HOST_MSG_CAL, 4, &badj, sizeof badj);
+  body.run_ms(20);
+  fb = b.take();
+  CHECK(result_code(fb, 2) == KILO_HOST_RESULT_CODE_NOT_CONTROLLER && result_code(fb, 3) == KILO_HOST_RESULT_CODE_BAD_ARG &&
+        result_code(fb, 4) == KILO_HOST_RESULT_CODE_BAD_ARG);
+  CHECK(body.seen.size() == 1);  // only the GET reached the body
+  // a holds the calibration posture; b's SET goes through (the nudge from another window)
+  uint8_t take[2] = {1, 0};  // no keepalive: the long waits below send nothing
+  kilo_host_posture_t calib = {KILO_POSTURE_CALIB, 0, 0};
+  a.send(KILO_HOST_MSG_CONTROL, 1, take, 2);
+  a.send(KILO_HOST_MSG_POSTURE, 2, &calib, sizeof calib);
+  body.run_ms(20);
+  b.send(KILO_HOST_MSG_CAL, 5, &set, sizeof set);
+  b.send(KILO_HOST_MSG_CAL, 6, &get, sizeof get);  // while the SET is in flight: BUSY
+  body.run_ms(60);
+  fb = b.take();
+  st = cal_status(fb, 5);
+  CHECK(st != nullptr && st->payload[0] == KILO_CAL_OP_SET && status_offset(st, 10) == 136);
+  CHECK(result_code(fb, 6) == KILO_HOST_RESULT_CODE_BUSY);
+  CHECK(body.seen.size() == 3 && body.seen[1] == KILO_MSG_CAL_SET && body.seen[2] == KILO_MSG_CAL_GET);
+  CHECK(r.capture.has("host: client 1: calibration joint 10 offset +8.50 deg"));
+  // SAVE: waits for EEPROM_SAVED, then the offsets
+  kilo_host_cal_t save = {KILO_CAL_OP_SAVE, 0, 0};
+  a.send(KILO_HOST_MSG_CAL, 3, &save, sizeof save);
+  body.run_ms(60);
+  std::vector<HostFrame> fa = a.take();
+  st = cal_status(fa, 3);
+  CHECK(st != nullptr && st->payload[0] == KILO_CAL_OP_SAVE && st->payload[1] == 1 && status_offset(st, 10) == 136);
+  // no EEPROM_SAVED: answered after the wait, saved 0
+  body.saved_event = false;
+  a.send(KILO_HOST_MSG_CAL, 4, &save, sizeof save);
+  body.run_ms(1500);
+  CHECK(cal_status(a.take(), 4) == nullptr);
+  body.run_ms(600);
+  fa = a.take();
+  st = cal_status(fa, 4);
+  CHECK(st != nullptr && st->payload[1] == 0 && r.capture.has("no EEPROM_SAVED within 2000 ms"));
+  // the body refuses (EEPROM busy): BUSY, with its reason
+  body.refuse = KILO_ACK_STATUS_EEPROM_BUSY;
+  a.send(KILO_HOST_MSG_CAL, 5, &set, sizeof set);
+  body.run_ms(60);
+  fa = a.take();
+  CHECK(result_code(fa, 5) == KILO_HOST_RESULT_CODE_BUSY && cal_status(fa, 5) == nullptr);
+  // REVERT
+  body.refuse = KILO_ACK_STATUS_OK;
+  kilo_host_cal_t rev = {KILO_CAL_OP_REVERT, 0, 0};
+  a.send(KILO_HOST_MSG_CAL, 6, &rev, sizeof rev);
+  body.run_ms(60);
+  fa = a.take();
+  st = cal_status(fa, 6);
+  CHECK(st != nullptr && st->payload[0] == KILO_CAL_OP_REVERT && body.seen.back() == KILO_MSG_CAL_GET);
+  // a body that never answers: NO_BODY after the link's retries
+  Rig r2;
+  r2.serial.feed_frame(KILO_MSG_HELLO, 0, &h, sizeof h);
+  FakeConn& c = r2.connect(0);
+  r2.run_ms(20);
+  c.take();
+  c.send(KILO_HOST_MSG_CAL, 1, &get, sizeof get);
+  r2.run_ms(1000);
+  int code = result_code(c.take(), 1);
+  CHECKF(code == KILO_HOST_RESULT_CODE_NO_BODY, "code %d: %s", code, r2.capture.lines.empty() ? "" : r2.capture.lines.back().c_str());
+}
+
 int main(int argc, char** argv) {
   if (argc < 2) {
     std::printf("usage: test_host VECTORS.txt\n");
@@ -1032,6 +1171,7 @@ int main(int argc, char** argv) {
   test_wrong_private_key();
   test_bad_records();
   test_slots();
+  test_cal();
   std::printf("  %d host vectors\n", g_vectors);
   return report("host");
 }

@@ -21,7 +21,8 @@ MIND_SRCS += \
 	mind/util/logring.cpp \
 	mind/net/host_frame.cpp \
 	mind/net/host_server.cpp \
-	mind/net/host_secure.cpp
+	mind/net/host_secure.cpp \
+	mind/net/host_cal.cpp
 
 # Who may talk to the mind (kernel/README.md "Who may talk to Kilo: keys"):
 # Monocypher (vendored, byte-identical upstream C) under the host channel's
