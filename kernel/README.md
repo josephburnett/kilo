@@ -633,7 +633,10 @@ the CLI waits 2 s for a close and is done either way. Params (`PARAM_*`) answer
 UNSUPPORTED. There is still no walk or trick command over `--host`: walks
 come from the IR remote, tricks only from the behaviour runner (built in,
 or started by the remote's A5). A laptop client holding control (`kilo posture`) silences
-the remote and pauses the runner meanwhile. A walk the raw bridge or a
+the remote and pauses the runner meanwhile. The distance guard (`mind/guard/`,
+`docs/distance-guard.md`) is on from boot (`MindConfig::guard`); `kilo guard
+on|off --host` (GUARD, any client) switches it, and GUARD_STATUS, `kilo
+status --host` and the metrics' `guard:` line report it. A walk the raw bridge or a
 flash cut off is aborted when the pause ends.
 
 ### Body link: two serial back ends
