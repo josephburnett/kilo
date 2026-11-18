@@ -1056,6 +1056,55 @@
    "payload": "01010301011f0123013c019600b40004000000010000000000000002000000",
    "wire": "23008a1c01010301011f0123013c019600b40004000000010000000000000002000000855d",
    "note": "holding after a stop at BLUE"
+  },
+  {
+   "name": "cal_set",
+   "msg": "CAL",
+   "type": 89,
+   "dir": "client_to_mind",
+   "kind": "command",
+   "seq": 29,
+   "fields": {
+    "op": 1,
+    "joint": 10,
+    "offset_a16": 136
+   },
+   "payload": "010a8800",
+   "wire": "0800591d010a88000230",
+   "note": "joint 10 (right hind shoulder) to +8.5 deg"
+  },
+  {
+   "name": "cal_status",
+   "msg": "CAL_STATUS",
+   "type": 139,
+   "dir": "mind_to_client",
+   "kind": "event",
+   "seq": 29,
+   "fields": {
+    "op": 1,
+    "saved": 0,
+    "offset": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     32,
+     -48,
+     136,
+     32,
+     16,
+     0,
+     -16,
+     8
+    ]
+   },
+   "payload": "0100000000000000000000000000000000002000d0ff8800200010000000f0ff0800",
+   "wire": "26008b1d0100000000000000000000000000000000002000d0ff8800200010000000f0ff0800b9ba",
+   "note": "the offsets after the SET"
   }
  ],
  "errors": [

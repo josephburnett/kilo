@@ -391,6 +391,10 @@ def host_frame_cases():
          {"enabled": 1, "zone": 1, "action": 3, "eyes": 1, "eyes_driven": 1, "dist_mm": 287, "raw_mm": 291,
           "blue_mm": 316, "red_mm": 150, "speed_mm_s": 180, "zone_changes": 4, "stops": 1, "pullbacks": 0,
           "refused": 2}, "holding after a stop at BLUE"),
+        ("cal_set", "CAL", 29, {"op": 1, "joint": 10, "offset_a16": 136}, "joint 10 (right hind shoulder) to +8.5 deg"),
+        ("cal_status", "CAL_STATUS", 29,
+         {"op": 1, "saved": 0, "offset": [0, 0, 0, 0, 0, 0, 0, 0, 32, -48, 136, 32, 16, 0, -16, 8]},
+         "the offsets after the SET"),
     ]
 
 
