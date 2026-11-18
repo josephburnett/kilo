@@ -406,3 +406,22 @@ def test_realtime_on_a_pty(binary):
     finally:
         link.stop()
         core.close()
+
+
+# ---- calibration: a CAL_SET moves the held pose at once -----------------------------------
+
+def test_cal_set_moves_the_held_calibration_pose(rig):
+    """kilo cal nudge relies on it (docs/rear-up-trick.md section 2): with CALIB held, CAL_SET
+    changes the joint's pulse from the next tick, by the offset times the counts per degree,
+    the joint's direction applied (joint 10, the right hind shoulder, on PCA channel 6, dir -1)."""
+    core, link, client = rig()
+    client.posture("calib")
+    assert core.run_until(lambda: not core.dump()["idle_moving"] and core.dump()["posture"] == P.Posture.CALIB, 2)
+    before = client.pca_counts()[6]
+    old = client.cal_get()[10]
+    client.cal_set(10, old + 8 * 16)
+    core.step(1)
+    after = client.pca_counts()[6]
+    assert client.cal_get()[10] == old + 8 * 16
+    # about 11 counts (us) per degree; fewer counts here: the upper leg turns back (a + shoulder angle)
+    assert -8 * 12 <= after - before <= -8 * 10

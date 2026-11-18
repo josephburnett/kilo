@@ -53,6 +53,14 @@
 // makes more than kMaxClients open, the oldest one that is not yet a client
 // is closed (the new one itself if every other is a client).
 //
+// - calibration (net/host_cal.cpp): CAL relays the body's CAL_GET, CAL_SET,
+//   CAL_SAVE and CAL_REVERT through the link's command slot, one CAL at a
+//   time, and answers CAL_STATUS with the offsets read back afterwards (for
+//   SAVE once EEPROM_SAVED came, or KILO_HOST_CAL_SAVE_WAIT_MS passed).
+//   Reading: any client. Changing: the controller, or any client while the
+//   calibration posture is held (`kilo posture calib --host` in one window,
+//   `kilo cal nudge` in another); never while a walk or trick runs.
+//
 // Control: one controller, the first client to send CONTROL take=1; the
 // others are observers (STATUS, TELEM, LOG_LINE) and get NOT_CONTROLLER for
 // POSTURE, PARAM_SET, REBOOT and the bridge. When the controller gives up
@@ -83,6 +91,16 @@
 #include "util/logring.h"
 
 namespace kilo {
+
+// What the mind tells the calibration relay: why a CAL that changes the
+// calibration must wait now (a walk, a trick), or null.
+class CalGate {
+ public:
+  virtual const char* cal_refusal() { return nullptr; }
+
+ protected:
+  ~CalGate() = default;
+};
 
 class HostServer final : public record::BenchSink {
  public:
@@ -150,6 +168,14 @@ class HostServer final : public record::BenchSink {
   void attach_metrics(record::MetricsSource& m) { metrics_ = &m; }
   // GUARD -> GUARD_STATUS: the distance guard (any client).
   void attach_guard(guard::DistanceGuard& g) { guard_ = &g; }
+  // CAL's gate (the mind: no calibration change while a walk or trick runs).
+  void attach_cal_gate(CalGate& g) { cal_gate_ = &g; }
+  // Right after link.poll(), before anyone else uses the command slot: a
+  // CAL's answer from the body is taken here (the slot holds one answer
+  // until the next request).
+  void collect();
+  // Every EVENT from the body (the mind's on_event): EEPROM_SAVED ends a CAL SAVE.
+  void on_body_event(const kilo_event_t& e);
   // record::BenchSink: REC_BENCH's results, to the client that asked.
   void bench_result(const kilo_host_bench_result_t& r) override;
   // The laptops' public keys a connection may name (they outlive the
@@ -255,6 +281,10 @@ class HostServer final : public record::BenchSink {
   void pump_bridge();
   void streams(uint64_t now);
   void reboot(uint32_t i, uint8_t seq);
+  // Calibration (net/host_cal.cpp).
+  void cal_request(uint32_t i, uint8_t seq, const uint8_t* p);
+  void cal_step(uint64_t now);
+  void cal_fail(uint8_t code, const char* why);
   void flash_begin(uint32_t i, uint8_t seq, const uint8_t* p);
   void flash_commit(uint32_t i, uint8_t seq);
   void drop_image(const char* why);
@@ -331,6 +361,23 @@ class HostServer final : public record::BenchSink {
   record::MetricsSource* metrics_ = nullptr;
   guard::DistanceGuard* guard_ = nullptr;
   int32_t bench_client_ = -1;
+
+  // The CAL in flight (one at a time).
+  enum class CalStep : uint8_t { None, Send, Wait, Get, GetWait, Saved };
+  struct CalJob {
+    int32_t client;
+    uint8_t seq;       // the client's CAL seq
+    uint8_t op;
+    uint8_t joint;
+    int16_t offset_a16;
+    CalStep step;
+    uint8_t req_type;  // the body command in the slot, and its seq
+    uint8_t req_seq;
+    uint64_t deadline_us;
+    bool saved;
+  };
+  CalJob cal_ = {-1, 0, 0, 0, 0, CalStep::None, 0, 0, 0, false};
+  CalGate* cal_gate_ = nullptr;
 };
 
 }  // namespace kilo

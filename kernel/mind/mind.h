@@ -91,7 +91,8 @@ struct MindConfig {
 class Mind final : public LinkListener,
                    public remote::TrickNotes,
                    public record::MetricsSource,
-                   public guard::GuardHost {
+                   public guard::GuardHost,
+                   public CalGate {
  public:
   static constexpr uint64_t kRunnerStallUs = 1000000;       // daemon/behaviour.py RUNNER_STALL_S
   static constexpr uint64_t kRunnerStartGraceUs = 10000000;  // RUNNER_START_GRACE_S
@@ -155,6 +156,8 @@ class Mind final : public LinkListener,
   // guard::GuardHost
   void sit_and_behave() override;
   bool may_act() override;
+  // CalGate: no calibration change over the host channel while a walk or trick runs.
+  const char* cal_refusal() override;
   void mark(const char* line) override { recorder_.note(line); }
 
   guard::DistanceGuard& guard() { return guard_; }
@@ -206,6 +209,7 @@ class Mind final : public LinkListener,
   bool liveness(uint64_t now);
   void ir_key(const kilo_event_t& e);
   bool forward_key(const remote::Key& key) const;
+  bool lying(const kilo_telemetry_t& t) const;
   double head_held(int field) const;  // the SET_HEAD goal's pan (2) or tilt (4) in degrees, 0 when not held
   void stats(uint64_t now);
   bool safe_for_card(uint64_t now);

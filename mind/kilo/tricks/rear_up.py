@@ -33,7 +33,7 @@ design does about it:
    floor, and with all four feet down the centre of mass only gets behind
    the hind feet with the hips 70 mm up). So the trick needs the right hind
    upper leg re-seated on its servo and recalibrated
-   (docs/rear-up-trick.md section 2: its calibration offset +7 to +20
+   (docs/rear-up-trick.md section 2: its calibration offset +7 to +25
    instead of -16). DESIGN is that calibration; AS_RECORDED is Kilo's
    as dumped (2026-10-10), on which the trick must stop itself safely at the
    first guard.
@@ -106,7 +106,7 @@ SIT_FRAME = J(30, 60, -80, 45, -60, 10, -20)  # the trick's last frame: SIT with
 
 # ---- the calibration the design needs, and Kilo's as recorded ---------------------------------
 # The right hind shoulder's CZP after re-seating its upper leg (docs
-# section 2): calibration offset +12 (the target range +7..+20), CZP = 90 +
+# section 2): calibration offset +12 (the range it may end in, +7..+25), CZP = 90 +
 # 10 - 12 = 88. Its pulse then ends at -85 deg, past the -80 joint limit.
 DESIGN_CZP = tuple(88 if j == JOINT_IDS["rb_shoulder"] else v for j, v in enumerate(T.KILO_CZP))
 DESIGN = T.Geometry3(czp=DESIGN_CZP)
@@ -411,7 +411,7 @@ def build(g: S.Geometry | None = None, st=1) -> Trick:
         stop_ticks=st.stop_ticks, guards=guards, roll_max=PLAY_ROLL_MAX,
         source={"kind": "authored", "design": "kilo.tricks.rear_up", "doc": "docs/rear-up-trick.md",
                 "stage": st.number, "design_version": 2,
-                "requires": "the right hind shoulder (joint 10) reaching -78 deg: calibration offset +7..+20 "
+                "requires": "the right hind shoulder (joint 10) reaching -78 deg: calibration offset +7..+25 "
                             "(kilo cal show), docs/rear-up-trick.md section 2",
                 "keyframes": [f.name for f in fr], "predicted_pitch_deg": pred},
         notes=(

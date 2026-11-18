@@ -50,6 +50,7 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
   recorder_.set_metrics(&metrics_);
   host_.attach_metrics(*this);
   host_.attach_guard(guard_);
+  host_.attach_cal_gate(*this);
   guard_.set_host(this);
   guard_.set_enabled(cfg.guard);
   if (cfg.random != nullptr) host_.set_keys(cfg.authorized_keys, cfg.authorized_key_count, *cfg.random);
@@ -90,11 +91,15 @@ bool Mind::body_limp() const {
 // and so for kCardQuietUs.
 bool Mind::safe_for_card(uint64_t now) {
   constexpr uint64_t kCardQuietUs = 2000000;
+  constexpr uint64_t kCardHelloWaitUs = 3000000;  // as the kernel's boot flash check (BootHelloWaitUs)
   const BodyState& b = link_.state();
+  // Not before the body's first HELLO (or 3 s without one): the card's first call mounts it,
+  // which stalls the loop (1.5 s on the Pi), and the HELLO's answer was lost in that stall.
+  bool booting = !b.has_hello && now - started_us_ < kCardHelloWaitUs;
   bool moving = b.has_telemetry && (b.telemetry.mode == KILO_MODE_GAIT || b.telemetry.mode == KILO_MODE_TRICK ||
                                     b.telemetry.mode == KILO_MODE_FALLEN || b.telemetry.mode == KILO_MODE_RECOVERING ||
                                     b.telemetry.mode == KILO_MODE_CALIB || b.telemetry.mode == KILO_MODE_BOOT);
-  bool busy = moving || walker_.active() || player_.busy() || remote_.busy() || recorder_.recording() ||
+  bool busy = booting || moving || walker_.active() || player_.busy() || remote_.busy() || recorder_.recording() ||
               host_.link_paused() || host_.flashing() || host_.updating() || behaviour_active();
   if (busy) unsafe_at_us_ = now;
   return !busy && now - unsafe_at_us_ >= kCardQuietUs;
@@ -148,6 +153,7 @@ void Mind::poll() {
     if (walker_.active()) walker_.abort();
   }
   link_.poll();
+  host_.collect();  // a CAL's answer, before anyone else uses the command slot
   // the command slot's answer, to its owner, before anyone sends another
   player_.collect();
   stats(now);
@@ -208,7 +214,7 @@ void Mind::on_hello(const kilo_hello_t& hello, bool solicited) {
 void Mind::on_telemetry(const kilo_telemetry_t& t) {
   walker_.on_telemetry(t);
   sleep_.on_telemetry(t);
-  guard_.on_telemetry(t, head_held(4));
+  guard_.on_telemetry(t, head_held(4), lying(t));
   if (t.batt_mv != 0 && !(t.flags & KILO_TELEMETRY_FLAGS_NO_BATTERY)) {
     metrics_.battery_mv = t.batt_mv;
     if (metrics_.battery_min_mv == 0 || t.batt_mv < metrics_.battery_min_mv) metrics_.battery_min_mv = t.batt_mv;
@@ -226,6 +232,7 @@ void Mind::on_telemetry(const kilo_telemetry_t& t) {
 
 void Mind::on_event(const kilo_event_t& e) {
   walker_.on_event(e);
+  host_.on_body_event(e);
   player_.on_event(e);
   if (n_events_ == behaviour::Snapshot::kEvents) {
     for (int i = 1; i < n_events_; i++) events_[i - 1] = events_[i];
@@ -410,14 +417,35 @@ double Mind::head_held(int field) const {
   return v == KILO_HEAD_NOT_HELD ? 0 : (double)v / 16.0;
 }
 
+// Lying with the head down: the REST or LIMP posture asked (A7, light sleep) and no walk, or the
+// body LIMP by itself. The ultrasonic reads the floor then (54-63 mm, docs/distance-guard.md).
+bool Mind::lying(const kilo_telemetry_t& t) const {
+  if (t.mode == KILO_MODE_LIMP) return true;
+  const Goal* g = const_cast<SerialLink&>(link_).goal(KILO_MSG_SET_POSTURE);
+  if (g == nullptr || g->len < 2 || walker_.active()) return false;
+  return g->payload[1] == KILO_POSTURE_REST || g->payload[1] == KILO_POSTURE_LIMP;
+}
+
 // A key that would walk forward now (remote.h): the gait keys (start forward, or straight forward
-// from a turn or from backward), and B7 while walking straight forward or from -1 to +1.
+// from a turn or from backward); B7 while walking straight forward, from -1 to +1, or out of a turn
+// in place (straight forward, docs/walking-and-balance.md §13.3); and A6 / C6 while walking forward
+// (a steer: the walk bends but stays forward, §13.2). A6 / C6 from standing or backward are not.
 bool Mind::forward_key(const remote::Key& key) const {
   if (key.kind == remote::Kind::Gait) return true;
-  if (key.kind != remote::Kind::Speed || !str_eq(key.name, "faster")) return false;
   planner::Direction d;
-  if (!remote_.direction(&d) || remote_.heading() != remote::Heading::Straight) return false;
-  return remote_.level() > 0 || remote_.level() == -1;
+  if (!remote_.direction(&d)) return false;
+  bool straight = remote_.heading() == remote::Heading::Straight;
+  if (key.kind == remote::Kind::Turn) return straight && remote_.level() > 0;
+  if (key.kind != remote::Kind::Speed || !str_eq(key.name, "faster")) return false;
+  return !straight || remote_.level() > 0 || remote_.level() == -1;
+}
+
+const char* Mind::cal_refusal() {
+  if (walker_.active()) return "a walk is running: stop it first";
+  const BodyState& b = link_.state();
+  if (player_.busy() || (b.has_telemetry && b.telemetry.mode == KILO_MODE_TRICK)) return "a trick is playing";
+  if (behaviour_active() && !host_controls()) return "the behaviour runner is on (B6 stops it)";
+  return nullptr;
 }
 
 bool Mind::may_act() {

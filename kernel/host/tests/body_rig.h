@@ -25,6 +25,8 @@ struct FakeBody {
   uint16_t batt_mv = 8000;
   bool telemetry_on = true;
   bool eyes = false;  // HELLO caps EYES (the body firmware of 2026-11-17 on)
+  int drop_hellos = 0;
+  int16_t cal[16] = {};  // the calibration offsets (a16): CAL_SET changes, CAL_GET answers (CAL_VALUES)  // this many HELLO_REQ go unanswered (the answer lost in a stalled loop)
   uint64_t next_tel = 0;
   std::vector<Sent> sent;  // every frame the mind wrote
   // the ACK status for a command (return 0xFF: no answer)
@@ -73,6 +75,10 @@ struct FakeBody {
       }
       if (s.type == 0xFF || kilo_msg_kind(s.type) != KILO_KIND_COMMAND) continue;
       if (s.type == KILO_MSG_HELLO_REQ) {
+        if (drop_hellos > 0) {
+          drop_hellos--;
+          continue;
+        }
         hello();
         continue;
       }
@@ -83,8 +89,11 @@ struct FakeBody {
           kilo_stats_t r = {};
           serial.feed_frame(KILO_MSG_STATS, seq++, &r, sizeof r);
         }
+        if (s.type == KILO_MSG_CAL_GET) serial.feed_frame(KILO_MSG_CAL_VALUES, seq++, cal, sizeof cal);
         continue;
       }
+      if (s.type == KILO_MSG_CAL_SET && st == KILO_ACK_STATUS_OK && s.payload.size() == 3)
+        cal[s.payload[0] & 15] = (int16_t)(s.payload[1] | (s.payload[2] << 8));
       kilo_ack_t a = {s.seq, s.type, st};
       serial.feed_frame(KILO_MSG_ACK, seq++, &a, sizeof a);
     }

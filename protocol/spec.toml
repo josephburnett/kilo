@@ -1312,6 +1312,7 @@ update_chunk_max = 200         # UPDATE_DATA data bytes per frame (as FLASH_DATA
 update_marker = "KILO-MIND-KERNEL-1"  # must be in an image UPDATE_COMMIT installs unless FORCE: the mind kernel embeds it (kernel/src/kernel.cpp), the netboot loader does not
 walk_format = 2                # WALK_DATA's bytes: 2 = flight-recorder blocks (record_block_header + records; 1 was a walk's records alone); bump on any change
 walk_text_max = 120            # WALK_INFO text bytes
+cal_save_wait_ms = 2000        # CAL SAVE: the wait for the body's EEPROM_SAVED before CAL_STATUS (saved 0 after it)
 walk_chunk_max = 200           # WALK_DATA data bytes per frame
 walk_preroll_ms = 2000         # a recording starts with this much of the link's traffic before the walk's setup
 walk_postroll_ms = 2000        # ... and runs on this long after the walk ended
@@ -1470,6 +1471,12 @@ WATCH = 0                      # nothing to do
 STOPPING = 1                   # the planned stop of a forward walk
 BACKING = 2                    # walking backward a short way (RED)
 HOLDING = 3                    # sitting; forward keys refused until clear
+
+[enums.cal_op]                 # CAL.op, CAL_STATUS.op
+GET = 0                        # read the 16 offsets (CAL_GET)
+SET = 1                        # one joint's absolute offset (CAL_SET), then read them
+SAVE = 2                       # write the calibration to the EEPROM slot (CAL_SAVE), wait for EEPROM_SAVED, then read
+REVERT = 3                     # reload the saved calibration (CAL_REVERT), then read
 
 [enums.rec_fetch_what]         # REC_FETCH.what
 BLOCKS = 0                     # the flight recorder's blocks covering the range
@@ -1830,6 +1837,19 @@ fields = [
 ]
 
 [[host_messages]]
+name = "CAL"
+id = 0x59
+dir = "client_to_mind"
+kind = "command"
+query = true
+doc = "Joint calibration, relayed to the body with CAL_GET / CAL_SET / CAL_SAVE / CAL_REVERT (kilo cal ... --host). GET: any client. SET, SAVE, REVERT: the controller, or any client while the calibration posture (CALIB) is held; refused (BUSY) while a walk or trick runs. A SET takes effect at once on the held pose. Answered by CAL_STATUS once the body has answered; refused with RESULT: BAD_ARG (joint over 15, offset outside +-25 deg, as the body's CAL_SET range), NO_BODY, BUSY (another CAL in flight, the body's EEPROM busy), or the body's refusal as text."
+fields = [
+  { name = "op", type = "u8", enum = "cal_op" },
+  { name = "joint", type = "u8", note = "SET: the legacy joint id 0..15 (CAL_VALUES' index); else 0" },
+  { name = "offset_a16", type = "i16", unit = "deg", scale = 0.0625, note = "SET: the absolute offset, -400..400 (+-25 deg); else 0" },
+]
+
+[[host_messages]]
 name = "RESULT"
 id = 0x80
 dir = "mind_to_client"
@@ -2032,6 +2052,19 @@ fields = [
   { name = "stops", type = "u32", note = "walks stopped at BLUE" },
   { name = "pullbacks", type = "u32", note = "walks backed off at RED" },
   { name = "refused", type = "u32", note = "forward keys refused while it held" },
+]
+
+[[host_messages]]
+name = "CAL_STATUS"
+id = 0x8B
+dir = "mind_to_client"
+kind = "event"
+reply_to = "CAL"
+doc = "The body's 16 calibration offsets after the CAL (as CAL_VALUES), the op it answers, and for SAVE whether EEPROM_SAVED came within host.cal_save_wait_ms."
+fields = [
+  { name = "op", type = "u8", enum = "cal_op" },
+  { name = "saved", type = "u8", note = "SAVE: 1 EEPROM_SAVED came, 0 not within the wait (queued only); else 0" },
+  { name = "offset", type = "i16", count = 16, unit = "deg", scale = 0.0625, note = "by legacy joint id" },
 ]
 
 [[host_messages]]

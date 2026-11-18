@@ -86,7 +86,7 @@ def test_kilo_param_list_and_cal_show(vbody_pty):
     p = _kilo(path, "cal", "show")
     out, err = p.communicate(timeout=15)
     assert p.returncode == 0, err
-    assert out.count("joint") == 16
+    assert "10 rb_shoulder" in out and out.count(" .. ") >= 11  # 11 driven joints: offset, reach, asked
 
 
 def test_kilo_eeprom_dump_and_pca(vbody_pty):

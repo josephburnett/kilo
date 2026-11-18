@@ -121,12 +121,12 @@ void DistanceGuard::note(const char* what) {
   if (host_ != nullptr) host_->mark(what);
 }
 
-void DistanceGuard::on_telemetry(const kilo_telemetry_t& t, double head_tilt_deg) {
+void DistanceGuard::on_telemetry(const kilo_telemetry_t& t, double head_tilt_deg, bool lying) {
   double now = (double)clock_.now_us() / 1e6;
   // the beam's tilt below level: the head held down, plus the body nose down (TELEMETRY pitch, nose down +)
   double down = -head_tilt_deg + (double)t.pitch / 16.0;
   bool fresh = (t.flags & KILO_TELEMETRY_FLAGS_DIST_FRESH) != 0;
-  filter_.feed(now, t.dist_mm, fresh, down > kFloorTiltDeg);
+  filter_.feed(now, t.dist_mm, fresh, lying || down > kFloorTiltDeg);
 
   double v = 0;
   const char* gait = "";
@@ -252,6 +252,15 @@ void DistanceGuard::poll() {
       set_action(Action::Stopping, "backed off: the planned stop");
       return;
     case Action::Holding:
+      // A forward walk while holding (a key that took over the stop and kept the walk forward,
+      // B5 from +5 to +4): the planned stop again. Forward keys are refused; this catches the rest.
+      if (forward_walk(&v, &gait) && may) {
+        stops_++;
+        walker_.stop();
+        deadline_ = now + (uint64_t)(remote::stop_timeout_s((double)walker_.planner().timing().period_ms) * 1e6);
+        set_action(Action::Stopping, "a forward walk while holding: the planned stop");
+        return;
+      }
       if (green_ && now - green_since_ >= (uint64_t)(kClearS * 1e6)) {
         releases_++;
         v_ = 0;

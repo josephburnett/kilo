@@ -636,8 +636,14 @@ or started by the remote's A5). A laptop client holding control (`kilo posture`)
 the remote and pauses the runner meanwhile. The distance guard (`mind/guard/`,
 `docs/distance-guard.md`) is on from boot (`MindConfig::guard`); `kilo guard
 on|off --host` (GUARD, any client) switches it, and GUARD_STATUS, `kilo
-status --host` and the metrics' `guard:` line report it. A walk the raw bridge or a
-flash cut off is aborted when the pause ends.
+status --host` and the metrics' `guard:` line report it. Calibration
+(`kilo cal show|set|nudge|save|revert --host`, `docs/calibration.md`): CAL is
+relayed to the body as CAL_GET / CAL_SET / CAL_SAVE / CAL_REVERT through the
+link's command slot (`mind/net/host_cal.cpp`), one at a time, and answered
+with CAL_STATUS, the offsets read back after it (SAVE waits for the body's
+EEPROM_SAVED); reading is open to any client, changing needs control or the
+calibration posture held by any client, and no walk or trick. A walk the raw
+bridge or a flash cut off is aborted when the pause ends.
 
 ### Body link: two serial back ends
 
@@ -848,9 +854,14 @@ card, but Circle resets it: CMD0, then ACMD41 until it is ready) about
 50-300 ms (est.), the mount a few sectors, a 31 KB read at 25 MHz 4-bit
 PIO a few ms: about 0.1-0.4 s (est.). Before `connect()` that would delay
 the link and the boot probe; after the first HELLO it delays neither, only
-the loop for that long once, with nothing walking. A HELLO that arrives
-meanwhile waits in the PL011's 2 KB RX ring. So the read is after the
-HELLO. A flash, when needed, takes about 10 s (est.) plus the new
+the loop for that long once, with nothing walking. So the read is after the
+HELLO. On the Pi the mount took 1.5 s (measured, 2026-11-17: `SD: FAT
+partition mounted in 1537 ms (card 1536 ms ...)`), and once the flight
+recorder's saver mounted the card in the first passes, before the HELLO:
+the PL011 overran, the HELLO was lost, and the mind never asked again
+(`firmware no HELLO yet` all session). Now the saver waits for the first
+HELLO too (or 3 s without one), and the link asks again with HELLO_REQ
+once a second while the body is alive but no HELLO has come. A flash, when needed, takes about 10 s (est.) plus the new
 firmware's boot.
 
 ### Updating the kernel over the network

@@ -465,6 +465,61 @@ void test_metric_lines() {
 
 }  // namespace
 
+// The calibration hold over the host channel (docs/rear-up-trick.md section 2):
+// a laptop holds the calibration posture (kilo posture calib --host: control
+// with keepalive, POSTURE CALIB) for as long as the owner needs, with light
+// sleep, the remote and the behaviour layer on: nothing drops the pose, A7 is
+// ignored while the laptop holds the body, and a second client's CAL SET
+// (kilo cal nudge) reaches the body while the pose is held.
+void test_calibration_hold_over_the_host() {
+  MindConfig c = sleep_cfg();
+  c.behaviour = true;
+  uint32_t nkeys;
+  c.authorized_keys = test_keys(&nkeys);
+  c.authorized_key_count = nkeys;
+  FakeRandom rnd;
+  c.random = &rnd;
+  Rig r(c, true);
+  r.start();
+  FakeConn& a = r.listener.connect(0);
+  FakeConn& b = r.listener.connect(1);
+  for (int k = 0; k < 40 && !(a.established && b.established); k++) {
+    r.pass();
+    a.pump();
+    b.pump();
+  }
+  CHECK(a.established && b.established);
+  uint8_t take[2] = {1, 1};
+  kilo_host_posture_t calib = {KILO_POSTURE_CALIB, 0, 0};
+  a.send(KILO_HOST_MSG_CONTROL, 1, take, 2);
+  a.send(KILO_HOST_MSG_POSTURE, 2, &calib, sizeof calib);
+  r.run_ms(100);
+  CHECK(r.mind.host().controller() == 0 && r.posture_goal() == KILO_POSTURE_CALIB);
+  size_t from = r.body.sent.size();
+  r.key(kA7);  // the remote while the laptop holds the body: ignored
+  bool held = true;
+  for (int s = 0; s < 600 * 2; s++) {  // 10 minutes, the CLI's KEEPALIVE every 500 ms
+    r.run_ms(500);
+    a.send(KILO_HOST_MSG_KEEPALIVE, 0);
+    a.pump();
+    b.pump();
+    held = held && r.posture_goal() == KILO_POSTURE_CALIB && r.mind.host().controller() == 0;
+    if (s == 600) {  // half way: the nudge from the other window
+      kilo_host_cal_t set = {KILO_CAL_OP_SET, 10, 136};
+      b.send(KILO_HOST_MSG_CAL, 1, &set, sizeof set);
+    }
+  }
+  CHECKF(held && r.state() == State::Awake, "held %d state %s behaviour %d controller %d",
+         held, power::state_name(r.state()), r.mind.behaviour_active(), (int)r.mind.host().controller());
+  CHECK(r.log.has("remote A7 (0xA2, sleep): ignored (a laptop client holds the body)"));
+  CHECK(r.body.cal[10] == 136 && r.body.count(KILO_MSG_CAL_SET) == 1);
+  bool status = false;
+  for (const HostFrame& f : b.take()) status = status || (f.type == KILO_HOST_MSG_CAL_STATUS && f.seq == 1);
+  CHECK(status);
+  std::vector<int> since = r.postures_since(from);  // only CALIB went to the body (its 5 Hz refresh)
+  CHECKF(since.size() == 1 && since[0] == KILO_POSTURE_CALIB, "%zu postures since", since.size());
+}
+
 int main() {
   test_enter_after_30s();
   test_cancel_and_restart();
@@ -474,5 +529,6 @@ int main() {
   test_recorder_flushed_first();
   test_battery_trend();
   test_metric_lines();
+  test_calibration_hold_over_the_host();
   return report("test_power");
 }

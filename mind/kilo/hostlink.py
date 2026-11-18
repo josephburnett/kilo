@@ -387,6 +387,16 @@ class HostLink:
             raise HostError(f"GUARD: unexpected reply {type(r).__name__}")
         return r
 
+    def cal(self, op: int = 0, joint: int = 0, offset_a16: int = 0) -> Any:
+        """CAL (P.CalOp GET, SET, SAVE, REVERT), relayed to the body: P.HostCalStatus with
+        the 16 offsets after it (HostRefused: the mind's or the body's refusal)."""
+        # SAVE waits for the body's EEPROM_SAVED (host.cal_save_wait_ms) before answering
+        wait = REPLY_TIMEOUT_S + (P.HOST_CAL_SAVE_WAIT_MS / 1000.0 if op == P.CalOp.SAVE else 0.0)
+        r = self.command(P.HostCal(op=int(op), joint=int(joint), offset_a16=int(offset_a16)), timeout=wait)
+        if not isinstance(r, P.HostCalStatus):
+            raise HostError(f"CAL: unexpected reply {type(r).__name__}")
+        return r
+
     def bench(self, count: int = 32, timeout: float = BENCH_TIMEOUT_S,
               on_result: Callable[[Any], None] | None = None) -> list[Any]:
         """REC_BENCH (controller, the body limp): BENCH_RESULT per write

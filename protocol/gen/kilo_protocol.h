@@ -388,6 +388,13 @@ enum kilo_guard_action {
     KILO_GUARD_ACTION_HOLDING = 3,
 };
 
+enum kilo_cal_op {
+    KILO_CAL_OP_GET = 0,
+    KILO_CAL_OP_SET = 1,
+    KILO_CAL_OP_SAVE = 2,
+    KILO_CAL_OP_REVERT = 3,
+};
+
 enum kilo_rec_fetch_what {
     KILO_REC_FETCH_WHAT_BLOCKS = 0,
     KILO_REC_FETCH_WHAT_LOG = 1,
@@ -1485,6 +1492,7 @@ enum kilo_param_id {
 #define KILO_HOST_UPDATE_MARKER "KILO-MIND-KERNEL-1"
 #define KILO_HOST_WALK_FORMAT 2u
 #define KILO_HOST_WALK_TEXT_MAX 120u
+#define KILO_HOST_CAL_SAVE_WAIT_MS 2000u
 #define KILO_HOST_WALK_CHUNK_MAX 200u
 #define KILO_HOST_WALK_PREROLL_MS 2000u
 #define KILO_HOST_WALK_POSTROLL_MS 2000u
@@ -1522,6 +1530,7 @@ enum kilo_host_msg_id {
     KILO_HOST_MSG_REC_SAVE = 0x56,
     KILO_HOST_MSG_REC_DELETE = 0x57,
     KILO_HOST_MSG_GUARD = 0x58,
+    KILO_HOST_MSG_CAL = 0x59,
     KILO_HOST_MSG_RESULT = 0x80,
     KILO_HOST_MSG_STATUS = 0x81,
     KILO_HOST_MSG_TELEM = 0x82,
@@ -1533,6 +1542,7 @@ enum kilo_host_msg_id {
     KILO_HOST_MSG_METRICS = 0x88,
     KILO_HOST_MSG_BENCH_RESULT = 0x89,
     KILO_HOST_MSG_GUARD_STATUS = 0x8A,
+    KILO_HOST_MSG_CAL_STATUS = 0x8B,
     KILO_HOST_MSG_FLASH_STATUS = 0xC0,
     KILO_HOST_MSG_UPDATE_STATUS = 0xC1,
 };
@@ -1751,6 +1761,18 @@ typedef struct KILO_PACKED kilo_host_guard_s {
 } kilo_host_guard_t;
 KILO_STATIC_ASSERT(sizeof(kilo_host_guard_t) == 1, kilo_sa_host_guard_size);
 KILO_STATIC_ASSERT(offsetof(kilo_host_guard_t, mode) == 0, kilo_sa_host_guard_mode);
+
+/* host 0x59 CAL: command. Joint calibration, relayed to the body with CAL_GET / CAL_SET / CAL_SAVE / CAL_REVERT (kilo cal ... --host). GET: any client. SET, SAVE, REVERT: the controller, or any client while the calibration posture (CALIB) is held; refused (BUSY) while a walk or trick runs. A SET takes effect at once on the held pose. Answered by CAL_STATUS once the body has answered; refused with RESULT: BAD_ARG (joint over 15, offset outside +-25 deg, as the body's CAL_SET range), NO_BODY, BUSY (another CAL in flight, the body's EEPROM busy), or the body's refusal as text. */
+#define KILO_HOST_CAL_LEN 4u
+typedef struct KILO_PACKED kilo_host_cal_s {
+    uint8_t op; /* enum cal_op */
+    uint8_t joint; /* SET: the legacy joint id 0..15 (CAL_VALUES' index); else 0 */
+    int16_t offset_a16; /* deg x 0.0625; SET: the absolute offset, -400..400 (+-25 deg); else 0 */
+} kilo_host_cal_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_cal_t) == 4, kilo_sa_host_cal_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_cal_t, op) == 0, kilo_sa_host_cal_op);
+KILO_STATIC_ASSERT(offsetof(kilo_host_cal_t, joint) == 1, kilo_sa_host_cal_joint);
+KILO_STATIC_ASSERT(offsetof(kilo_host_cal_t, offset_a16) == 2, kilo_sa_host_cal_offset_a16);
 
 /* host 0x80 RESULT: event. The answer to a command without a reply message of its own, and to any refused command: its seq, its type, a code and a short reason. */
 #define KILO_HOST_RESULT_MIN_LEN 2u
@@ -2026,6 +2048,18 @@ KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, stops) == 19, kilo_sa_host
 KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, pullbacks) == 23, kilo_sa_host_guard_status_pullbacks);
 KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, refused) == 27, kilo_sa_host_guard_status_refused);
 
+/* host 0x8B CAL_STATUS: event, reply to CAL. The body's 16 calibration offsets after the CAL (as CAL_VALUES), the op it answers, and for SAVE whether EEPROM_SAVED came within host.cal_save_wait_ms. */
+#define KILO_HOST_CAL_STATUS_LEN 34u
+typedef struct KILO_PACKED kilo_host_cal_status_s {
+    uint8_t op; /* enum cal_op */
+    uint8_t saved; /* SAVE: 1 EEPROM_SAVED came, 0 not within the wait (queued only); else 0 */
+    int16_t offset[16]; /* deg x 0.0625; by legacy joint id */
+} kilo_host_cal_status_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_cal_status_t) == 34, kilo_sa_host_cal_status_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_cal_status_t, op) == 0, kilo_sa_host_cal_status_op);
+KILO_STATIC_ASSERT(offsetof(kilo_host_cal_status_t, saved) == 1, kilo_sa_host_cal_status_saved);
+KILO_STATIC_ASSERT(offsetof(kilo_host_cal_status_t, offset) == 2, kilo_sa_host_cal_status_offset);
+
 /* host 0xC0 FLASH_STATUS: stream. Progress of a flash, to the client that committed it: on every phase change and page, last DONE or FAILED. */
 #define KILO_HOST_FLASH_STATUS_LEN 21u
 typedef struct KILO_PACKED kilo_host_flash_status_s {
@@ -2130,6 +2164,8 @@ static inline uint8_t kilo_host_payload_len_check(uint8_t type, uint16_t len)
         return len == 4u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_GUARD:
         return len == 1u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_CAL:
+        return len == 4u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_RESULT:
         return (len >= 2u && len <= 62u) ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_STATUS:
@@ -2152,6 +2188,8 @@ static inline uint8_t kilo_host_payload_len_check(uint8_t type, uint16_t len)
         return len == 31u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_GUARD_STATUS:
         return len == 31u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_CAL_STATUS:
+        return len == 34u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_FLASH_STATUS:
         return len == 21u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_UPDATE_STATUS:
@@ -2188,6 +2226,7 @@ static inline uint8_t kilo_host_msg_kind(uint8_t type)
     case KILO_HOST_MSG_REC_SAVE:
     case KILO_HOST_MSG_REC_DELETE:
     case KILO_HOST_MSG_GUARD:
+    case KILO_HOST_MSG_CAL:
         return KILO_KIND_COMMAND;
     case KILO_HOST_MSG_KEEPALIVE:
     case KILO_HOST_MSG_BRIDGE_TX:
@@ -2207,6 +2246,7 @@ static inline uint8_t kilo_host_msg_kind(uint8_t type)
     case KILO_HOST_MSG_REC_STATUS:
     case KILO_HOST_MSG_METRICS:
     case KILO_HOST_MSG_GUARD_STATUS:
+    case KILO_HOST_MSG_CAL_STATUS:
         return KILO_KIND_EVENT;
     default:
         return KILO_KIND_UNKNOWN;
@@ -2227,6 +2267,8 @@ static inline uint8_t kilo_host_query_reply(uint8_t type)
         return KILO_HOST_MSG_METRICS;
     case KILO_HOST_MSG_GUARD:
         return KILO_HOST_MSG_GUARD_STATUS;
+    case KILO_HOST_MSG_CAL:
+        return KILO_HOST_MSG_CAL_STATUS;
     default:
         return 0u;
     }

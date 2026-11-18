@@ -376,6 +376,13 @@ class GuardAction(enum.IntEnum):
     HOLDING = 3
 
 
+class CalOp(enum.IntEnum):
+    GET = 0
+    SET = 1
+    SAVE = 2
+    REVERT = 3
+
+
 class RecFetchWhat(enum.IntEnum):
     BLOCKS = 0
     LOG = 1
@@ -3136,6 +3143,7 @@ HOST_UPDATE_CHUNK_MAX = 200
 HOST_UPDATE_MARKER = 'KILO-MIND-KERNEL-1'
 HOST_WALK_FORMAT = 2
 HOST_WALK_TEXT_MAX = 120
+HOST_CAL_SAVE_WAIT_MS = 2000
 HOST_WALK_CHUNK_MAX = 200
 HOST_WALK_PREROLL_MS = 2000
 HOST_WALK_POSTROLL_MS = 2000
@@ -3174,6 +3182,7 @@ class HostMsgId(enum.IntEnum):
     REC_SAVE = 0x56
     REC_DELETE = 0x57
     GUARD = 0x58
+    CAL = 0x59
     RESULT = 0x80
     STATUS = 0x81
     TELEM = 0x82
@@ -3185,6 +3194,7 @@ class HostMsgId(enum.IntEnum):
     METRICS = 0x88
     BENCH_RESULT = 0x89
     GUARD_STATUS = 0x8A
+    CAL_STATUS = 0x8B
     FLASH_STATUS = 0xC0
     UPDATE_STATUS = 0xC1
 
@@ -4303,6 +4313,52 @@ class HostGuard:
 
 
 @dataclass
+class HostCal:
+    """host 0x59 CAL (command). Joint calibration, relayed to the body with CAL_GET / CAL_SET / CAL_SAVE / CAL_REVERT (kilo cal ... --host). GET: any client. SET, SAVE, REVERT: the controller, or any client while the calibration posture (CALIB) is held; refused (BUSY) while a walk or trick runs. A SET takes effect at once on the held pose. Answered by CAL_STATUS once the body has answered; refused with RESULT: BAD_ARG (joint over 15, offset outside +-25 deg, as the body's CAL_SET range), NO_BODY, BUSY (another CAL in flight, the body's EEPROM busy), or the body's refusal as text."""
+    ID: ClassVar[int] = 0x59
+    NAME: ClassVar[str] = 'CAL'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = True
+    REPLY: ClassVar[int | None] = 0x8B
+    MIN_LEN: ClassVar[int] = 4
+    MAX_LEN: ClassVar[int] = 4
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BBh')
+    op: int = 0  # enum cal_op
+    joint: int = 0  # SET: the legacy joint id 0..15 (CAL_VALUES' index); else 0
+    offset_a16: int = 0  # deg x 0.0625; SET: the absolute offset, -400..400 (+-25 deg); else 0
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.op)
+        v.append(self.joint)
+        v.append(self.offset_a16)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['op'] = v[0]
+        kw['joint'] = v[1]
+        kw['offset_a16'] = v[2]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
 class HostResult:
     """host 0x80 RESULT (event). The answer to a command without a reply message of its own, and to any refused command: its seq, its type, a code and a short reason."""
     ID: ClassVar[int] = 0x80
@@ -5019,6 +5075,54 @@ class HostGuardStatus:
 
 
 @dataclass
+class HostCalStatus:
+    """host 0x8B CAL_STATUS (event). The body's 16 calibration offsets after the CAL (as CAL_VALUES), the op it answers, and for SAVE whether EEPROM_SAVED came within host.cal_save_wait_ms."""
+    ID: ClassVar[int] = 0x8B
+    NAME: ClassVar[str] = 'CAL_STATUS'
+    KIND: ClassVar[Kind] = Kind.EVENT
+    DIR: ClassVar[str] = 'mind_to_client'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 34
+    MAX_LEN: ClassVar[int] = 34
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BBhhhhhhhhhhhhhhhh')
+    op: int = 0  # enum cal_op
+    saved: int = 0  # SAVE: 1 EEPROM_SAVED came, 0 not within the wait (queued only); else 0
+    offset: list[int] = field(default_factory=lambda: [0] * 16)  # deg x 0.0625; by legacy joint id
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.op)
+        v.append(self.saved)
+        if len(self.offset) != 16:
+            raise PayloadError('offset: expected 16 elements')
+        v.extend(self.offset)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['op'] = v[0]
+        kw['saved'] = v[1]
+        kw['offset'] = list(v[2:18])
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
 class HostFlashStatus:
     """host 0xC0 FLASH_STATUS (stream). Progress of a flash, to the client that committed it: on every phase change and page, last DONE or FAILED."""
     ID: ClassVar[int] = 0xC0
@@ -5171,6 +5275,7 @@ HOST_MESSAGES: dict[int, type] = {
     0x56: HostRecSave,
     0x57: HostRecDelete,
     0x58: HostGuard,
+    0x59: HostCal,
     0x80: HostResult,
     0x81: HostStatus,
     0x82: HostTelem,
@@ -5182,6 +5287,7 @@ HOST_MESSAGES: dict[int, type] = {
     0x88: HostMetrics,
     0x89: HostBenchResult,
     0x8A: HostGuardStatus,
+    0x8B: HostCalStatus,
     0xC0: HostFlashStatus,
     0xC1: HostUpdateStatus,
 }
@@ -5244,6 +5350,8 @@ def host_payload_len_status(msg_type: int, payload: bytes) -> int:
         return LEN_OK if n == 4 else LEN_BAD
     if msg_type == 0x58:
         return LEN_OK if n == 1 else LEN_BAD
+    if msg_type == 0x59:
+        return LEN_OK if n == 4 else LEN_BAD
     if msg_type == 0x80:
         return LEN_OK if 2 <= n <= 62 else LEN_BAD
     if msg_type == 0x81:
@@ -5266,6 +5374,8 @@ def host_payload_len_status(msg_type: int, payload: bytes) -> int:
         return LEN_OK if n == 31 else LEN_BAD
     if msg_type == 0x8A:
         return LEN_OK if n == 31 else LEN_BAD
+    if msg_type == 0x8B:
+        return LEN_OK if n == 34 else LEN_BAD
     if msg_type == 0xC0:
         return LEN_OK if n == 21 else LEN_BAD
     if msg_type == 0xC1:

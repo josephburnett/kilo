@@ -128,7 +128,7 @@ kilo balance on --kp 0.6 --kd 0.05 --for 30   # SET_BALANCE gains (live, not per
 kilo walk --for 5            # trot forward 5 s, then stop (ON THE FLOOR ONLY; see Walking)
 kilo walk left --pattern crawl   # turn left in place until Ctrl-C; `kilo walk stop` stops any walk
 kilo pose --pitch 5 --posture stance --for 10   # body pose over STANCE
-kilo cal [show] | cal set JOINT DEG | cal save | cal revert
+kilo cal [show] | cal set JOINT DEG | cal nudge JOINT DEG | cal save | cal revert   (also --host; docs/calibration.md)
 kilo param list | param get ID | param set ID VALUE [--persist]   # ID = number or name
 kilo pca                     # read back the 16 PCA9685 OFF counts
 kilo eeprom dump 0 283       # hex dump of the body EEPROM (EEPROM_READ, 56 B per request)
@@ -192,7 +192,10 @@ update`, which only a C++ mind serves, look for `kilo.local` when `--host`
 is left out; the other commands keep their serial and daemon paths without
 `--host`. `kilo find [--json]` prints each Kilo that answered: name,
 address, port and build (`kilo find --ask IP` asks one address directly,
-for a network that drops multicast). Finding gives only an address; the
+for a network that drops multicast). Other devices on the network answer
+mDNS too; only answers that name `kilo.local` or the `_kilo._tcp` service
+count, one with the service's build first (`kilo find -v` lists the answers
+left out). Finding gives only an address; the
 handshake still checks the keys. On a direct cable the Pi is at
 169.254.75.73 when no DHCP answers: set the laptop's port to link-local
 (NetworkManager "Link-Local Only", or `sudo ip addr add 169.254.1.1/16 dev
