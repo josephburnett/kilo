@@ -12,6 +12,10 @@ that the mind knows this laptop's key.
 
 --ask sends the query to one address (unicast) instead of the whole
 network: for a network that drops multicast, or the tests.
+
+Other devices on the network answer mDNS too (each other's questions, or
+announcements of their own services); only answers that name kilo.local or
+the _kilo._tcp service count. `kilo find -v` lists the ones left out.
 """
 
 from __future__ import annotations
@@ -36,6 +40,8 @@ def add_parser(sub: Any) -> None:
     s.add_argument("--timeout", type=float, default=mdns.TIMEOUT_S, dest="find_timeout",
                    help=f"seconds to wait for answers (default {mdns.TIMEOUT_S:g})")
     s.add_argument("--json", action="store_true")
+    s.add_argument("-v", "--verbose", action="count", default=0, dest="find_verbose",
+                   help="also list the answers left out (other devices on the network)")
     s.add_argument("--ask", metavar="IP[:PORT]", default=None,
                    help="ask this address directly (unicast, port 5353 unless given) instead of the network")
 
@@ -57,11 +63,15 @@ def cmd_find(args: argparse.Namespace) -> int:
     if args.ask:
         host, sep, port = args.ask.rpartition(":")
         targets = [(host, int(port))] if sep and port.isdigit() else [(args.ask, mdns.PORT)]
+    ignored: list[str] = []
     try:
-        found = mdns.resolve(name, args.find_timeout, targets=targets)
+        found = mdns.resolve(name, args.find_timeout, targets=targets, ignored=ignored)
     except mdns.MdnsError as e:
         print(f"kilo find: {e}", file=sys.stderr)
         return EXIT_ERR
+    if getattr(args, "verbose", 0) or getattr(args, "find_verbose", 0):  # other devices' answers (mDNS is heard by everyone): only with -v
+        for line in ignored:
+            print(f"kilo find: ignored {line}", file=sys.stderr)
     if not found:
         print(f"kilo find: no answer for {name} within {args.find_timeout:g} s"
               + (f" from {args.ask}" if args.ask else

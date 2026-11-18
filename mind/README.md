@@ -192,7 +192,10 @@ update`, which only a C++ mind serves, look for `kilo.local` when `--host`
 is left out; the other commands keep their serial and daemon paths without
 `--host`. `kilo find [--json]` prints each Kilo that answered: name,
 address, port and build (`kilo find --ask IP` asks one address directly,
-for a network that drops multicast). Finding gives only an address; the
+for a network that drops multicast). Other devices on the network answer
+mDNS too; only answers that name `kilo.local` or the `_kilo._tcp` service
+count, one with the service's build first (`kilo find -v` lists the answers
+left out). Finding gives only an address; the
 handshake still checks the keys. On a direct cable the Pi is at
 169.254.75.73 when no DHCP answers: set the laptop's port to link-local
 (NetworkManager "Link-Local Only", or `sudo ip addr add 169.254.1.1/16 dev

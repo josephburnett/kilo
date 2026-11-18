@@ -11,6 +11,7 @@ import json
 import socket
 import struct
 import threading
+import time
 
 import pytest
 
@@ -27,9 +28,9 @@ class FakeResponder:
     echoed); `service=False` answers only A, as Circle's own responder did."""
 
     def __init__(self, address: str = "192.168.88.9", host: str = "kilo.local", service: bool = True,
-                 port: int = 5300, build: str = "2d7789e1", answer_name: bool = True):
+                 port: int = 5300, build: str = "2d7789e1", answer_name: bool = True, delay: float = 0.0):
         self.address, self.host, self.service, self.port, self.build = address, host, service, port, build
-        self.answer_name = answer_name
+        self.answer_name, self.delay = answer_name, delay
         self.queries: list[mdns.Message] = []
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("127.0.0.1", 0))
@@ -62,6 +63,7 @@ class FakeResponder:
                 continue
             qbytes = data[12:]
             head = struct.pack(">HHHHHH", q.id, 0x8400, len(q.questions), len(answers), 0, len(extra))
+            time.sleep(self.delay)
             self.sock.sendto(head + qbytes + b"".join(answers + extra), src)
 
     def close(self) -> None:
@@ -223,3 +225,89 @@ def test_cli_host_local_name_is_resolved(responder, capsys, monkeypatch):
     # a host-only command without --host finds it the same way
     assert cli.main(["walks"]) == 1
     assert f"kilo: no --host: found kilo.local at 127.0.0.1:{port}" in capsys.readouterr().err
+
+
+# ---- other devices on the network ---------------------------------------------------------
+class StrayResponder(FakeResponder):
+    """Another device on the LAN that answers every query with records of its own (a printer:
+    its name, an _ipp._tcp service on port 443), as mDNS software answering on the group does;
+    `claim` also answers A for kilo.local with its own address, without the service."""
+
+    def __init__(self, address: str = "192.168.88.19", claim: bool = False):
+        self.claim = claim
+        super().__init__(address=address, host="printer.local", service=False)
+
+    def _run(self) -> None:
+        while True:
+            try:
+                data, src = self.sock.recvfrom(2048)
+            except OSError:
+                return
+            q = mdns.parse_message(data)
+            self.queries.append(q)
+            inst = "Printer._ipp._tcp.local"
+            recs = [rr("printer.local", mdns.TYPE_A, socket.inet_aton(self.address)),
+                    rr("_ipp._tcp.local", mdns.TYPE_PTR, mdns.encode_name(inst)),
+                    rr(inst, mdns.TYPE_SRV, struct.pack(">HHH", 0, 0, 443) + mdns.encode_name("printer.local")),
+                    rr(inst, mdns.TYPE_TXT, b"\x0bbuild=12345")]
+            if self.claim:
+                recs.append(rr("kilo.local", mdns.TYPE_A, socket.inet_aton(self.address)))
+            head = struct.pack(">HHHHHH", q.id, 0x8400, 0, len(recs), 0, 0)
+            self.sock.sendto(head + b"".join(recs), src)
+
+
+@pytest.fixture
+def stray():
+    rs: list[StrayResponder] = []
+
+    def make(**kw):
+        r = StrayResponder(**kw)
+        rs.append(r)
+        return r
+
+    yield make
+    for r in rs:
+        r.close()
+
+
+def test_a_stray_answer_is_not_a_kilo(stray):
+    """A printer answering our query: its SRV (port 443) and name are not Kilo's; nothing found."""
+    s = stray()
+    ignored: list[str] = []
+    assert mdns.resolve(targets=[s.addr], timeout=0.6, ignored=ignored) == []
+    assert len(ignored) == 1 and ignored[0].startswith("127.0.0.1: not a Kilo's answer (printer.local")
+
+
+def test_a_stray_answer_beside_kilo(responder, stray):
+    s, r = stray(), responder()
+    found = mdns.resolve(targets=[s.addr, r.addr], timeout=1.0)
+    assert [(f.name, f.address, f.port, f.build) for f in found] == [("kilo.local", "192.168.88.9", 5300, "2d7789e1")]
+
+
+def test_a_stray_claiming_kilo_local_is_set_aside(responder, stray):
+    """A device that also answers A for kilo.local, but not for the service: the Kilo with a build wins."""
+    s, r = stray(claim=True), responder(delay=0.2)  # the Kilo answers after the stray
+    ignored: list[str] = []
+    found = mdns.resolve(targets=[s.addr, r.addr], timeout=1.0, ignored=ignored)
+    assert [(f.address, f.build) for f in found] == [("192.168.88.9", "2d7789e1")]
+    assert any("192.168.88.19: answered for kilo.local but not for _kilo._tcp.local" in x for x in ignored)
+
+
+def test_find_never_returns_a_stray(stray, monkeypatch):
+    s = stray()
+    real = mdns.resolve
+    monkeypatch.setattr(mdns, "resolve", lambda name, timeout=1.5, service=True, targets=None, ignored=None:
+                        real(name, 0.5, service, targets=[s.addr], ignored=ignored))
+    monkeypatch.setattr(mdns, "interfaces", lambda: ["192.168.88.2"])
+    with pytest.raises(mdns.MdnsError, match="no answer for kilo.local"):
+        mdns.find()
+
+
+def test_cli_find_a_stray_only(stray, capsys):
+    s = stray()
+    ask = ["find", "--ask", f"{s.addr[0]}:{s.addr[1]}", "--timeout", "0.5"]
+    assert cli.main(ask) == 1
+    cap = capsys.readouterr()
+    assert "no answer for kilo.local" in cap.err and "ignored" not in cap.err and "443" not in cap.out + cap.err
+    assert cli.main(ask + ["-v"]) == 1
+    assert "kilo find: ignored 127.0.0.1: not a Kilo's answer (printer.local" in capsys.readouterr().err

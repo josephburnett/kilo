@@ -228,55 +228,94 @@ class Found:
         return self.address if self.port in (None, 5300) else f"{self.address}:{self.port}"
 
 
+class _Source:
+    """What one address said: its A records, the service's SRV and TXT, and
+    every record name in its answers (for -v)."""
+
+    def __init__(self, via: str):
+        self.via = via
+        self.addr: dict[str, str] = {}             # host name -> address
+        self.srv: dict[str, tuple[int, str]] = {}  # _kilo._tcp instance -> (port, host name)
+        self.txt: dict[str, list[str]] = {}        # _kilo._tcp instance -> TXT strings
+        self.names: list[str] = []
+
+
+def _is_instance(n: str) -> bool:
+    return n.endswith("." + SERVICE)
+
+
 class _Collect:
+    """The answers, by the address they came from. Only records that name the
+    asked host (kilo.local) or an instance of the _kilo._tcp service count:
+    the multicast socket hears every mDNS answer on the network (a printer's
+    SRV on port 443, a phone's own name), and none of those is a Kilo."""
+
     def __init__(self, name: str):
         self.name = name.lower().rstrip(".")
-        self.addr: dict[str, str] = {}       # host name -> address
-        self.srv: dict[str, tuple[int, str]] = {}  # instance -> (port, host name)
-        self.txt: dict[str, list[str]] = {}
-        self.instances: list[str] = []
-        self.via: dict[str, str] = {}        # host name -> how the address came
+        self.src: dict[tuple[str, int], _Source] = {}  # by (address, port) the answer came from
 
-    def feed(self, data: bytes, via: str) -> None:
+    def feed(self, data: bytes, via: str, src: tuple[str, int] = ("", 0)) -> None:
         try:
             m = parse_message(data)
         except (ValueError, struct.error):
             return
         if not m.is_response:
             return
+        s = self.src.get(src)
+        if s is None:
+            s = self.src[src] = _Source(via)
         for r in m.records:
             n = r.name.lower().rstrip(".")
+            if n not in s.names:
+                s.names.append(n)
             if r.type == TYPE_A and r.value:
-                if n not in self.addr:
-                    self.via[n] = via
-                self.addr[n] = str(r.value)
-            elif r.type == TYPE_PTR and n == SERVICE and isinstance(r.value, str):
-                inst = r.value.lower()
-                if inst not in self.instances:
-                    self.instances.append(inst)
-            elif r.type == TYPE_SRV and isinstance(r.value, tuple):
-                self.srv[n] = (r.value[0], r.value[1].lower().rstrip("."))
-            elif r.type == TYPE_TXT and isinstance(r.value, list):
-                self.txt[n] = r.value
+                s.addr[n] = str(r.value)
+            elif r.type == TYPE_SRV and _is_instance(n) and isinstance(r.value, tuple):
+                s.srv[n] = (r.value[0], r.value[1].lower().rstrip("."))
+            elif r.type == TYPE_TXT and _is_instance(n) and isinstance(r.value, list):
+                s.txt[n] = r.value
+
+    def _found(self) -> tuple[list[Found], list[str]]:
+        found: list[Found] = []
+        ignored: list[str] = []
+        for (addr, _), s in self.src.items():
+            got: list[Found] = []
+            hosts = ([self.name] if self.name in s.addr else []) + [t for _, t in s.srv.values()]
+            for host in dict.fromkeys(hosts):
+                if host not in s.addr:
+                    continue
+                f = Found(host, s.addr[host], via=s.via)
+                for inst, (port, target) in s.srv.items():
+                    if target == host:
+                        f.port, f.instance = port, inst
+                        for t in s.txt.get(inst, []):
+                            if t.startswith("build="):
+                                f.build = t[len("build="):]
+                got.append(f)
+            for f in got:  # the same Kilo from another port (unicast and multicast): one entry, merged
+                same = next((g for g in found if (g.name, g.address) == (f.name, f.address)), None)
+                if same is None:
+                    found.append(f)
+                elif same.build is None and f.build is not None:
+                    same.port, same.build, same.instance = f.port, f.build, f.instance
+            if not got:
+                more = ", ..." if len(s.names) > 6 else ""
+                ignored.append(f"{addr or '?'}: not a Kilo's answer ({', '.join(s.names[:6]) or 'no records'}{more})")
+        # A Kilo's answer carries the service's build. When one does, an answer
+        # for the name alone from elsewhere (another device claiming kilo.local) is set aside.
+        if any(f.build for f in found):
+            for f in [f for f in found if f.port is None]:
+                found.remove(f)
+                ignored.append(f"{f.address}: answered for {f.name} but not for {SERVICE}: set aside, "
+                               "a Kilo with a build answered")
+        found.sort(key=lambda f: (f.name != self.name, f.build is None))
+        return found, ignored
 
     def results(self) -> list[Found]:
-        out: list[Found] = []
-        seen: set[str] = set()
-        hosts = [self.name] + [self.srv[i][1] for i in self.instances if i in self.srv]
-        hosts += [h for _, h in self.srv.values()]
-        for host in hosts:
-            if host in seen or host not in self.addr:
-                continue
-            seen.add(host)
-            f = Found(host, self.addr[host], via=self.via.get(host, ""))
-            for inst, (port, target) in self.srv.items():
-                if target == host:
-                    f.port, f.instance = port, inst
-                    for s in self.txt.get(inst, []):
-                        if s.startswith("build="):
-                            f.build = s[len("build="):]
-            out.append(f)
-        return out
+        return self._found()[0]
+
+    def ignored(self) -> list[str]:
+        return self._found()[1]
 
     def complete(self) -> bool:
         """The asked name has an address, a port and a build."""
@@ -293,9 +332,11 @@ def _reuse(s: socket.socket) -> None:
 
 
 def resolve(name: str = DEFAULT_NAME, timeout: float = TIMEOUT_S, service: bool = True,
-            targets: list[tuple[str, int]] | None = None) -> list[Found]:
+            targets: list[tuple[str, int]] | None = None, ignored: list[str] | None = None) -> list[Found]:
     """Every Kilo that answered for `name` (and, with service, for the
-    _kilo._tcp service) within `timeout` seconds; empty if none.
+    _kilo._tcp service) within `timeout` seconds, those with the service's
+    build first; empty if none. Answers that name neither (other devices on
+    the network) are left out; `ignored`, if given, gets a line for each.
 
     targets: send the queries there (unicast) instead of to the group on
     every interface, and listen only for unicast answers (tests: a fake
@@ -375,7 +416,7 @@ def resolve(name: str = DEFAULT_NAME, timeout: float = TIMEOUT_S, service: bool 
             end = start + timeout if settle_end is None else min(start + timeout, settle_end)
             if now >= end or col.complete():
                 break
-            if not resent and now - start >= RESEND_S and not col.addr:
+            if not resent and now - start >= RESEND_S and not col.results():
                 send_all()
                 resent = True
             wait = min(end, start + RESEND_S) - now if not resent else end - now
@@ -386,12 +427,14 @@ def resolve(name: str = DEFAULT_NAME, timeout: float = TIMEOUT_S, service: bool 
                     data, src = s.recvfrom(9000)
                 except OSError:
                     continue
-                col.feed(data, f"{via} from {src[0]}")
+                col.feed(data, f"{via} from {src[0]}", (src[0], src[1]))
             if settle_end is None and any(f.name == col.name for f in col.results()):
                 settle_end = time.monotonic() + SETTLE_S
     finally:
         for s, _ in socks:
             s.close()
+    if ignored is not None:
+        ignored += col.ignored()
     return col.results()
 
 
@@ -400,8 +443,9 @@ def is_mdns_name(host: str) -> bool:
 
 
 def find(name: str = DEFAULT_NAME, timeout: float = TIMEOUT_S) -> Found:
-    """The Kilo answering for `name`, else the only one the service query
-    found (a Kilo that had to take another name); MdnsError if none."""
+    """The Kilo answering for `name` (one with the service's build first),
+    else the only one the service query found (a Kilo that had to take
+    another name); MdnsError if none."""
     found = resolve(name, timeout)
     for f in found:
         if f.name == name.lower().rstrip("."):
