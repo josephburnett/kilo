@@ -26,7 +26,9 @@ After a stop the guard **holds** until the way is clear again (green for
 1 s). While it holds:
 
 - forward keys are refused: A4, B4, C4 (each starts or turns into a forward
-  walk) and B7 when it would go forward. The log says
+  walk), B7 when it would go forward (also out of a turn in place: that is
+  straight forward), and A6 / C6 while walking forward (a steer bends the
+  walk but keeps it going forward). The log says
   `remote A4 (0x68, trot): refused (distance guard holding: blue, 287 mm
   ahead; turn, back up or B6)`, and the session metrics count it;
 - turning (A6, C6), backing up (B5 down to the negative levels) and the
@@ -36,7 +38,19 @@ After a stop the guard **holds** until the way is clear again (green for
 - C7 (freeze) works as always.
 
 A key that the guard lets through while it is stopping or backing takes
-over from it: Kilo does what the key says, and the guard keeps holding.
+over from it: Kilo does what the key says, and the guard keeps holding. If
+that leaves a forward walk going (B5 from +5 only slows it to +4), the
+guard stops it again.
+
+## Lying down and light sleep
+
+After A7 Kilo lies in REST with the head down, and in light sleep he goes
+limp the same way; the sensor then reads the floor at 55-63 mm. The guard
+treats every reading while he lies (the REST or LIMP posture asked and no
+walk, or the body limp by itself) as the floor: not a reading, so the zone
+stays green, the eyes stay green, nothing is logged, and nothing wakes him.
+Without that the eyes showed red all night and flipped to green and back
+at each missed echo.
 
 ## The thresholds
 
@@ -51,21 +65,50 @@ faster walk needs more room to stop:
 
     red  = below 150 mm, left again above 200 mm
 
-| Gait at the remote's top level (+5) | Speed | Blue below | Simulated stop: gap left to the wall |
-|---|---|---|---|
-| walk | 97 mm/s | 206 mm | 116 mm (123 mm with noisy readings) |
-| trot | 180 mm/s | 316 mm | 140 mm (124 mm noisy) |
-| trot | 200 mm/s (if the trot gets faster) | 357 mm | not simulated |
-| crawl | 27 mm/s | 200 mm | 196 mm |
+Simulated (the host test, below), at the remote's top levels; the trot's
+levels are 57.6, 100.8, 144, 187.2 and 230.4 mm/s since the faster trot
+(`docs/walking-and-balance.md` §13.4):
 
-The planned stop's own way was measured in the planner (2026-11-17):
-walk 80-97 mm/s stops within 39-57 mm, trot 144-184 mm/s within 79-127 mm,
-crawl within 23-30 mm. The guard's figures are rounded up from those
-(`kernel/host/tests/test_guard.cpp` checks they stay above the planner's).
-The "gap left" column is the virtual walk of the same test: the body's
-position follows the feet the mind streamed, 120 ms late (the servos), and
-the range is read from there every 80 ms. It is a simulation: the real
-floor (slipping feet, a wall at an angle, a soft curtain) can differ.
+| Gait, level | Speed | Blue below | The planned stop's own way: planner / the guard allows | Gap left at the wall: clean / noisy |
+|---|---|---|---|---|
+| walk +5 | 96.8 mm/s | 206 mm | 19 / 62 mm | 155 / 155 mm |
+| trot +4 | 187.2 mm/s | 330 mm | 43 / 146 mm | 220 / 220 mm |
+| trot +5 | 230.4 mm/s | 425 mm | 66 / 221 mm | 280 / 280 mm |
+| crawl +5 | 26.9 mm/s | 200 mm | 23 / 45 mm | 196 / 196 mm |
+
+Steering while walking (A6 / C6, §13.2) is still walking forward for the
+guard: the same thresholds at the same speed. A steered walk goes a little
+slower (the strides are shortened to keep the bend), so it stops a little
+further from the wall:
+
+| Gait, level, steer | Blue below | The planned stop: planner | Gap left: clean / noisy |
+|---|---|---|---|
+| walk +5, left 3 | 206 mm | 9 mm | 182 / 182 mm |
+| trot +4, left 1 | 330 mm | 45 mm | 234 / 234 mm |
+| trot +5, left 1 | 425 mm | 45 mm | 320 / 305 mm |
+| trot +5, right 2 | 425 mm | - | 333 / 333 mm |
+| trot +5, left 3 | 425 mm | 33 mm | 354 / 345 mm |
+
+"Noisy" is readings +-12 mm, 5 % outliers and 3 % dropouts. The planner
+column is the real planner's stop (its support feet's travel from the stop
+to standing), against the guard's speed^2 / 2a. The decelerations in the
+guard date from before the faster stride slew (1.5 mm a tick since §13.3),
+when the planner's stops were longer (walk 39-57 mm, trot 79-127 mm); now
+they are about a third of what the guard allows, so the guard stops early:
+about 150 to 350 mm short of the wall instead of the 100 mm it aims at. I
+left the constants as they were: that is the safe side, and the floor
+(slipping feet, a soft or slanted wall) may need the room. If the early stop
+gets in the way, the trot's deceleration is the one to raise
+(`kDecelTrotMmS2` 120 to about 300 would stop the trot at +4 and +5
+116 to 152 mm short in the simulation).
+
+`kernel/host/tests/test_guard.cpp` checks that the guard's allowance stays
+above the planner's stop and that every approach above ends at least
+100 mm from the wall. The approach is a simulation: the body's position
+follows the feet the mind streamed, 120 ms late (the servos), and the range
+is read from there every 80 ms. It does not turn the body (the virtual body
+has no yaw), so a steered approach is a straight one at the steered speed.
+The real floor can differ.
 
 ## How the readings are cleaned up
 
@@ -91,7 +134,7 @@ So the guard:
 1. uses only new readings (DIST_FRESH);
 2. drops "no echo" (0), anything beyond 2.5 m, and any reading taken while
    the beam points down at the floor: the head held tilted down plus the
-   body's nose-down pitch over 12°;
+   body's nose-down pitch over 12°, or Kilo lying (REST, LIMP);
 3. takes the median of the readings of the last 0.3 s (up to 3) and needs
    at least two, so one short echo (a hand waved past, a stray reflection)
    never stops Kilo; a hand held in front for a quarter of a second does;

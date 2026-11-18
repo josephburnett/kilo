@@ -8,8 +8,8 @@
 //    TELEMETRY flag DIST_FRESH; measured in the recordings of 2026-11-17).
 //    Only fresh readings count. No echo (0), a reading beyond kMaxRangeMm,
 //    or one taken with the beam tilted down at the floor (the head held
-//    tilted down plus the body's nose-down pitch over kFloorTiltDeg) is not
-//    a reading. The filtered range is the median of the readings of the
+//    tilted down plus the body's nose-down pitch over kFloorTiltDeg, or
+//    Kilo lying in REST or LIMP with the head down) is not a reading. The filtered range is the median of the readings of the
 //    last kWindowS (at most 3), and needs two of them: one short echo (a
 //    hand waved past, a reflection) never stops Kilo. Without a reading
 //    for kStaleS there is no range: the zone is green (nothing seen).
@@ -54,7 +54,9 @@ constexpr double kStopGapMm = 100;        // left between the sensor and the obs
 constexpr double kReactS = 0.45;          // reading (80 ms + the median's 80 ms), link, FEET queued ahead (100 ms), servo lag (120 ms)
 constexpr double kDecelWalkMmS2 = 75;     // the planned stop's deceleration, by gait (planner, 2026-11-17:
 constexpr double kDecelTrotMmS2 = 120;    //   walk 80-97 mm/s stops in 39-57 mm, trot 144-184 in 79-127 mm,
-constexpr double kDecelCrawlMmS2 = 8;     //   crawl 22-27 in 23-30 mm), rounded down for a margin
+constexpr double kDecelCrawlMmS2 = 8;     //   crawl 22-27 in 23-30 mm), rounded down for a margin. Since the
+                                          //   1.5 mm/tick stride slew the walk and trot stop in a third of
+                                          //   that (trot 230 in 66 mm; test_guard prints it): kept, the safe side
 constexpr double kBlueMinMm = 200;        // BLUE never below this (and standing still)
 constexpr double kBlueExitMm = 80;        // BLUE is left this far above its threshold
 constexpr double kRedMm = 150;            // RED: back off
@@ -132,8 +134,10 @@ class DistanceGuard {
   bool enabled() const { return on_; }
 
   // Every TELEMETRY (after the walker has seen it). head_tilt_deg: the
-  // tilt the head is held at (0 when not held; - = down).
-  void on_telemetry(const kilo_telemetry_t& t, double head_tilt_deg);
+  // tilt the head is held at (0 when not held; - = down). lying: Kilo lies
+  // with the head down (REST or LIMP, as after A7 and in light sleep): the
+  // beam reads the floor, so no reading counts.
+  void on_telemetry(const kilo_telemetry_t& t, double head_tilt_deg, bool lying = false);
   // Every pass: the actions' steps and the eyes' goal.
   void poll();
 

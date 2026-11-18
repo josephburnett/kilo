@@ -206,6 +206,7 @@ class Mind final : public LinkListener,
   bool liveness(uint64_t now);
   void ir_key(const kilo_event_t& e);
   bool forward_key(const remote::Key& key) const;
+  bool lying(const kilo_telemetry_t& t) const;
   double head_held(int field) const;  // the SET_HEAD goal's pan (2) or tilt (4) in degrees, 0 when not held
   void stats(uint64_t now);
   bool safe_for_card(uint64_t now);

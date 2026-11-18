@@ -208,7 +208,7 @@ void Mind::on_hello(const kilo_hello_t& hello, bool solicited) {
 void Mind::on_telemetry(const kilo_telemetry_t& t) {
   walker_.on_telemetry(t);
   sleep_.on_telemetry(t);
-  guard_.on_telemetry(t, head_held(4));
+  guard_.on_telemetry(t, head_held(4), lying(t));
   if (t.batt_mv != 0 && !(t.flags & KILO_TELEMETRY_FLAGS_NO_BATTERY)) {
     metrics_.battery_mv = t.batt_mv;
     if (metrics_.battery_min_mv == 0 || t.batt_mv < metrics_.battery_min_mv) metrics_.battery_min_mv = t.batt_mv;
@@ -410,14 +410,27 @@ double Mind::head_held(int field) const {
   return v == KILO_HEAD_NOT_HELD ? 0 : (double)v / 16.0;
 }
 
+// Lying with the head down: the REST or LIMP posture asked (A7, light sleep) and no walk, or the
+// body LIMP by itself. The ultrasonic reads the floor then (54-63 mm, docs/distance-guard.md).
+bool Mind::lying(const kilo_telemetry_t& t) const {
+  if (t.mode == KILO_MODE_LIMP) return true;
+  const Goal* g = const_cast<SerialLink&>(link_).goal(KILO_MSG_SET_POSTURE);
+  if (g == nullptr || g->len < 2 || walker_.active()) return false;
+  return g->payload[1] == KILO_POSTURE_REST || g->payload[1] == KILO_POSTURE_LIMP;
+}
+
 // A key that would walk forward now (remote.h): the gait keys (start forward, or straight forward
-// from a turn or from backward), and B7 while walking straight forward or from -1 to +1.
+// from a turn or from backward); B7 while walking straight forward, from -1 to +1, or out of a turn
+// in place (straight forward, docs/walking-and-balance.md §13.3); and A6 / C6 while walking forward
+// (a steer: the walk bends but stays forward, §13.2). A6 / C6 from standing or backward are not.
 bool Mind::forward_key(const remote::Key& key) const {
   if (key.kind == remote::Kind::Gait) return true;
-  if (key.kind != remote::Kind::Speed || !str_eq(key.name, "faster")) return false;
   planner::Direction d;
-  if (!remote_.direction(&d) || remote_.heading() != remote::Heading::Straight) return false;
-  return remote_.level() > 0 || remote_.level() == -1;
+  if (!remote_.direction(&d)) return false;
+  bool straight = remote_.heading() == remote::Heading::Straight;
+  if (key.kind == remote::Kind::Turn) return straight && remote_.level() > 0;
+  if (key.kind != remote::Kind::Speed || !str_eq(key.name, "faster")) return false;
+  return !straight || remote_.level() > 0 || remote_.level() == -1;
 }
 
 bool Mind::may_act() {
