@@ -45,7 +45,7 @@ void link_hal_imu_raw(int16_t raw[6]) {
   for (uint8_t i = 0; i < 6; i++) raw[i] = (int16_t)((g_pkt[16 + 2 * i] << 8) | g_pkt[17 + 2 * i]);
 }
 
-bool link_hal_pca_read(uint16_t counts[16]) { return pca_read_all(counts) == I2C_OK; }
+bool link_hal_pca_read(uint16_t counts[KILO_CHANNEL_COUNT]) { return pca_read_all(counts) == I2C_OK; }
 
 void link_hal_imu_offsets(const int16_t offsets[6]) { mpu_set_offsets(offsets); }
 

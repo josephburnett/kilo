@@ -25,7 +25,7 @@
 // the upgrade and `kilo flash --legacy` still finds its EEPROM untouched.
 #define CFG_VERSION 2
 #define CFG_VERSION_OLDEST 1
-#define CFG_PARAM_COUNT 20
+#define CFG_PARAM_COUNT KILO_PARAM_SLOTS
 #define CFG_PARAM_COUNT_V1 16
 #define CFG_PARAM_DEFAULT 0x7FFF
 

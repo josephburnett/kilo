@@ -23,13 +23,13 @@
 // Durations in 20 ms ticks. The watchdog's are live params (core/params.h).
 #define WD_STOP_TICKS param_ms_ticks(KILO_PARAM_WD_STOP_MS)        // 0.5 s without a valid frame: stop
 #define WD_REST_TICKS param_ms_ticks(KILO_PARAM_WD_REST_MS)        // 1.5 s: lie down
-#define WD_LIMP_TICKS ((uint16_t)(PARAM(WD_LIMP_S) * 50))          // 10 s after REST: limp
+#define WD_LIMP_TICKS ((uint16_t)(PARAM(WD_LIMP_S) * KILO_TICK_HZ))  // 10 s after REST: limp
 #define REST_MOVE_TICKS 50   // reflex moves to REST take 1 s
 #define BATT_LIMP_TICKS 100  // low battery: limp 2 s after REST
 #define WARM_HOLD_TICKS 50   // warm boot: hold at most 1 s waiting for the IMU
 #define IMU_STALE_TICKS 10   // no fresh packet for 10 ticks -> IMU_FAULT
 #define IMU_ERR_RUN 3        // or 3 consecutive I2C errors
-#define HEAD_HOLD_TICKS (KILO_HEAD_HOLD_MS / 20u)  // SET_HEAD hold without a refresh: 2 s
+#define HEAD_HOLD_TICKS (KILO_HEAD_HOLD_MS / KILO_TICK_MS)  // SET_HEAD hold without a refresh: 2 s
 
 enum ImuStatus : uint8_t { IMU_NONE = 0, IMU_FRESH = 1, IMU_ERR = 2 };
 

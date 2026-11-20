@@ -8,9 +8,10 @@
 #ifndef KILO_CORE_JOINTS_H
 #define KILO_CORE_JOINTS_H
 #include <stdint.h>
+#include "../proto/kilo_protocol.h"
 
-#define JOINT_COUNT 16   // legacy joint ids / PCA9685 channels
-#define DRIVEN_COUNT 11  // canonical order [0,1,2,8,9,10,11,12,13,14,15]
+#define JOINT_COUNT KILO_CHANNEL_COUNT  // legacy joint ids / PCA9685 channels: 16
+#define DRIVEN_COUNT KILO_JOINT_COUNT  // 11, canonical order [0,1,2,8,9,10,11,12,13,14,15]
 
 // Left/right mirror in canonical order: 3..10 are the LF RF RB LB shoulders
 // then knees, so the L/R partner of k is ((k - 3) ^ 1) + 3; 0-2 (pan, tilt,
@@ -22,7 +23,7 @@ inline uint8_t joint_mirror_k(uint8_t k) { return k < 3 ? k : (uint8_t)(((k - 3)
 
 // PCA9685 OFF-count bit 12 means "full off" (datasheet 7.3.3). Counts carry it
 // through the pipeline so a single uint16 says both where and whether.
-#define PCA_FULL_OFF 0x1000u
+#define PCA_FULL_OFF KILO_PCA_FULL_OFF_BIT
 
 // Per-robot calibration, imported from the legacy EEPROM (core/config).
 struct JointCal {
