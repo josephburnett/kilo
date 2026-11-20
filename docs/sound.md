@@ -190,6 +190,34 @@ microseconds (computed, not measured: the metrics line's
 `callback_max_us` will tell). A chunk asked for late (more than 1.5 chunk
 times after the last) is counted as `late`: it may have clicked.
 
+## Wiring
+
+The Pi's 3.5 mm headphone jack feeds one PAM8403 amplifier board (an
+analog amplifier, two channels of 3 W, 2.5 to 5 V supply) and one small
+speaker of 4 or 8 ohm. Only the left channel is used. Pad names differ a
+little between boards; the usual ones are given.
+
+| From | To amplifier pad | Notes |
+| --- | --- | --- |
+| Plug tip (left audio) | `L` (input) | The very end of the plug. |
+| Plug sleeve (ground) | `G` (input) | The section nearest the cable. |
+| Plug middle ring (right audio) | none | Leave unconnected. |
+| 5 V | `+` (power) | For example the red wire of a cut USB cable in a Pi USB port. Both 5 V pins of the Pi's header are under the NyBoard socket. |
+| Ground | `-` (power) | The black wire of that USB cable. Tape off its white and green wires. |
+| Speaker wire 1 | `L+` (output) | Either way round. |
+| Speaker wire 2 | `L-` (output) | |
+
+Neither speaker wire may touch ground, the power pads or the other
+channel: both speaker pads are live outputs, and shorting one to ground
+damages the chip. The right channel's input and outputs stay empty.
+
+A plug with four metal sections, counted from the tip: 1 left audio (use),
+2 right audio (leave), 3 ground (use), 4 video (leave unconnected).
+
+To test the Pi side alone, put ordinary headphones in the jack and press B2
+or run `kilo sound play meow --host ADDR`. The amplifier has no off switch,
+so it draws about 10 mA even in light sleep.
+
 ## What was computed, and what must be checked on Kilo
 
 Nothing here has run on the Pi yet. The tests on the laptop
