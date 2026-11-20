@@ -23,14 +23,6 @@ constexpr uint64_t kTrickStopWaitUs = 2000000;  // TRICK_STOP's ACK and the TRIC
 constexpr uint64_t kStepLeadUs = 300000;  // a lower stage's hold: down this long before it ends without A2
 const char* const kStageTop[] = {"up", "mid", "top"};  // rear_up.py: each stage's top frame (its last guard)
 
-// The rear-up stage of a trick (rear_up 1, rear_up_2 2, rear_up_3 3), 0 for another.
-int rear_up_stage_of(const char* name) {
-  if (str_eq(name, "rear_up")) return 1;
-  if (str_eq(name, "rear_up_2")) return 2;
-  if (str_eq(name, "rear_up_3")) return 3;
-  return 0;
-}
-
 // The frame of stage k's top in trick t (its guard named so), -1 if none.
 int stage_frame(const tricks::Trick& t, int k) {
   for (uint8_t i = 0; i < t.n_guards; i++)
@@ -469,7 +461,7 @@ void RemoteControl::start_trick() {
   }
   uint32_t ticks = 0;
   tricks::total_ticks(*t, tricks::kSpeedUnity, &ticks);
-  int stages = rear_up_stage_of(t->name);
+  int stages = (int)tricks::rear_up_stage(t->name);
   step_trick_ = stages > 0 ? t : nullptr;
   step_play_ = player_.result().play;
   step_max_ = stages;

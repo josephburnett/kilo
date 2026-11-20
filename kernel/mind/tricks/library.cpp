@@ -12,5 +12,12 @@ const Trick* find_trick(const char* name) {
   return nullptr;
 }
 
+unsigned rear_up_stage(const char* name) {
+  if (str_eq(name, "rear_up")) return 1;
+  if (str_eq(name, "rear_up_2")) return 2;
+  if (str_eq(name, "rear_up_3")) return 3;
+  return 0;
+}
+
 }  // namespace tricks
 }  // namespace kilo
