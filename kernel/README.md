@@ -50,8 +50,10 @@ make -C kernel boot     # once: download the Pi firmware into circle/boot (wget)
 
 `make -C kernel` writes `circle/Config.mk` (`RASPPI = 2`, `AARCH = 32`, the
 toolchain prefix, `STDLIB_SUPPORT = 1`), builds the Circle libraries the
-images link (`lib`, `usb`, `input`, `fs`, `sched`, `net`, and the addons
-`fatfs` and `SDCard`) inside the submodule, then:
+images link (`lib`, `usb`, `input`, `fs`, `sched`, `net`, `sound` unless
+`KILO_SOUND=0`, and the addons `fatfs` and `SDCard`) inside the submodule,
+packs `kernel/sounds/*.wav` (docs/sound.md: the size report is printed when
+the sounds change), then:
 
 | Output | What | Size |
 |---|---|---|
@@ -67,7 +69,11 @@ it linked: about 55 KB; the Noise layer and the secure host server, about
 13 KB) took the image from 522,532 to 591,140 bytes; each authorized key
 adds 72 bytes. The walk recorder took it from 594,916 to 607,140 bytes;
 the flight recorder, its card saver and the metrics ("The flight
-recorder") and the mDNS responder to 649,188.
+recorder") and the mDNS responder to 649,188. Sound (docs/sound.md) took
+it from 689,636 to 717,084 bytes with no sounds packed (Circle's PWM sound
+device and DMA buffers about 15 KB, the player and the renderer about
+10 KB); each second of packed sound adds 22,050 bytes. `KILO_SOUND=0`:
+700,260 (the player stays, with nothing to play).
 
 The build needs at least one laptop key in `keys/authorized_keys` ("Who may
 talk to Kilo: keys"), or `KILO_AUTHORIZED_KEYS=FILE`; without one it stops
@@ -636,7 +642,10 @@ or started by the remote's A5). A laptop client holding control (`kilo posture`)
 the remote and pauses the runner meanwhile. The distance guard (`mind/guard/`,
 `docs/distance-guard.md`) is on from boot (`MindConfig::guard`); `kilo guard
 on|off --host` (GUARD, any client) switches it, and GUARD_STATUS, `kilo
-status --host` and the metrics' `guard:` line report it. Calibration
+status --host` and the metrics' `guard:` line report it. Kilo's sounds
+(docs/sound.md): `kilo sound status|list|play NAME|on|off|volume N --host`
+(SOUND and SOUND_LIST, any client), a `sound` line in `kilo status --host`
+and the metrics' `sound:` line. Calibration
 (`kilo cal show|set|nudge|save|revert --host`, `docs/calibration.md`): CAL is
 relayed to the body as CAL_GET / CAL_SET / CAL_SAVE / CAL_REVERT through the
 link's command slot (`mind/net/host_cal.cpp`), one at a time, and answered
@@ -765,6 +774,7 @@ no settings file on the card, so they are compiled in (`src/kernel.cpp`):
 | `rear_up_key` | 0 (off); `make -C kernel KILO_REAR_UP=1` (or `2`, `3`) turns it on at that stage | the remote's A2 starts the rear-up trick only when switched on (docs/rear-up-trick.md, the switch): off until the owner's staged trials are done, A2 does nothing like the other keys of rows 1-3. The value is the stage: 1 `rear_up` (28 degrees), 2 `rear_up_2` (40), 3 `rear_up_3` (54). The daemon's switch is `KILO_REAR_UP=N` in its environment, `kilo-mind-host`'s is `--rear-up[=N]`. Built in, the kernel logs `Kilo mind, build ... (rear-up key A2 on: rear_up_2, stage 2)` |
 | `seed` | 32 bits from the hardware RNG | the behaviour runner logs it (`seed N`, at boot or in the remote's A5 line), so a run can be replayed on the laptop |
 | `stats_period_ms` | 1000 | a STATS_REQ to the body each second, logged `body STATS: ...`, as `kilo-mind-host` does |
+| `sounds`, `sound_output` | `make -C kernel KILO_SOUND=0` leaves them out | Kilo's sounds on the 3.5 mm jack (docs/sound.md, `src/sound.h`, `mind/sound/`): the sounds `tools/pack_sounds.py` packs from `kernel/sounds/*.wav` and Circle's PWM sound device. Logged at boot: `sound: PWM on the 3.5 mm jack, 44100 Hz, range 5669, chunks of 512 frames, idle stopped` and `sound: N sounds (S s) in the image, on, volume 70`. `KILO_SOUND_IDLE=run` keeps the device running between sounds; `KILO_SOUNDS_DIR=DIR` packs another directory. `kilo sound on|off|volume N --host` switches them at run time (not kept over a reboot) |
 | `light_sleep` | on; `make -C kernel KILO_LIGHT_SLEEP=0` turns it off | the remote's A7, then 30 s of nothing: light sleep (servos off, the loop idles in wfi, the Ethernet PHY powered down while no cable is in; docs/power.md, `mind/power/sleep.h`). Logged at boot: `power: ARM 600 MHz, SoC .. C, throttled 0x..; light sleep on`. Off, A7 is plain REST: the awake baseline docs/power.md compares against. `kilo-mind-host --light-sleep` runs the same state machine on Linux (no wfi there) |
 
 The runner's wind-down ends in a poweroff, which the daemon ran through
@@ -1111,6 +1121,12 @@ toolchain's hard-float `libm` (`thumb/v7ve+simd/hard`) is a wrapper around
 `-fno-math-errno` would inline `vsqrt.f32`).
 
 ### Not yet tested on hardware
+
+Sound (docs/sound.md, "What must be checked on Kilo"): that the PWM device
+plays on the Pi 2 B's jack at all, the audio interrupt's cost and its
+effect on the body link (the metrics' `callback_max_us`, the PL011 line
+errors), pops at each start and stop, idle hiss, and loudness through the
+amplifier.
 
 The flight recorder: the 64 MB store on Circle's heap, its cost per pass
 on the Cortex-A7 (the loop line's `mind.poll`), a download over the cable

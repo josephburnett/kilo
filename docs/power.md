@@ -29,7 +29,7 @@ link and TELEMETRY at 25 a second. That is how the remote still wakes him.
 
 "Nothing happens" means: no key, no laptop connected or asking anything,
 nothing moving. Any of these starts the 30 seconds again. A key that
-moves Kilo (B6, C5, A4, B4, C4, A6, C6, A5, B2) calls the sleep off.
+moves Kilo (B6, C5, A4, B4, C4, A6, C6, A5, A2) calls the sleep off.
 
 The 30 seconds are `kSleepAfterUs` in `kernel/mind/power/sleep.h`.
 
@@ -39,7 +39,9 @@ The 30 seconds are `kSleepAfterUs` in `kernel/mind/power/sleep.h`.
   next pass of its loop (within 10 ms). Then the key does what it always
   does: B6 stands him up. Keys that do nothing (rows 1-3, a held key, C7)
   only wake the Pi; A7 still holds, so 30 seconds later he sleeps again.
-- A walk, a turn, a trick or the behaviour key (A4, B4, C4, A6, C6, B2,
+  B2 (the meow) is one of those too: it wakes him, and the wake's mew is
+  what you hear (docs/sound.md).
+- A walk, a turn, a trick or the behaviour key (A4, B4, C4, A6, C6, A2,
   A5) first powers the servos back to REST (a trick cannot start while
   limp), then does its job.
 - **The laptop**: any connection (`kilo status --host`, `kilo log --host`,
@@ -161,7 +163,7 @@ warning 6900 mV (held 5 s), low 6600 mV (REST, then limp 2 s later),
 critical 6300 mV. Because walking sags the reading by about 0.1 to 0.25 V,
 the low trip can come while trotting when the pack at rest would still
 read 6.7 to 6.85 V: about 1 to 2.5 minutes early. Separately, the
-remote's B2 (rear up) refuses below 7400 mV: at 90 mV per minute that is
+remote's rear-up key (A2 now; B2 at the time) refuses below 7400 mV: at 90 mV per minute that is
 about 7 minutes into a full pack, so for the second half of a session the
 trick is not available.
 

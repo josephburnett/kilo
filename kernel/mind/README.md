@@ -52,6 +52,8 @@ perception/       ultrasonic and IMU detectors, the Percepts aggregator (kilo/pe
 behaviour/        tree engine, drives, utility selector, library, 10 Hz runner, personality.gen.cpp (kilo/behaviour)
 behaviour/alive   small body moves while the runner idles or explores (no Python counterpart)
 guard/            the distance guard: the range filtered, zones, stop / back off / sit, forward keys refused, the eyes
+sound/            Kilo's sounds: the player (requests, families, the queue, the gap, volume), the renderer the audio
+                  interrupt runs, the output seam (no Python counterpart; docs/sound.md)
 remote/           the IR key map and RemoteControl (kilo/ir.py); client.cpp: BodyClient's posture/balance/look
 mind.h, mind.cpp  Mind: all of the above, the link and the laptop server in one object
 util/dmath, str   double helpers with Python's sums (dmath), string compare (str)
@@ -609,7 +611,8 @@ each key does):
 | C7 | freeze: the walk aborted at once (the body settles in STANCE, powered), a trick and the behaviour runner stopped; then only B6 and A7 act |
 | A5 | start the behaviour runner |
 | A2 | off unless built with `KILO_REAR_UP=1`, `2` or `3`: rear up (the trick `rear_up`, `rear_up_2` or `rear_up_3` by that stage, docs/rear-up-trick.md): sit up on the hind feet and the tail at 28, 40 or 54 degrees, hold 2 s, come down to SIT (12 to 18 s); pressed again while it plays, it comes down at once (1.5 to 2.5 s); refused below 7400 mV. B2 until 2026-11-17 |
-| rows 1-3 but A2 | nothing (logged as ignored), B2 too |
+| B2 | a meow: one of the meow family, picked at random (`sound/`, docs/sound.md); it moves nothing, so it plays at once, also while a walk or the behaviour runs |
+| rows 1-3 but A2 and B2 | nothing (logged as ignored) |
 
 The daemon's blocking waits are phases of `poll()` and keys that come
 meanwhile queue (4), as its lock queues them; C7 does not queue: it cancels
