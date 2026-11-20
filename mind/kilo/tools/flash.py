@@ -502,13 +502,8 @@ def prepare_image(opts: ImageOptions, say: Callable[[str], None] = print,
 
 
 def describe_flash_status(st: Any) -> str:
+    from kilo.hostlink import enum_name as name
     from kilo.protocol import kilo_protocol as P
-
-    def name(cls: Any, v: int) -> str:
-        try:
-            return cls(v).name
-        except ValueError:
-            return str(v)
 
     phase = name(P.FlashPhase, st.phase)
     out = f"{phase.lower()}"

@@ -49,12 +49,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from kilo import EXIT_ERR, EXIT_OK
 from kilo import kernel_image as KI
 from kilo.kernel_image import DEFAULT_KERNEL, KERNEL_DIR, KERNEL_FILE, KERNEL_NEW, KERNEL_OLD, has_marker
+from kilo.log import DEFAULT_DIR_TEXT
 from kilo.protocol import kilo_protocol as P
 from kilo.tools.body_image import IMAGE_FILE, MANIFEST_FILE
 
-EXIT_OK, EXIT_ERR = 0, 1
 RESULT_FILE, RESULT_NEW = "body-result.txt", "body-result.new"  # kernel/mind/flash/cardflash.h
 RESULT_MAGIC = "kilo-body-result 1"
 REC_DIR = "kilorec"
@@ -89,8 +90,10 @@ def add_parser(sub: Any) -> None:
     g = s.add_mutually_exclusive_group()
     g.add_argument("--status", action="store_true", help="what the mind left on the card: the body flash's "
                                                          "result, the saved log's last lines, the recordings")
-    g.add_argument("--fetch", action="store_true", help="copy the card's recordings to --out (default ~/kilo-logs)")
-    s.add_argument("--out", default="~/kilo-logs", metavar="DIR", help="--fetch: where to (default ~/kilo-logs)")
+    g.add_argument("--fetch", action="store_true",
+                   help=f"copy the card's recordings to --out (default {DEFAULT_DIR_TEXT})")
+    s.add_argument("--out", default=DEFAULT_DIR_TEXT, metavar="DIR",
+                   help=f"--fetch: where to (default {DEFAULT_DIR_TEXT})")
     s.add_argument("--lines", type=int, default=40, metavar="N", help="--status: the saved log's last N lines")
     s.add_argument("--no-build", action="store_true",
                    help="do not build: the last kernel (kernel/build/kernel7.img) and the last body build "

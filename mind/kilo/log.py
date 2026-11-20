@@ -22,7 +22,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-DEFAULT_DIR = Path.home() / "kilo-logs"
+# Where every kilo log, recording and download goes by default.
+DEFAULT_DIR_TEXT = "~/kilo-logs"
+DEFAULT_DIR = Path(DEFAULT_DIR_TEXT).expanduser()
 
 
 def default_path() -> Path:

@@ -26,12 +26,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-from kilo.hostlink import HostError, HostLink, HostRefused
+from kilo import EXIT_ERR, EXIT_OK
+from kilo.hostlink import HostError, HostLink, HostRefused, enum_name
+from kilo.log import DEFAULT_DIR_TEXT
 from kilo.logs import flight, trickrec, walkrec
 from kilo.protocol import kilo_protocol as P
 
-EXIT_OK, EXIT_ERR = 0, 1
-DEFAULT_OUT = "~/kilo-logs"
+DEFAULT_OUT = DEFAULT_DIR_TEXT
 EARLIER_SHIFT = 20
 ALL_BOOTS = 0xFFFFFFFF
 
@@ -353,16 +354,9 @@ CARD_STATE_HELP = {"NONE": "no SD card", "OFF": "saving is off (kilo record save
                    "FAILED": "the card refused: saving stopped (kilo record save on to retry)"}
 
 
-def _name(cls: Any, v: int) -> str:
-    try:
-        return cls(v).name
-    except ValueError:
-        return str(v)
-
-
 def recorder_line(rs: Any) -> str:
     """One line: RAM used, what a power cut would lose, the card."""
-    card = _name(P.RecordCardState, rs.card_state)
+    card = enum_name(P.RecordCardState, rs.card_state)
     s = (f"recorder    RAM {rs.used / 1048576:.1f} of {rs.capacity / 1048576:.0f} MB "
          f"({(rs.clock_ms - rs.oldest_ms) / 60000:.0f} min kept); a power cut now loses "
          f"{rs.unsaved_bytes / 1024:.0f} KB; card {card}")
@@ -402,7 +396,7 @@ def cmd_record(args: argparse.Namespace, hl: HostLink) -> int:
 
 
 def print_rec_status(rs: Any) -> None:
-    card = _name(P.RecordCardState, rs.card_state)
+    card = enum_name(P.RecordCardState, rs.card_state)
     print(f"flight recorder  boot {rs.boot or '? (card not read)'}, clock {rs.clock_ms / 1000:.1f} s, "
           f"{rs.runs} runs this boot")
     print(f"  RAM     {rs.used / 1048576:.2f} of {rs.capacity / 1048576:.1f} MB, {rs.blocks} blocks of "

@@ -45,43 +45,62 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kilo.planner.model import LEG_NAMES
 from kilo.protocol import kilo_link_codec as C
 from kilo.protocol import kilo_protocol as P
 
 MAGIC = b"KILOWALK\n"
 A16 = 16.0
-LEGS = ("LF", "RF", "RB", "LB")
+LEGS = LEG_NAMES
 _HDR = struct.Struct("<BBI")
 assert _HDR.size == P.WalkRecordHeader.SIZE
 
 
 # ---- the file ---------------------------------------------------------------------
 
-def write_file(path: str | Path, meta: dict[str, Any], records: bytes) -> Path:
+# A recording file (.kwalk here, .krec in kilo.logs.flight): the magic, the meta's length (u16 LE), the
+# meta as compact JSON, then the data.
+
+def write_container(path: str | Path, magic: bytes, meta: dict[str, Any], data: bytes, what: str) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     m = json.dumps(meta, separators=(",", ":"), sort_keys=True).encode()
     if len(m) > 0xFFFF:
-        raise ValueError("kwalk meta too long")
-    path.write_bytes(MAGIC + struct.pack("<H", len(m)) + m + bytes(records))
+        raise ValueError(f"{what} meta too long")
+    path.write_bytes(magic + struct.pack("<H", len(m)) + m + bytes(data))
     return path
 
 
-def is_kwalk(path: str | Path) -> bool:
+def has_magic(path: str | Path, magic: bytes) -> bool:
     try:
         with open(path, "rb") as f:
-            return f.read(len(MAGIC)) == MAGIC
+            return f.read(len(magic)) == magic
     except OSError:
         return False
 
 
-def read_file(path: str | Path) -> tuple[dict[str, Any], bytes]:
-    data = Path(path).read_bytes()
-    if not data.startswith(MAGIC) or len(data) < len(MAGIC) + 2:
-        raise ValueError(f"{path}: not a walk recording (.kwalk)")
-    (n,) = struct.unpack_from("<H", data, len(MAGIC))
-    start = len(MAGIC) + 2
+def split_container(data: bytes, magic: bytes) -> tuple[dict[str, Any], bytes] | None:
+    """(meta, data) of a container's bytes, None if they do not start with magic and a length."""
+    if not data.startswith(magic) or len(data) < len(magic) + 2:
+        return None
+    (n,) = struct.unpack_from("<H", data, len(magic))
+    start = len(magic) + 2
     return json.loads(data[start:start + n].decode()), data[start + n:]
+
+
+def write_file(path: str | Path, meta: dict[str, Any], records: bytes) -> Path:
+    return write_container(path, MAGIC, meta, records, "kwalk")
+
+
+def is_kwalk(path: str | Path) -> bool:
+    return has_magic(path, MAGIC)
+
+
+def read_file(path: str | Path) -> tuple[dict[str, Any], bytes]:
+    got = split_container(Path(path).read_bytes(), MAGIC)
+    if got is None:
+        raise ValueError(f"{path}: not a walk recording (.kwalk)")
+    return got
 
 
 # ---- records ----------------------------------------------------------------------

@@ -62,7 +62,7 @@ import tty
 from pathlib import Path
 from typing import Any, Sequence
 
-from kilo import __version__
+from kilo import EXIT_ERR, EXIT_OK, __version__
 from kilo.body.client import (BALANCE_CLAMP, BALANCE_DEADBAND, BALANCE_KD_S, BALANCE_KP, POSTURE_CHOICES,
                               BodyClient, ProtocolMismatch)
 from kilo.cli_tools import add_log_parser, cmd_log, fix_kilolog_argv
@@ -74,7 +74,7 @@ from kilo.link.transport import DEFAULT_BAUD, open_port
 from kilo.protocol import kilo_protocol as P
 from kilo.remote import DaemonError
 
-EXIT_OK, EXIT_ERR, EXIT_USAGE = 0, 1, 2
+EXIT_USAGE = 2
 
 
 # ---- argument parsing -------------------------------------------------------------
@@ -532,7 +532,9 @@ def _walk_row(snap: dict[str, Any]) -> str:
         return "-"
     ref, corr = snap["ref_deg"], snap["corr_deg"]
     feet = snap.get("support") or 0
-    down = "".join(n for i, n in enumerate(("LF", "RF", "RB", "LB")) if feet >> i & 1) or "-"
+    from kilo.planner.model import LEG_NAMES
+
+    down = "".join(n for i, n in enumerate(LEG_NAMES) if feet >> i & 1) or "-"
     return (f"ref {ref[0]:+.1f}° {ref[1]:+.1f}°  error {err[0]:+.1f}° {err[1]:+.1f}°  "
             f"corr {corr[0]:+.1f}° {corr[1]:+.1f}°  down {down}  queued {snap.get('feet_queued')}")
 

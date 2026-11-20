@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO, Iterator
 
+from kilo.log import DEFAULT_DIR
 from kilo.protocol import kilo_link_codec as C
 from kilo.protocol import kilo_protocol as P
 
@@ -59,7 +60,7 @@ DIR_RX, DIR_TX = 0, 1
 
 def default_path() -> Path:
     """``~/kilo-logs/kilo-YYYYmmdd-HHMMSS.kilolog.gz``."""
-    return Path.home() / "kilo-logs" / time.strftime("kilo-%Y%m%d-%H%M%S.kilolog.gz")
+    return DEFAULT_DIR / time.strftime("kilo-%Y%m%d-%H%M%S.kilolog.gz")
 
 
 def _open(path: Path, mode: str) -> BinaryIO:

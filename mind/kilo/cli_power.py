@@ -21,7 +21,8 @@ import sys
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable
 
-EXIT_OK, EXIT_ERR = 0, 1
+from kilo import EXIT_ERR, EXIT_OK
+
 SETTLE_S = 60.0          # a stretch's first minute: the voltage settles after the load changed
 MIN_STRETCH_S = 90.0     # shorter stretches: no slope
 METRIC_GROUPS = ("power", "power_hw", "battery", "power_segments")
@@ -229,20 +230,16 @@ def summary(st: list[Stretch]) -> dict[str, dict[str, Any]]:
 
 
 def from_file(path: str) -> list[Stretch]:
+    from kilo.hostlink import enum_name
     from kilo.logs import flight
+    from kilo.protocol import kilo_protocol as P
 
     s = flight.load(path)
     t0 = s.t_first_us or 0
-    samples = [((t - t0) / 1e6, _mode_name(m.mode), bool(m.flags & 4), 0 if m.flags & (1 << 9) else m.batt_mv)
+    samples = [((t - t0) / 1e6, enum_name(P.Mode, m.mode), bool(m.flags & 4), 0 if m.flags & (1 << 9) else m.batt_mv)
                for t, m in s.telemetry()]
     logs = [((g.t_us - t0) / 1e6, g.text) for g in s.logs]
     return stretches(samples, logs)
-
-
-def _mode_name(v: int) -> str:
-    from kilo.protocol import kilo_protocol as P
-
-    return P.Mode(v).name if v in P.Mode._value2member_map_ else str(v)
 
 
 def offline(args: argparse.Namespace) -> int:

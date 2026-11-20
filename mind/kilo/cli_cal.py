@@ -22,10 +22,10 @@ import argparse
 import sys
 from typing import Any, Callable
 
+from kilo import EXIT_ERR, EXIT_OK
 from kilo import calibration as C
 from kilo.protocol import kilo_protocol as P
 
-EXIT_OK, EXIT_ERR = 0, 1
 
 
 def add_parser(sub: Any) -> None:

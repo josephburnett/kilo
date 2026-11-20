@@ -76,6 +76,14 @@ REC_IDLE_TIMEOUT_S = 30.0
 BENCH_TIMEOUT_S = 120.0
 
 
+def enum_name(cls: Any, v: int) -> str:
+    """The name of v in the protocol enum cls, or v as a number if it is none of its values."""
+    try:
+        return cls(v).name
+    except ValueError:
+        return str(v)
+
+
 class HostError(Exception):
     """The host channel failed: no connection, the stream out of step, no reply."""
 
@@ -99,19 +107,16 @@ class HostRefused(HostError):
             name = P.HostMsgId(request).name
         except ValueError:
             name = f"type {request:#04x}"
-        try:
-            code_name = P.HostResultCode(code).name
-        except ValueError:
-            code_name = str(code)
+        code_name = enum_name(P.HostResultCode, code)
         self.code_name = code_name
         super().__init__(f"{name}: {code_name}" + (f" ({text})" if text else ""))
 
 
-def parse_address(addr: str) -> tuple[str, int]:
+def parse_address(addr: str, default_port: int = DEFAULT_PORT) -> tuple[str, int]:
     """'ip', 'ip:port' or 'host:port' -> (host, port); the port defaults to host.port (5300)."""
     host, sep, port = addr.rpartition(":")
     if not sep:
-        return addr, DEFAULT_PORT
+        return addr, default_port
     if not host or not port.isdigit() or not 0 < int(port) < 65536:
         raise ValueError(f"bad --host {addr!r}: want IP or IP:PORT")
     return host, int(port)

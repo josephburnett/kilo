@@ -19,9 +19,10 @@ import json
 import sys
 from typing import Any
 
+from kilo import EXIT_ERR, EXIT_OK
+from kilo.hostlink import enum_name
 from kilo.protocol import kilo_protocol as P
 
-EXIT_OK, EXIT_ERR = 0, 1
 ACTIONS = ("status", "list", "play", "on", "off", "volume")
 NAME_MAX = P.HostSound.MAX_LEN - 2  # SOUND.name: 15 bytes
 
@@ -47,24 +48,17 @@ def add_parser(sub: Any) -> None:
     s.add_argument("--json", action="store_true")
 
 
-def _name(cls: Any, v: int) -> str:
-    try:
-        return cls(v).name
-    except ValueError:
-        return str(v)
-
-
 def status_dict(st: Any) -> dict[str, Any]:
     d = P.to_dict(st)
-    d["result"] = _name(P.SoundResult, st.result).lower()
-    d["state"] = _name(P.SoundState, st.state).lower()
+    d["result"] = enum_name(P.SoundResult, st.result).lower()
+    d["state"] = enum_name(P.SoundState, st.state).lower()
     d["last"] = bytes(st.last).decode("ascii", "replace")
     return d
 
 
 def status_lines(st: Any) -> list[str]:
     """`kilo status --host`'s line and `kilo sound`'s."""
-    state = _name(P.SoundState, st.state).lower()
+    state = enum_name(P.SoundState, st.state).lower()
     last = bytes(st.last).decode("ascii", "replace") or "-"
     note = "  (no sound output: built with KILO_SOUND=0)" if st.state == P.SoundState.NONE else ""
     return [f"sound       {'on' if st.enabled else 'OFF'}  volume {st.volume}  {st.sounds} sounds in the image  "
@@ -129,7 +123,7 @@ def cmd_sound(args: argparse.Namespace, hl: Any) -> int:
         print(json.dumps(status_dict(st), indent=2))
     else:
         if action == "play":
-            text = RESULT_TEXT.get(st.result, _name(P.SoundResult, st.result))
+            text = RESULT_TEXT.get(st.result, enum_name(P.SoundResult, st.result))
             print(f"sound       {args.value}: {text}")
         print("\n".join(status_lines(st)))
         print(count_line(st))

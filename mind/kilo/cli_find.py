@@ -25,9 +25,9 @@ import json
 import sys
 from typing import Any
 
+from kilo import EXIT_ERR, EXIT_OK
 from kilo import mdns
 
-EXIT_OK, EXIT_ERR = 0, 1
 
 
 def add_parser(sub: Any) -> None:
@@ -61,8 +61,13 @@ def cmd_find(args: argparse.Namespace) -> int:
     name = args.name if mdns.is_mdns_name(args.name) else args.name + ".local"
     targets = None
     if args.ask:
-        host, sep, port = args.ask.rpartition(":")
-        targets = [(host, int(port))] if sep and port.isdigit() else [(args.ask, mdns.PORT)]
+        from kilo.hostlink import parse_address
+
+        try:
+            targets = [parse_address(args.ask, mdns.PORT)]
+        except ValueError as e:
+            print(f"kilo find: {e}", file=sys.stderr)
+            return EXIT_ERR
     ignored: list[str] = []
     try:
         found = mdns.resolve(name, args.find_timeout, targets=targets, ignored=ignored)
