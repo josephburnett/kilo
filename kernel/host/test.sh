@@ -12,7 +12,10 @@
 #      and refused: a key the mind does not know, no key file, a plaintext frame;
 #      walk-demo trotting the virtual body;
 #   5. body flashing (P4): kilo flash --host through kilo-mind-host to a fake optiboot
-#      (tests/fake_optiboot.py), a refused CRC, a sync timeout, and kilo flash --sd.
+#      (tests/fake_optiboot.py), a refused CRC, a sync timeout, and kilo flash --sd; the card
+#      route: kilo card writes a directory standing for the SD card, kilo-mind-host --card flashes
+#      its body.bin at start (a good flash, the same build, a failed one not retried), kilo card
+#      --status reads body-result.txt, and kilo card --fetch the flight recorder's saved files.
 
 #   5. P3: the generated trick and personality tables and the perception and behaviour golden
 #      vectors up to date with the Python mind (their unit tests run in 1.); IR keys, the
@@ -614,6 +617,82 @@ expect "$FL/sd_refused_mount.txt" "is not a mount point" "--sd: not a mount"
 [ ! -e "$FL/notcard/body.bin" ] || { echo "FAILED: wrote to a card it refused"; exit 1; }
 echo "   --sd: wrote the card; refused a directory without kernel7.img and an unmounted one"
 
+# ---- the card route (kilo card PATH; mind/flash/cardflash.h) ----------------------------------------------
+# kilo card writes a directory standing for the SD card; kilo-mind-host --card DIR does at its start what the
+# Pi does at power-on: flash body.bin once if the body runs another build, and write body-result.txt.
+echo "== card route: kilo card writes the card, kilo-mind-host --card flashes it at start, --status reads it"
+CR="$FL/cardroute"
+rm -rf "$CR"; mkdir -p "$CR/card"
+printf 'kernel=kernel7.img\n' > "$CR/card/config.txt"
+KPY - "$CR" <<'EOF'
+import sys
+from pathlib import Path
+from kilo import hostkey
+from kilo.protocol import kilo_protocol as P
+d, key = Path(sys.argv[1]), hostkey.load()   # this run's throwaway key ($KILO_HOST_KEY)
+mark = P.HOST_UPDATE_MARKER.encode()
+(d / "card" / "kernel7.img").write_bytes(b"old kernel " + mark + b"\0" * 900)
+(d / "kernel7.img").write_bytes(b"new kernel " + mark + key.public + b"\0" * 2000)
+EOF
+KPY -m kilo.cli card "$CR/card" --force-dir --kernel "$CR/kernel7.img" --image "$FL/body.bin" | tee "$CR/write.txt"
+cmp "$CR/kernel7.img" "$CR/card/kernel7.img" && cmp "$FL/body.bin" "$CR/card/body.bin" \
+    && grep -q "old kernel" "$CR/card/kernel7.old" || { echo "FAILED: kilo card: the card's files"; ls -l "$CR/card"; exit 1; }
+expect "$CR/write.txt" "kernel: this laptop's key \([0-9a-f]+\) is built in" "kilo card: the key check"
+expect "$CR/write.txt" "the previous one is kernel7.old" "kilo card: kernel7.old kept"
+expect "$CR/write.txt" "compares body.json \(build $FLASH_BUILD\)" "kilo card: what the next boot does"
+set +e
+KPY -m kilo.cli card "$CR/card" --kernel "$CR/kernel7.img" --image "$FL/body.bin" > "$CR/notmounted.txt" 2>&1
+s1=$?
+KPY -m kilo.cli card "$FL/notcard" --force-dir --kernel "$CR/kernel7.img" --image "$FL/body.bin" > "$CR/notcard.txt" 2>&1
+s2=$?
+set -e
+[ "$s1" -eq 1 ] && [ "$s2" -eq 1 ] || { echo "FAILED: kilo card refusals: exit $s1, $s2"; exit 1; }
+expect "$CR/notmounted.txt" "is not a mount point" "kilo card: not a mounted card"
+expect "$CR/notcard.txt" "has no kernel7.img" "kilo card: not Kilo's card"
+
+# Start the fake body (a fresh one: build 56424f44 unless given) and a mind on the card for S seconds.
+card_boot() {  # card_boot <name> <seconds> <fake_optiboot args...>
+    local name="$1" secs="$2"; shift 2
+    start_body "$CR/$name.body.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u "$HERE/tests/fake_optiboot.py" \
+        --reset-fifo "$CR/$name.fifo" "$@"
+    set +e
+    "$HOST" --port "$PTY" --authorized-keys "$KEYS" --listen 127.0.0.1:0 --reset-fifo "$CR/$name.fifo" \
+        --card "$CR/card" --duration "$secs" 2> "$CR/$name.mind.log"
+    local status=$?
+    set -e
+    stop_body
+    [ "$status" -eq 0 ] || { echo "FAILED: kilo-mind-host --card exit $status"; cat "$CR/$name.mind.log"; exit 1; }
+}
+card_boot boot1 10 --new-build "$FLASH_BUILD"
+expect "$CR/boot1.mind.log" "boot flash check: the body runs build 56424f44, the card has build $FLASH_BUILD .*: flashing" \
+    "boot 1: the check flashes"
+expect "$CR/boot1.mind.log" "flash: done in [0-9]+ ms: HELLO build $FLASH_BUILD reset FLASHED" "boot 1: flashed"
+expect "$CR/boot1.mind.log" "boot flash check: wrote body-result.txt \(outcome flashed" "boot 1: the result written"
+expect "$CR/boot1.mind.log" "sound play name=trill asked=trill why=card flash done" "boot 1: the trill"
+expect "$CR/card/body-result.txt" "^body after: build $FLASH_BUILD reset FLASHED" "body-result.txt: the HELLO after"
+KPY -m kilo.cli card "$CR/card" --force-dir --status | tee "$CR/status1.txt"
+expect "$CR/status1.txt" "body-result.txt: outcome FLASHED \(about the body.json on the card now\)" "--status: flashed"
+expect "$CR/status1.txt" "body.bin matches it" "--status: the card's image checked"
+cp "$CR/card/body-result.txt" "$CR/result1.txt"
+card_boot boot2 4 --build "$FLASH_BUILD"
+expect "$CR/boot2.mind.log" "boot flash check: the body runs build $FLASH_BUILD, the card has build $FLASH_BUILD .*: no flash" \
+    "boot 2: the same build, no flash"
+cmp "$CR/result1.txt" "$CR/card/body-result.txt" || { echo "FAILED: boot 2 rewrote body-result.txt"; exit 1; }
+card_boot boot3 10 --no-bootloader
+expect "$CR/boot3.mind.log" "boot flash check: wrote body-result.txt \(outcome failed" "boot 3: the failure recorded"
+expect "$CR/card/body-result.txt" "^error: SYNC_TIMEOUT" "body-result.txt: SYNC_TIMEOUT"
+cp "$CR/card/body-result.txt" "$CR/result3.txt"
+card_boot boot4 4 --no-bootloader
+expect "$CR/boot4.mind.log" "NOT flashing: a flash of this same image failed at an earlier boot" "boot 4: not retried"
+if grep -q "battery reading: flashing\|mV: flashing" "$CR/boot4.mind.log"; then echo "FAILED: boot 4 flashed"; exit 1; fi
+cmp "$CR/result3.txt" "$CR/card/body-result.txt" || { echo "FAILED: boot 4 rewrote body-result.txt"; exit 1; }
+KPY -m kilo.cli card "$CR/card" --force-dir --status > "$CR/status4.txt"
+expect "$CR/status4.txt" "outcome FAILED" "--status: failed"
+expect "$CR/status4.txt" "next boot: not retried" "--status: not retried"
+KPY -m kilo.cli card "$CR/card" --force-dir --no-kernel --image "$FL/body.bin" | tee "$CR/write2.txt"
+expect "$CR/write2.txt" "removed body-result.txt \(it said: failed" "kilo card again: the old result removed"
+echo "   card route: flashed at start, the same build left alone, a failure recorded and not retried"
+
 # ---- P3 (docs/fast-boot.md): tricks, perception, behaviour, remote and the Mind ----------------
 echo "== P3: generated tables up to date (tricks, personality)"
 "$PYTHON" "$REPO/kernel/mind/tricks/gen_library.py" --check  # (each generator imports this checkout's mind/)
@@ -939,6 +1018,17 @@ expect "$OUT/flight2_prev.txt" "remote A2 \(0x10, rear up\)" "the previous boot'
 wait_mind "$OUT/host_flight2.log"
 stop_body
 trap - EXIT
+# The card in a laptop's reader: kilo card --status lists what was saved, --fetch copies it for the analysis.
+KPY -m kilo.cli card "$REC/card" --force-dir --force --status --lines 1000 > "$OUT/card_status.txt" 2> /dev/null
+expect "$OUT/card_status.txt" "boot 1: [0-9]+ block files, [0-9.]+ MB, a saved log" "kilo card --status: boot 1's files"
+expect "$OUT/card_status.txt" "the last [0-9]+ lines of boot 2's saved log" "kilo card --status: the newest saved log"
+expect "$OUT/card_status.txt" "card: 1 runs of earlier boots listed" "kilo card --status: the saved log's tail"
+KPY -m kilo.cli card "$REC/card" --force-dir --force --fetch --out "$REC/cardfetch" 2> /dev/null | tee "$OUT/card_fetch.txt"
+expect "$OUT/card_fetch.txt" "boot 1: [0-9]+ bytes, [0-9]+ blocks, 1 runs -> .*rec-card-b1\.krec" "kilo card --fetch: boot 1"
+CREC="$(ls "$REC"/cardfetch/run-b1-*-trick-1.krec)"
+KPY -m kilo.cli log trick "$CREC" > "$OUT/card_trick.txt"
+expect "$OUT/card_trick.txt" "trick run 1: rear_up \(stage 1\)" "kilo log trick on the card's run"
+expect "$REC/cardfetch/kilo-card-b1.log" "remote A2 \(0x10, rear up\)" "kilo card --fetch: boot 1's saved log"
 echo "== finding Kilo by name: kilo find --ask against the mind's mDNS responder (build/mdns-host, loopback)"
 MDNS_OUT="$OUT/mdns_host.out"
 "$HERE/build/mdns-host" --name kilo --address 192.168.88.9 --build 2d7789e1 --duration 20 > "$MDNS_OUT" 2> "$OUT/mdns_host.log" &
