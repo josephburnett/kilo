@@ -3,15 +3,18 @@
 // and writing, FlashImage, the STK500 flasher against a scripted optiboot
 // on a fake UART and clock (sync after the LED blink, pages, verify, the
 // HELLO after; no bootloader, a desync, a bad signature, a verify mismatch
-// retried, a wrong build), and the image channel of HostServer: FLASH_*,
-// and UPDATE_* (the kernel updater against an in-memory card,
-// tests/fake_store.h) with the exclusion between the two.
+// retried, a wrong build), the image channel of HostServer: FLASH_*, and
+// UPDATE_* (the kernel updater against an in-memory card,
+// tests/fake_store.h) with the exclusion between the two, and the boot-time
+// flash from the SD card (CardFlash: its rules, the result file, several
+// boots on one card).
 #include <cstdlib>
 #include <deque>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
+#include "flash/cardflash.h"
 #include "flash/crc32.h"
 #include "flash/flasher.h"
 #include "flash/image.h"
@@ -920,6 +923,310 @@ void test_no_flasher() {
   if (!fs.empty()) CHECK(std::string((const char*)fs[0].payload + 2, fs[0].len - 2).find("--card") != std::string::npos);
 }
 
+// ---- the boot-time flash from the SD card (flash/cardflash.h) --------------------------------
+
+std::string manifest_json(const Manifest& m) {
+  char buf[96];
+  uint32_t n = format_manifest(m, buf, sizeof buf);
+  return std::string(buf, n);
+}
+
+void put(FakeStore& card, const char* name, const std::string& text) {
+  card.files[name] = std::vector<uint8_t>(text.begin(), text.end());
+}
+void put(FakeStore& card, const char* name, const std::vector<uint8_t>& data) { card.files[name] = data; }
+
+struct Sounds final : CardFlashHost {
+  std::vector<std::string> said;
+  int before = 0;
+  void card_sound(const char* name, const char*) override { said.push_back(name); }
+  void card_before_flash() override { before++; }
+};
+
+// One boot: a CardFlash on the rig's link and the card, run until it is done (or ms pass).
+struct Boot {
+  Rig& r;
+  FakeStore& card;
+  LogRing ring;
+  FlashImage image;
+  Sounds host;
+  CardFlash cf;
+  Boot(Rig& rig, FakeStore& c)
+      : r(rig), card(c), ring(rig.clock, &rig.log), cf(c, image, rig.flasher, rig.link, rig.clock, ring) {
+    cf.set_ring(&ring);
+    cf.set_host(&host);
+    cf.set_mind_build(0x12345678);
+    cf.begin();
+  }
+  uint32_t run(uint32_t max_ms = 40000, bool card_free = true) {
+    uint32_t t = 0;
+    for (; t < max_ms && !cf.done(); t++) {
+      r.clock.advance_ms(1);
+      r.pass();
+      cf.poll(card_free);
+    }
+    return t;
+  }
+};
+
+// An image on the card: body.bin and body.json.
+Manifest card_image(FakeStore& card, uint32_t size, uint32_t build, uint32_t seed) {
+  std::vector<uint8_t> img = pattern(size, seed);
+  Manifest m{build, size, crc32(img.data(), size)};
+  put(card, kImageFile, img);
+  put(card, kManifestFile, manifest_json(m));
+  return m;
+}
+
+bool contains(const std::string& s, const char* part) { return s.find(part) != std::string::npos; }
+
+void test_card_record() {
+  const char* text =
+      "kilo-body-result 1\noutcome: failed\nimage: build 3d441ec0 size 31234 crc32 cbf43926\nwhy: x\nlog:\n"
+      "  1.000 I outcome: flashed\n";
+  CardRecord r = {};
+  CHECK(parse_card_record(text, (uint32_t)std::strlen(text), r));
+  CHECK(r.outcome == CardOutcome::Failed && r.image.build == 0x3D441EC0 && r.image.size == 31234 &&
+        r.image.crc32 == 0xCBF43926);
+  const char* none = "kilo-body-result 1\r\noutcome: refused\r\nimage: none\r\n";  // an editor's line ends
+  CHECK(parse_card_record(none, (uint32_t)std::strlen(none), r) && r.outcome == CardOutcome::Refused &&
+        r.image.build == 0 && r.image.size == 0);
+  const char* bad[] = {"",
+                       "kilo-body-result 2\noutcome: failed\nimage: none\n",
+                       "kilo-body-result 1\noutcome: maybe\nimage: none\n",
+                       "kilo-body-result 1\noutcome: failed\n",
+                       "kilo-body-result 1\noutcome: failed\nimage: build 3d441ec size 1 crc32 00000000\n",
+                       "kilo-body-result 1\nlog:\noutcome: failed\nimage: none\n"};
+  for (const char* b : bad) CHECKF(!parse_card_record(b, (uint32_t)std::strlen(b), r), "%s", b);
+}
+
+void test_card_decide() {
+  CardFacts f = {};
+  const char* why = nullptr;
+  CHECK(decide_card_flash(f, &why) == CardAction::Nothing);
+  f.has_manifest = true;
+  f.manifest = Manifest{0xAAAA0001, 1000, 0x11111111};
+  f.image_bad = "body.bin is 500 bytes, body.json says 1000: half copied?";
+  CHECK(decide_card_flash(f, &why) == CardAction::Refuse && contains(why, "half copied"));
+  f.image_bad = nullptr;
+  // match
+  f.has_hello = true;
+  f.body_build = 0xAAAA0001;
+  CHECK(decide_card_flash(f, &why) == CardAction::Same);
+  // mismatch, no battery reading (USB power, or no TELEMETRY): flash
+  f.body_build = 0xBBBB0002;
+  CHECK(decide_card_flash(f, &why) == CardAction::Flash);
+  // no HELLO at all (no firmware): flash
+  f.has_hello = false;
+  CHECK(decide_card_flash(f, &why) == CardAction::Flash && contains(why, "no HELLO"));
+  f.has_hello = true;
+  // the battery: under the mark is refused, at the mark is not
+  f.has_battery = true;
+  f.batt_mv = CardFlash::kMinBatteryMv - 1;
+  CHECK(decide_card_flash(f, &why) == CardAction::Refuse && contains(why, "battery"));
+  f.batt_mv = CardFlash::kMinBatteryMv;
+  CHECK(decide_card_flash(f, &why) == CardAction::Flash);
+  // a failed flash of this very image: not retried; the body running it anyway wins
+  f.has_record = true;
+  f.record = CardRecord{CardOutcome::Failed, f.manifest};
+  CHECK(decide_card_flash(f, &why) == CardAction::NotRetried);
+  f.body_build = 0xAAAA0001;
+  CHECK(decide_card_flash(f, &why) == CardAction::Same);
+  f.body_build = 0xBBBB0002;
+  // a changed image (the same build, another CRC or size) is tried
+  f.record.image.crc32 ^= 1;
+  CHECK(decide_card_flash(f, &why) == CardAction::Flash);
+  f.record.image = f.manifest;
+  f.record.image.size++;
+  CHECK(decide_card_flash(f, &why) == CardAction::Flash);
+  // a refusal, a good flash or "same" on record does not hold a flash back
+  f.record.image = f.manifest;
+  for (CardOutcome o : {CardOutcome::Refused, CardOutcome::Flashed, CardOutcome::Same}) {
+    f.record.outcome = o;
+    CHECK(decide_card_flash(f, &why) == CardAction::Flash);
+  }
+  // the image's checks come first
+  f.record.outcome = CardOutcome::Failed;
+  f.image_bad = "x";
+  CHECK(decide_card_flash(f, &why) == CardAction::Refuse);
+}
+
+void test_card_flash_boots() {
+  static Rig r;
+  FakeStore card;
+  put(card, "kernel7.img", std::string("kernel"));
+  Manifest m = card_image(card, 31234, 0x3D441EC0, 7);
+  r.body.new_build = m.build;
+
+  // Boot 1: the body runs FAKE, the card has 3d441ec0: flashed.
+  {
+    Boot b(r, card);
+    // Not before the HELLO and the TELEMETRY wait, nor while the card is not free.
+    b.run(1500, false);
+    CHECK(!b.cf.done() && !b.cf.flashing() && r.gpio.edges.empty());
+    uint32_t ms = b.run();
+    CHECKF(b.cf.done() && b.cf.outcome() == CardOutcome::Flashed, "outcome %s after %u ms",
+           card_outcome_name(b.cf.outcome()), ms);
+    CHECK(r.gpio.edges == std::vector<char>({'L', 'H'}) && b.host.before == 1);
+    CHECK(b.host.said == std::vector<std::string>({"trill"}));
+    CHECK(r.link.state().hello.fw_build == m.build);
+    std::string t = card.text(kResultFile);
+    CHECKF(t.rfind("kilo-body-result 1\noutcome: flashed\nimage: build 3d441ec0 size 31234 crc32 ", 0) == 0, "%s",
+           t.c_str());
+    CHECK(contains(t, "body before: build 46414b45\n"));
+    CHECK(contains(t, "body after: build 3d441ec0 reset FLASHED\n"));
+    CHECK(contains(t, "error: none\n") && contains(t, "mind: build 12345678"));
+    CHECK(contains(t, "battery: no reading\n"));
+    CHECK(contains(t, "next boot: nothing to do"));
+    // The log lines from the check on (the flasher's own go to the rig's log here; on the Pi, to the same ring).
+    CHECK(contains(t, "\nlog:\n") && contains(t, " I boot flash check: the body runs build 46414b45"));
+    CHECK(!card.has(kResultNewFile));
+  }
+  // Boot 2: the body runs the card's build: no flash, and the record of the flash stays.
+  {
+    std::string before = card.text(kResultFile);
+    card.ops.clear();
+    Boot b(r, card);
+    b.run();
+    CHECK(b.cf.done() && b.cf.action() == CardAction::Same && b.cf.outcome() == CardOutcome::Same);
+    CHECK(r.gpio.edges.size() == 2 && b.host.said.empty());
+    CHECK(card.text(kResultFile) == before);
+    for (const std::string& o : card.ops) CHECKF(o.rfind("create", 0) != 0, "%s", o.c_str());
+  }
+  // A "same" with no record of it is written (a card made with the build the body already ran).
+  {
+    card.files.erase(kResultFile);
+    Boot b(r, card);
+    b.run();
+    CHECK(b.cf.outcome() == CardOutcome::Same && contains(card.text(kResultFile), "outcome: same\n"));
+  }
+}
+
+void test_card_flash_refused() {
+  static Rig r;
+  FakeStore card;
+  // Half copied: body.bin shorter than body.json says.
+  card_image(card, 4000, 0x3D441EC0, 9);
+  card.files[kImageFile].resize(2500);
+  {
+    Boot b(r, card);
+    b.run();
+    CHECK(b.cf.done() && b.cf.outcome() == CardOutcome::Refused && r.gpio.edges.empty());
+    CHECK(b.host.said == std::vector<std::string>({"hiss"}));
+    std::string t = card.text(kResultFile);
+    CHECKF(contains(t, "outcome: refused\n") && contains(t, "half copied") &&
+               contains(t, "next boot: checked again: copy body.bin and body.json whole"),
+           "%s", t.c_str());
+    CHECK(r.log.has("NOT flashing"));
+  }
+  // Damaged: the right size, a flipped bit.
+  card_image(card, 4000, 0x3D441EC0, 9);
+  card.files[kImageFile][100] ^= 0x40;
+  {
+    Boot b(r, card);
+    b.run();
+    CHECK(b.cf.outcome() == CardOutcome::Refused && r.gpio.edges.empty());
+    CHECK(contains(card.text(kResultFile), "CRC_MISMATCH"));
+  }
+  // Longer than the manifest says; a manifest that is not one; no body.bin.
+  card_image(card, 4000, 0x3D441EC0, 9);
+  card.files[kImageFile].push_back(0);
+  {
+    Boot b(r, card);
+    b.run();
+    CHECK(b.cf.outcome() == CardOutcome::Refused && contains(card.text(kResultFile), "do not belong"));
+  }
+  put(card, kManifestFile, std::string("{\"format\": 1, \"build\": \"3d44"));
+  {
+    Boot b(r, card);
+    b.run();
+    std::string t = card.text(kResultFile);
+    CHECKF(b.cf.outcome() == CardOutcome::Refused && contains(t, "image: none\n") && contains(t, "not a manifest"),
+           "%s", t.c_str());
+  }
+  card_image(card, 4000, 0x3D441EC0, 9);
+  card.files.erase(kImageFile);
+  {
+    Boot b(r, card);
+    b.run();
+    CHECK(b.cf.outcome() == CardOutcome::Refused && contains(card.text(kResultFile), "is missing"));
+  }
+  // No body.json at all: nothing, nothing written.
+  card.files.clear();
+  {
+    Boot b(r, card);
+    b.run();
+    CHECK(b.cf.done() && b.cf.action() == CardAction::Nothing && b.cf.outcome() == CardOutcome::None);
+    CHECK(card.files.empty() && b.host.said.empty() && r.gpio.edges.empty());
+  }
+}
+
+void test_card_flash_failed_not_retried() {
+  static Rig r;
+  r.body.bootloader = false;  // RESET restarts the firmware: SYNC_TIMEOUT
+  FakeStore card;
+  card_image(card, 3000, 0x3D441EC0, 11);
+  // Boot 1: tried, failed, recorded.
+  {
+    Boot b(r, card);
+    b.run();
+    CHECKF(b.cf.done() && b.cf.outcome() == CardOutcome::Failed, "%s", card_outcome_name(b.cf.outcome()));
+    CHECK(r.gpio.edges.size() == 4);  // two attempts
+    CHECK(b.host.said == std::vector<std::string>({"hiss"}));
+    std::string t = card.text(kResultFile);
+    CHECKF(contains(t, "outcome: failed\n") && contains(t, "error: SYNC_TIMEOUT\n") &&
+               contains(t, "body after: build 46414b45") && contains(t, "next boot: not retried"),
+           "%s", t.c_str());
+  }
+  // Boots 2 and 3: the same image is not tried again; the file stays as it was.
+  std::string failed = card.text(kResultFile);
+  for (int boot = 0; boot < 2; boot++) {
+    Boot b(r, card);
+    b.run();
+    CHECK(b.cf.done() && b.cf.action() == CardAction::NotRetried && b.host.said.empty());
+    CHECK(r.gpio.edges.size() == 4 && card.text(kResultFile) == failed);
+  }
+  CHECK(r.log.has("it is tried again only once body.bin or body.json change"));
+  // A changed image: tried again (with a bootloader this time: flashed).
+  r.body.bootloader = true;
+  Manifest m2 = card_image(card, 3000, 0x3D441EC1, 12);
+  r.body.new_build = m2.build;
+  {
+    Boot b(r, card);
+    b.run();
+    CHECK(b.cf.outcome() == CardOutcome::Flashed && r.gpio.edges.size() == 6);
+    CHECK(contains(card.text(kResultFile), "outcome: flashed\n"));
+  }
+  // The failed image again with its record: not retried; once `kilo card` has removed the record: tried.
+  r.body.bootloader = false;
+  card_image(card, 3000, 0x3D441EC0, 11);
+  put(card, kResultFile, failed);
+  {
+    Boot b(r, card);
+    b.run();
+    CHECK(b.cf.action() == CardAction::NotRetried);
+  }
+  card.files.erase(kResultFile);
+  {
+    Boot b(r, card);
+    b.run();
+    CHECK(b.cf.action() == CardAction::Flash && b.cf.outcome() == CardOutcome::Failed && r.gpio.edges.size() == 10);
+  }
+}
+
+void test_card_result_write_fails() {
+  // A write-protected card: the flash still happens; the log says the result is not on the card.
+  static Rig r;
+  FakeStore card;
+  Manifest m = card_image(card, 1000, 0x3D441EC0, 13);
+  r.body.new_build = m.build;
+  card.fail_create = true;
+  Boot b(r, card);
+  b.run();
+  CHECK(b.cf.outcome() == CardOutcome::Flashed && !card.has(kResultFile));
+  CHECK(r.log.has("body-result.txt is NOT on the card"));
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -942,5 +1249,11 @@ int main(int argc, char** argv) {
   test_update_channel();
   test_update_dropped();
   test_no_flasher();
+  test_card_record();
+  test_card_decide();
+  test_card_flash_boots();
+  test_card_flash_refused();
+  test_card_flash_failed_not_retried();
+  test_card_result_write_fails();
   return report("flash");
 }

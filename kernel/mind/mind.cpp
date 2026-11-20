@@ -100,7 +100,7 @@ bool Mind::body_limp() const {
 // and so for kCardQuietUs.
 bool Mind::safe_for_card(uint64_t now) {
   constexpr uint64_t kCardQuietUs = 2000000;
-  constexpr uint64_t kCardHelloWaitUs = 3000000;  // as the kernel's boot flash check (BootHelloWaitUs)
+  constexpr uint64_t kCardHelloWaitUs = 3000000;  // as the boot flash check (flash/cardflash.h kHelloWaitUs)
   const BodyState& b = link_.state();
   // Not before the body's first HELLO (or 3 s without one): the card's first call mounts it,
   // which stalls the loop (1.5 s on the Pi), and the HELLO's answer was lost in that stall.

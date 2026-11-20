@@ -22,7 +22,10 @@
 //                      walker, the trick player, the remote, the behaviour
 //                      runner
 //   the end of a flash: log it; --persist: write the image to SD
-//   the boot flash check: once, after the first HELLO (or 3 s)
+//   the boot flash check: once, after the first HELLO (or 3 s): the SD
+//                      card's body firmware if the body runs another build
+//                      (mind/flash/cardflash.h), the outcome in
+//                      body-result.txt on the card
 //   link.connect() again once a second if the Serial failed
 //   a planner bench step: once, after the first laptop client
 //   Circle's log events into the ring
@@ -162,11 +165,6 @@ static const uint64_t RebootFlushUs = 200000;
 // Circle's own log events copied into the ring per pass, at most.
 static const unsigned CircleEventsPerPass = 4;
 
-// The boot-time flash check waits this long after mind.start() for the
-// body's first HELLO; with none, the SD card's image counts as another
-// build (an empty or broken firmware sends no HELLO).
-static const uint64_t BootHelloWaitUs = 3000000;
-
 void CLinkWatch::on_hello (const kilo_hello_t &rHello, bool bSolicited)
 {
 	if (m_bFirstHello)
@@ -215,9 +213,8 @@ CKernel::CKernel (void)
 	m_pBootCard (0),
 	m_pHostImage (0),
 	m_pCardImage (0),
+	m_pCardFlash (0),
 	m_pUpdater (0),
-	m_BootFlash (BootFlashWait),
-	m_nLinkUpUs (0),
 	m_bGoAhead (FALSE),
 	m_bWasFlashing (FALSE),
 	m_bPoweroffLogged (FALSE),
@@ -341,6 +338,13 @@ boolean CKernel::Initialize (void)
 	m_pFlasher = new Flasher (m_Serial, m_Clock, m_ResetGpio, m_pMind->link (), *m_pLog);
 	m_pMind->host ().attach_flasher (*m_pFlasher, *m_pHostImage);
 	m_pBootCard = new CBootCard (&m_Interrupt, &m_Timer, m_pLog);
+	// The boot check reads and writes the card through the same KernelStore
+	// as the updater (one file at a time; never while an update writes).
+	m_CardFlashHost.m_pMind = m_pMind;
+	m_pCardFlash = new CardFlash (*m_pBootCard, *m_pCardImage, *m_pFlasher, m_pMind->link (), m_Clock, *m_pLog);
+	m_pCardFlash->set_ring (&m_pMind->log ());
+	m_pCardFlash->set_host (&m_CardFlashHost);
+	m_pCardFlash->set_mind_build ((uint32_t) KILO_BUILD);
 
 	// Updating this kernel on the card (`kilo update --host`): the host
 	// server fills the updater from UPDATE_* and polls it, and while it
@@ -366,7 +370,7 @@ boolean CKernel::Initialize (void)
 	// RNG does not.
 	m_pMind->link ().seed_seq ((uint8_t) m_Random.GetNumber ());
 	m_pMind->start ();		// balance on, then link.connect(): HELLO_REQ
-	m_nLinkUpUs = m_Clock.now_us ();
+	m_pCardFlash->begin ();
 
 #if KILO_PLANNER_BENCH
 	m_pBench = new CPlannerBench (m_pLog);
@@ -470,7 +474,7 @@ TShutdownMode CKernel::Run (void)
 		uint64_t nNow = m_Clock.now_us ();
 
 		WatchFlash ();			// first: it names a boot flash that just ended
-		BootFlash (nNow);
+		BootFlash ();
 
 		if (!Link.connected ())
 		{
@@ -592,94 +596,44 @@ void CKernel::LightSleep (unsigned nUs)
 	}
 }
 
-// The boot-time flash from the SD card (docs/fast-boot.md §6 path B,
-// `kilo flash --sd`): once the body's first HELLO arrived (or none came
-// BootHelloWaitUs after link.connect()), read body.json and body.bin and
-// flash them if the body runs another build. Then the go-ahead for the net
-// task's USB scan (the default KILO_BODY_SERIAL=pl011 build), which stalls
-// the main loop and so must not cut into a flash. A missing or bad file is
-// no error.
+// The boot-time flash from the SD card (mind/flash/cardflash.h; the card
+// route, `kilo card PATH`): once the body's first HELLO arrived (or none came
+// 3 s after link.connect()), read body.json and body.bin, flash them if the
+// body runs another build, and write the outcome to body-result.txt. Then
+// the go-ahead for the net task's USB scan (the default
+// KILO_BODY_SERIAL=pl011 build), which stalls the main loop and so must not
+// cut into a flash.
 //
-// The card is read only here, after the HELLO, so neither the link nor the
-// boot probe (GPIO21 falls at the first HELLO) waits for it; the read
-// itself stalls the loop (SD driver busy-waits), logged in ms.
-void CKernel::BootFlash (uint64_t nNowUs)
+// The card is read only after the HELLO, so neither the link nor the boot
+// probe (GPIO21 falls at the first HELLO) waits for it; the read itself
+// stalls the loop (the SD driver busy-waits), logged in ms. Never while the
+// bridge or a laptop's flash has the UART, or a kernel update the card.
+void CKernel::BootFlash (void)
 {
-	switch (m_BootFlash)
-	{
-	case BootFlashWait:
-		if (   !m_Watch.m_bFirstHello
-		    && nNowUs - m_nLinkUpUs < BootHelloWaitUs)
-		{
-			return;
-		}
-		if (m_pMind->host ().link_paused () || m_pFlasher->busy ())
-		{
-			return;			// a bridge or a laptop's flash first
-		}
-		break;
-
-	case BootFlashRunning:
-		if (m_pFlasher->busy ())
-		{
-			return;			// WatchFlash logs the end
-		}
-		m_BootFlash = BootFlashDone;
-		m_bGoAhead = TRUE;
-		return;
-
-	case BootFlashDone:
-		return;
-	}
-
-	m_BootFlash = BootFlashDone;
-	const BodyState &b = m_pMind->link ().state ();
-	const kilo_hello_t *pHello = b.has_hello ? &b.hello : 0;
-	if (pHello == 0)
-	{
-		logf (*m_pLog, LogLevel::Warn, "boot flash check: no HELLO %u ms after the link came up "
-		      "(no firmware, a broken one, or the body is off)", (unsigned) (BootHelloWaitUs / 1000));
-	}
-
-	if (!m_pBootCard->LoadBodyImage (*m_pCardImage))
+	if (m_pCardFlash->done ())
 	{
 		m_bGoAhead = TRUE;
 		return;
 	}
-
-	uint32_t nCard = m_pCardImage->manifest ().build;
-	if (!m_pCardImage->needs_flash (pHello))
+	m_pCardFlash->poll (!m_pMind->host ().link_paused () && !m_pUpdater->busy ());
+	if (m_pCardFlash->done ())
 	{
-		logf (*m_pLog, LogLevel::Info, "boot flash check: the body runs build %08x, the card's: no flash",
-		      (unsigned) nCard);
-		m_pCardImage->clear ();
 		m_bGoAhead = TRUE;
-		return;
 	}
+}
 
-	if (pHello != 0)
-	{
-		logf (*m_pLog, LogLevel::Info, "boot flash check: the body runs build %08x, the card has %08x: flashing",
-		      (unsigned) pHello->fw_build, (unsigned) nCard);
-	}
-	else
-	{
-		logf (*m_pLog, LogLevel::Info, "boot flash check: no HELLO, the card has %08x: flashing",
-		      (unsigned) nCard);
-	}
+void CCardFlashHost::card_sound (const char *pName, const char *pWhy)
+{
+	m_pMind->say (pName, pWhy, true);	// no one is connected: the owner hears how it went
+}
 
-	// A walk the remote started in the first seconds ends before the
-	// flasher takes the UART (abort() may send SET_STREAM, which must go
-	// out first). A trick is not stopped: the flash resets the body, and
-	// the player gives up on it by its own timeout.
+// A walk the remote started in the first seconds ends before the flasher
+// takes the UART (abort() may send SET_STREAM, which must go out first). A
+// trick is not stopped: the flash resets the body, and the player gives up
+// on it by its own timeout.
+void CCardFlashHost::card_before_flash (void)
+{
 	m_pMind->walker ().abort ();
-	if (!m_pFlasher->start (*m_pCardImage, false))	// the host server polls it
-	{
-		logf (*m_pLog, LogLevel::Warn, "boot flash check: the flasher is busy: not flashing");
-		m_bGoAhead = TRUE;
-		return;
-	}
-	m_BootFlash = BootFlashRunning;
 }
 
 // The end of a flash, whoever started it, and --persist: after a DONE from
@@ -692,7 +646,7 @@ void CKernel::WatchFlash (void)
 	if (m_bWasFlashing && !bFlashing)
 	{
 		const Flasher::Status &s = m_pFlasher->status ();
-		const char *pFrom = m_BootFlash == BootFlashRunning ? "the SD card (boot)" : "the laptop";
+		const char *pFrom = m_pCardFlash->flashing () ? "the SD card (boot)" : "the laptop";
 		if (s.phase == KILO_FLASH_PHASE_DONE)
 		{
 			logf (*m_pLog, LogLevel::Info, "body flashed from %s: build %08x, HELLO build %08x reset %s",

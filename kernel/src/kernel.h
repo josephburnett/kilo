@@ -15,6 +15,7 @@
 #if KILO_SOUND
 #include "sound.h"
 #endif
+#include "flash/cardflash.h"
 #include "flash/flasher.h"
 #include "flash/image.h"
 #include "update/updater.h"
@@ -51,9 +52,19 @@ struct CLinkWatch : kilo::LinkListener
 	CircleClock *m_pClock = 0;
 	kilo::Log *m_pLog = 0;
 	uint64_t m_nBootUs = 0;			// clock at the top of the kernel
-	bool m_bFirstHello = false;		// the boot-time flash check waits for it
+	bool m_bFirstHello = false;		// logged once, and the boot probe's mark
 	unsigned m_nTelemetry = 0;		// in the current second
 	unsigned m_nOverruns = 0;		// TELEMETRY with the OVERRUN flag, current second
+};
+
+// The boot-time flash from the SD card hears through this: its sounds (the
+// Mind's player) and a walk to stop first.
+struct CCardFlashHost : kilo::CardFlashHost
+{
+	void card_sound (const char *pName, const char *pWhy) override;
+	void card_before_flash (void) override;
+
+	kilo::Mind *m_pMind = 0;
 };
 
 // Durations within one stats second, in microseconds.
@@ -86,7 +97,7 @@ public:
 
 private:
 	kilo::Serial *ChooseSerial (void);
-	void BootFlash (uint64_t nNowUs);
+	void BootFlash (void);
 	void WatchFlash (void);
 	void DrainCircleLog (void);
 	void LogStats (void);
@@ -139,24 +150,18 @@ private:
 #endif
 
 	// Flashing the body (P4): the laptop's FLASH_* through the Mind's host
-	// server, and the image on the SD card at boot.
+	// server, and the image on the SD card at boot (mind/flash/cardflash.h).
 	kilo::Flasher		*m_pFlasher;	// polled by the host server
-	CBootCard		*m_pBootCard;	// body.bin, body.json on the FAT partition
+	CBootCard		*m_pBootCard;	// the FAT partition: body.bin, body.json, body-result.txt, kernel7.*
 	kilo::FlashImage	*m_pHostImage;	// 32 KB: FLASH_BEGIN..COMMIT fills it
 	kilo::FlashImage	*m_pCardImage;	// 32 KB: the SD card's, at boot
+	kilo::CardFlash		*m_pCardFlash;	// the boot-time check and flash (body-result.txt)
+	CCardFlashHost		m_CardFlashHost;
 
 	// Updating this kernel on the SD card (`kilo update --host`): the Mind's
 	// host server fills it from UPDATE_* and polls it; m_pBootCard is its
 	// KernelStore.
 	kilo::KernelUpdater	*m_pUpdater;	// its 4 MB image buffer on the heap
-	enum TBootFlash
-	{
-		BootFlashWait,			// for the first HELLO, or BootHelloWaitUs
-		BootFlashRunning,		// flashing the SD card's image
-		BootFlashDone
-	};
-	TBootFlash		m_BootFlash;
-	uint64_t		m_nLinkUpUs;	// mind.start() (link.connect()) at boot
 	boolean			m_bGoAhead;	// the boot flash check is over: the net task may scan USB
 	boolean			m_bWasFlashing;
 	boolean			m_bPoweroffLogged;

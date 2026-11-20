@@ -1,6 +1,7 @@
 //
-// bootcard.cpp: body.bin and body.json on the SD card, and the kernel
-// updater's store (see bootcard.h).
+// bootcard.cpp: the SD card's FAT partition: --persist's body.bin and
+// body.json, and the store of the kernel updater and the boot-time flash
+// check (see bootcard.h).
 //
 #include "bootcard.h"
 #include "flash/flasher.h"
@@ -12,9 +13,6 @@ using namespace kilo;
 
 // FatFs's volume string for the SD card (addon/fatfs/ffconf.h FF_VOLUME_STRS).
 static const char Drive[] = "SD:";
-
-// body.json is one short line (about 100 bytes with "commit").
-static const unsigned ManifestMax = 1024;
 
 static inline unsigned Elapsed (unsigned nStart)
 {
@@ -34,6 +32,7 @@ CBootCard::CBootCard (CInterruptSystem *pInterrupt, CTimer *pTimer, kilo::Log *p
 	memset (&m_FileSystem, 0, sizeof m_FileSystem);
 	memset (&m_File, 0, sizeof m_File);
 	memset (&m_KernelFile, 0, sizeof m_KernelFile);
+	m_OpenName[0] = '\0';
 }
 
 boolean CBootCard::Mount (void)
@@ -51,7 +50,7 @@ boolean CBootCard::Mount (void)
 	if (!m_pEMMC->Initialize ())
 	{
 		logf (*m_pLog, LogLevel::Warn, "SD: the card did not initialise (%u ms): no body image from SD, "
-		      "no --persist", Elapsed (nStart));
+		      "no result file, no --persist", Elapsed (nStart));
 		return FALSE;
 	}
 	unsigned nCardMs = Elapsed (nStart);
@@ -68,66 +67,6 @@ boolean CBootCard::Mount (void)
 	m_bMounted = TRUE;
 	logf (*m_pLog, LogLevel::Info, "SD: FAT partition mounted in %u ms (card %u ms; the main loop waited)",
 	      Elapsed (nStart), nCardMs);
-
-	return TRUE;
-}
-
-boolean CBootCard::LoadBodyImage (FlashImage &rImage)
-{
-	if (!Mount ())
-	{
-		return FALSE;
-	}
-
-	unsigned nStart = CTimer::GetClockTicks ();
-
-	char Text[ManifestMax + 1];
-	int nLen = ReadFile (kManifestFile, Text, ManifestMax);
-	if (nLen == ReadMissing)
-	{
-		logf (*m_pLog, LogLevel::Info, "SD: no %s: nothing to flash at boot", kManifestFile);
-		return FALSE;
-	}
-	if (nLen < 0)
-	{
-		logf (*m_pLog, LogLevel::Info, "SD: %s %s: not flashing at boot", kManifestFile,
-		      nLen == ReadTooBig ? "is too big for a manifest" : "cannot be read");
-		return FALSE;
-	}
-	Text[nLen] = '\0';
-
-	Manifest m;
-	const char *pWhy = parse_manifest (Text, (uint32_t) nLen, m);
-	if (pWhy != 0)
-	{
-		logf (*m_pLog, LogLevel::Info, "SD: %s is not a manifest (%s): not flashing at boot", kManifestFile, pWhy);
-		return FALSE;
-	}
-
-	// Read into a heap buffer, then load_from() copies and checks it.
-	u8 *pData = new u8[FlashImage::kMaxSize];
-	int nSize = ReadFile (kImageFile, pData, FlashImage::kMaxSize);
-	if (nSize < 0)
-	{
-		delete [] pData;
-		logf (*m_pLog, LogLevel::Info, "SD: %s for build %08x %s: not flashing at boot", kImageFile,
-		      (unsigned) m.build,
-		      nSize == ReadMissing ? "is missing" : nSize == ReadTooBig ? "is over 32256 bytes" : "cannot be read");
-		return FALSE;
-	}
-
-	uint8_t nError = rImage.load_from (m, pData, (uint32_t) nSize);
-	delete [] pData;
-	if (nError != KILO_FLASH_ERROR_NONE)
-	{
-		logf (*m_pLog, LogLevel::Info, "SD: %s (%u bytes) does not match %s (build %08x, %u bytes, crc32 %08x): "
-		      "%s; not flashing at boot", kImageFile, (unsigned) nSize, kManifestFile, (unsigned) m.build,
-		      (unsigned) m.size, (unsigned) m.crc32, flash_error_name (nError));
-		return FALSE;
-	}
-
-	logf (*m_pLog, LogLevel::Info, "SD: body image build %08x, %u bytes, crc32 %08x good (read in %u ms)",
-	      (unsigned) m.build, (unsigned) m.size, (unsigned) m.crc32, Elapsed (nStart));
 
 	return TRUE;
 }
@@ -177,49 +116,6 @@ boolean CBootCard::PersistBodyImage (const FlashImage &rImage)
 	return TRUE;
 }
 
-int CBootCard::ReadFile (const char *pName, void *pBuffer, unsigned nSize)
-{
-	char Name[32];
-	Path (Name, sizeof Name, pName);
-
-	FRESULT Result = f_open (&m_File, Name, FA_READ | FA_OPEN_EXISTING);
-	if (Result == FR_NO_FILE || Result == FR_NO_PATH)
-	{
-		return ReadMissing;
-	}
-	if (Result != FR_OK)
-	{
-		logf (*m_pLog, LogLevel::Warn, "SD: cannot open %s (FatFs error %u)", pName, (unsigned) Result);
-		return ReadError;
-	}
-
-	int nResult;
-	FSIZE_t nFileSize = f_size (&m_File);
-	if (nFileSize > nSize)
-	{
-		nResult = ReadTooBig;
-	}
-	else
-	{
-		UINT nRead = 0;
-		Result = f_read (&m_File, pBuffer, (UINT) nFileSize, &nRead);
-		if (Result != FR_OK || nRead != nFileSize)
-		{
-			logf (*m_pLog, LogLevel::Warn, "SD: cannot read %s (FatFs error %u, %u of %u bytes)", pName,
-			      (unsigned) Result, (unsigned) nRead, (unsigned) nFileSize);
-			nResult = ReadError;
-		}
-		else
-		{
-			nResult = (int) nRead;
-		}
-	}
-
-	f_close (&m_File);
-
-	return nResult;
-}
-
 boolean CBootCard::WriteFile (const char *pName, const void *pData, unsigned nSize)
 {
 	char Name[32];
@@ -251,7 +147,7 @@ void CBootCard::Path (char *pOut, unsigned nSize, const char *pName) const
 	format (pOut, nSize, "%s/%s", Drive, pName);
 }
 
-// ---- the kernel updater's store (kilo::KernelStore) ----------------------------------
+// ---- the store of the kernel updater and the boot flash check (kilo::KernelStore) ------
 //
 // FatFs writes the file's data at f_write (multi-sector, straight from the
 // buffer when aligned) and the FAT and directory entry at f_close; f_unlink
@@ -280,6 +176,7 @@ KernelStore::Result CBootCard::create (const char *pName)
 	}
 	m_bKernelOpen = TRUE;
 	m_bKernelWriting = TRUE;
+	format (m_OpenName, sizeof m_OpenName, "%s", pName);
 
 	return Result::Ok;
 }
@@ -303,6 +200,7 @@ KernelStore::Result CBootCard::open (const char *pName)
 	}
 	m_bKernelOpen = TRUE;
 	m_bKernelWriting = FALSE;
+	format (m_OpenName, sizeof m_OpenName, "%s", pName);
 
 	return Result::Ok;
 }
@@ -317,8 +215,8 @@ KernelStore::Result CBootCard::write (const uint8_t *pData, uint32_t nLen)
 	FRESULT Result = f_write (&m_KernelFile, pData, (UINT) nLen, &nWritten);
 	if (Result != FR_OK || nWritten != nLen)
 	{
-		logf (*m_pLog, LogLevel::Warn, "SD: writing the kernel failed (FatFs error %u, %u of %u bytes%s)",
-		      (unsigned) Result, (unsigned) nWritten, (unsigned) nLen,
+		logf (*m_pLog, LogLevel::Warn, "SD: writing %s failed (FatFs error %u, %u of %u bytes%s)",
+		      m_OpenName, (unsigned) Result, (unsigned) nWritten, (unsigned) nLen,
 		      Result == FR_OK ? ": the card is full" : "");
 		return Result::Failed;
 	}
@@ -336,7 +234,7 @@ int32_t CBootCard::read (uint8_t *pBuffer, uint32_t nLen)
 	FRESULT Result = f_read (&m_KernelFile, pBuffer, (UINT) nLen, &nRead);
 	if (Result != FR_OK)
 	{
-		logf (*m_pLog, LogLevel::Warn, "SD: reading the kernel back failed (FatFs error %u)", (unsigned) Result);
+		logf (*m_pLog, LogLevel::Warn, "SD: reading %s failed (FatFs error %u)", m_OpenName, (unsigned) Result);
 		return -1;
 	}
 
@@ -353,7 +251,7 @@ KernelStore::Result CBootCard::close (void)
 	FRESULT Result = f_close (&m_KernelFile);	// after writing: the cached sector, the FAT, the directory entry
 	if (Result != FR_OK)
 	{
-		return Failed (m_pLog, "cannot close", "the kernel file", Result);
+		return Failed (m_pLog, "cannot close", m_OpenName, Result);
 	}
 
 	return Result::Ok;
