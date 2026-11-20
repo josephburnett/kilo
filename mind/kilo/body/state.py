@@ -25,18 +25,14 @@ from typing import Any
 
 from kilo.link import consts
 from kilo.link.messages import fields_of
+from kilo.protocol import kilo_protocol as P
 
 A16 = 16.0  # a16: 1/16 degree
 TELEMETRY_TIMEOUT_S = 0.300
 UPRIGHT_DEG = 30.0
 
-# Resting 2S Li-ion curve, pack mV -> percent. (est.) Replace with a measured
-# curve for Kilo's ZCF503060 pack.
-BATTERY_CURVE: tuple[tuple[int, float], ...] = (
-    (6600, 0.0), (7000, 5.0), (7200, 12.0), (7300, 20.0), (7400, 30.0),
-    (7500, 40.0), (7600, 50.0), (7800, 65.0), (8000, 80.0), (8200, 90.0),
-    (8400, 100.0),
-)
+# Resting 2S Li-ion curve, pack mV -> percent (est.): protocol/spec.toml [battery].
+BATTERY_CURVE: tuple[tuple[int, float], ...] = tuple((mv, float(pct)) for mv, pct in P.BATTERY_CURVE)
 
 
 def battery_percent(mv: int | None) -> float | None:

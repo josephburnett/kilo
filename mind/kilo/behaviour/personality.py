@@ -3,6 +3,8 @@
 ``load(path=None)`` reads ``personality.yaml`` (the packaged default when no
 path is given), merges it over ``DEFAULTS`` and validates it: unknown keys,
 wrong types and out-of-range values raise ``PersonalityError`` naming the key.
+``DEFAULTS`` is the packaged personality.yaml itself (complete and validated
+at import), so the default values are written only there.
 
 PyYAML is optional (``pip install 'kilo-mind[behaviour]'`` or apt
 ``python3-yaml``). Without it a small built-in parser reads the subset the
@@ -25,41 +27,6 @@ TERMS = ("base", "energy", "fatigue", "curiosity", "sociability", "arousal", "ca
          "face", "pet", "near", "approaching", "alone")
 DRIVES = ("energy", "curiosity", "sociability", "arousal")
 POSTURES = ("rest", "sit", "stand", "balance")
-
-DEFAULTS: dict[str, Any] = {
-    "name": "kilo",
-    "drives": {
-        "initial": {"energy": 0.8, "curiosity": 0.2, "sociability": 0.3, "arousal": 0.0},
-        "energy": {"drain_active": 0.004, "drain_idle": 0.0008, "recover_rest": 0.004,
-                   "battery_full_pct": 60.0, "battery_empty_pct": 10.0},
-        "curiosity": {"growth": 0.003, "satisfy": 0.02},
-        "sociability": {"growth": 0.002, "satisfy": 0.05},
-        "arousal": {"startle": 0.9, "approach": 0.6, "half_life_s": 3.0},
-        "noise": 0.0,
-    },
-    "weights": {
-        "idle": {"base": 0.35},
-        "explore": {"curiosity": 1.0, "energy": 0.2, "fatigue": -0.4},
-        "nap": {"fatigue": 1.0, "calm": 0.1, "base": -0.2},
-        "greet": {"face": 0.5, "sociability*face": 0.6, "pet": 0.5},
-        "startle": {"arousal": 1.2, "base": -0.3},
-    },
-    "selector": {"noise": 0.04, "noise_period_s": 8.0, "margin": 0.1, "min_dwell_s": 6.0,
-                 "urgent": ["startle", "greet"]},
-    "safety": {"low_battery_pct": 5.0, "critical_battery_pct": 0.0, "wind_down_s": 5.0,
-               "fallen_settle_s": 2.0},
-    "percepts": {"near_mm": 250.0, "approach_mm_s": 400.0},
-    "behaviours": {
-        "idle": {"posture": "sit", "look_every_s": 6.0, "look_chance": 0.5,
-                 "look_pan_deg": 40.0, "look_tilt_deg": 20.0},
-        "explore": {"posture": "stand", "look_every_s": 1.5, "looks": 12,
-                    "look_pan_deg": 70.0, "look_tilt_deg": 30.0},
-        "nap": {"posture": "rest", "min_s": 40.0},
-        "greet": {"trick": "hi", "cooldown_s": 30.0},
-        "startle": {"hold_s": 2.0},
-    },
-}
-
 
 class PersonalityError(ValueError):
     pass
@@ -313,3 +280,18 @@ def _block(lines: list, i: int, indent: int) -> tuple[Any, int]:
         else:
             mapping[key] = None
     return mapping, i
+
+
+# ---- the defaults -------------------------------------------------------------------
+
+def _defaults() -> dict[str, Any]:
+    """The packaged personality.yaml, complete and valid: the one place the defaults are written."""
+    try:
+        raw = parse_yaml(DEFAULT_PATH.read_text(encoding="utf-8"))
+        validate(raw)
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise PersonalityError(f"{DEFAULT_PATH} (the defaults): {e!r}") from None
+    return raw
+
+
+DEFAULTS: dict[str, Any] = _defaults()

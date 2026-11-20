@@ -26,7 +26,7 @@ constexpr uint8_t kMaxFrames = KILO_TRICK_CAPACITY;           // 24
 constexpr uint8_t kFramesPerMsg = KILO_TRICK_FRAMES_PER_MSG;  // 4
 constexpr uint8_t kRepeatForever = 255;
 constexpr uint8_t kSpeedUnity = KILO_TRICK_SPEED_UNITY_Q6;    // 64 = 1x
-constexpr uint8_t kSpeedMin = 16;                             // 0.25x (client.py SPEED_MIN)
+constexpr uint8_t kSpeedMin = KILO_TRICK_PLAY_SPEED_Q6_MIN;    // 0.25x (spec TRICK_PLAY speed_q6 range)
 
 // Wire order of the 11 driven joints as legacy slots (model.py CANONICAL).
 extern const uint8_t kCanonical[KILO_JOINT_COUNT];

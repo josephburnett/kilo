@@ -1,4 +1,5 @@
 #include "update/updater.h"
+#include "proto/kilo_names.h"
 #include "util/log.h"
 #include "util/mem.h"
 
@@ -19,21 +20,7 @@ const char* result_name(KernelStore::Result r) {
 
 }  // namespace
 
-const char* update_error_name(uint8_t error) {
-  switch (error) {
-    case KILO_UPDATE_ERROR_NONE: return "NONE";
-    case KILO_UPDATE_ERROR_BAD_SIZE: return "BAD_SIZE";
-    case KILO_UPDATE_ERROR_BAD_OFFSET: return "BAD_OFFSET";
-    case KILO_UPDATE_ERROR_SHORT: return "SHORT";
-    case KILO_UPDATE_ERROR_CRC_MISMATCH: return "CRC_MISMATCH";
-    case KILO_UPDATE_ERROR_NOT_A_KERNEL: return "NOT_A_KERNEL";
-    case KILO_UPDATE_ERROR_WRITE_FAILED: return "WRITE_FAILED";
-    case KILO_UPDATE_ERROR_VERIFY_FAILED: return "VERIFY_FAILED";
-    case KILO_UPDATE_ERROR_INSTALL_FAILED: return "INSTALL_FAILED";
-    case KILO_UPDATE_ERROR_CARD_BROKEN: return "CARD_BROKEN";
-    default: return "?";
-  }
-}
+const char* update_error_name(uint8_t error) { return kilo_update_error_name(error); }
 
 bool has_kernel_marker(const uint8_t* data, uint32_t len) {
   if (len < kMarkerLen) return false;

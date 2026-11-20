@@ -81,7 +81,7 @@ const char* trick_problem(const Trick& t) {
 
 uint8_t speed_q6(double speed) {
   double x = speed * 64.0;
-  if (!(x >= kSpeedMin - 0.5 && x < 255.5)) return 0;
+  if (!(x >= kSpeedMin - 0.5 && x < KILO_TRICK_PLAY_SPEED_Q6_MAX + 0.5)) return 0;
   return (uint8_t)(x + 0.5);
 }
 

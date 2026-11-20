@@ -61,6 +61,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from kilo.protocol import kilo_protocol as P
+
 REPEAT = 0x100
 
 
@@ -187,7 +189,7 @@ CANCELLED = "cancelled (C7 froze Kilo)"
 # this pack voltage (TELEMETRY batt_mv, filtered) A2 refuses, so that the
 # body's low-battery reflex (REST from wherever Kilo is, docs/rear-up-trick.md)
 # does not fire half way up. Also refused on USB power (no_battery).
-TRICK_MIN_MV = 7400
+TRICK_MIN_MV = P.BATTERY_TRICK_MIN_MV  # protocol/spec.toml [battery]
 
 
 def describe(arg: int) -> str:

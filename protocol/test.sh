@@ -36,7 +36,7 @@ for f in cobs crc16 kilo_frame; do
     "$CC" -std=c99 -pedantic $WARN $SAN -g -O1 -I"$HERE/gen" -c "$HERE/c/$f.c" -o "$BUILD/$f.o"
 done
 # The generated header must also compile as plain C99 and as C++ on its own.
-printf '#include "kilo_protocol.h"\nint kilo_dummy;\n' > "$BUILD/hdr_c99.c"
+printf '#include "kilo_protocol.h"\n#include "kilo_names.h"\nint kilo_dummy;\n' > "$BUILD/hdr_c99.c"
 "$CC" -std=c99 -pedantic $WARN -I"$HERE/gen" -c "$BUILD/hdr_c99.c" -o "$BUILD/hdr_c99.o"
 "$CXX" -std=c++17 $WARN $SAN -g -O1 -I"$HERE/gen" -I"$HERE/c" \
     "$HERE/c/test_protocol.cpp" "$BUILD/cobs.o" "$BUILD/crc16.o" "$BUILD/kilo_frame.o" \

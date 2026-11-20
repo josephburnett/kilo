@@ -2,8 +2,9 @@
 """Generate kernel/mind/behaviour/personality.gen.cpp from a personality YAML.
 
 The C++ mind cannot parse YAML, so the laptop does: kilo.behaviour.personality
-loads the file (merged over its DEFAULTS and validated, exactly as the Python
-runner loads it) and this script writes the result as the const table
+loads the file (merged over its DEFAULTS, which are the packaged yaml, and
+validated, exactly as the Python runner loads it) and this script writes the
+result as the const table
 kPersonality (behaviour/personality.h). Doubles are written with repr(), so
 the C++ has Python's values bit for bit.
 

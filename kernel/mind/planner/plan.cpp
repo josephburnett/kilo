@@ -278,7 +278,7 @@ void Planner::start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tic
     swing_h_[leg] = 0;
     caught_[leg] = false;
   }
-  h_ = start_height < 0 ? model_.stance_height(205) : start_height;
+  h_ = start_height < 0 ? model_.stance_height(KILO_GAIT_STANCE_H_256) : start_height;
   s_cur_[0] = s_cur_[1] = s_tgt_[0] = s_tgt_[1] = 0;
   stance_ticks_ = stance_tgt_ = 1;
   lean_ = lean_from_ = lean_to_ = Lean();
@@ -580,7 +580,7 @@ void Planner::slewed(real s[2], real* stance, real* h) const {
 }
 
 real Planner::height_target() const {
-  if (finishing_) return model_.stance_height(205);
+  if (finishing_) return model_.stance_height(KILO_GAIT_STANCE_H_256);
   if (direct_change()) return model_.stance_height(pending_->body_h_256);  // to the new pattern's height first
   return model_.stance_height(pattern_->body_h_256);
 }

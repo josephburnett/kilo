@@ -65,13 +65,12 @@ bool BodyState::alive(uint64_t now_us, uint32_t lost_us) const {
 
 namespace {
 
-// state.py BATTERY_CURVE: resting 2S Li-ion, pack mV -> percent (est.)
+// spec [battery]: the resting 2S Li-ion curve, pack mV -> percent (est.)
 const struct {
   uint16_t mv;
   double pct;
-} kBatteryCurve[] = {{6600, 0.0},  {7000, 5.0},  {7200, 12.0}, {7300, 20.0}, {7400, 30.0}, {7500, 40.0},
-                     {7600, 50.0}, {7800, 65.0}, {8000, 80.0}, {8200, 90.0}, {8400, 100.0}};
-constexpr int kCurveN = sizeof kBatteryCurve / sizeof kBatteryCurve[0];
+} kBatteryCurve[KILO_BATTERY_CURVE_LEN] = KILO_BATTERY_CURVE_INIT;
+constexpr int kCurveN = KILO_BATTERY_CURVE_LEN;
 
 }  // namespace
 

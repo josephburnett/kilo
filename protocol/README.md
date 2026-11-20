@@ -8,12 +8,14 @@ from it and committed, so consumers never need to run the generator.
 
 ```
 spec.toml              messages, enums, flags, link constants, live params, and the shared
-                       defaults and limits (gait patterns, joint limits, balance, head)
+                       defaults and limits (gait, joint limits, balance, head, battery, body model)
 gen.py                 generator (stdlib only, Python 3.11+)
-vendor.py              copies gen/ + c/ into body/src/proto and kernel/mind/proto, gen/ + py/ codec into mind/kilo/protocol
-doc_check.py           fails when docs/architecture.md §3b/§3d/§3f or mind/README.md quote other numbers
+vendor.py              copies gen/ + c/ into body/src/proto and kernel/mind/proto (kilo_names.h: the mind's only),
+                       gen/ + py/ codec into mind/kilo/protocol
+doc_check.py           fails when docs/architecture.md §3b/§3f/§3g or mind/README.md quote other numbers
 vector_cases.py        the test-vector cases gen.py turns into vectors/*.json
 gen/kilo_protocol.h    C99/C++: ids, enums, packed payload structs, constants, length rules
+gen/kilo_names.h       C99/C++: the name of every message and enum value (kilo_<enum>_name()), for the mind
 gen/kilo_protocol.py   Python: dataclasses with pack()/unpack(), enums, constants
 c/cobs.[ch]            COBS encode/decode
 c/crc16.[ch]           CRC-16/CCITT-FALSE (same semantics as avr-libc _crc_xmodem_update)
@@ -30,7 +32,7 @@ test.sh                runs everything
 ## Regenerating
 
 ```
-python3 protocol/gen.py          # rewrite gen/ and vectors/ from spec.toml
+python3 protocol/gen.py          # rewrite gen/, vectors/ and the docs' params table from spec.toml
 python3 protocol/vendor.py       # copy the results into body/src/proto, kernel/mind/proto and mind/kilo/protocol
 python3 protocol/gen.py --check  # exit 1 if anything committed is stale
 python3 protocol/vendor.py --check
@@ -49,9 +51,11 @@ PYTHON=~/venv/bin/python protocol/test.sh   # interpreter that has pytest
 
 `test.sh` runs these steps:
 
-1. `gen.py --check`: the generated files are up to date; `vendor.py --check`:
-   the body's and mind's copies are identical to them; `doc_check.py`: the
-   docs' tables quote the spec's shared defaults (gait, joints, balance, head).
+1. `gen.py --check`: the generated files (and docs/architecture.md's params
+   table) are up to date; `vendor.py --check`: the body's and mind's copies
+   are identical to them; `doc_check.py`: the numbers in docs/architecture.md
+   §3b (joint limits), §3f (balance), §3g (battery and watchdog) and
+   mind/README.md (Kp, look() speed) are the spec's.
 2. Builds the C codec with `-std=c99 -pedantic -Wall -Wextra -Werror` and
    `test_protocol.cpp` with `g++ -std=c++17 -Wall -Wextra -Werror
    -fsanitize=address,undefined`. Runs it against the vectors, then fuzzes the
@@ -149,7 +153,8 @@ laptops whose key the mind knows (the `[host]` comments;
 ## Params
 
 `[[params]]` entries have a stable `id` (dense from 0, below
-`link.param_slots`), `default`, `min`, `max`, `unit` and `doc`. C gets
+`link.param_slots`), `default`, `min`, `max`, `unit`, `doc` and `brief` (the Meaning
+column of the params table gen.py writes into docs/architecture.md). C gets
 `KILO_PARAM_<NAME>` ids, `_DEFAULT`/`_MIN`/`_MAX` macros and the
 `KILO_PARAM_TABLE_INIT` / `KILO_PARAM_DEFAULTS_INIT` initialisers (the body puts
 the table in flash); Python gets `ParamId`, `PARAMS` and `PARAMS_BY_NAME`. Add a

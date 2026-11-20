@@ -84,6 +84,7 @@ from dataclasses import dataclass
 from kilo.planner import patterns as pat
 from kilo.planner.model import (FRONT, LEFT, LEGS, BodyModel, _solve3, fit_attitude, hull, leg_lengths, stability,
                                 world_points)
+from kilo.protocol import kilo_protocol as P
 
 X_RANGE = (-60, 60)   # FEET x_mm (spec range)
 Z_RANGE = (30, 95)    # FEET z_mm
@@ -182,7 +183,7 @@ class Planner:
         self.speed_mm_s = pat.default_speed(self.pattern) if speed_mm_s is None else abs(float(speed_mm_s))
         self._pending_pattern: pat.Pattern | None = None
         self.xg = [0.0] * 4          # foot x in the gait frame (no lean shift)
-        self.h = model.stance_height(205) if start_height is None else float(start_height)
+        self.h = model.stance_height(P.GAIT_STANCE_H_256) if start_height is None else float(start_height)
         self.s_cur = [0.0, 0.0]      # stride now, left and right
         self.s_tgt = [0.0, 0.0]
         self.stance_ticks = 1.0      # a foot's time on the ground now (slewed toward stance_tgt)
@@ -628,7 +629,7 @@ class Planner:
 
     def _height_target(self) -> float:
         if self.finishing:
-            return self.model.stance_height(205)
+            return self.model.stance_height(P.GAIT_STANCE_H_256)
         if self._direct_change():  # changing: to the new pattern's height first (_switch_ok)
             return self.model.stance_height(self._pending_pattern.body_h_256)
         return self.model.stance_height(self.pattern.body_h_256)

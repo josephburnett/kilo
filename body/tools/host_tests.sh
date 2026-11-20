@@ -9,6 +9,11 @@ OUT="${TMPDIR:-/tmp}/kilo-host-tests"
 mkdir -p "$OUT"
 fail=0
 
+# 0. src/proto is protocol/'s output, copied by protocol/vendor.py: a stale or
+#    hand-edited copy fails here as well as in protocol/test.sh.
+echo "== vendored protocol copies up to date"
+python3 "$REPO/protocol/vendor.py" --check || fail=$((fail + 1))
+
 # 1. Lint: core/ uses fixed-width types only (on AVR int is 16 bits, on the
 #    host 32; a bare int/unsigned/long hides that). Comments are stripped
 #    first so prose may say "int".

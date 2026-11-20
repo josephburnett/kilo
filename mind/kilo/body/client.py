@@ -60,7 +60,7 @@ HEAD_MAX_DEG = P.HEAD_MAX_DEG
 HEAD_SPEED_DPS = P.HEAD_SPEED_DPS  # default look() slew, °/s (0 = only the body's 500°/s safety slew)
 
 # Tricks: TRICK_PLAY speed_q6 range (0.25x .. 3.98x) and the play() timeout margin.
-SPEED_MIN, SPEED_MAX = 16 / 64, 255 / 64
+SPEED_MIN, SPEED_MAX = (v / P.TRICK_SPEED_UNITY_Q6 for v in P.FIELD_RANGES[("TRICK_PLAY", "speed_q6")])
 TRICK_DONE_MARGIN_S = 1.0
 
 

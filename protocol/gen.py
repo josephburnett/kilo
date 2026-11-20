@@ -3,10 +3,12 @@
 
 Outputs (all committed):
   protocol/gen/kilo_protocol.h    C99/C++ header: ids, enums, packed structs, constants
+  protocol/gen/kilo_names.h       C99/C++ header: message and enum value names (the mind's only)
   protocol/gen/kilo_protocol.py   Python dataclasses with pack/unpack, enums, constants
   protocol/vectors/frames.json    framed test vectors (cases in vector_cases.py)
   protocol/vectors/cobs.json      COBS-only vectors
   protocol/vectors/host_frames.json  the laptop channel's frames (spec [host_messages])
+  docs/architecture.md            the params table in Appendix E, between its generated markers
 
 Usage:
   python3 protocol/gen.py           regenerate in place
@@ -27,10 +29,12 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SPEC = HERE / "spec.toml"
 OUT_H = HERE / "gen" / "kilo_protocol.h"
+OUT_NAMES = HERE / "gen" / "kilo_names.h"
 OUT_PY = HERE / "gen" / "kilo_protocol.py"
 OUT_FRAMES = HERE / "vectors" / "frames.json"
 OUT_COBS = HERE / "vectors" / "cobs.json"
 OUT_HOST = HERE / "vectors" / "host_frames.json"
+OUT_DOC = HERE.parent / "docs" / "architecture.md"
 
 SCALARS = {
     # name: (size, signed, struct char, C type)
@@ -194,8 +198,14 @@ def validate(spec: dict) -> None:
             raise SpecError(f"param {p['name']}: id must be < link.param_slots")
         if not -32768 <= p["min"] <= p["default"] <= p["max"] <= 32767:
             raise SpecError(f"param {p['name']}: need i16 min <= default <= max")
+        if not p.get("brief") or "|" in p["brief"]:
+            raise SpecError(f"param {p['name']}: a brief (the docs table's Meaning, no '|')")
     if sorted(pids) != list(range(len(pids))):
         raise SpecError("param ids must be dense from 0")
+    telem_div = next(p["default"] for p in spec["params"] if p["name"] == "TELEM_DIV")
+    if link["telemetry_default_div"] != telem_div or link["telemetry_default_hz"] * telem_div != link["tick_hz"]:
+        raise SpecError("link: telemetry_default_div != param TELEM_DIV's default, or telemetry_default_hz != "
+                        "tick_hz / it")
     validate_shared(spec)
     validate_host(spec)
 
@@ -301,7 +311,7 @@ def field_range(spec: dict, msg: str, name: str) -> tuple[int, int]:
 
 
 def validate_shared(spec: dict) -> None:
-    """The shared defaults and limits ([gait], link.feet_*, [[joints]], [balance],
+    """The shared defaults and limits ([gait], link.feet_*, [[joints]], [balance], [battery],
     [head]) against each other and the wire ranges."""
     link = spec["link"]
     g = spec["gait"]
@@ -346,6 +356,40 @@ def validate_shared(spec: dict) -> None:
         raise SpecError("head: unexpected or missing keys")
     if h["not_held"] != -32768 or not 0 < h["max_deg"] * 16 <= 32767 or not 0 <= h["speed_dps"] <= 0xFFFF:
         raise SpecError("head: not_held -32768, max_deg * 16 within i16, speed_dps u16")
+    bt = spec["battery"]
+    if set(bt) != {"curve_mv", "curve_pct", "trick_min_mv", "flash_min_mv"}:
+        raise SpecError("battery: unexpected or missing keys")
+    mv, pct = bt["curve_mv"], bt["curve_pct"]
+    if len(mv) != len(pct) or len(mv) < 2 or not all(isinstance(v, int) for v in mv + pct):
+        raise SpecError("battery: curve_mv and curve_pct are integer lists of the same length (at least 2)")
+    if any(a >= b for a, b in zip(mv, mv[1:])) or any(a > b for a, b in zip(pct, pct[1:])):
+        raise SpecError("battery: curve_mv strictly ascending, curve_pct not descending")
+    if not (0 <= pct[0] and pct[-1] <= 100 and 0 < mv[0] and mv[-1] <= 0xFFFF):
+        raise SpecError("battery: percent 0..100, mV u16")
+    low = next(p["default"] for p in spec["params"] if p["name"] == "BATT_LOW_MV")
+    if not (low < bt["flash_min_mv"] <= 0xFFFF and 0 < bt["trick_min_mv"] <= 0xFFFF):
+        raise SpecError("battery: flash_min_mv above BATT_LOW_MV's default; both u16")
+    md = spec["model"]
+    if set(md) != MODEL_KEYS:
+        raise SpecError("model: unexpected or missing keys")
+    for k, v in md.items():
+        if k.endswith("_mass"):
+            if len(v) != 4 or not v[0] > 0:
+                raise SpecError(f"model.{k}: [grams > 0, x, y, z]")
+        elif not isinstance(v, (int, float)) or isinstance(v, bool):
+            raise SpecError(f"model.{k}: a number")
+    if not 0 < md["reach_frac"] < 1 or not 90 < md["knee_max_deg"] < 180:
+        raise SpecError("model: reach_frac in (0, 1), knee_max_deg in (90, 180)")
+
+
+MODEL_KEYS = {"foot_r_mm", "reach_frac", "knee_max_deg", "stand_com_x_mm", "body_mass", "battery_mass", "pi_mass",
+              "upper_leg_g", "upper_leg_at", "lower_leg_g", "lower_leg_at", "servo_lag_ms", "servo_tau_ms"}
+
+
+def model_fixed(md: dict) -> tuple[int, int]:
+    """The body's integer forms of the IK limits: reach_frac x 256, and 2 cos(180 - knee_max_deg) in Q12."""
+    import math
+    return round(md["reach_frac"] * 256), round(2 * math.cos(math.radians(180 - md["knee_max_deg"])) * 4096)
 
 
 # ---------------------------------------------------------------------------
@@ -382,8 +426,9 @@ def gen_c(spec: dict) -> str:
     w(f"/* {HEADER_NOTE}")
     w(" *")
     w(" * Kilo body <-> mind protocol. C99 and C++ compatible; no Arduino, no")
-    w(" * malloc, no floats. Payload structs are packed and little-endian, so on a")
-    w(" * little-endian target a payload can be memcpy'd to/from its struct.")
+    w(" * malloc, no floats (but some KILO_MODEL_* #defines, for the mind). Payload")
+    w(" * structs are packed and little-endian, so on a little-endian target a")
+    w(" * payload can be memcpy'd to/from its struct.")
     w(" */")
     w("#ifndef KILO_PROTOCOL_H")
     w("#define KILO_PROTOCOL_H")
@@ -484,6 +529,10 @@ def gen_c(spec: dict) -> str:
         w(f"KILO_STATIC_ASSERT(sizeof(kilo_{lname}_t) == {lay['max']}, kilo_sa_{lname}_size);")
         for f in m["fields"]:
             w(f"KILO_STATIC_ASSERT(offsetof(kilo_{lname}_t, {c_ident(f['name'])}) == {lay['offsets'][f['name']]}, kilo_sa_{lname}_{f['name']});")
+        for f in m["fields"]:
+            if "range" in f:  # the field's valid raw values (the body refuses others BAD_ARG)
+                w(f"#define KILO_{m['name']}_{f['name'].upper()}_MIN ({f['range'][0]})")
+                w(f"#define KILO_{m['name']}_{f['name'].upper()}_MAX ({f['range'][1]})")
         w("")
     # helpers
     w("/* ---- Per-type helpers ---- */")
@@ -664,7 +713,7 @@ def gen_c_shared(spec: dict, w) -> None:
         return f"({v})" if v < 0 else str(v)
 
     g = spec["gait"]
-    w("/* ---- Shared defaults and limits (spec [gait], [[joints]], [balance], [head]) ---- */")
+    w("/* ---- Shared defaults and limits (spec [gait], [[joints]], [balance], [head], [battery], [model]) ---- */")
     w(f"#define KILO_GAIT_STANCE_H_256 {g['stance_h_256']} /* STANCE's body height, /256 of L1 + L2 */")
     w("/* Joint limits, whole degrees, by legacy joint id. */")
     for j in spec["joints"]:
@@ -686,6 +735,28 @@ def gen_c_shared(spec: dict, w) -> None:
     w(f"#define KILO_HEAD_SPEED_DPS {h['speed_dps']}")
     w(f"#define KILO_HEAD_MAX_DEG {h['max_deg']}")
     w(f"#define KILO_HEAD_NOT_HELD ((int16_t)({h['not_held'] + 1} - 1))")
+    bt = spec["battery"]
+    w("/* Battery, the mind's side (the body's trips are the BATT_* params): A2's rear-up and the card flash")
+    w("   refuse below these pack mV; the resting curve, pack mV -> percent, interpolated and clamped. */")
+    w(f"#define KILO_BATTERY_TRICK_MIN_MV {bt['trick_min_mv']}u")
+    w(f"#define KILO_BATTERY_FLASH_MIN_MV {bt['flash_min_mv']}u")
+    w(f"#define KILO_BATTERY_CURVE_LEN {len(bt['curve_mv'])}")
+    w("/* Initializer for a {mV, percent} [KILO_BATTERY_CURVE_LEN] table, mV ascending. */")
+    w("#define KILO_BATTERY_CURVE_INIT { "
+      + ", ".join(f"{{{v}, {p}}}" for v, p in zip(bt["curve_mv"], bt["curve_pct"])) + " }")
+    md = spec["model"]
+    w("/* The body model (spec [model]; the leg lengths are the LEG_* params' defaults): the mind's planner")
+    w("   (planner/model.h), a mass as a {grams, x, y, z} initializer. The only floats in this header. */")
+    for k, v in md.items():
+        if isinstance(v, list):
+            w(f"#define KILO_MODEL_{k.upper()}_INIT {{{', '.join(num(x) for x in v)}}}")
+        else:
+            w(f"#define KILO_MODEL_{k.upper()} {v!r}")
+    reach_256, knee_q12 = model_fixed(md)
+    w("/* The body's IK limits in integers: d <= REACH_256 / 256 (L1 + L2); d^2 >= L1^2 + L2^2 - L1 L2 KNEE_2COS_Q12")
+    w("   / 4096, the knee bend <= KNEE_MAX_DEG. */")
+    w(f"#define KILO_MODEL_REACH_256 {reach_256}")
+    w(f"#define KILO_MODEL_KNEE_2COS_Q12 {knee_q12}")
     w("")
 
 
@@ -785,6 +856,64 @@ def gen_c_host(spec: dict, w) -> None:
     w("    }")
     w("}")
     w("")
+
+
+# ---------------------------------------------------------------------------
+# The docs' params table (docs/architecture.md Appendix E)
+
+DOC_BEGIN = "<!-- generated by protocol/gen.py from spec.toml [[params]]: edit the spec, not this table -->"
+DOC_END = "<!-- end of the generated params table -->"
+
+
+def gen_doc_params(spec: dict, text: str) -> str:
+    """docs/architecture.md with the params table between DOC_BEGIN and DOC_END rewritten."""
+    a, b = text.find(DOC_BEGIN), text.find(DOC_END)
+    if a < 0 or b < a:
+        raise SpecError(f"{OUT_DOC}: the params table's markers are missing")
+    rows = ["| Id | Name | Default | Min..max | Unit | Meaning |", "|---|---|---|---|---|---|"]
+    for p in sorted(spec["params"], key=lambda p: p["id"]):
+        rows.append(f"| {p['id']} | `{p['name']}` | {p['default']} | {p['min']}..{p['max']} | {p['unit']} | "
+                    f"{p['brief']} |")
+    return text[:a] + DOC_BEGIN + "\n" + "\n".join(rows) + "\n" + text[b:]
+
+
+# ---------------------------------------------------------------------------
+# C names (the mind's only)
+
+def gen_names(spec: dict) -> str:
+    """kilo_names.h: the printable name of every message and enum value, for
+    the mind's log lines. A separate header that only the mind vendors: the
+    body has no flash for the strings."""
+    L = []
+    w = L.append
+    w(f"/* {HEADER_NOTE}")
+    w(" *")
+    w(" * Printable names of the spec's messages and enum values (as the spec writes")
+    w(" * them), for the mind's log lines; \"?\" for a value the spec does not name.")
+    w(" * Not for the body (protocol/vendor.py copies it to the mind only). */")
+    w("#ifndef KILO_NAMES_H")
+    w("#define KILO_NAMES_H")
+    w("")
+    w('#include "kilo_protocol.h"')
+    w("")
+
+    def fn(name: str, cases: list[tuple[str, str]]) -> None:
+        w(f"static inline const char *{name}(unsigned v)")
+        w("{")
+        w("    switch (v) {")
+        for c, s in cases:
+            w(f'    case {c}: return "{s}";')
+        w('    default: return "?";')
+        w("    }")
+        w("}")
+        w("")
+
+    fn("kilo_msg_name", [(f"KILO_MSG_{m['name']}", m["name"]) for m in spec["messages"]])
+    fn("kilo_host_msg_name", [(f"KILO_HOST_MSG_{m['name']}", m["name"]) for m in spec["host_messages"]])
+    for ename, vals in spec["enums"].items():
+        fn(f"kilo_{ename}_name", [(f"KILO_{ename.upper()}_{vn}", vn) for vn in vals])
+    w("#endif /* KILO_NAMES_H */")
+    return "\n".join(L) + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -1003,6 +1132,15 @@ def gen_py(spec: dict) -> str:
     w("MESSAGES: dict[int, type] = {")
     for m in spec["messages"]:
         w(f"    0x{m['id']:02X}: {camel(m['name'])},")
+    w("}")
+    w("")
+    w("")
+    w("# (message, field) -> the field's valid raw values, inclusive (the body refuses others BAD_ARG).")
+    w("FIELD_RANGES: dict[tuple[str, str], tuple[int, int]] = {")
+    for m in spec["messages"]:
+        for f in m["fields"]:
+            if "range" in f:
+                w(f"    ({m['name']!r}, {f['name']!r}): ({f['range'][0]}, {f['range'][1]}),")
     w("}")
     w("")
     w("")
@@ -1236,7 +1374,7 @@ def gen_py_shared(spec: dict, w) -> None:
     """Shared defaults and limits as plain data: the raw spec values (a derived
     value such as Kp = kp_q8 / 256 is computed by its one consumer)."""
     g = spec["gait"]
-    w("# ---- Shared defaults and limits (spec [gait], [[joints]], [balance], [head]) ----")
+    w("# ---- Shared defaults and limits (spec [gait], [[joints]], [balance], [head], [battery], [model]) ----")
     w(f"GAIT_STANCE_H_256 = {g['stance_h_256']}")
     w("")
     w("")
@@ -1261,6 +1399,17 @@ def gen_py_shared(spec: dict, w) -> None:
     w(f"HEAD_SPEED_DPS = {h['speed_dps']}")
     w(f"HEAD_MAX_DEG = {h['max_deg']}")
     w(f"HEAD_NOT_HELD = {h['not_held']}")
+    bt = spec["battery"]
+    w("# Battery, the mind's side (the body's trips are the BATT_* params): A2's rear-up and the card flash")
+    w("# refuse below these pack mV; the resting curve, (pack mV, percent) ascending, interpolated and clamped.")
+    w(f"BATTERY_TRICK_MIN_MV = {bt['trick_min_mv']}")
+    w(f"BATTERY_FLASH_MIN_MV = {bt['flash_min_mv']}")
+    w("BATTERY_CURVE: tuple[tuple[int, int], ...] = ("
+      + ", ".join(f"({v}, {p})" for v, p in zip(bt["curve_mv"], bt["curve_pct"])) + ")")
+    w("# The body model (spec [model]; the leg lengths are the LEG_* params' defaults): kilo.planner.model.BodyModel;")
+    w("# a mass is (grams, x, y, z).")
+    for k, v in spec["model"].items():
+        w(f"MODEL_{k.upper()} = {tuple(v)!r}" if isinstance(v, list) else f"MODEL_{k.upper()} = {v!r}")
     w("")
     w("")
 
@@ -1308,7 +1457,9 @@ def render() -> dict[Path, str]:
     h = gen_c(spec)
     py = gen_py(spec)
     frames, cobs, host = gen_vectors(py)
-    return {OUT_H: h, OUT_PY: py, OUT_FRAMES: frames, OUT_COBS: cobs, OUT_HOST: host}
+    doc = gen_doc_params(spec, OUT_DOC.read_text())
+    return {OUT_H: h, OUT_NAMES: gen_names(spec), OUT_PY: py, OUT_FRAMES: frames, OUT_COBS: cobs, OUT_HOST: host,
+            OUT_DOC: doc}
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -27,12 +27,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from kilo.protocol import kilo_protocol as P
+
 from .selector import Behaviour, SafetyBranch, UtilitySelector
 from .tree import (RUNNING, SUCCESS, Action, Chance, Condition, Context, Cooldown,
                    ForceSuccess, Node, Repeat, Sequence, Wait)
 
 LOW_BATTERY_HYSTERESIS_PCT = 5.0
-CRITICAL_LEVEL = 3  # protocol BatteryLevel.CRITICAL (EVENT LOW_BATTERY arg)
+CRITICAL_LEVEL = int(P.BatteryLevel.CRITICAL)  # EVENT LOW_BATTERY arg
 SAD_BEEP = [(64, 120), (60, 120), (55, 300)]
 
 

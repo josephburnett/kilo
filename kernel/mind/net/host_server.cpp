@@ -1,4 +1,5 @@
 #include "net/host_server.h"
+#include "proto/kilo_names.h"
 #include "util/fmt.h"
 #include "util/log.h"
 #include "util/mem.h"
@@ -10,32 +11,6 @@ namespace {
 constexpr uint32_t kKeepaliveUs = KILO_HOST_KEEPALIVE_TIMEOUT_MS * 1000u;
 constexpr uint32_t kBodyLostUs = KILO_BODY_LOST_MS * 1000u;
 constexpr uint32_t kResultTextMax = KILO_HOST_RESULT_MAX_LEN - 2;
-
-const char* name_of(uint8_t type) {
-  switch (type) {
-    case KILO_HOST_MSG_STATUS_REQ: return "STATUS_REQ";
-    case KILO_HOST_MSG_GUARD: return "GUARD";
-    case KILO_HOST_MSG_SOUND: return "SOUND";
-    case KILO_HOST_MSG_SOUND_LIST: return "SOUND_LIST";
-    case KILO_HOST_MSG_CAL: return "CAL";
-    case KILO_HOST_MSG_CONTROL: return "CONTROL";
-    case KILO_HOST_MSG_POSTURE: return "POSTURE";
-    case KILO_HOST_MSG_PARAM_GET: return "PARAM_GET";
-    case KILO_HOST_MSG_PARAM_SET: return "PARAM_SET";
-    case KILO_HOST_MSG_REBOOT: return "REBOOT";
-    case KILO_HOST_MSG_TELEM_SUB: return "TELEM_SUB";
-    case KILO_HOST_MSG_LOG_SUB: return "LOG_SUB";
-    case KILO_HOST_MSG_BRIDGE_OPEN: return "BRIDGE_OPEN";
-    case KILO_HOST_MSG_BRIDGE_CLOSE: return "BRIDGE_CLOSE";
-    case KILO_HOST_MSG_FLASH_BEGIN: return "FLASH_BEGIN";
-    case KILO_HOST_MSG_FLASH_COMMIT: return "FLASH_COMMIT";
-    case KILO_HOST_MSG_UPDATE_BEGIN: return "UPDATE_BEGIN";
-    case KILO_HOST_MSG_UPDATE_COMMIT: return "UPDATE_COMMIT";
-    case KILO_HOST_MSG_WALK_LIST: return "WALK_LIST";
-    case KILO_HOST_MSG_WALK_FETCH: return "WALK_FETCH";
-    default: return "?";
-  }
-}
 
 }  // namespace
 
@@ -412,7 +387,7 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
     case KILO_HOST_MSG_SOUND_LIST:
       return sound_list(i, f.seq, p[0]);
     default:
-      return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UNSUPPORTED, name_of(f.type));
+      return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UNSUPPORTED, kilo_host_msg_name(f.type));
   }
 }
 

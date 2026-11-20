@@ -698,8 +698,8 @@ echo "   card route: flashed at start, the same build left alone, a failure reco
 echo "== P3: generated tables up to date (tricks, personality)"
 "$PYTHON" "$REPO/kernel/mind/tricks/gen_library.py" --check  # (each generator imports this checkout's mind/)
 "$PYTHON" "$REPO/kernel/mind/behaviour/gen_personality.py" --check
-echo "== P3: golden vectors up to date with the Python mind (perception, behaviour)"
-for v in perception behaviour; do
+echo "== P3: golden vectors up to date with the Python mind (perception, behaviour, planner)"
+for v in perception behaviour planner; do  # (the planner's takes about 1 s)
     "$PYTHON" "$HERE/tests/gen_${v}_vectors.py" | cmp -s - "$HERE/tests/${v}_vectors.txt" ||
         { echo "FAILED: stale; run: $PYTHON kernel/host/tests/gen_${v}_vectors.py > kernel/host/tests/${v}_vectors.txt"; exit 1; }
 done

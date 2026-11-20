@@ -12,12 +12,13 @@
 // - With every support foot on flat ground,
 //     z_i + r = H - a X_i - b Y_i,  a = tan(pitch) / cos(roll),  b = tan(roll).
 //
-// The masses and the servo lag are estimates until Kilo is weighed
-// (docs/walking-and-balance.md §9, §10): change them in model.py and here.
+// The numbers are protocol/spec.toml's ([model] and the LEG_* params), from
+// the generated header, as model.py's: change them there and regenerate.
 #ifndef KILO_MIND_PLANNER_MODEL_H
 #define KILO_MIND_PLANNER_MODEL_H
 #include <stdint.h>
 #include "planner/fmath.h"
+#include "proto/kilo_protocol.h"
 
 namespace kilo {
 namespace planner {
@@ -43,29 +44,29 @@ struct Attitude {
 };
 
 struct BodyModel {
-  // geometry: measured (params LEG_L1_MM, LEG_L2_MM, LEG_LB_MM, LEG_W_MM)
-  real l1_mm = 45;
-  real l2_mm = 50;
-  real foot_r_mm = 6;
-  real length_mm = 123;  // front to back shoulder axle
-  real track_mm = 65;    // left to right foot centre
-  // masses: measured 2026-11-14 with the Pi on the NyBoard's socket (358 g,
-  // the centre of gravity 7.5 mm ahead of the origin and 3 mm below the
-  // axles at STAND); the split is a fit, see mind/kilo/planner/model.py
-  Mass body = {183, 17, 0, 8};
-  Mass battery = {58, 0, 0, -16};
-  Mass pi = {45, -10, 0, 20};
-  real upper_leg_g = 14;
-  real upper_leg_at = (real)0.8;
-  real lower_leg_g = 4;
-  real lower_leg_at = (real)0.5;
-  // servos: fitted to the floor recordings of 2026-11-15 (model.py): a dead
-  // time, then a first-order response
-  real servo_lag_ms = 50;
-  real servo_tau_ms = 70;
-  real slew_deg_per_tick = 10;
-  real reach_frac = (real)0.95;
-  real knee_max_deg = 150;
+  // The defaults are protocol/spec.toml's (the LEG_* and SLEW_MAX_A16 params,
+  // [model]), as model.py's: geometry, measured
+  real l1_mm = KILO_PARAM_LEG_L1_MM_DEFAULT;
+  real l2_mm = KILO_PARAM_LEG_L2_MM_DEFAULT;
+  real foot_r_mm = KILO_MODEL_FOOT_R_MM;
+  real length_mm = KILO_PARAM_LEG_LB_MM_DEFAULT;  // front to back shoulder axle
+  real track_mm = KILO_PARAM_LEG_W_MM_DEFAULT;    // left to right foot centre
+  // masses: a fit to the centre of gravity measured 2026-11-14 at STAND
+  real stand_com_x_mm = (real)KILO_MODEL_STAND_COM_X_MM;  // ahead of the origin
+  Mass body = KILO_MODEL_BODY_MASS_INIT;
+  Mass battery = KILO_MODEL_BATTERY_MASS_INIT;
+  Mass pi = KILO_MODEL_PI_MASS_INIT;
+  real upper_leg_g = KILO_MODEL_UPPER_LEG_G;
+  real upper_leg_at = (real)KILO_MODEL_UPPER_LEG_AT;
+  real lower_leg_g = KILO_MODEL_LOWER_LEG_G;
+  real lower_leg_at = (real)KILO_MODEL_LOWER_LEG_AT;
+  // servos: fitted to the floor recordings of 2026-11-15: a dead time, then a
+  // first-order response
+  real servo_lag_ms = KILO_MODEL_SERVO_LAG_MS;
+  real servo_tau_ms = KILO_MODEL_SERVO_TAU_MS;
+  real slew_deg_per_tick = (real)KILO_PARAM_SLEW_MAX_A16_DEFAULT / 16;
+  real reach_frac = (real)KILO_MODEL_REACH_FRAC;
+  real knee_max_deg = KILO_MODEL_KNEE_MAX_DEG;
 
   real total_g() const;
   V2 hip(int leg) const;  // shoulder axle (x, y) in the body frame

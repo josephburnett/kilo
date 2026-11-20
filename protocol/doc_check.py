@@ -2,10 +2,14 @@
 """Check the docs' copies of the spec's shared defaults and limits.
 
 The prose stays hand-written; this only finds the numbers in it and fails
-when they drift from protocol/spec.toml ([[joints]], [balance], [head]):
+when they drift from protocol/spec.toml ([[joints]], [balance], [head],
+[[params]]):
 
-  docs/architecture.md  §3b joint table (limits), §3f balance defaults and limit
+  docs/architecture.md  §3b joint table (limits), §3f balance defaults and limit,
+                        §3g battery table (the BATT_* params) and watchdog table (WD_*)
   mind/README.md        the default Kp and look() speed
+
+(The Appendix E params table is not checked here: gen.py writes it.)
 
 Usage: python3 protocol/doc_check.py   (exit 1 on drift; protocol/test.sh runs it)
 """
@@ -90,6 +94,27 @@ def check_arch(c: Checker, spec: dict, text: str) -> None:
     m = c.find("§3f limit", r"dead band and clamp ≤ (\d+)°", f3f)
     if m:
         c.eq("§3f dead band / clamp limit", int(m[1]), b["limit_deg"])
+
+    # §3g battery table (volts) and link watchdog table (seconds): the BATT_* and WD_* param defaults.
+    p = {q["name"]: q["default"] for q in spec["params"]}
+    s3g = section(text, "### 3g.")
+    for level, trip, clear in (("WARN", "BATT_WARN_MV", "BATT_WARN_CLEAR_MV"), ("LOW", "BATT_LOW_MV", "BATT_LOW_CLEAR_MV")):
+        m = c.find(f"§3g battery {level}", rf"^\| {level} \| < ([\d.]+) V [^|]*\| > ([\d.]+) V ", s3g)
+        if m:
+            c.eq(f"§3g battery {level} trip ({trip})", round(float(m[1]) * 1000), p[trip])
+            c.eq(f"§3g battery {level} clear ({clear})", round(float(m[2]) * 1000), p[clear])
+    m = c.find("§3g battery CRITICAL", r"^\| CRITICAL \| < ([\d.]+) V ", s3g)
+    if m:
+        c.eq("§3g battery CRITICAL trip (BATT_CRIT_MV)", round(float(m[1]) * 1000), p["BATT_CRIT_MV"])
+    m = c.find("§3g watchdog stage 1", r"^\| ≥ ([\d.]+) s \(`WD_STOP_MS`\)", s3g)
+    if m:
+        c.eq("§3g watchdog stage 1 (WD_STOP_MS)", round(float(m[1]) * 1000), p["WD_STOP_MS"])
+    m = c.find("§3g watchdog stage 2", r"^\| ≥ ([\d.]+) s \(`WD_REST_MS`\)", s3g)
+    if m:
+        c.eq("§3g watchdog stage 2 (WD_REST_MS)", round(float(m[1]) * 1000), p["WD_REST_MS"])
+    m = c.find("§3g watchdog LIMP", r"^\| REST \+ (\d+) s \|", s3g)
+    if m:
+        c.eq("§3g watchdog LIMP (WD_LIMP_S)", int(m[1]), p["WD_LIMP_S"])
 
 
 def check_readme(c: Checker, spec: dict, text: str) -> None:
