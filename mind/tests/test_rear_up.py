@@ -294,8 +294,13 @@ def test_trick_is_built_and_up_to_date(st):
     names = t.source["keyframes"]
     assert [names[g.frame] for g in t.guards][:5] == ["gather", "low", "onto", "paws", "up"]
     assert all(t.frames[g.frame].hold >= 20 for g in t.guards) and t.roll_max == RU.PLAY_ROLL_MAX
-    top = max(range(len(t.frames)), key=lambda i: t.frames[i].hold)
+    top = RU.top_frame(t)
     assert top == st.top and t.frames[top].hold == RU.HOLD and names[-1] == "sit"
+    # the lower stages' tops hold STEP_HOLD: the remote's A2 goes on from there (or he comes down)
+    lower = [s.top for s in RU.STAGES if s.number < st.number]
+    assert [i for i, f in enumerate(t.frames) if f.hold == RU.STEP_HOLD] == lower
+    assert [names[i] for i in lower] == ["up", "mid"][:len(lower)]
+    assert all(any(g.frame == i for g in t.guards) for i in lower)  # each one guarded
 
 
 def test_each_stage_goes_the_same_way_up_as_the_one_below():
@@ -405,7 +410,7 @@ def joints_out(out: list[int]) -> dict:
                                              "lb_knee"), out)}
 
 
-def play_with_model_attitude(core, client, until, alive=True, max_ticks=1500):
+def play_with_model_attitude(core, client, until, alive=True, max_ticks=2000):
     """Tick the core, feeding it the attitude the 3-D model (the design's
     calibration) gives for its joint outputs, as TELEMETRY (nose down +,
     right side up +). Returns the nose-up pitches fed."""
@@ -457,7 +462,7 @@ def test_rear_up_on_the_body_core(rig, name):
         ends.append(tick)
     seen = {}
     k = 0
-    while client2.trick_done_since(n, tid) is None and k < 1200:
+    while client2.trick_done_since(n, tid) is None and k < 2000:
         core2.step(1)
         k += 1
         out = core2.dump()["out"]
@@ -478,8 +483,8 @@ def test_rear_up_stop_is_a_slow_straight_crossfade_to_sit(rig, name):
     stand(core, client)
     t = library.load(name)
     tid, n = client.start_trick(t)
-    hold_i = max(range(len(t.frames)), key=lambda i: t.frames[i].hold)
-    top = sum(f.dur for f in t.frames[:hold_i + 1]) + 20  # into the hold
+    hold_i = RU.top_frame(t)
+    top = sum(f.dur + f.hold for f in t.frames[:hold_i]) + t.frames[hold_i].dur + 20  # into the top's hold
     play_with_model_attitude(core, client, lambda: False, max_ticks=top)
     start = core.dump()["out"]
     client.stop_trick()  # None: the trick's own stop_ticks
@@ -510,8 +515,9 @@ def test_rear_up_leaves_the_fall_detector_armed(rig, name):
     stand(core, client)
     t = library.load(name)
     tid, n = client.start_trick(t)
-    hold_i = max(range(len(t.frames)), key=lambda i: t.frames[i].hold)
-    play_with_model_attitude(core, client, lambda: False, max_ticks=sum(f.dur for f in t.frames[:hold_i + 1]) + 10)
+    hold_i = RU.top_frame(t)
+    play_with_model_attitude(core, client, lambda: False,
+                             max_ticks=sum(f.dur + f.hold for f in t.frames[:hold_i]) + t.frames[hold_i].dur + 10)
     assert not events(link, "FELL")
     core.set_attitude(pitch_deg=-85)  # tipping over backwards
     assert core.run_until(lambda: client.trick_done_since(n, tid) is not None, 1) is not None
