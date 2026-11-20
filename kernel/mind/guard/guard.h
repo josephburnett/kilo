@@ -1,42 +1,58 @@
 // guard: the distance guard (docs/distance-guard.md). Kilo reads the
-// ultrasonic range on his head; when a forward walk brings him too close to
-// something he stops and sits, and when he is very close he backs off a
-// little first. The eyes show the zone: green clear, blue too close, red
-// very close.
+// ultrasonic range on his head; he reacts to what comes close in every state
+// but light sleep and a laptop holding him. The eyes show the zone: green
+// clear, blue too close, red very close.
 //
 // 1. The filter (DistanceFilter). The body measures every 80 ms (12.5 Hz,
-//    TELEMETRY flag DIST_FRESH; measured in the recordings of 2026-11-17).
-//    Only fresh readings count. No echo (0), a reading beyond kMaxRangeMm,
-//    or one taken with the beam tilted down at the floor (the head held
-//    tilted down plus the body's nose-down pitch over kFloorTiltDeg, or
-//    Kilo lying in REST or LIMP with the head down) is not a reading. The filtered range is the median of the readings of the
-//    last kWindowS (at most 3), and needs two of them: one short echo (a
-//    hand waved past, a reflection) never stops Kilo. Without a reading
-//    for kStaleS there is no range: the zone is green (nothing seen).
+//    TELEMETRY flag DIST_FRESH). Only fresh readings count. No echo (0) or a
+//    reading beyond kMaxRangeMm is not a reading; a reading at or beyond
+//    where the beam meets the floor is the floor, not a reading: with the
+//    beam tilted down more than kFloorTiltDeg (the head held down plus the
+//    body's nose-down pitch) the floor is kSensorHeightMm / sin(tilt) away,
+//    and readings from kFloorShare of that on are dropped (a hand closer
+//    than the floor still counts); lying in REST or LIMP every reading is
+//    the floor. The filtered range is the median of the readings of the last
+//    kWindowS (at most 3), and needs two of them: one short echo never acts.
+//    Without a reading for kStaleS there is no range (green), except right
+//    after something very close (under kRedMm): then no echo means
+//    closer than the sensor measures, and the range holds for kCloseHoldS.
 // 2. Zones with hysteresis. RED below kRedMm (left above kRedExitMm); BLUE
-//    below blue_mm(v) (left above it + kBlueExitMm), where v is the forward
-//    walk's speed: the gap left after the stop (kStopGapMm), the way
-//    travelled while the reading comes in and the servos follow
-//    (v x kReactS), and the planned stop's own way (v^2 / 2a, a by gait,
-//    from the planner: stop_way_mm()). Never below kBlueMinMm (also the
-//    threshold standing still, for the eyes).
-// 3. Actions, only for a forward walk the mind drives (the remote's or the
-//    guard's own; not with a laptop holding control, during a trick, or
-//    with Kilo picked up), and only with the guard on:
-//    BLUE: the planned stop (Walker::stop), then sit and start the
-//    behaviour runner's sitting variant (GuardHost::sit_and_behave).
-//    RED: back off: the walk turns backward at kBackSpeedMmS for kBackS
-//    (about kBackMm; no rear sensor, so short and slow), then the planned
-//    stop, then as BLUE. RED during BLUE's stop backs off too.
-//    Then HOLDING: forward keys are refused (refuses()); turning, backward
-//    and the posture keys work. It releases after kClearS of green.
-// The eyes show the zone; while the zone is green and Kilo is tired (the
-// battery at rest below the personality's low mark, or the body's LOW_BATT:
-// the Mind decides, set_tired()), they are a dim orange instead. Blue and
-// red always win.
-// Every zone change and action is a log line and a MARK record in the
-// flight recorder ("guard zone=blue mm=287 blue=316 red=150 v=180 ...",
-// "guard stop ..."), and counted (metrics line "guard:").
+//    below blue_mm(v) (left above it + kBlueExitMm), v the forward walk's
+//    speed: the gap left after the stop (kStopGapMm), the way travelled
+//    while the reading comes in and the quick stop starts (v x kReactS),
+//    and the quick stop's own way (v^2 / 2a, a by gait: stop_way_mm()).
+//    Never below kBlueMinMm (also the threshold when not walking forward).
+// 3. What he does (poll()), with the guard on and nothing in the way
+//    (GuardHost::not_now(): a laptop holds the body, a trick, picked up,
+//    light sleep):
+//    - walking forward (any gait, also steering): BLUE: the quick stop
+//      (Walker::halt), then sit and the behaviour runner's sitting variant
+//      (GuardHost::sit_and_behave). RED: back off (the walk turns backward
+//      at kBackSpeedMmS for kBackS, about kBackMm; no rear sensor, so short
+//      and slow), the quick stop, then as BLUE; the crawl only stops (its
+//      strides turn round at 0.5 mm a tick: 4 s before it would go back);
+//    - turning in place: RED only (a hand in his face): the quick stop, then
+//      sit (a wall seen while turning is not a reason to stop turning);
+//    - walking backward: nothing (he is going away; the eyes show it);
+//    - standing still: something enters BLUE: he looks at it and sits; RED:
+//      a short back-off (as above) and sits;
+//    - sitting: BLUE: he looks at it; RED: he leans back (GuardHost::flinch);
+//    - lying (REST, after A7): the eyes only.
+//    Every RED reaction hisses (hisses()). Then HOLDING: forward keys are
+//    refused (refuses()); turning, backward and the posture keys work. It
+//    releases after kClearS of green.
+//    The release rule: at most kMaxBacks RED reactions (backing off,
+//    leaning back, a stopped turn) until the zone has been green for
+//    kClearS; after that only the eyes. A hand reaching for him or the floor
+//    seen with the head down never backs him off over and over.
+// The eyes show the zone; while the zone is green and Kilo is tired they
+// are a dim orange instead (the Mind decides: set_tired()).
+// The log and the flight recorder: every zone change and action is a line
+// and a MARK ("guard zone=blue mm=287 ...", "guard action=stopping ..."),
+// and every change of what the guard makes of it (the state Kilo is in and
+// why it acts or not) one compact line: "guard decides: zone=red mm=89
+// raw=91 seen=reading state=sitting: lean back" or "... state=lying: eyes
+// only (lying: the floor)"; the counters in the metrics line "guard:".
 #ifndef KILO_MIND_GUARD_GUARD_H
 #define KILO_MIND_GUARD_GUARD_H
 #include <stdint.h>
@@ -53,14 +69,18 @@ constexpr bool kDefaultOn = true;         // the kernel's default (kilo guard on
 constexpr double kMaxRangeMm = 2500;      // beyond: not a reading (the recordings: echoes to 3.4 m, outliers)
 constexpr double kWindowS = 0.30;         // readings this recent make the median (3 at 12.5 Hz)
 constexpr double kStaleS = 0.40;          // no reading for this long: no range (green)
-constexpr double kFloorTiltDeg = 12;      // beam tilted down more than this: the floor, not a reading
+constexpr double kFloorTiltDeg = 12;      // beam tilted down more than this: the floor is in view
+constexpr double kSensorHeightMm = 80;    // the sensor above the floor, standing (a little low: the floor nearer)
+constexpr double kFloorShare = 0.75;      // ... readings from this share of the floor's distance on are the floor
+constexpr double kCloseHoldS = 1.0;       // no echo right after something very close: the range holds this long
 constexpr double kStopGapMm = 100;        // left between the sensor and the obstacle after the stop
-constexpr double kReactS = 0.45;          // reading (80 ms + the median's 80 ms), link, FEET queued ahead (100 ms), servo lag (120 ms)
-constexpr double kDecelWalkMmS2 = 75;     // the planned stop's deceleration, by gait (planner, 2026-11-17:
-constexpr double kDecelTrotMmS2 = 120;    //   walk 80-97 mm/s stops in 39-57 mm, trot 144-184 in 79-127 mm,
-constexpr double kDecelCrawlMmS2 = 8;     //   crawl 22-27 in 23-30 mm), rounded down for a margin. Since the
-                                          //   1.5 mm/tick stride slew the walk and trot stop in a third of
-                                          //   that (trot 230 in 66 mm; test_guard prints it): kept, the safe side
+constexpr double kReactS = 0.40;          // reading (80 ms + the median's 80 ms), link, the re-planned FEET
+                                          //   (40 ms), the servos (120 ms), and a margin
+constexpr double kDecelWalkMmS2 = 400;    // the quick stop's deceleration, by gait: its way (the support feet's
+constexpr double kDecelTrotMmS2 = 700;    //   travel from the halt; test_guard prints it: walk 97 mm/s 5 mm, trot
+                                          //   230 13 mm) at least doubled: the floor may need the room
+constexpr double kStopSlackMm = 5;        // ... plus this (the swing that lands, at any speed)
+constexpr double kCrawlStopMm = 20;       // the crawl's: its lean (up to 18 mm fore and aft) as the legs square up
 constexpr double kBlueMinMm = 200;        // BLUE never below this (and standing still)
 constexpr double kBlueExitMm = 80;        // BLUE is left this far above its threshold
 constexpr double kRedMm = 150;            // RED: back off
@@ -69,6 +89,7 @@ constexpr double kBackSpeedMmS = 40;      // backing off: slow ...
 constexpr double kBackS = 2.0;            // ... and short (the reversal and about kBackMm)
 constexpr double kBackMm = 50;
 constexpr double kClearS = 1.0;           // green this long releases the hold
+constexpr int kMaxBacks = 2;              // RED reactions until green for kClearS; then the eyes only
 // The eyes (SET_EYES all six LEDs; the legacy firmware's dim 0x22 levels, a little brighter).
 constexpr uint8_t kEyeLevel = 0x30;
 // Orange (low battery): red at kEyeLevel, green a third of it, no blue.
@@ -91,23 +112,34 @@ const char* zone_name(Zone z);
 const char* eyes_name(Eyes e);
 const char* action_name(Action a);
 
-// The planned stop's way at v mm/s in this gait (v^2 / 2a).
+// The quick stop's way at v mm/s in this gait (kStopSlackMm + v^2 / 2a; the crawl kCrawlStopMm).
 double stop_way_mm(const char* gait, double v_mm_s);
 // BLUE's threshold at v (0: not walking forward).
 double blue_mm(const char* gait, double v_mm_s);
 
+// Where the beam meets the floor (1. above): 0 when it does not (tilted down
+// kFloorTiltDeg or less); readings from the return on are the floor.
+double floor_from_mm(double tilt_down_deg);
+
+// What the last fresh reading was.
+enum class Seen : uint8_t { None, Reading, NoEcho, TooFar, Floor };
+const char* seen_name(Seen s);
+
 // Step 1 above.
 class DistanceFilter {
  public:
-  // One TELEMETRY: its range, whether it is a new reading, and whether the
-  // beam pointed at the floor then. t in seconds.
-  void feed(double t, uint16_t raw_mm, bool fresh, bool floor);
+  // One TELEMETRY: its range, whether it is a new reading, and from where on
+  // a reading is the floor (0: no floor in view; < 0: every reading). t in
+  // seconds.
+  void feed(double t, uint16_t raw_mm, bool fresh, double floor_mm);
   bool has() const { return has_; }
   double mm() const { return mm_; }
   uint16_t raw() const { return raw_; }
   uint32_t readings() const { return readings_; }
   uint32_t dropouts() const { return dropouts_; }
   uint32_t floor_ignored() const { return floor_; }
+  Seen last() const { return last_; }
+  bool close_hold() const { return hold_; }  // no echo after something very close: holding the range
 
  private:
   struct Pt {
@@ -119,19 +151,32 @@ class DistanceFilter {
   double mm_ = 0;
   uint16_t raw_ = 0;
   uint32_t readings_ = 0, dropouts_ = 0, floor_ = 0;
+  Seen last_ = Seen::None;
+  bool hold_ = false;
+  double hold_until_ = 0;
 };
 
 // Step 2: the zone for a filtered range (has false: none) at thresholds blue, red.
 Zone next_zone(Zone now, bool has, double mm, double blue, double red);
+
+// Kilo, when the walker is idle (GuardHost::still()).
+enum class Still : uint8_t { None, Standing, Sitting, Lying };
+const char* still_name(Still s);
 
 // What the guard asks of the Mind.
 class GuardHost {
  public:
   // Sit and start the behaviour runner's sitting variant.
   virtual void sit_and_behave() {}
-  // A forward walk the guard may act on: the Mind's (remote) walk, no
-  // laptop in control, no trick, not picked up.
-  virtual bool may_act() { return true; }
+  // Why the guard must not act now (a laptop holds the body, a trick plays,
+  // picked up, light sleep), or null.
+  virtual const char* not_now() { return nullptr; }
+  // How Kilo is when the walker is idle (None: between postures, moving).
+  virtual Still still() { return Still::None; }
+  // BLUE while still: look straight at it (the head ahead).
+  virtual void notice() {}
+  // RED while sitting: lean back. False if it could not.
+  virtual bool flinch() { return false; }
   // A MARK line into the flight recorder.
   virtual void mark(const char* /*line*/) {}
 
@@ -180,9 +225,19 @@ class DistanceGuard {
   uint32_t refused() const { return refused_; }
   uint32_t stops() const { return stops_; }
   uint32_t pullbacks() const { return pullbacks_; }
+  uint32_t hisses() const { return hisses_; }  // RED reactions (the Mind hisses once for each)
+  uint32_t reactions() const { return reactions_; }  // reactions while still or turning (looks, sits, leans back)
+  int backs() const { return backs_; }  // RED reactions since the last release (kMaxBacks)
+  const char* decision() const { return decided_; }  // the last "guard decides" line's state and reason
 
  private:
+  enum class Walk : uint8_t { None, Forward, Turn, Back, Other, Stopping };
+  Walk walk_kind(double* v, const char** gait) const;
   bool forward_walk(double* v, const char** gait) const;
+  void quick_stop(uint64_t now, const char* why);
+  void back_off(uint64_t now, const char* why);
+  bool react_still(uint64_t now, Still s);
+  void decide(const char* state, const char* reason);
   void set_action(Action a, const char* why);
   void note(const char* what);
   void eyes_step();
@@ -208,6 +263,12 @@ class DistanceGuard {
   bool tired_ = false;
   bool eyes_sent_ = false;
   uint32_t zone_changes_ = 0, stops_ = 0, pullbacks_ = 0, refused_ = 0, releases_ = 0;
+  uint32_t hisses_ = 0, reactions_ = 0;
+  int backs_ = 0;
+  bool blue_new_ = false, red_new_ = false;  // the zone entered BLUE (from green) or RED: not yet reacted to
+  char decided_[80] = {};  // the last decision line's state and reason
+  bool lying_ = false;
+  double floor_mm_ = 0;
   double min_mm_ = 0;  // the closest filtered range while walking forward
   bool has_min_ = false;
 };

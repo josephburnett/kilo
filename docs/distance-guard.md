@@ -2,29 +2,54 @@
 
 Kilo has an ultrasonic range finder in his head: the two silver cans are
 the eyes, and the module has six small RGB lights (WS2812) around them.
-The distance guard uses the range so that Kilo does not walk into a wall,
-and the eyes show what it sees:
-
-| Eyes | Zone | What Kilo does while walking forward |
-|---|---|---|
-| green | clear (or nothing seen) | walks on |
-| blue | too close | stops (the normal, planned stop), sits, and starts the A5 behaviour in its sitting form |
-| red | very close | backs off a short way (about 4-5 cm, slowly), then stops and sits as for blue |
-| dim orange | clear, but the battery is low ("Low battery: orange" below) | walks on; blue and red still show over it |
-
-Only walking **forward** sets the guard off. Walking backward, turning on the
-spot, a trick (the rear-up), being picked up, and a laptop holding the body
-do not. The eyes show the zone at all times, walking or not.
+The distance guard uses the range so that Kilo does not walk into a wall
+and reacts to a hand in front of his face, and the eyes show what it sees:
+green clear (or nothing seen), blue too close, red very close, dim orange
+clear but the battery is low ("Low battery: orange" below).
 
 The code is `kernel/mind/guard/guard.h` (the thresholds are all at its top)
 and `guard.cpp`; the mind wires it in (`kernel/mind/mind.cpp`). The Python
 daemon (`kilo run --remote`) does not have the guard: it is in the C++ mind
 that runs on Kilo.
 
+## What he does
+
+Since 2026-11-19 he reacts in every state but light sleep and a laptop
+holding him (the owner: "he should always react, unless sleeping"):
+
+| Kilo is | Blue (too close) | Red (very close) |
+|---|---|---|
+| walking forward, any gait, also steering | the quick stop (below), then he sits and starts the A5 behaviour in its sitting form | backs off a short way (4-8 cm, slowly), the quick stop, sits; hisses. In the crawl he only stops and sits (the crawl takes 4 s to turn round) |
+| turning in place (A6, C6) | nothing: a wall seen as he turns is no reason to stop turning | the quick stop, then he sits; hisses |
+| walking backward | nothing: he is going away from it | nothing (the eyes go red) |
+| standing still | he looks at it (the head straight ahead) and sits | backs off a short way and sits; hisses |
+| sitting | he looks at it | he leans back (shoulders and knees back, the head pulled up, the tail up, about 2 s) and hisses |
+| lying (A7, REST) | nothing: lying, the sensor sees the floor under his nose | nothing |
+| in light sleep, or a laptop holds him, or a trick (the rear-up) plays, or he is picked up | nothing | nothing |
+
+"Something comes close" means the zone **changes** to blue or red: standing
+next to a wall that was already there does nothing; a hand put in front of
+him does. While walking forward the zone itself counts: he stops at blue
+whenever he walks into it.
+
+How fast: in the host test (`kernel/host/tests/test_guard.cpp`, a hand put
+in front of him at 180 or 100 mm) the guard acts 0.10 to 0.14 s after the
+hand appears (two readings, 80 ms apart, must agree), at every gait. The
+quick stop then has the trot stopped about 0.15 s later; he sits about 1 s
+after the hand appeared (the walk and the trot) or 3 s (the crawl, which
+squares its legs up slowly); after a back-off about 3 s.
+
+### The quick stop
+
+`docs/walking-and-balance.md` §14: the feet in the air are put down where
+they are, the strides go to zero in 120 ms so the body stops, all four feet
+stay down for 200 ms, then the legs step under the shoulders. The same stop
+is B6's, C7's and the other remote keys'.
+
 ## While the guard holds
 
-After a stop the guard **holds** until the way is clear again (green for
-1 s). While it holds:
+After any reaction the guard **holds** until the way is clear again (green
+for 1 s). While it holds:
 
 - forward keys are refused: A4, B4, C4 (each starts or turns into a forward
   walk), B7 when it would go forward (also out of a turn in place: that is
@@ -36,110 +61,107 @@ After a stop the guard **holds** until the way is clear again (green for
   posture keys (B6 stand, A7 sleep, C5) work as always. A turn or backing
   key also ends the sitting behaviour the guard started, so Kilo can be
   steered away;
-- C7 (freeze) works as always.
+- C7 (freeze) works as always;
+- he still reacts: a hand that comes very close while he sits after a stop
+  makes him lean back.
 
 A key that the guard lets through while it is stopping or backing takes
 over from it: Kilo does what the key says, and the guard keeps holding. If
 that leaves a forward walk going (B5 from +5 only slows it to +4), the
 guard stops it again.
 
-## Lying down and light sleep
+**The release rule.** He backs off, leans back or stops a turn at most
+**twice** for one thing in front of him; after that only the eyes show it,
+until the zone has been green for a second. So a hand reaching for him, or
+a hand going back and forth, never makes him back away over and over; the
+log says `eyes only (backed off twice: clear for 1 s first)`.
+
+## The floor, lying down and light sleep
+
+The beam points a little down when the head is held tilted down or the
+body leans nose down. Then the floor is in view: at a tilt of d degrees
+below level it is about 80 mm / sin d away (the sensor is about 80 mm
+above the floor when he stands; at 25 degrees that is 190 mm). The guard
+counts a reading from three quarters of that distance on as the floor and
+ignores it, and everything nearer as real: a hand in front of a lowered
+head still counts. Up to 12 degrees down the floor is not in view.
 
 After A7 Kilo lies in REST with the head down, and in light sleep he goes
-limp the same way; the sensor then reads the floor at 55-63 mm. The guard
-treats every reading while he lies (the REST or LIMP posture asked and no
-walk, or the body limp by itself) as the floor: not a reading, so the zone
-stays green, the eyes stay green, nothing is logged, and nothing wakes him.
-Without that the eyes showed red all night and flipped to green and back
-at each missed echo.
+limp the same way; the sensor then reads the floor at 55-63 mm. Every
+reading while he lies (the REST or LIMP posture asked and no walk, or the
+body limp by itself) is the floor: the zone stays green, the eyes stay
+green, nothing is logged, and nothing wakes him. Without that the eyes
+showed red all night and flipped to green and back at each missed echo.
+
+While the mind walks Kilo (the remote's walks) and the A5 behaviour is
+off, his head is held straight ahead: the behaviour's last look (held until
+something else moves the head) could leave it turned or tilted, the beam
+on the floor or to the side, and the guard blind to what is ahead.
 
 ## The thresholds
 
-All in `kernel/mind/guard/guard.h`. Blue depends on the speed, because a
-faster walk needs more room to stop:
+All in `kernel/mind/guard/guard.h`. Blue depends on the speed when walking
+forward, because a faster walk needs more room to stop:
 
     blue = 100 mm gap left after the stop
-         + speed x 0.45 s   (the reading comes in, the stream ahead, the servos)
-         + the planned stop's own way (speed^2 / 2a; a by gait: walk 75, trot 120, crawl 8 mm/s^2)
-    never below 200 mm (also the threshold when Kilo is not walking, for the eyes)
+         + speed x 0.40 s   (the readings come in, the stop reaches the body, the servos follow)
+         + 5 mm + the quick stop's own way (speed^2 / 2a; a: walk 400, trot 700 mm/s^2; the crawl 20 mm)
+    never below 200 mm (also the threshold when not walking forward)
     left again 80 mm above it
 
     red  = below 150 mm, left again above 200 mm
 
-Simulated (the host test, below), at the remote's top levels; the trot's
-levels are 57.6, 100.8, 144, 187.2 and 230.4 mm/s since the faster trot
-(`docs/walking-and-balance.md` §13.4):
-
-| Gait, level | Speed | Blue below | The planned stop's own way: planner / the guard allows | Gap left at the wall: clean / noisy |
+| Gait, level | Speed | Blue below (before 2026-11-19) | The quick stop's own way: planner / the guard allows | Stopped short of the wall (simulated, clean / noisy) |
 |---|---|---|---|---|
-| walk +5 | 96.8 mm/s | 206 mm | 19 / 62 mm | 155 / 155 mm |
-| trot +4 | 187.2 mm/s | 330 mm | 43 / 146 mm | 220 / 220 mm |
-| trot +5 | 230.4 mm/s | 425 mm | 66 / 221 mm | 280 / 280 mm |
-| crawl +5 | 26.9 mm/s | 200 mm | 23 / 45 mm | 196 / 196 mm |
+| walk +5 | 96.8 mm/s | 200 mm (206) | 5 / 17 mm | 166 / 166 mm |
+| trot +4 | 187.2 mm/s | 205 mm (330) | 10 / 30 mm | 142 / 142 mm |
+| trot +5 | 230.4 mm/s | 235 mm (425) | 13 / 43 mm | 162 / 180 mm |
+| crawl +5 | 26.9 mm/s | 200 mm (200) | 10 / 20 mm | 196 / 196 mm |
 
-Steering while walking (A6 / C6, §13.2) is still walking forward for the
-guard: the same thresholds at the same speed. A steered walk goes a little
-slower (the strides are shortened to keep the bend), so it stops a little
-further from the wall:
+Steering (A6 / C6 while walking forward) is still walking forward: the
+same thresholds at the same speed; the steered walk goes a little slower,
+so it stops a little further from the wall (146 to 212 mm in the test).
 
-| Gait, level, steer | Blue below | The planned stop: planner | Gap left: clean / noisy |
-|---|---|---|---|
-| walk +5, left 3 | 206 mm | 9 mm | 182 / 182 mm |
-| trot +4, left 1 | 330 mm | 45 mm | 234 / 234 mm |
-| trot +5, left 1 | 425 mm | 45 mm | 320 / 305 mm |
-| trot +5, right 2 | 425 mm | - | 333 / 333 mm |
-| trot +5, left 3 | 425 mm | 33 mm | 354 / 345 mm |
-
-"Noisy" is readings +-12 mm, 5 % outliers and 3 % dropouts. The planner
-column is the real planner's stop (its support feet's travel from the stop
-to standing), against the guard's speed^2 / 2a. The decelerations in the
-guard date from before the faster stride slew (1.5 mm a tick since §13.3),
-when the planner's stops were longer (walk 39-57 mm, trot 79-127 mm); now
-they are about a third of what the guard allows, so the guard stops early:
-about 150 to 350 mm short of the wall instead of the 100 mm it aims at. I
-left the constants as they were: that is the safe side, and the floor
-(slipping feet, a soft or slanted wall) may need the room. If the early stop
-gets in the way, the trot's deceleration is the one to raise
-(`kDecelTrotMmS2` 120 to about 300 would stop the trot at +4 and +5
-116 to 152 mm short in the simulation).
+"Noisy" is readings ±12 mm, 5 % outliers and 3 % dropouts. The planner
+column is the real planner's quick stop (its support feet's travel from the
+stop to standing, the worst over the moments of a cycle), against the
+guard's allowance, which is at least twice it: the floor (slipping feet, a
+soft or slanted wall) may need the room. With the old planned stop the
+blue distance at the trot's top speed was 425 mm: he stopped 28 cm short
+of a wall; now about 16-18 cm.
 
 `kernel/host/tests/test_guard.cpp` checks that the guard's allowance stays
-above the planner's stop and that every approach above ends at least
-100 mm from the wall. The approach is a simulation: the body's position
-follows the feet the mind streamed, 120 ms late (the servos), and the range
-is read from there every 80 ms. It does not turn the body (the virtual body
-has no yaw), so a steered approach is a straight one at the steered speed.
-The real floor can differ.
+above the planner's stop and that every approach ends at least 100 mm from
+the wall. The approach is a simulation: the body's position follows the
+feet the mind streamed, 120 ms late (the servos), and the range is read
+from there every 80 ms. It does not turn the body (the virtual body has no
+yaw). The real floor can differ.
 
 ## How the readings are cleaned up
 
 What the session recordings of 2026-11-17 show (`kilo record decode FILE
---csv`, the `dist_mm` column; `/home/joe/kilo-logs/rec-20261117-214454.krec`
-and the `run-*-walk-*.krec` files):
+--csv`, the `dist_mm` column):
 
 - a new reading every 80 ms (12.5 a second; the TELEMETRY flag DIST_FRESH
   marks them; telemetry itself comes 25 or 50 times a second);
 - still and with a flat target the readings agree within a few mm;
-  approaching a wall at a walk the readings fall smoothly (926 mm to 540 mm
-  in 5.4 s, 71 mm/s);
+  approaching a wall at a walk the readings fall smoothly;
 - while walking, 5-15 % of the readings jump by more than 100 mm for one
-  reading: mostly too long (a far wall seen past the near one, up to
-  2973 mm), sometimes too short (something at the side, a leg); and with two
-  targets in view the readings can alternate between them;
-- "no echo" (0) is rare: under 1 % of readings, at most a few in a row
-  while walking;
-- with the head down (lying, REST) the sensor reads the floor at 54-63 mm.
+  reading: mostly too long (a far wall seen past the near one), sometimes
+  too short (something at the side, a leg);
+- "no echo" (0) is rare: under 1 % of readings while walking; very close
+  (under about 3 cm) the sensor gives no echo at all.
 
 So the guard:
 
 1. uses only new readings (DIST_FRESH);
-2. drops "no echo" (0), anything beyond 2.5 m, and any reading taken while
-   the beam points down at the floor: the head held tilted down plus the
-   body's nose-down pitch over 12°, or Kilo lying (REST, LIMP);
+2. drops "no echo" (0), anything beyond 2.5 m, and the floor (above);
 3. takes the median of the readings of the last 0.3 s (up to 3) and needs
    at least two, so one short echo (a hand waved past, a stray reflection)
-   never stops Kilo; a hand held in front for a quarter of a second does;
-4. without a reading for 0.4 s it has no range: the zone is green.
+   never sets it off; a hand held in front for a sixth of a second does;
+4. without a reading for 0.4 s it has no range: the zone is green; except
+   right after something very close (under 150 mm): then no echo means
+   closer than the sensor can measure, and the range holds for 1 s.
 
 ## Switching it off and on
 
@@ -159,20 +181,31 @@ lasts until the mind restarts.
     eyes        green (on the eyes)
     guard count stops 1  pullbacks 0  forward keys refused 2  zone changes 6
 
-"not shown: the body firmware has no eyes yet (flash it)" in the eyes line
-means the body still runs a firmware from before the eyes (see below): the
-mind keeps the colour and logs it, but the lights stay as they are.
-
 ## Reading a session afterwards
 
 Every zone change and every guard action is a line in Kilo's log and a mark
-in the flight recorder:
+in the flight recorder, and so is every change of **what the guard makes of
+it**: one line each time the state Kilo is in or the reason it acts or not
+changes (not every reading):
 
     guard zone=blue mm=287 raw=291 blue=316 red=150 v=180 gait=trot action=watch
-    guard action=stopping zone=blue mm=287 blue=316 v=180 gait=trot: too close: the planned stop
+    guard decides: zone=blue mm=287 raw=291 seen=reading blue=316 floor_from=0 action=watch state=walk-forward: the quick stop
+    guard action=stopping zone=blue mm=287 blue=316 v=180 gait=trot: too close: the quick stop
     guard action=holding ...: stopped: sitting, the behaviour runner's sitting variant
+    guard decides: zone=red mm=89 raw=91 seen=reading ... state=sitting: react (holding)
+    guard: leans back
+    guard decides: zone=green mm=none raw=54 seen=floor ... state=lying: nothing seen (lying: every reading is the floor)
+    guard decides: ... state=picked-up: eyes only
     remote A4 (0x68, trot): refused (distance guard holding: blue, 287 mm ahead; ...)
     guard action=watch ...: clear: forward walking allowed again
+
+In a `guard decides` line: `seen` is what the last new reading was
+(`reading`, `no-echo`, `too-far`, `floor`), `floor_from` where the floor
+starts for the beam's tilt then (0: not in view), `state` what Kilo was
+doing (`walk-forward`, `turn-in-place`, `walk-back`, `stopping`,
+`standing`, `sitting`, `lying`, `moving` between postures; or why the
+guard stays out of it: `laptop`, `asleep`, `trick`, `picked-up`, `paused`,
+`off`), and after the colon what it did.
 
 To read them later:
 
@@ -183,8 +216,29 @@ To read them later:
 
 The session metrics (`kilo metrics --host kilo.local`, also in `kilo status
 --host`) have a `guard:` line: on, zone, action, eye colour, zone changes,
-stops, pullbacks, refused keys, releases, readings, dropouts, floor
-readings ignored, and the closest range seen while walking forward.
+stops, pullbacks, refused keys, releases, reactions (while standing,
+sitting or turning), hisses, readings, dropouts, floor readings ignored,
+and the closest range seen while walking forward.
+
+### Why he did not react on 2026-11-19 (what was found)
+
+- The guard acted only for a forward walk: standing, sitting and turning it
+  only coloured the eyes.
+- After the guard (or B6) changed his posture, the IMU percepts could read
+  the sit's 26 degrees nose up, or standing up from it, as being **picked
+  up**; picked up, the guard stays out of it until he has been calm at his
+  old attitude for 1.5 s, and a walk started before that (B6, then A4 at
+  once) went on unguarded to its end. In the host test a sit did exactly
+  that. Every posture the mind asks for now keeps the IMU percepts quiet
+  over the move (`Mind::posture_moves`), as the behaviour's own postures
+  always did.
+- The head held tilted down by the behaviour's last look stayed so while
+  walking (nothing released it), and with the old floor rule every reading
+  then counted as the floor. Now the head is straight while the mind walks,
+  and only readings as far as the floor are the floor.
+- A hand closer than about 3 cm gives no echo, which read as "nothing".
+- The raw 54 and 63 mm readings with "no range" were taken lying in REST,
+  where every reading is the floor (55-63 mm): that one is as intended.
 
 ## The eyes
 
@@ -228,10 +282,7 @@ mV at rest, 30 %)`; `kilo guard --host` and `kilo status --host` show
 
 **At rest** matters: moving legs pull the battery's voltage down by 0.1 to
 0.25 V for as long as they move (the "sag"), and it comes back within a
-second of them stopping. On 2026-11-19 at a wall Kilo read 7408 mV lying
-still, above the mark, but the guard's sitting behaviour lay him down in
-REST instead of sitting: most likely the reading while his legs were still
-moving was below it. So the mind now judges the battery by the highest
+second of them stopping. So the mind judges the battery by the highest
 reading of the last 20 seconds (`kernel/mind/power/battery.h`
 `RestedBattery`): a moment of rest, or the lightest moment of a walk, in
 that time is enough to see the real level. A walk that never pauses for
@@ -243,19 +294,22 @@ show the reading as it is; the metrics' `battery:` line also has
 
 The guard starts the A5 behaviour runner in its sitting form: everything
 the behaviours would do standing, Kilo does sitting (the log says
-`behaviour: posture stand: sit (the sitting variant)`), with the small body
-moves of the alive layer (`kernel/mind/behaviour/alive.h`). B6, A7 and C7
-stop it as they stop A5, and so do the turning and backing keys.
+`behaviour: posture stand: sit (the sitting variant)`), with the moves of
+the alive layer (`kernel/mind/behaviour/alive.h`: leans, shrugs, a paw
+lifted, tail swishes, the head looking around). B6, A7 and C7 stop it as
+they stop A5, and so do the turning and backing keys.
 
 ## Known limits
 
-- He has no rear sensor: backing off is short (2 s at 40 mm/s, about
-  4-5 cm in the simulation) and slow; something right behind him is hit.
-- Very close (under about 3 cm) the sensor may give no echo or nonsense; a
-  wall reached in the dark of a corner can read as clear.
+- He has no rear sensor: backing off is short (2 s at 40 mm/s, 4-8 cm in
+  the simulation) and slow; something right behind him is hit.
+- Very close (under about 3 cm) the sensor gives no echo; the guard holds
+  the last very close range for a second, but something that arrives that
+  close in one step is not seen.
 - Soft things (a curtain, a cushion, fur) and walls at a steep angle may
   not echo: the guard sees nothing there.
 - Only what is in front of his head counts: a table edge above the beam
-  or a step down below it is not seen.
-- The guard acts on the remote's walks; a walk a laptop drives is not
-  stopped (the laptop holds the body then).
+  or a step down below it is not seen; with the head turned by the A5
+  behaviour (standing or sitting) he sees what the head looks at.
+- The guard acts on the mind's own walks and postures; a walk a laptop
+  drives is not stopped (the laptop holds the body then).

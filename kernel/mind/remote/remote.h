@@ -34,28 +34,38 @@
 //   level the planner clamps to the same speed still changes the level, and
 //   the log shows the real mm/s (planner::timing()).
 // - B6 stand, A7 rest (sleep), C5 the calibration posture (CALIB): stop a
-//   walk the planned way and wait for it (up to stop_timeout), stop a
-//   playing trick, then take the posture.
+//   walk with the quick stop (planner/plan.h halt(): the feet down where
+//   they are, the body stopped in about 0.2 s, the legs squared up) and wait
+//   for it (up to stop_timeout), stop a playing trick, then take the posture.
 // - C7 freeze: at once, ahead of any key waiting (the action under way is
-//   cancelled, keys queued behind it dropped, each logged): abort the walk
-//   (no planned stop: the body holds the last pose for link.feet_hold_ticks,
-//   settles the swing feet to the ground and stays in STANCE, powered,
-//   GAIT_STOPPED arg 1), stop a playing trick, stop the behaviour runner;
-//   not walking, Kilo keeps the posture he is in. Then every key but B6 and
-//   A7 is ignored ("frozen") until one of them is pressed.
+//   cancelled, keys queued behind it dropped, each logged): the quick stop
+//   of the walk (as B6; it ends in STANCE, powered), stop a playing trick,
+//   stop the behaviour runner; not walking, Kilo keeps the posture he is in.
+//   Then every key but B6 and A7 is ignored ("frozen") until one of them is
+//   pressed.
 // - A5: start the behaviour runner (after stopping a walk and a trick as a
 //   posture key does). While it runs, B6, A7 and C7 stop it first and then
 //   do their own action, A5 again does nothing, every other key is ignored
 //   (but those the hook yields() to: the distance guard's sitting runner
 //   gives way to the walking keys; docs/distance-guard.md).
-// - A2 rear up (Kind::Trick, the trick rear_up, rear_up_2 or rear_up_3 by
-//   the stage, docs/rear-up-trick.md; B2 until 2026-11-17), only with the
-//   rear-up key switched on (keys.h set_rear_up_key, KILO_REAR_UP=1|2|3;
-//   off, A2 is a row 1-3 key and never reaches perform()):
-//   not playing a trick, stop a walk the planned way, then start the trick
-//   (the key is done once TRICK_PLAY is out; the trick plays on). While a
-//   trick plays, A2 stops it: the toggle, a second press brings rear_up
-//   down. Refused below kTrickMinMv or on USB power (NO_BATTERY), so that
+// - A2 rear up (Kind::Trick, docs/rear-up-trick.md; B2 until 2026-11-17),
+//   only with the rear-up key switched on (keys.h set_rear_up_key,
+//   KILO_REAR_UP=1|2|3: the highest stage allowed; off, A2 is a row 1-3 key
+//   and never reaches perform()): not playing a trick, stop a walk, then
+//   start the stage's trick (rear_up, rear_up_2 or rear_up_3: the highest
+//   allowed; the key is done once TRICK_PLAY is out). Kilo goes up to stage
+//   1 and holds it: in rear_up_2 and rear_up_3 the lower stages' tops hold
+//   4 s (rear_up.py STEP_HOLD). A2 while he goes up to or holds such a top
+//   takes him on to the next stage (up to the build's); without it, the
+//   remote stops the trick kStepLeadUs before that hold ends and he comes
+//   down to SIT (step_gate()). The trick's own guards (pitch and roll at
+//   every guarded hold, each stage's top among them) still stop it when
+//   the body is not where the model says. A2 at any other moment, B6 and
+//   C7 bring him down (TRICK_STOP over the trick's stop_ticks). Each stage
+//   reached, gone on from or left is a log line and a mark in the trick's
+//   flight-recorder run. Refused below kTrickMinMv at rest (the highest
+//   reading of the last 20 s, TrickNotes::rested_mv: a walk just stopped
+//   sags the reading for a moment) or on USB power (NO_BATTERY), so that
 //   the body's low-battery reflex does not take Kilo to REST half way up.
 // - Stopping a trick (A2, the posture keys, a walk from standing, C7) sends
 //   TRICK_STOP over the trick's stop_ticks (rear_up: 1.5 s to SIT, the
@@ -118,6 +128,10 @@ class BehaviourHook {
 class TrickNotes {
  public:
   virtual void refused(const char* /*trick*/, const char* /*why*/) {}
+  // A line into the trick's run (the rear-up's stages).
+  virtual void trick_mark(const char* /*line*/) {}
+  // The battery at rest (power/battery.h RestedBattery), false if none: the trick's refusal.
+  virtual bool rested_mv(uint16_t* /*mv*/) { return false; }
 
  protected:
   ~TrickNotes() = default;
@@ -177,6 +191,10 @@ class RemoteControl {
   void steer_text(char* buf, uint32_t cap) const;
   planner::WalkGoal walk_goal() const;
   void stop_then_act(uint64_t now);
+  // The rear-up's stages (above): the stage top the play is going up to or holding (1..), 0 none.
+  int step_at(uint64_t* hold_end_us) const;
+  void step_gate();
+  void step_note(const char* what);
 
   SerialLink& link_;
   planner::Walker& walker_;
@@ -191,6 +209,10 @@ class RemoteControl {
   int steer_ = 0;
   bool walking_ = false;  // the remote started the walker's walk
   bool frozen_ = false;
+  // the rear-up's stages: the play, its highest stage, the stage A2 allows now
+  const tricks::Trick* step_trick_ = nullptr;
+  uint32_t step_play_ = 0;
+  int step_max_ = 0, step_allowed_ = 0, step_held_ = 0;
 
   struct Pending {
     const Key* key;

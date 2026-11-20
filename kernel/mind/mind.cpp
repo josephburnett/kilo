@@ -177,6 +177,10 @@ void Mind::poll() {
   stats(now);
   walker_.poll();
   player_.poll();
+  if (flinch_pending_ && !player_.busy()) {
+    flinch_pending_ = false;
+    if (!alive_.flinch()) logf(log_, LogLevel::Warn, "guard: the lean back was not played");
+  }
   if (cfg_.remote) remote_.poll();
   if (behaviour_on_) runner_.poll((double)clock_.now_us() / 1e6);
   {
@@ -185,6 +189,8 @@ void Mind::poll() {
     alive_.poll((double)clock_.now_us() / 1e6, behaviour_active() && !host_controls(), calm, head_held(2));
   }
   battery_step();
+  head_for_walk();
+  posture_moves();
   guard_.poll();
   recorder_.poll(player_);
   card_safe_ = safe_for_card(clock_.now_us());
@@ -206,6 +212,13 @@ bool Mind::rested_pct(double* pct) const {
   if (!b.has_telemetry || (b.telemetry.flags & KILO_TELEMETRY_FLAGS_NO_BATTERY) || !sleep_.rested_mv(&mv)) return false;
   *pct = battery_percent(mv);
   return true;
+}
+
+// The remote's trick refusal (remote.h A2): the battery at rest, not the sag right after a walk.
+bool Mind::rested_mv(uint16_t* mv) {
+  const BodyState& b = link_.state();
+  if (!b.has_telemetry || (b.telemetry.flags & KILO_TELEMETRY_FLAGS_NO_BATTERY)) return false;
+  return sleep_.rested_mv(mv);
 }
 
 // Tired: the battery at rest below the personality's low mark (the behaviour tree's rule and its +5 %
@@ -256,8 +269,8 @@ void Mind::sound_events() {
     sound_.suspend(asleep);
     if (!asleep) say("mew", "wake", true);
   }
-  if (guard_.pullbacks() != pullbacks_said_) {  // RED: backing off, once per event
-    pullbacks_said_ = guard_.pullbacks();
+  if (guard_.hisses() != hisses_said_) {  // RED: backing off, leaning back, a turn stopped: once per event
+    hisses_said_ = guard_.hisses();
     say("hiss", "guard red", true);
   }
   sound::Chatter::Mode mode = sound::Chatter::Mode::None;
@@ -556,10 +569,88 @@ const char* Mind::cal_refusal() {
   return nullptr;
 }
 
-bool Mind::may_act() {
+// Why the guard must not act now (guard.h GuardHost::not_now), or null. The alive layer's small
+// sitting moves are not a trick here: the guard leans him back over them.
+const char* Mind::not_now() {
+  if (host_controls()) return "laptop";
+  if (paused_) return "paused";
+  if (sleep_.asleep()) return "asleep";
+  if (trick_playing()) return "trick";
+  if (percepts_.picked_up()) return "picked-up";
+  return nullptr;
+}
+
+// How Kilo is when the walker is idle: the posture asked (the alive layer's sitting moves are sitting).
+guard::Still Mind::still() {
+  if (walker_.active()) return guard::Still::None;
   const BodyState& b = link_.state();
-  bool trick = player_.busy() || (b.has_telemetry && b.telemetry.mode == KILO_MODE_TRICK);
-  return !host_controls() && !paused_ && !trick && !percepts_.picked_up();
+  if (!b.has_telemetry) return guard::Still::None;
+  if (player_.busy()) return player_.trick() == &alive_.sit_trick() ? guard::Still::Sitting : guard::Still::None;
+  if (b.telemetry.mode != KILO_MODE_IDLE) return guard::Still::None;
+  const Goal* g = link_.goal(KILO_MSG_SET_POSTURE);
+  uint8_t posture = 0xFF;
+  if (g != nullptr && g->len >= 2) posture = g->payload[1];
+  else if (player_.trick() != nullptr && player_.result().state == tricks::PlayState::Done)
+    posture = player_.trick()->end_posture;  // a trick cleared the goal: the body took its end posture
+  else if (alive_.sitting() || sitting_variant_) posture = KILO_POSTURE_SIT;
+  switch (posture) {
+    case KILO_POSTURE_SIT: return guard::Still::Sitting;
+    case KILO_POSTURE_STAND:
+    case KILO_POSTURE_STANCE: return guard::Still::Standing;
+    case KILO_POSTURE_REST:
+    case KILO_POSTURE_LIMP: return guard::Still::Lying;
+    default: return guard::Still::None;
+  }
+}
+
+// BLUE while still: the head straight at it (the behaviour tree may look elsewhere again later).
+void Mind::notice() {
+  bool ok = client_look(link_, 0, 0);
+  percepts_.notify_self_motion(seconds(this), kLookMoveS);
+  logf(log_, LogLevel::Info, "guard: looks at it (the head ahead)%s", ok ? "" : ": refused");
+}
+
+// RED while sitting: the alive layer's lean back (a short trick on the legs, the head and the tail).
+bool Mind::flinch() {
+  percepts_.notify_self_motion(seconds(this), kTrickMoveS);
+  if (player_.busy() && player_.trick() == &alive_.sit_trick()) {  // a sitting move under way: stopped, then the lean
+    player_.stop();
+    flinch_pending_ = true;
+    logf(log_, LogLevel::Info, "guard: leans back (after the sitting move it stopped)");
+    return true;
+  }
+  bool ok = alive_.flinch();
+  logf(log_, ok ? LogLevel::Info : LogLevel::Warn, "guard: leans back%s", ok ? "" : ": not played");
+  return ok;
+}
+
+// Every posture the mind asks for (the remote's B6, A7, the guard's sit, a walk's STANCE) moves the
+// body: the IMU percepts stay quiet over it, as for the behaviour runner's (Body::posture). Without it
+// a sit (26 degrees nose up in half a second) read as Kilo picked up, and picked up the guard stays
+// out of it until he is put down calm at his old attitude: blind through the walk that followed.
+void Mind::posture_moves() {
+  const Goal* g = link_.goal(KILO_MSG_SET_POSTURE);
+  uint16_t now = g == nullptr || g->len < 4 ? 0xFFFFu : (uint16_t)(g->payload[1] | (g->payload[3] << 8));
+  if (now == posture_seen_) return;
+  posture_seen_ = now;
+  if (now != 0xFFFFu) percepts_.notify_self_motion(seconds(this), kPostureMoveS);
+}
+
+// While the mind walks and the behaviour runner is off, the head looks straight ahead: the sensor is
+// on it, and a head left tilted or turned by the runner's last look (SET_HEAD is held until changed)
+// sends the beam at the floor or to the side, and the guard would not see what is ahead.
+void Mind::head_for_walk() {
+  if (!walker_.active() || behaviour_active() || host_controls()) {
+    head_centred_ = false;
+    return;
+  }
+  if (head_centred_) return;
+  head_centred_ = true;
+  double pan = head_held(2), tilt = head_held(4);
+  if (pan == 0 && tilt == 0) return;
+  bool ok = client_look(link_, 0, 0);
+  logf(log_, LogLevel::Info, "head: straight ahead for the walk (it was held at pan %d tilt %d)%s", (int)pan,
+       (int)tilt, ok ? "" : ": refused");
 }
 
 // BLUE (after the stop) and RED (after backing off): sit, and the behaviour runner's sitting variant.
