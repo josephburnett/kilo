@@ -61,6 +61,10 @@ OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/
 #                           `kilo bench sd --host` has measured the card and `kilo record save on --host`)
 #   KILO_LIGHT_SLEEP=1|0    light sleep after the remote's A7 and 30 s of nothing (default 1; 0: A7 is plain rest,
 #                           the awake baseline of docs/power.md)
+#   KILO_SOUND=1|0          Kilo's sounds on the 3.5 mm jack (docs/sound.md): kernel/sounds/*.wav packed into the
+#                           image, Circle's PWM sound device (default 1; 0: no sound code, no sounds, no libsound)
+#   KILO_SOUND_IDLE=stop|run  the sound device between sounds: stopped, started for each sound with a ramp
+#                           (default), or running at silence from boot (src/sound.h)
 KILO_BODY_SERIAL ?= pl011
 KILO_BOOT_PROBE ?= 1
 KILO_PLANNER_BENCH ?= 1
@@ -69,8 +73,16 @@ KILO_BEHAVIOUR ?= 0
 KILO_REAR_UP ?= 0
 KILO_RECORD_SAVE ?= 0
 KILO_LIGHT_SLEEP ?= 1
+KILO_SOUND ?= 1
+KILO_SOUND_IDLE ?= stop
 ifeq ($(filter 0 1 2 3,$(KILO_REAR_UP)),)
 $(error KILO_REAR_UP must be 0, 1, 2 or 3)
+endif
+ifeq ($(filter 0 1,$(KILO_SOUND)),)
+$(error KILO_SOUND must be 0 or 1)
+endif
+ifeq ($(filter stop run,$(KILO_SOUND_IDLE)),)
+$(error KILO_SOUND_IDLE must be stop or run)
 endif
 ifeq ($(KILO_BODY_SERIAL),pl011)
 KILO_DEFS := -DKILO_BODY_SERIAL_PL011
@@ -78,7 +90,18 @@ else ifneq ($(KILO_BODY_SERIAL),auto)
 $(error KILO_BODY_SERIAL must be auto or pl011)
 endif
 KILO_DEFS += -DKILO_BOOT_PROBE=$(KILO_BOOT_PROBE) -DKILO_PLANNER_BENCH=$(KILO_PLANNER_BENCH) -DKILO_MDNS=$(KILO_MDNS) \
-	-DKILO_BEHAVIOUR=$(KILO_BEHAVIOUR) -DKILO_REAR_UP=$(KILO_REAR_UP) -DKILO_RECORD_SAVE=$(KILO_RECORD_SAVE) -DKILO_LIGHT_SLEEP=$(KILO_LIGHT_SLEEP)
+	-DKILO_BEHAVIOUR=$(KILO_BEHAVIOUR) -DKILO_REAR_UP=$(KILO_REAR_UP) -DKILO_RECORD_SAVE=$(KILO_RECORD_SAVE) -DKILO_LIGHT_SLEEP=$(KILO_LIGHT_SLEEP) \
+	-DKILO_SOUND=$(KILO_SOUND) -DKILO_SOUND_KEEP_RUNNING=$(if $(filter run,$(KILO_SOUND_IDLE)),1,0)
+
+# Kilo's sounds (docs/sound.md): the PWM sound device (src/sound.cpp, Circle's lib/sound) and the
+# table tools/pack_sounds.py packs from sounds/*.wav into build/gen/sounds.gen.cpp, every build (it
+# rewrites the table only when it changed, prints the size report, and stops the build when a file
+# cannot be used or the sounds are over the budget). KILO_SOUND=0: none of it.
+ifeq ($(KILO_SOUND),1)
+CIRCLE_LIBS := $(CIRCLEHOME)/lib/sound/libsound.a $(CIRCLE_LIBS)
+CIRCLE_LIBDIRS += lib/sound
+OBJS += $(BUILD)/src/sound.o $(BUILD)/gen/sounds.gen.o
+endif
 LIBS := $(CIRCLE_LIBS)
 
 NETBOOT_SRC  := $(CIRCLEHOME)/sample/38-bootloader
@@ -133,6 +156,21 @@ $(KEYS_H): kilo-keys
 	@python3 keys/gen_keys.py "$(KILO_AUTHORIZED_KEYS)" $@ --shown-as "$(KEYS_SHOWN)"
 $(BUILD)/src/kernel.o: $(KEYS_H)
 $(BUILD)/src/kernel.o: CPPFLAGS += -I $(BUILD)/gen
+
+# KILO_SOUNDS_DIR: where the .wav files are (default sounds/, i.e. kernel/sounds; a path relative to
+# kernel/, or absolute: a test build with other sounds).
+KILO_SOUNDS_DIR ?= sounds
+SOUNDS_SHOWN := $(if $(filter sounds,$(KILO_SOUNDS_DIR)),kernel/sounds,$(KILO_SOUNDS_DIR))
+SOUNDS_GEN := $(BUILD)/gen/sounds.gen.cpp
+.PHONY: kilo-sounds
+kilo-sounds:
+	@:
+$(SOUNDS_GEN): kilo-sounds
+	@mkdir -p $(@D)
+	@python3 tools/pack_sounds.py "$(KILO_SOUNDS_DIR)" $@ --shown-as "$(SOUNDS_SHOWN)"
+$(BUILD)/gen/sounds.gen.o: $(SOUNDS_GEN) mind/sound/sound.h
+	@echo "  CPP   $@"
+	@$(CPP) $(CPPFLAGS) -c -o $@ $<
 
 # The options reach src/ only; build/options changes when they do, so
 # switching them rebuilds what reads them.
@@ -191,7 +229,7 @@ $(OBJS) $(NETBOOT_OBJS): | circle-config
 $(BUILD)/%.o: %.cpp
 	@mkdir -p $(@D)
 	@echo "  CPP   $@"
-	@$(CPP) $(CPPFLAGS) -MMD -MP -c -o $@ $<
+	@$(CPP) $(CPPFLAGS) -c -o $@ $<
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(@D)
@@ -231,4 +269,5 @@ $(BUILD)/netboot/kernel7.img: $(NETBOOT_OBJS) $(LIBS) $(CIRCLEHOME)/circle.ld
 	@echo -n "  WC    $@ => "
 	@wc -c < $@
 
--include $(OBJS:.o=.d) $(NETBOOT_OBJS:.o=.d)
+# (not the sounds table's: its .d would be remade, and make restarted, every build: its one header is above)
+-include $(filter-out $(BUILD)/gen/sounds.gen.d,$(OBJS:.o=.d)) $(NETBOOT_OBJS:.o=.d)

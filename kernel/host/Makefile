@@ -65,6 +65,8 @@ TESTS += test_mdns
 TESTS += test_power
 # The distance guard and the alive layer (guard/, behaviour/alive): a walk at a wall in the Mind.
 TESTS += test_guard
+# Kilo's sounds (sound/): the renderer, the player, the events' hooks in the Mind, SOUND over the host channel.
+TESTS += test_sound
 
 .PHONY: all check bench freestanding clean
 all: $(B)/kilo-mind-host $(B)/walk-demo
@@ -83,8 +85,23 @@ $(B)/obj/host/%.o: %.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -MMD -c $< -o $@
 
-$(B)/kilo-mind-host: $(CORE_OBJS) $(HOST_OBJS)
+$(B)/kilo-mind-host: $(CORE_OBJS) $(HOST_OBJS) $(B)/obj/gen/sounds.gen.o
 	$(CXX) $^ -o $@
+
+# Kilo's sounds (docs/sound.md): kernel/sounds/*.wav packed as kernel/Makefile packs them, for
+# kilo-mind-host's sound list (the tool runs every build and rewrites the table only when it changed).
+# KILO_SOUNDS_DIR (as kernel/Makefile's, but absolute or relative to kernel/host): another directory of .wav files.
+KILO_SOUNDS_DIR ?= $(KERNEL)/sounds
+SOUNDS_GEN := $(B)/gen/sounds.gen.cpp
+.PHONY: kilo-sounds
+kilo-sounds:
+	@:
+$(SOUNDS_GEN): kilo-sounds
+	@mkdir -p $(dir $@)
+	@$(PYTHON) $(KERNEL)/tools/pack_sounds.py "$(KILO_SOUNDS_DIR)" $@ --shown-as "$(if $(filter $(KERNEL)/sounds,$(KILO_SOUNDS_DIR)),kernel/sounds,$(KILO_SOUNDS_DIR))"
+$(B)/obj/gen/sounds.gen.o: $(SOUNDS_GEN)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # The walk against the virtual body (kernel/host/test.sh).
 $(B)/walk-demo: $(CORE_OBJS) $(B)/obj/host/walk_demo.o $(B)/obj/host/posix.o $(B)/obj/host/baud.o
@@ -189,13 +206,13 @@ clean:
 # and cos (GCC fuses the pair into sincos). Circle links libm, which has them.
 ALLOWED += exp log sin cos sincos
 # The remote, the flight recorder (and the host server that serves it), light sleep (it uses the
-# remote's keys and the saver), the distance guard, the alive layer and the Mind use the planner's
+# remote's keys and the saver), the distance guard, the alive layer, the sounds and the Mind use the planner's
 # float types: the double-planner builds (the vector test's twin, the bench) leave them out
 # (their recipes expand these at run time).
 DBL_OBJS := $(filter-out $(B)/san/mind/remote/% $(B)/san/mind/record/% $(B)/san/mind/net/host_% $(B)/san/mind/power/% $(B)/san/mind/mind.o \
-                          $(B)/san/mind/guard/% $(B)/san/mind/behaviour/alive.o,$(DBL_OBJS))
+                          $(B)/san/mind/guard/% $(B)/san/mind/behaviour/alive.o $(B)/san/mind/sound/%,$(DBL_OBJS))
 BENCH_DBL_OBJS := $(filter-out $(B)/obj/mind/remote/% $(B)/obj/mind/record/% $(B)/obj/mind/net/host_% $(B)/obj/mind/power/% $(B)/obj/mind/mind.o \
-                                $(B)/obj/mind/guard/% $(B)/obj/mind/behaviour/alive.o,$(BENCH_DBL_OBJS))
+                                $(B)/obj/mind/guard/% $(B)/obj/mind/behaviour/alive.o $(B)/obj/mind/sound/%,$(BENCH_DBL_OBJS))
 
 # ---- finding Kilo by name (net/mdns.h) ----------------------------------------------------
 # The responder on a loopback UDP port, for test.sh's `kilo find --ask`.

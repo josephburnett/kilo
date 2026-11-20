@@ -95,6 +95,17 @@
 #ifndef KILO_LIGHT_SLEEP
 #define KILO_LIGHT_SLEEP 1
 #endif
+// Kilo's sounds (src/sound.h, docs/sound.md): the 3.5 mm jack, the sounds
+// kernel/sounds/*.wav packed into the image. make -C kernel KILO_SOUND=0
+// leaves all of it out (no device, no sounds: every play request is a
+// counted no-op). KILO_SOUND_IDLE=run keeps the device running between
+// sounds instead of starting it for each.
+#ifndef KILO_SOUND
+#define KILO_SOUND 1
+#endif
+#ifndef KILO_SOUND_KEEP_RUNNING
+#define KILO_SOUND_KEEP_RUNNING 0
+#endif
 #if KILO_REAR_UP < 0 || KILO_REAR_UP > 3
 #error "KILO_REAR_UP must be 0, 1, 2 or 3"
 #endif
@@ -197,6 +208,9 @@ CKernel::CKernel (void)
 	m_pNetTask (0),
 	m_pBench (0),
 	m_pPower (0),
+#if KILO_SOUND
+	m_pSound (0),
+#endif
 	m_pFlasher (0),
 	m_pBootCard (0),
 	m_pHostImage (0),
@@ -254,6 +268,16 @@ boolean CKernel::Initialize (void)
 	Config.authorized_keys = kAuthorizedKeys;
 	Config.authorized_key_count = kAuthorizedKeyCount;
 	Config.random = &m_KeyRandom;
+#if KILO_SOUND
+	// The jack: Circle's PWM sound device (the PWM clock and GPIO40/45 set
+	// up now; the DMA starts with the first sound, or at once with
+	// KILO_SOUND_IDLE=run), the sounds the build packed.
+	m_pSound = new CKiloSound (&m_Interrupt, KILO_SOUND_KEEP_RUNNING != 0);
+	boolean bSoundOK = m_pSound->Initialize ();
+	Config.sounds = kilo::sound::kSounds;
+	Config.sound_count = kilo::sound::kSoundCount;
+	Config.sound_output = m_pSound;
+#endif
 	m_pMind = new Mind (m_Serial, m_Clock, m_KernelLog, m_pListener, Config);
 	m_pMind->attach_log (new LogEntry[LogRing::kLines], LogRing::kLines);	// 4096 lines of history, 700 KB
 	m_pLog = &m_pMind->log ();
@@ -273,6 +297,16 @@ boolean CKernel::Initialize (void)
 		logf (*m_pLog, LogLevel::Info, "host: authorized key %u of %u: %s %s", i + 1, kAuthorizedKeyCount,
 		      Fingerprint, kAuthorizedKeys[i].name);
 	}
+
+#if KILO_SOUND
+	logf (*m_pLog, bSoundOK ? LogLevel::Info : LogLevel::Error,
+	      "sound: PWM on the 3.5 mm jack, %u Hz, range %d, chunks of %u frames, idle %s%s",
+	      CKiloSound::SampleRate, m_pSound->GetRangeMax () + 1, CKiloSound::ChunkFrames,
+	      m_pSound->KeepRunning () ? "running (KILO_SOUND_IDLE=run)" : "stopped",
+	      bSoundOK ? "" : ": the device did NOT start");
+#else
+	logf (*m_pLog, LogLevel::Info, "sound: not built in (KILO_SOUND=0)");
+#endif
 
 	// Light sleep's hardware: the Ethernet PHY (once the net task has it)
 	// and the SoC's clock and temperature, logged once here.

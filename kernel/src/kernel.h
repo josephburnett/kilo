@@ -12,6 +12,9 @@
 #include "net.h"
 #include "plannerbench.h"
 #include "power.h"
+#if KILO_SOUND
+#include "sound.h"
+#endif
 #include "flash/flasher.h"
 #include "flash/image.h"
 #include "update/updater.h"
@@ -131,6 +134,9 @@ private:
 	CKiloNet		*m_pNetTask;
 	CPlannerBench		*m_pBench;	// 0 once done, or built without it
 	CKiloPower		*m_pPower;	// light sleep's hardware (mind/power/sleep.h)
+#if KILO_SOUND
+	CKiloSound		*m_pSound;	// Kilo's sounds on the 3.5 mm jack (sound.h, docs/sound.md)
+#endif
 
 	// Flashing the body (P4): the laptop's FLASH_* through the Mind's host
 	// server, and the image on the SD card at boot.

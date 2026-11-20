@@ -242,6 +242,12 @@ int main(int argc, char** argv) {
     cfg.authorized_key_count = n_keys;
     cfg.random = &random;
   }
+  // Kilo's sounds (docs/sound.md): the build packed kernel/sounds/*.wav (tools/pack_sounds.py) as for the
+  // kernel; they "play" into a buffer for as long as they would on the Pi (no audio here).
+  static sound::TimedOutput sound_out(clock);
+  cfg.sounds = sound::kSounds;
+  cfg.sound_count = sound::kSoundCount;
+  cfg.sound_output = &sound_out;
   // static: the Mind holds ~60 KB of buffers (the laptop channel's, perception's windows)
   static Mind mind(serial, clock, stderr_log, listen != nullptr ? &listener : nullptr, cfg);
   Log& log = mind.log();  // every line: the RAM ring (`kilo log --host`), then stderr
