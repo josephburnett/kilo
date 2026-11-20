@@ -40,6 +40,8 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
       sleep_(link_, walker_, clock, log_),
       guard_(link_, walker_, clock, log_),
       alive_(link_, player_, log_, cfg.seed),
+      sound_(clock, log_, cfg.seed),
+      chatter_(cfg.seed),
       recorder_(clock, link_) {
   sleep_.set_enabled(cfg.light_sleep);
   remote::set_rear_up_key(cfg.rear_up_key);
@@ -53,6 +55,12 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
   host_.attach_cal_gate(*this);
   guard_.set_host(this);
   guard_.set_enabled(cfg.guard);
+  sound_.set_sounds(cfg.sounds, cfg.sound_count);
+  sound_.set_output(cfg.sound_output);
+  sound_.set_host(this);
+  sound_.set_volume(cfg.sound_volume);
+  sound_.set_enabled(cfg.sound);
+  host_.attach_sound(sound_);
   if (cfg.random != nullptr) host_.set_keys(cfg.authorized_keys, cfg.authorized_key_count, *cfg.random);
   runner_.set_clock(seconds, this);
   runner_.set_percept_source(&body_);
@@ -121,6 +129,15 @@ void Mind::start() {
   if (cfg_.remote) logf(log_, LogLevel::Info, "IR remote on");
   logf(log_, LogLevel::Info, "distance guard %s (BLUE from %d mm standing, RED below %d mm; docs/distance-guard.md)",
        guard_.enabled() ? "on" : "off", (int)guard::kBlueMinMm, (int)guard::kRedMm);
+  {
+    uint32_t ms = sound_.total_ms();
+    if (sound_.count() == 0)
+      logf(log_, LogLevel::Info, "sound: no sounds in this image%s", cfg_.sound_output == nullptr ? " (no output)" : "");
+    else
+      logf(log_, LogLevel::Info, "sound: %u sounds (%u.%u s) in the image, %s, volume %u; docs/sound.md",
+           (unsigned)sound_.count(), (unsigned)(ms / 1000u), (unsigned)(ms / 100u % 10u), sound_.enabled() ? "on" : "off",
+           (unsigned)sound_.volume());
+  }
   if (saver_ != nullptr && cfg_.record_save) saver_->set_mode(1);
   link_.connect();
 }
@@ -175,6 +192,42 @@ void Mind::poll() {
   act.host_events = host_.stats().accepted + host_.stats().requests;
   act.host_clients = listener_ != nullptr ? host_.clients() : 0;
   sleep_.poll(act);
+  sound_events();
+  sound_.poll();
+}
+
+// ---- Kilo's sounds (docs/sound.md) ----------------------------------------------------------
+
+bool Mind::trick_playing() const {
+  const BodyState& b = link_.state();
+  if (player_.busy()) return player_.trick() != &alive_.sit_trick();
+  return b.has_telemetry && b.telemetry.mode == KILO_MODE_TRICK && !alive_.sitting();
+}
+
+uint8_t Mind::say(const char* name, const char* why, bool always) {
+  if (!always && (trick_playing() || host_controls())) return KILO_SOUND_RESULT_OK;  // quiet now: not asked
+  return sound_.request(name, why);
+}
+
+// The events' sounds, once a pass: light sleep's start and end, the guard backing off, the behaviour's chatter.
+void Mind::sound_events() {
+  bool asleep = sleep_.asleep();
+  if (asleep != was_asleep_) {
+    was_asleep_ = asleep;
+    sound_.suspend(asleep);
+    if (!asleep) say("mew", "wake", true);
+  }
+  if (guard_.pullbacks() != pullbacks_said_) {  // RED: backing off, once per event
+    pullbacks_said_ = guard_.pullbacks();
+    say("hiss", "guard red", true);
+  }
+  sound::Chatter::Mode mode = sound::Chatter::Mode::None;
+  if (behaviour_active() && !host_controls()) {
+    if (alive_.sitting() || sitting_variant_) mode = sound::Chatter::Mode::Sitting;
+    else if (alive_.standing()) mode = sound::Chatter::Mode::Standing;
+  }
+  const char* what = chatter_.poll((double)clock_.now_us() / 1e6, mode, trick_playing() || sound_.busy());
+  if (what != nullptr) say(what, "behaviour");
 }
 
 void Mind::stats(uint64_t now) {
@@ -208,6 +261,10 @@ void Mind::on_connection(bool connected, bool alive) {
 }
 
 void Mind::on_hello(const kilo_hello_t& hello, bool solicited) {
+  if (!hello_said_) {  // the first HELLO after boot: ready
+    hello_said_ = true;
+    say("mew", "ready", true);
+  }
   if (tap_ != nullptr) tap_->on_hello(hello, solicited);
 }
 
@@ -292,6 +349,16 @@ void Mind::ir_key(const kilo_event_t& e) {
     metrics_.keys_laptop++;
     return;
   }
+  if (key->kind == remote::Kind::Sound) {  // B2: a sound moves nothing, so it goes at once, past the remote's queue
+    static const char* const kResult[] = {"ok", "queued", "unknown", "off", "no sounds in this image", "asleep"};
+    char why[16];
+    format(why, sizeof why, "key:%s", key->grid);
+    uint8_t r = sound_.request(key->name, why);
+    logf(log_, LogLevel::Info, "remote %s: %s %s", text, key->name, r < 6 ? kResult[r] : "?");
+    metrics_.keys_acted++;
+    recorder_.key(text);
+    return;
+  }
   if (guard_.holds() && forward_key(*key)) {  // the distance guard: only the safe directions
     char why[96];
     format(why, sizeof why, "remote %s: refused (distance guard %s: %s, %d mm ahead; turn, back up or B6)", text,
@@ -320,7 +387,8 @@ void named(char* out, uint32_t n, size_t* len, const record::NamedCounts& c) {
 
 }  // namespace
 
-uint32_t Mind::metric_lines() { return 11 + power::Sleep::kMetricLines; }
+// 0-10 the Mind's, then the power lines (11-14), then sound (15): test_power and test_guard index them.
+uint32_t Mind::metric_lines() { return 11 + power::Sleep::kMetricLines + 1; }
 
 void Mind::metric_line(uint32_t i, char* out, uint32_t n) {
   const record::Metrics& m = metrics_;
@@ -402,7 +470,8 @@ void Mind::metric_line(uint32_t i, char* out, uint32_t n) {
       alive_.metrics_line(out, n);
       return;
     default:
-      sleep_.metric_line(i - 11, out, n);  // power, power_hw, battery, power_segments
+      if (i < 11 + power::Sleep::kMetricLines) sleep_.metric_line(i - 11, out, n);  // power, power_hw, battery, power_segments
+      else if (i == 11 + power::Sleep::kMetricLines) sound_.metrics_line(out, n);
       return;
   }
 }

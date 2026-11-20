@@ -59,8 +59,10 @@ void test_key_table(uint8_t stage) {
     if (k.kind == Kind::Posture) CHECKF(posture_code(k.name) >= 0, "posture %s", k.name);
     if (k.kind == Kind::Gait) CHECKF(planner::find_pattern(k.name) != nullptr, "gait %s", k.name);
     if (k.kind == Kind::Trick) CHECKF(tricks::find_trick(k.name) != nullptr, "trick %s", k.name);
-    // rows 1-3 do nothing, but A2
-    CHECKF((k.grid[1] <= '3' && std::strcmp(k.grid, "A2") != 0) == (k.kind == Kind::Ignore), "%s", k.grid);
+    // rows 1-3 do nothing, but A2 and B2 (the meow: the C++ mind's only; ir.py has no sounds)
+    CHECKF((k.grid[1] <= '3' && std::strcmp(k.grid, "A2") != 0 && std::strcmp(k.grid, "B2") != 0) ==
+               (k.kind == Kind::Ignore),
+           "%s", k.grid);
   }
   CHECK(cmds.size() == 21 && grids.size() == 21);
   CHECK(action_for(0x45) == nullptr);
@@ -74,7 +76,7 @@ void test_key_table(uint8_t stage) {
               {"A5", Kind::Behaviour, ""},    {"B5", Kind::Speed, "slower"},  {"C5", Kind::Posture, "calib"},
               {"A4", Kind::Gait, "trot"},     {"B4", Kind::Gait, "crawl"},    {"C4", Kind::Gait, "walk"},
               {"A2", rear_up ? Kind::Trick : Kind::Ignore, kStageTrick[stage]},
-              {"B2", Kind::Ignore, ""}};  // the rear-up key until 2026-11-17: nothing now
+              {"B2", Kind::Sound, "meow"}};  // the rear-up key until 2026-11-17; a meow since 2026-11-19 (docs/sound.md)
   for (const auto& w : want) {
     const Key* k = action_for(cmd_of(w.grid));
     CHECKF(k != nullptr && k->kind == w.kind && std::strcmp(k->name, w.name) == 0, "%s", w.grid);
@@ -97,7 +99,7 @@ void test_key_table(uint8_t stage) {
   std::snprintf(want_a2, sizeof want_a2, "A2 (0x10, %s)", kStageLabel[stage]);
   CHECKF(std::strcmp(d, want_a2) == 0, "%s", d);
   describe(0x38, d, sizeof d);
-  CHECKF(std::strcmp(d, "B2 (0x38, none)") == 0, "%s", d);
+  CHECKF(std::strcmp(d, "B2 (0x38, meow)") == 0, "%s", d);
   set_rear_up_key(0);
 }
 

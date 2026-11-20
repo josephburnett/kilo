@@ -62,7 +62,9 @@
 //   higher stages 2 and 2.5 s, not the body's 0.2 s); a key that then
 //   takes a posture or walks waits for
 //   that crossfade first (Phase::Settle).
-// - Rows 1-3 (and A2 unless switched on) do nothing (Mind::ir_key logs them as ignored).
+// - B2 meows (Kind::Sound): the Mind asks its sound player (sound/player.h)
+//   and never calls perform() for it.
+// - Rows 1-3 but B2 (and A2 unless switched on) do nothing (Mind::ir_key logs them as ignored).
 // Every key leaves one log line, "remote <grid> (0x.., <label>): <outcome>".
 // Which keys never reach perform() (repeats, other remotes' keys, rows 1-3,
 // a laptop client holding the body) is the owner's call (Mind::ir_key,

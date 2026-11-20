@@ -21,12 +21,12 @@
 //   Awake    the default; A7 (a remote key the mind acts on) -> Drowsy
 //   Drowsy   A7 was the last key: counting kSleepAfterUs of nothing
 //            happening. Any activity restarts the count: a key that does
-//            nothing (rows 1-3, a held key's repeats, another remote's key,
+//            nothing (rows 1-3, B2's meow, a held key's repeats, another remote's key,
 //            C7, B5/B7 while not walking), a laptop connecting or sending a
 //            request, a client connected at all, the walker, a trick, the
 //            remote's own action (A7's planned stop), the behaviour runner,
 //            the body in GAIT, TRICK, FALLEN, RECOVERING, CALIB or BOOT. A
-//            key that moves Kilo (B6, C5, A4-C4, A6, C6, A5, B2) cancels:
+//            key that moves Kilo (B6, C5, A4-C4, A6, C6, A5, A2) cancels:
 //            back to Awake. When the count runs out and the card saver is
 //            not writing (it is asked to save what it holds first: "save
 //            now", when saving is on), -> Asleep.
