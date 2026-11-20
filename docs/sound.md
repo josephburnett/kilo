@@ -121,15 +121,15 @@ build stops and names the largest sounds; shorten them, drop some, or save
 them at 11025 Hz (half the size; still fine for a purr or a hiss).
 
 The kernel image was 689,636 bytes before sound. The sound code adds about
-27 KB; each second of sound adds 22 KB. The seven sounds planned (about 9
-seconds together) make it about 915 KB: tested with synthetic sounds of
-that length, 915,676 bytes.
+27 KB; each second of sound adds 22 KB. The seven sounds in
+`kernel/sounds/` (11.2 seconds together, 241 KB once packed, from 494 KB of
+16-bit WAV) make it about 965 KB (965,596 bytes on 2026-11-19).
 
 `kilo update` sends the whole image over the network and reads it back
 from the card, so a bigger image takes longer to install. The one timed
 update so far (591,140 bytes) was back in 10.7 seconds, reboot included;
 if all of that time grew with the size (it does not: the reboot and the
-network coming up do not), 200 KB of sound would add at most 3.6 seconds.
+network coming up do not), the 241 KB of sound would add at most 4.4 seconds.
 `kilo update` prints how long the mind took to come back; compare it after
 the sounds go in.
 
