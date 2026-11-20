@@ -6,6 +6,7 @@
 #include "../src/core/posture.h"
 #include "../src/core/reset.h"
 #include "check.h"
+#include "body_fixture.h"
 #include "fake_eeprom.h"
 
 static Config cfg;
@@ -40,12 +41,8 @@ static bool has_event(uint8_t code, int16_t arg = -1) {
 }
 static void clear_events() { events_init(b.ev); }
 static void reset(const int16_t* warm = nullptr) {
-  config_defaults(cfg.img);
-  cfg.state = CFG_MIGRATED;
-  body_init(b, &cfg, warm, true);
-  in = TickIn();
-  in.imu = IMU_FRESH;
-  in.att.gz = 16384;
+  fixture_body(b, cfg, CFG_MIGRATED, warm);
+  in = fixture_upright();
 }
 
 int main() {
@@ -206,12 +203,9 @@ int main() {
     ResetRecord rec = {0, 0, 0, 0, 0};
     uint16_t last;
     reset_classify(rec, 5, last);  // cold boot (invalid magic)
-    config_defaults(cfg.img);
-    cfg.state = CFG_MIGRATED;
+    fixture_config(cfg);
     body_init(b, &cfg, nullptr, true, rec.epoch);
-    in = TickIn();
-    in.imu = IMU_FRESH;
-    in.att.gz = 16384;
+    in = fixture_upright();
     CHECK(b.epoch == 1);
     for (int boot = 0; boot < 3; boot++) {
       uint8_t old = b.epoch;

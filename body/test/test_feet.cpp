@@ -30,6 +30,7 @@
 #include "../src/core/params.h"
 #include "../src/core/posture.h"
 #include "check.h"
+#include "body_fixture.h"
 #include "fake_eeprom.h"
 #include "fake_link_hal.h"
 #include "tip_plant.h"
@@ -69,19 +70,13 @@ static void collect() {
 }
 
 static void reset(uint8_t cfg_state = CFG_MIGRATED) {
-  g_ee.reset();
-  config_defaults(cfg.img);
-  cfg.state = (ConfigState)cfg_state;
-  params_load(cfg.img);
-  body_init(b, &cfg, nullptr, true);
+  fixture_body(b, cfg, cfg_state);
   g_lh.reset();
   link_init(0xFEE7FEE7u, KILO_HELLO_CAPS_DMP);
   g_lh.feed(frame(KILO_MSG_SET_STREAM, 0xFF, {1, 0, 0}));  // TELEMETRY every tick
   link_poll();
   g_lh.take();
-  in = TickIn();
-  in.imu = IMU_FRESH;
-  in.att.gz = 16384;
+  in = fixture_upright();
   heartbeat = true;
   evlog.clear();
   tlog.clear();

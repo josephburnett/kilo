@@ -21,6 +21,7 @@
 #include "../src/core/posture.h"
 #include "check.h"
 #include "slurp.h"
+#include "body_fixture.h"
 #include "fake_eeprom.h"
 
 // ---- Legacy reference (src/motion.h, src/skill.h), in double -------------
@@ -294,14 +295,8 @@ static uint16_t counts[16];
 static TickIn in;
 
 static void reset_body() {
-  g_ee.reset();
-  config_defaults(cfg.img);
-  cfg.state = CFG_MIGRATED;
-  params_load(cfg.img);
-  body_init(b, &cfg, nullptr, true);
-  in = TickIn();
-  in.imu = IMU_FRESH;
-  in.att.gz = 16384;
+  fixture_body(b, cfg);
+  in = fixture_upright();
 }
 static void tick(int n = 1) {
   for (int i = 0; i < n; i++) {

@@ -15,6 +15,7 @@
 #include "../src/core/posture.h"
 #include "../src/proto/crc16.h"
 #include "check.h"
+#include "body_fixture.h"
 #include "fake_eeprom.h"
 #include "fake_link_hal.h"
 #include "trick_library.h"
@@ -29,28 +30,14 @@ static const int8_t STAND[11] = {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30};
 static const uint16_t ALL = 0xFF07;
 
 static void reset(uint8_t state = CFG_MIGRATED) {
-  g_ee.reset();
-  config_defaults(cfg.img);
-  cfg.state = (ConfigState)state;
-  cfg.writing = 0;
-  cfg.newest = 0xFF;
-  params_load(cfg.img);
-  body_init(b, &cfg, nullptr, true);
+  fixture_body(b, cfg, state);
   g_lh.reset();
   link_init(1, 0);
-  in = TickIn();
-  in.imu = IMU_FRESH;
-  in.att.gz = 16384;
+  in = fixture_upright();
   evs.clear();
 }
 
-static void drain() {
-  const Event* e;
-  while ((e = events_peek(b.ev)) != nullptr) {
-    evs.push_back(*e);
-    events_pop(b.ev);
-  }
-}
+static void drain() { fixture_drain(b.ev, evs); }
 
 static void tick(int n = 1) {
   for (int i = 0; i < n; i++) {

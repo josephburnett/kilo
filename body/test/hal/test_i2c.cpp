@@ -5,7 +5,9 @@
 // high) and the error counter. Also measures the polling bounds that
 // docs/code-review-2026-10-11.md §2.2 calls weak: a dead bus costs one
 // bounded wait per transfer, a slow (not dead) bus is bounded only per
-// action, so per transfer it scales with the byte count.
+// action, so per transfer it scales with the byte count; and the per-tick
+// budget: what it is charged, a transfer refused once it is spent, and a
+// slow STOP bounded by it.
 #include <cstdio>
 #include <vector>
 #include "../check.h"
@@ -302,6 +304,52 @@ int main() {
     std::printf("i2c: slow bus: a %llu-poll burst fits the tick budget; at %u polls per action the "
                 "burst is cut at the 17000-poll budget (%llu polls)\n", (unsigned long long)fits, (unsigned)(SPIN_LIMIT - 1),
                 (unsigned long long)burst);
+  }
+
+  // ---- what the tick budget is charged: only the polls spent waiting ----
+  {
+    // Healthy but not instant: each action answers on its third poll. The
+    // PCA burst (START, SLA, register, 64 bytes: 67 actions) costs 2 polls
+    // per action, and the STOP 1 (TWSTO reads set once).
+    reset_all();
+    i2c_init();  // also refills the budget
+    g_twi.slow_polls = 2;
+    uint8_t d[64] = {};
+    CHECK(i2c_write(0x40, 0x06, d, 64) == I2C_OK);
+    CHECKF(budget == TICK_SPIN_BUDGET - 67 * 2 - 1, "budget %u", budget);
+    // A hung START costs exactly SPIN_LIMIT.
+    reset_all();
+    i2c_init();
+    g_twi.hang_at = 0;
+    CHECK(i2c_write_byte(0x40, 0x00, 0x11) == I2C_TIMEOUT);
+    CHECK(budget == TICK_SPIN_BUDGET - SPIN_LIMIT);
+  }
+
+  // ---- a budget spent exactly at a transfer boundary ----
+  // Reads and writes are both refused before START: no bus activity, no
+  // recovery, but each refusal is a counted error (so the IMU read becomes
+  // IMU_ERR, the PCA keeps its pose, and i2c_err in STATS shows it).
+  {
+    reset_all();
+    i2c_init();
+    budget = 0;
+    long a = g_twi.actions, dis = g_twi.disables;
+    uint8_t b[2];
+    CHECK(i2c_read(0x40, 0x72, b, 2) == I2C_BUDGET);
+    CHECK(i2c_write_byte(0x40, 0x00, 0x11) == I2C_BUDGET);
+    CHECK(g_twi.actions == a && g_twi.disables == dis && g_twi.count('S') == 0);
+    CHECK(i2c_error_count() == 2);
+  }
+
+  // ---- a slow STOP is charged to the budget too, and bounded by it ----
+  {
+    reset_all();
+    i2c_init();
+    g_twi.stop_hangs = true;
+    budget = 500;
+    uint64_t sp = g_twi.stop_polls;
+    CHECK(i2c_write_byte(0x40, 0x00, 0x11) == I2C_OK);
+    CHECK(budget == 0 && g_twi.stop_polls - sp == 500);
   }
 
   return report("hal_i2c");

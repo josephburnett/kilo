@@ -47,6 +47,7 @@
 #include "../src/core/params.h"
 #include "../src/core/reset.h"
 #include "fake_eeprom.h"
+#include "body_fixture.h"
 #include "fake_link_hal.h"
 
 static Config cfg;
@@ -119,13 +120,8 @@ static void boot(bool warm, uint8_t cause, uint8_t epoch, uint16_t last_alive, b
 }
 
 static void cold(uint8_t state, bool imu_ok) {
-  g_ee.reset();
-  config_defaults(cfg.img);
-  cfg.state = (ConfigState)state;
-  cfg.reason = state == CFG_DEFAULTED ? CFG_REASON_PWM_PIN : CFG_REASON_NONE;
-  cfg.writing = 0;
-  cfg.saved = 0;
-  cfg.newest = 0xFF;
+  fixture_config(cfg, state);
+  if (state == CFG_DEFAULTED) cfg.reason = CFG_REASON_PWM_PIN;
   scripted = TickIn();
   scripted.imu = IMU_FRESH;
   set_att(0, 0, 0, 0, 0);
