@@ -15,12 +15,13 @@
 #ifndef KILO_MIND_PLANNER_PATTERNS_H
 #define KILO_MIND_PLANNER_PATTERNS_H
 #include <stdint.h>
+#include "link/consts.h"
 #include "planner/fmath.h"
 
 namespace kilo {
 namespace planner {
 
-constexpr real kTickMs = 20;
+constexpr real kTickMs = (real)KILO_TICK_MS;
 constexpr real kStrideMinMm = 8;
 constexpr real kTurnFrac = (real)0.8;  // a turn in place: each side's stride, this fraction of the stride
 constexpr real kLeanMoveMs = 300;      // the body's typical move between two swings (walk, crawl)

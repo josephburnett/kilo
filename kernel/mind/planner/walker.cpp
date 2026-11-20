@@ -83,7 +83,7 @@ void pack_feet(uint8_t epoch, const TickPlan& tp, kilo_feet_t* out) {
     out->x_mm[i] = tp.x[i];
     out->z_mm[i] = tp.z[i];
   }
-  int p = round_i(tp.pitch * 16), r = round_i(tp.roll * 16);
+  int p = round_i(to_a16(tp.pitch)), r = round_i(to_a16(tp.roll));
   out->pitch = (int16_t)(p < -480 ? -480 : p > 480 ? 480 : p);
   out->roll = (int16_t)(r < -480 ? -480 : r > 480 ? 480 : r);
   out->support = tp.support;

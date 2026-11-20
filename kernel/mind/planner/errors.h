@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include "planner/fmath.h"
 #include "planner/model.h"
+#include "planner/patterns.h"
 
 namespace kilo {
 namespace planner {
@@ -42,7 +43,7 @@ struct ErrorEstimate {
 
 class ErrorTracker {
  public:
-  explicit ErrorTracker(real offset_s = 2) : alpha_(kTickDefault / (real)1000.0 / offset_s) {}
+  explicit ErrorTracker(real offset_s = 2) : alpha_(kTickMs / (real)1000.0 / offset_s) {}
   void reset();
 
   // One TELEMETRY in GAIT (tick unwrapped; angles in TELEMETRY's 1/16 deg)
@@ -57,7 +58,6 @@ class ErrorTracker {
   uint32_t count() const { return count_; }
 
  private:
-  static constexpr real kTickDefault = 20;
   const ErrorSample& at(int i) const { return ring_[(head_ + i) % kErrWindowTicks]; }
   void lag(bool* has, real* lag_ms, real* quality) const;
 

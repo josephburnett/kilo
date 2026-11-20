@@ -1,4 +1,5 @@
 #include "link/body_state.h"
+#include "link/consts.h"
 
 namespace kilo {
 
@@ -130,7 +131,7 @@ bool BodyState::moving() const {
 
 int BodyState::upright() const {
   if (!has_telemetry) return -1;
-  const int16_t lim = 30 * 16;  // state.py UPRIGHT_DEG, in 1/16 deg (|p| / 16 < 30)
+  const int16_t lim = to_a16(30);  // state.py UPRIGHT_DEG, in 1/16 deg (|p| / 16 < 30)
   bool up = telemetry.pitch < lim && telemetry.pitch > -lim && telemetry.roll < lim && telemetry.roll > -lim;
   return up && !fallen() ? 1 : 0;
 }

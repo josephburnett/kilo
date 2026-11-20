@@ -1,4 +1,5 @@
 #include "tricks/model.h"
+#include "link/consts.h"
 #include "proto/crc16.h"
 #include "util/fmt.h"
 #include "util/mem.h"
@@ -141,8 +142,8 @@ void GuardWatch::reset(const Trick& t, uint8_t speed_q6) {
       for (uint8_t f = t.loop_start; f <= t.loop_end; f++) visit(f);
     for (uint32_t f = t.loop_end + 1u; f < t.n_frames; f++) visit((uint8_t)f);
     uint32_t h = phase_ticks(t.frames[g].hold, speed_q6);
-    from_us_[i] = (uint64_t)(2u * h0 + h) * KILO_TICK_MS * 500u;  // h0 + h / 2 ticks
-    decide_us_[i] = (uint64_t)(h0 + h - (h > kEarlyTicks ? kEarlyTicks : h)) * KILO_TICK_MS * 1000u;
+    from_us_[i] = ticks_to_us(2u * h0 + h) / 2;  // h0 + h / 2 ticks
+    decide_us_[i] = ticks_to_us(h0 + h - (h > kEarlyTicks ? kEarlyTicks : h));
   }
 }
 

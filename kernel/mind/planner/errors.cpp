@@ -3,8 +3,6 @@
 namespace kilo {
 namespace planner {
 
-static constexpr real kA16 = 16;
-
 static real round2(double v) {  // Python's round(v, 2), half to even
   double s = v * 100.0;
   int64_t i = (int64_t)s;
@@ -27,17 +25,17 @@ Attitude ErrorTracker::add(int64_t tick, int16_t pitch, int16_t roll, int16_t re
                            int16_t corr_pitch, int16_t corr_roll, const Attitude* ref) {
   ErrorSample s;
   s.tick = tick;
-  s.mp = (real)pitch / kA16;
-  s.mr = (real)roll / kA16;
+  s.mp = from_a16((real)pitch);
+  s.mr = from_a16((real)roll);
   if (ref == nullptr) {
-    s.rp = (real)ref_pitch / kA16;
-    s.rr = (real)ref_roll / kA16;
+    s.rp = from_a16((real)ref_pitch);
+    s.rr = from_a16((real)ref_roll);
   } else {
     s.rp = ref->pitch;
     s.rr = ref->roll;
   }
-  s.cp = (real)corr_pitch / kA16;
-  s.cr = (real)corr_roll / kA16;
+  s.cp = from_a16((real)corr_pitch);
+  s.cr = from_a16((real)corr_roll);
   if (count_ < kErrWindowTicks) {
     ring_[(head_ + count_) % kErrWindowTicks] = s;
     count_++;
@@ -150,7 +148,7 @@ void ErrorTracker::lag(bool* has, real* lag_ms, real* quality) const {
   }
   if (!found) return;
   *has = true;
-  *lag_ms = (real)best_k * kTickDefault;
+  *lag_ms = (real)best_k * kTickMs;
   *quality = round2(best_c);
 }
 

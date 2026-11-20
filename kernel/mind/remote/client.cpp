@@ -42,8 +42,8 @@ bool client_balance_enabled(SerialLink& link) {
 }
 
 bool client_look(SerialLink& link, double pan_deg, double tilt_deg) {
-  const double lim = KILO_HEAD_MAX_DEG * 16.0;
-  double pan = d_round(pan_deg * 16.0), tilt = d_round(tilt_deg * 16.0);
+  const double lim = to_a16((double)KILO_HEAD_MAX_DEG);
+  double pan = d_round(to_a16(pan_deg)), tilt = d_round(to_a16(tilt_deg));
   if (!(pan >= -lim && pan <= lim && tilt >= -lim && tilt <= lim) || link.state().proto_ok == 0) return false;
   kilo_set_head_t h = {0, KILO_HEAD_MODE_HOLD, (int16_t)pan, (int16_t)tilt, KILO_HEAD_NOT_HELD, KILO_HEAD_SPEED_DPS};
   return link.set_goal(KILO_MSG_SET_HEAD, (const uint8_t*)&h, sizeof h);

@@ -49,7 +49,6 @@
 namespace kilo {
 namespace planner {
 
-constexpr uint32_t kTickUs = KILO_TICK_MS * 1000u;
 constexpr int kLookahead = KILO_FEET_LOOKAHEAD_TICKS;
 constexpr int kClockWindow = 100;      // telemetry frames in the body-clock estimate (2 s at 50 Hz)
 constexpr int kClockResetFrames = 5;   // ...restarted after this many frames in a row a tick below its maximum

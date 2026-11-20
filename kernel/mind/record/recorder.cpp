@@ -44,7 +44,7 @@ void Line::fixed(const char* key, real v, int decimals) {
 }
 
 int16_t a16(real deg) {
-  long v = (long)planner::round_i(deg * 16);
+  long v = (long)planner::round_i(to_a16(deg));
   return (int16_t)(v < -32767 ? -32767 : v > 32767 ? 32767 : v);
 }
 

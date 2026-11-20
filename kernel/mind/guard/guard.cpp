@@ -201,7 +201,7 @@ void DistanceGuard::decide(const char* state, const char* reason) {
 void DistanceGuard::on_telemetry(const kilo_telemetry_t& t, double head_tilt_deg, bool lying) {
   double now = (double)clock_.now_us() / 1e6;
   // the beam's tilt below level: the head held down, plus the body nose down (TELEMETRY pitch, nose down +)
-  double down = -head_tilt_deg + (double)t.pitch / 16.0;
+  double down = -head_tilt_deg + from_a16((double)t.pitch);
   bool fresh = (t.flags & KILO_TELEMETRY_FLAGS_DIST_FRESH) != 0;
   lying_ = lying;
   floor_mm_ = lying ? -1 : floor_from_mm(down);

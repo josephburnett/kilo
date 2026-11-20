@@ -28,6 +28,18 @@ inline bool is_clearing_event(uint8_t code) {
   return code == KILO_EVENT_FELL || code == KILO_EVENT_WATCHDOG || code == KILO_EVENT_LOW_BATTERY;
 }
 
+// The body's control tick (KILO_TICK_MS: 50 Hz) and the wire's angle unit,
+// 1/16 degree ("a16": TELEMETRY's pitch and roll, SET_BODY_POSE, SET_HEAD).
+constexpr uint32_t kTickUs = KILO_TICK_MS * 1000u;
+constexpr double kTickS = KILO_TICK_MS / 1000.0;      // 0.02
+constexpr double kTicksPerS = 1000.0 / KILO_TICK_MS;  // 50
+constexpr uint64_t ticks_to_us(uint64_t ticks) { return ticks * kTickUs; }
+// Exact in any type (a power of two): the same bits as the literal * 16 and / 16.
+template <class T>
+constexpr T to_a16(T deg) { return deg * (T)16; }
+template <class T>
+constexpr T from_a16(T a16) { return a16 / (T)16; }
+
 // Timings (serial_link.py LinkConfig), from the spec where it has them.
 struct LinkConfig {
   uint32_t heartbeat_idle_us = KILO_HEARTBEAT_IDLE_MS * 1000u;  // HEARTBEAT after this much TX silence

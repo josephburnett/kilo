@@ -421,7 +421,7 @@ void RemoteControl::stop_trick() {
   }
   step_trick_ = nullptr;
   player_.stop();
-  settle_us_ = ticks != 0 ? (uint64_t)ticks * KILO_TICK_MS * 1000u + 100000u : 0;  // ir.py _stop_trick
+  settle_us_ = ticks != 0 ? ticks_to_us(ticks) + 100000u : 0;  // ir.py _stop_trick
 }
 
 void RemoteControl::start_trick() {
@@ -498,8 +498,8 @@ int RemoteControl::step_at(uint64_t* hold_end_us) const {
     if (f < 0) continue;
     uint32_t start = 0;
     for (int i = 0; i < f; i++) start += t.frames[i].dur + t.frames[i].hold;
-    uint64_t from = t0 + (uint64_t)start * KILO_TICK_MS * 1000u;
-    uint64_t end = from + (uint64_t)(t.frames[f].dur + t.frames[f].hold) * KILO_TICK_MS * 1000u;
+    uint64_t from = t0 + ticks_to_us(start);
+    uint64_t end = from + ticks_to_us(t.frames[f].dur + t.frames[f].hold);
     if (now >= from && now < end) {
       *hold_end_us = end;
       return k;
