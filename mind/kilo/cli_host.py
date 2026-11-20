@@ -16,6 +16,8 @@ today, and so what works here:
     kilo update --host IP [--image PATH] [--force] [--wait S]   write a new kernel onto the mind's SD card;
                                                    it reboots into it, and this waits for it to come back
     kilo guard [on|off|status] --host IP [--json]  the distance guard (docs/distance-guard.md)
+    kilo sound [status|list|play NAME|on|off|volume N] --host IP [--json]   Kilo's sounds (kilo.cli_sound,
+                                                   docs/sound.md)
     kilo cal [show|set J DEG|nudge J DEG|save|revert] --host IP   joint calibration (kilo.cli_cal,
                                                    docs/calibration.md)
     kilo runs --host IP [--json] | --fetch ... | --delete ...   the walks and tricks recorded (kilo.cli_record;
@@ -51,7 +53,7 @@ import zlib
 from pathlib import Path
 from typing import Any
 
-from kilo import cli_power, cli_record, hostkey, mdns
+from kilo import cli_power, cli_record, cli_sound, hostkey, mdns
 from kilo.hostlink import REBOOT_CLOSE_WAIT_S, HostError, HostKeyRefused, HostLink, HostRefused, has_kernel_marker
 from kilo.protocol import kilo_protocol as P
 
@@ -161,6 +163,14 @@ def cmd_guard(args: argparse.Namespace, hl: HostLink) -> int:
     return EXIT_OK
 
 
+def _sound(hl: HostLink) -> Any:
+    """SOUND_STATUS, or None from a mind without sounds."""
+    try:
+        return hl.sound(P.SoundOp.STATUS)
+    except (HostRefused, HostError):
+        return None
+
+
 def _extras(hl: HostLink) -> tuple[Any, list[str]]:
     """REC_STATUS and the metrics lines, or (None, []) from a mind without them."""
     rs, lines = None, []
@@ -179,6 +189,7 @@ def cmd_status(args: argparse.Namespace, hl: HostLink) -> int:
     st = hl.status()
     rs, lines = _extras(hl)
     g = _guard(hl)
+    snd = _sound(hl)
     if args.json:
         d = status_dict(st)
         if rs is not None:
@@ -188,11 +199,15 @@ def cmd_status(args: argparse.Namespace, hl: HostLink) -> int:
             d["metrics"] = lines
         if g is not None:
             d["guard"] = guard_dict(g)
+        if snd is not None:
+            d["sound"] = cli_sound.status_dict(snd)
         print(json.dumps(d, indent=2))
     else:
         print_status(st)
         if g is not None:
             print("\n".join(guard_lines(g)))
+        if snd is not None:
+            print("\n".join(cli_sound.status_lines(snd)))
         if rs is not None:
             print(cli_record.recorder_line(rs))
         for ln in lines:
@@ -585,7 +600,7 @@ def _prepare_flash(args: argparse.Namespace) -> int | None:
 
 HOST_COMMANDS = {"status": cmd_status, "posture": cmd_posture, "monitor": cmd_monitor, "log": cmd_log,
                  "flash": cmd_flash, "reboot": cmd_reboot, "update": cmd_update, "guard": cmd_guard,
-                 **cli_record.HOST_COMMANDS, "power": cli_power.cmd_power,
+                 **cli_record.HOST_COMMANDS, "power": cli_power.cmd_power, "sound": cli_sound.cmd_sound,
                  "cal": lambda args, hl: __import__("kilo.cli_cal").cli_cal.cmd_cal_host(args, hl)}
 
 
@@ -607,7 +622,7 @@ def parse_log_argv(argv: list[str], host: str | None, key: str | None = None) ->
 
 
 # Commands only a C++ mind serves: without --host they find Kilo by mDNS (kilo.mdns).
-HOST_ONLY = ("walks", "runs", "bench", "metrics", "reboot", "update", "guard")
+HOST_ONLY = ("walks", "runs", "bench", "metrics", "reboot", "update", "guard", "sound")
 
 
 def wants_host(args: argparse.Namespace) -> bool:

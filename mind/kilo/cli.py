@@ -18,6 +18,7 @@
     kilo record decode FILE [--csv OUT] [--json] [--log] [--plot PNG]   a downloaded recording, readable
     kilo bench sd --host IP   the SD card's write times;   kilo metrics --host IP   the session's counters
     kilo power --host IP | FILE.krec   light sleep and the battery's trend (kilo.cli_power, docs/power.md)
+    kilo sound [status|list|play NAME|on|off|volume N] --host IP   Kilo's sounds (kilo.cli_sound, docs/sound.md)
     kilo vbody [--fall-after S] [--no-keys]
     kilo run [--port P] [--socket PATH] [--log] [--kilolog [FILE]] [--behaviour] [--remote] [--balance [KP]]
     kilo daemon [status|stop]
@@ -167,6 +168,8 @@ def build_parser() -> argparse.ArgumentParser:
                                      "(docs/distance-guard.md)")
     s.add_argument("mode", nargs="?", choices=["on", "off", "status"], default="status")
     s.add_argument("--json", action="store_true")
+
+    __import__("kilo.cli_sound").cli_sound.add_parser(sub)  # kilo sound (cli_sound.py; --host only)
 
     s = sub.add_parser("reboot", help="restart a C++ mind over --host: the body gets REST, then the Pi reboots "
                                       "(on the netboot card: the loader waits for the next kernel)")
