@@ -41,9 +41,10 @@ import math
 from collections import deque
 
 from kilo.planner.model import LEGS, BodyModel, G_MM_S2, hull, margin, rotation
+from kilo.protocol import kilo_protocol as P
 
 SUBSTEPS = 10
-TICK_S = 0.020
+TICK_S = P.TICK_MS / 1000
 
 
 class Physics:

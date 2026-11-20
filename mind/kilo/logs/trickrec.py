@@ -47,7 +47,7 @@ from kilo.logs import flight
 from kilo.protocol import kilo_protocol as P
 from kilo.tricks.player import FOREVER, phase_ticks, play_order
 
-TICK_US = 20000
+TICK_US = P.TICK_MS * 1000
 A16 = 16.0
 THRESHOLD_DEG = 8.0
 ONSET_S = 0.2

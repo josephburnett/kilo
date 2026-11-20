@@ -36,8 +36,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from kilo.planner.model import LB, LF, RB, RF
+from kilo.protocol import kilo_protocol as P
 
-TICK_MS = 20.0
+TICK_MS = float(P.TICK_MS)
 STRIDE_MIN_MM = 8.0
 TURN_FRAC = 0.8          # a turn in place: each side's stride, this fraction of the forward stride
 LEAN_MOVE_MS = 300.0     # the body's typical move between two swings (walk, crawl; the roll from one side to the other)

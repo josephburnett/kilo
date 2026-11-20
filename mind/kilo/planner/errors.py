@@ -26,8 +26,10 @@ import math
 from collections import deque
 from typing import Any, Iterable
 
+from kilo.protocol import kilo_protocol as P
+
 A16 = 16.0
-TICK_MS = 20.0
+TICK_MS = float(P.TICK_MS)
 WINDOW_TICKS = 200       # 4 s of 50 Hz telemetry
 MIN_SAMPLES = 50
 MAX_LAG_TICKS = 10       # +-200 ms around the model's lag

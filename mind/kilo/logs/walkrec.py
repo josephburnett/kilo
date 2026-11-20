@@ -463,7 +463,7 @@ def summarize(w: Walk, rows: list[dict[str, Any]] | None = None) -> dict[str, An
             "corr_roll": _r(sum(x["corr_roll"] or 0 for x in v) / len(v))}
         for k, v in sorted(by.items(), key=lambda kv: (-len(kv[1]), kv[0]))}
     held = [r for r in gait if r["held"]]
-    out["held"] = {"ticks": len(held), "seconds": round(len(held) * 0.02, 2),
+    out["held"] = {"ticks": len(held), "seconds": round(len(held) * (P.TICK_MS / 1000), 2),
                    "fraction": round(len(held) / len(gait), 3)}
     out["balance_active_fraction"] = round(sum(1 for r in gait if r["balance"]) / len(gait), 3)
     cp = [r["corr_pitch"] for r in gait if r["corr_pitch"] is not None]

@@ -21,7 +21,7 @@ from kilo.protocol import kilo_link_codec as C
 from kilo.protocol import kilo_protocol as P
 from kilo.vbody.sim import VirtualBody
 
-TICK = 0.02
+TICK = P.TICK_MS / 1000
 
 
 class FakeLink:

@@ -38,7 +38,7 @@ from kilo.planner import patterns as pat  # noqa: E402
 from kilo.vbody import physics as phys  # noqa: E402
 from walksim import WalkSim  # noqa: E402
 
-TICK_S = 0.02
+TICK_S = phys.TICK_S
 STILL_MM = 3.0  # "stopped": the body stays this close to where it ends
 REPLAN_TICKS = 4  # "replan": the plan LOOKAHEAD (5) ahead, planned again from the body's tick + 2: 4 ticks sooner
 MODES = ("planned", "quick", "replan")
