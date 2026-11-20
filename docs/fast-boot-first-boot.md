@@ -357,8 +357,9 @@ key bends it back), **B7** or **B5** while he turns on the spot sets off
 straight forward or backward, **B4** crawl and **C4** walk (the two slower
 gaits), **C5** the calibration posture, **A5** Kilo's own behaviour (B6 or
 A7 ends it), and **C7** freeze: Kilo stops where he is, feet on the ground,
-and ignores every key except B6 and A7. The keys in rows 1 to 3 do nothing
-(A2, the rear-up trick, only when it is switched on: docs/rear-up-trick.md).
+and ignores every key except B6 and A7. The keys in rows 1 to 3 do nothing,
+except B2, which meows (docs/sound.md), and A2, the rear-up trick, when it
+is switched on (docs/rear-up-trick.md).
 
 If a key does nothing and no `remote` line appears, the key did not reach
 the mind: note which key. If the line says `ignored (a laptop client holds

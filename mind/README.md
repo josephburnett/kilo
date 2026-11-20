@@ -30,6 +30,8 @@ one on connect) are only sent while the mind's main loop proved alive within
 
 ## Install on the Pi
 
+> **Retired route.** This section installs the Python mind on the Pi's Raspberry Pi OS. Kilo no longer runs that: the Pi now starts the mind kernel straight from the SD card, with no operating system under it (`docs/fast-boot.md` section 8 lists what is retired). On the laptop the `kilo` command is installed as `docs/laptop-setup.md` says; the mind on Kilo is the kernel (`kernel/README.md`). This text stays until the owner decides what to do with it.
+
 The full recipe for the Pi and a dev host is `docs/setup.md`; the essentials:
 pyserial comes from apt (`python3-serial`, 3.5). Recommended: a per-repo venv
 that can see the system site packages, so pyserial is not installed twice and
@@ -388,6 +390,8 @@ stop), `pose(...)`, `release_pose()`. No behaviour walks yet
 allowed.
 
 ## Daemon and systemd
+
+> **Retired route.** Running `kilo run` on the Pi as Kilo's mind, under systemd, is the old way. Kilo no longer runs that: the Pi now starts the mind kernel straight from the SD card, with no operating system under it (`docs/fast-boot.md` section 8 lists what is retired). The C++ mind kernel does this job now (`kernel/README.md`); the laptop talks to it with `kilo --host`. `kilo run` itself is still in the code, and its tests run it against the virtual body. This text stays until the owner decides what to do with it.
 
 `kilo run` is one process that owns the serial port, the `SerialLink` and the
 `BodyClient`, and serves a Unix socket. The socket path comes from one
@@ -1377,38 +1381,8 @@ three minutes.
 
 ## Layout
 
-```
-kilo/protocol/              VENDORED by protocol/vendor.py: kilo_protocol.py, kilo_link_codec.py
-kilo/link/codec.py          Codec / Decoder interface and KiloCodec (COBS + CRC)
-kilo/link/messages.py       KiloMessages: pack/unpack by name over the generated dataclasses
-kilo/link/consts.py         type codes, statuses, events, modes, params (from kilo_protocol)
-kilo/link/transport.py      pyserial, raw-fd (pty) and loopback transports
-kilo/link/ports.py          port auto-detection
-kilo/link/serial_link.py    SerialLink: reader/writer threads, goals, commands
-kilo/body/state.py          BodyState
-kilo/body/client.py         BodyClient: postures, balance, head, walking, pose, tricks, calibration, params, stats
-kilo/planner/               walking: body model, patterns and speed, the step planner, error estimates, the FEET stream
-kilo/log.py                 JSON-lines logger thread
-kilo/perception/            ultrasonic + IMU detectors, Percepts aggregator, SharedPercepts, ring buffer
-kilo/logs/                  log reader (JSONL, .kilolog, .kwalk), summary/replay/plot/walk (kilo log, python -m kilo.logs)
-kilo/tricks/                trick model, legacy importer, library/*.json (generated), player timing
-kilo/behaviour/             behaviour tree, drives, utility selector, personality.yaml, runner (run_behaviour)
-kilo/cli_trick.py           `kilo trick` (registered by one line in cli.py)
-kilo/cli_head.py            `kilo look` (registered by one line in cli.py)
-kilo/cli_walk.py            `kilo walk`, `kilo pose` (registered by one line in cli.py)
-kilo/cli.py                 the `kilo` command
-kilo/cli_tools.py           `kilo log`, `--kilolog`, `monitor --percepts`, `kilo daemon` link lines
-kilo/cli_host.py            `kilo --host`: status, posture, monitor, log, flash, reboot, update, walks against a C++ mind
-kilo/hostlink.py            the host channel client (TCP to the C++ mind) and BridgeTransport (kilo.link over the raw bridge)
-kilo/hostsecure.py          the host channel's secure layer: the hello, the Noise KN handshake, records (noiseprotocol)
-kilo/hostkey.py             this laptop's key file for --host: `kilo key init|show`, --key, $KILO_HOST_KEY
-kilo/daemon/                `kilo run`: owns the port, serves the socket, holds, port release (map in __init__.py)
-kilo/remote.py              socket path resolver, JSON-lines client, RemoteBody (BodyClient over the socket)
-kilo/tools/flash.py         build + flash; kilo/tools/gpio.py GPIO4 reset
-kilo/vbody/                 virtual body (sim.py; feet.py plays FEET, physics.py walks)
-firmware/                   stored hex images (legacy firmware)
-systemd/                    kilo-system.service (the system unit), kilo.service (fallback user unit), env.example, install.sh, trim-boot.sh
-```
+The map of `mind/` and the rest of the repository is in
+`docs/architecture.md` Appendix G.
 
 ## Background clients over ssh
 

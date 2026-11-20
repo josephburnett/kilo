@@ -4,8 +4,11 @@ Written 2026-10-13 after the first floor drives (trot at 1000 ms with
 balance on: "wobbles so much when walking that he tipped over"; tricks fine).
 Numbers use Kilo's measured geometry: legs 45 + 50 mm, body 123 mm long,
 feet 65 mm apart, body height 0.80 × 95 = 76 mm, centre of mass about 80 mm
-up. Code: `body/src/core/gait.cpp`, `balance.cpp`, `body.cpp` (the wiring);
-design: `docs/architecture.md` §3d, §3f.
+up. Code at the time: `body/src/core/gait.cpp`, `balance.cpp`, `body.cpp`
+(the wiring); design: `docs/architecture.md` §3d, §3f. The body's gait
+generator is gone since protocol 2.0 (commit a38580e): the mind now plans
+the feet (`kernel/mind/planner/`) and streams them to the body, which plays
+them (`body/src/core/feet.cpp`).
 
 ## 1. What we have
 
