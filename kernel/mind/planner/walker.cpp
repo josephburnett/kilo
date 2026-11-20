@@ -83,7 +83,7 @@ void pack_feet(uint8_t epoch, const TickPlan& tp, kilo_feet_t* out) {
     out->x_mm[i] = tp.x[i];
     out->z_mm[i] = tp.z[i];
   }
-  int p = round_i(tp.pitch * 16), r = round_i(tp.roll * 16);
+  int p = round_i(to_a16(tp.pitch)), r = round_i(to_a16(tp.roll));
   out->pitch = (int16_t)(p < -480 ? -480 : p > 480 ? 480 : p);
   out->roll = (int16_t)(r < -480 ? -480 : r > 480 ? 480 : r);
   out->support = tp.support;
@@ -93,12 +93,6 @@ void pack_feet(uint8_t epoch, const TickPlan& tp, kilo_feet_t* out) {
 
 Walker::Walker(SerialLink& link, Clock& clock, Log& log, const BodyModel& model, const PlannerConfig& config)
     : link_(link), clock_(clock), log_(log), planner_(model, config) {}
-
-void Walker::set_stream_divs(uint8_t telem, uint8_t joints, uint8_t imu_raw) {
-  divs_[0] = telem;
-  divs_[1] = joints;
-  divs_[2] = imu_raw;
-}
 
 void Walker::on_telemetry(const kilo_telemetry_t& t) {
   uint64_t rx = link_.state().telemetry_at_us;
@@ -312,9 +306,9 @@ bool Walker::begin_stream(uint64_t now) {
   replanned_ = 0;
   phase_ = WalkPhase::Streaming;
   next_wake_ = now;
-  int v10 = round_i(planner_.timing().speed_mm_s * 10);
-  logf(log_, LogLevel::Info, "walk %s %s at %d.%d mm/s", goal_.pattern->name, direction_name(goal_.direction),
-       v10 / 10, v10 % 10);
+  char v[16];
+  format_fixed(v, sizeof v, fixed_i(planner_.timing().speed_mm_s, 1), 1);
+  logf(log_, LogLevel::Info, "walk %s %s at %s mm/s", goal_.pattern->name, direction_name(goal_.direction), v);
   mark(WalkMark::Stream);
   return true;
 }
@@ -510,13 +504,7 @@ void Walker::poll() {
   }
 }
 
-static void fixed(char* buf, size_t cap, real v, int decimals) {
-  int scale = decimals == 2 ? 100 : 10;
-  int n = round_i(v * (real)scale);
-  const char* sign = n < 0 ? "-" : "";
-  if (n < 0) n = -n;
-  format(buf, cap, decimals == 2 ? "%s%d.%02d" : "%s%d.%d", sign, n / scale, n % scale);
-}
+static void fixed(char* buf, size_t cap, real v, int decimals) { format_fixed(buf, cap, fixed_i(v, decimals), decimals); }
 
 void Walker::log_status(LogLevel level) const {
   const Planner& p = planner_;

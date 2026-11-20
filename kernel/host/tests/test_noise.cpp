@@ -14,6 +14,7 @@
 #include <vector>
 #include "net/noise.h"
 #include "tests/check.h"
+#include "tests/fakes.h"
 #include "third_party/monocypher/monocypher.h"
 
 using namespace kilo;
@@ -21,13 +22,6 @@ using namespace kilo::noise;
 using Bytes = std::vector<uint8_t>;
 
 namespace {
-
-Bytes unhex(const std::string& s) {
-  Bytes out;
-  if (s == "-") return out;
-  for (size_t i = 0; i + 1 < s.size(); i += 2) out.push_back((uint8_t)std::strtoul(s.substr(i, 2).c_str(), nullptr, 16));
-  return out;
-}
 
 Bytes pub_of(const Bytes& priv) {
   Bytes p(32);

@@ -1,6 +1,7 @@
 #include "flash/image.h"
 #include "util/fmt.h"
 #include "util/mem.h"
+#include "util/str.h"
 
 namespace kilo {
 
@@ -44,50 +45,24 @@ struct Cursor {
   // An unsigned decimal integer that fits 32 bits.
   bool number(uint32_t* v) {
     skip_ws();
-    if (p >= end || *p < '0' || *p > '9') return false;
-    uint64_t x = 0;
-    while (p < end && *p >= '0' && *p <= '9') {
-      x = x * 10u + (uint32_t)(*p - '0');
-      if (x > 0xFFFFFFFFu) return false;
-      p++;
-    }
-    if (p < end && (*p == '.' || *p == 'e' || *p == 'E')) return false;
-    *v = (uint32_t)x;
+    const char* q = parse_dec_u32(p, end, v);
+    if (q == nullptr || (q < end && (*q == '.' || *q == 'e' || *q == 'E'))) return false;
+    p = q;
     return true;
   }
   bool word(const char* w) {
     skip_ws();
-    const char* q = p;
-    for (; *w != '\0'; w++, q++)
-      if (q >= end || *q != *w) return false;
+    const char* q = skip_lit(p, end, w);
+    if (q == nullptr) return false;
     p = q;
     return true;
   }
 };
 
-bool equals(const char* s, uint32_t n, const char* lit) {
-  uint32_t i = 0;
-  for (; i < n; i++)
-    if (lit[i] == '\0' || lit[i] != s[i]) return false;
-  return lit[i] == '\0';
-}
+bool equals(const char* s, uint32_t n, const char* lit) { return skip_lit(s, s + n, lit) == s + n; }
 
 // Exactly 8 hex digits (either case).
-bool hex32(const char* s, uint32_t n, uint32_t* v) {
-  if (n != 8) return false;
-  uint32_t x = 0;
-  for (uint32_t i = 0; i < n; i++) {
-    char c = s[i];
-    uint32_t d;
-    if (c >= '0' && c <= '9') d = (uint32_t)(c - '0');
-    else if (c >= 'a' && c <= 'f') d = (uint32_t)(c - 'a' + 10);
-    else if (c >= 'A' && c <= 'F') d = (uint32_t)(c - 'A' + 10);
-    else return false;
-    x = x << 4 | d;
-  }
-  *v = x;
-  return true;
-}
+bool hex32(const char* s, uint32_t n, uint32_t* v) { return parse_hex32(s, s + n, v) == s + n; }
 
 }  // namespace
 

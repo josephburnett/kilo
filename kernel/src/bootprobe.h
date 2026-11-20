@@ -14,9 +14,7 @@
 #ifndef KILO_SRC_BOOTPROBE_H
 #define KILO_SRC_BOOTPROBE_H
 
-#ifndef KILO_BOOT_PROBE
-#define KILO_BOOT_PROBE 1
-#endif
+#include "options.h"
 
 #define KILO_BOOT_PROBE_PIN	21
 

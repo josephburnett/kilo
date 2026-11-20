@@ -62,7 +62,6 @@ class UtilitySelector : public Node {
   const Choice& last() const { return last_; }
   uint32_t switches() const { return switches_; }
   int current() const { return current_; }
-  const char* current_name() const;
 
  protected:
   Status do_tick(Context& ctx) override;

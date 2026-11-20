@@ -12,6 +12,10 @@ namespace tricks {
 // Null when the library has none.
 const Trick* find_trick(const char* name);
 
+// The rear-up stage a trick is (docs/rear-up-trick.md): rear_up 1,
+// rear_up_2 2, rear_up_3 3; 0 for another trick.
+unsigned rear_up_stage(const char* name);
+
 }  // namespace tricks
 }  // namespace kilo
 

@@ -61,58 +61,6 @@
 #include "util/fmt.h"
 #include "util/log.h"
 
-#ifndef KILO_BUILD
-#define KILO_BUILD 0
-#endif
-
-#ifndef KILO_PLANNER_BENCH
-#define KILO_PLANNER_BENCH 1
-#endif
-
-// The behaviour runner (kilo run --behaviour): off, as the Pi's daemon ran.
-// make -C kernel KILO_BEHAVIOUR=1 turns it on.
-#ifndef KILO_BEHAVIOUR
-#define KILO_BEHAVIOUR 0
-#endif
-
-// The remote's rear-up key, A2 (docs/rear-up-trick.md, the switch):
-// off, A2 does nothing, until the owner has done the staged trials.
-// make -C kernel KILO_REAR_UP=1 (or 2, 3: the stage, how high) turns it on.
-#ifndef KILO_REAR_UP
-#define KILO_REAR_UP 0
-#endif
-
-// The flight recorder's card saver (mind/record/saver.h): off until the
-// owner has run `kilo bench sd --host` and turned it on (`kilo record save
-// on --host`, remembered on the card as kilorec/SAVE_ON); a card write
-// stalls the main loop and this card's write times are not measured yet.
-// make -C kernel KILO_RECORD_SAVE=1 turns it on from the start.
-#ifndef KILO_RECORD_SAVE
-#define KILO_RECORD_SAVE 0
-#endif
-// Light sleep (mind/power/sleep.h, docs/power.md): the remote's A7, then
-// 30 s of nothing: servos off, the loop idles (wfi) a 10 ms pass at a
-// time, the Ethernet PHY powered down while no cable is in. On by
-// default; make -C kernel KILO_LIGHT_SLEEP=0 leaves A7 as plain rest (the
-// awake baseline for docs/power.md's comparison).
-#ifndef KILO_LIGHT_SLEEP
-#define KILO_LIGHT_SLEEP 1
-#endif
-// Kilo's sounds (src/sound.h, docs/sound.md): the 3.5 mm jack, the sounds
-// kernel/sounds/*.wav packed into the image. make -C kernel KILO_SOUND=0
-// leaves all of it out (no device, no sounds: every play request is a
-// counted no-op). KILO_SOUND_IDLE=run keeps the device running between
-// sounds instead of starting it for each.
-#ifndef KILO_SOUND
-#define KILO_SOUND 1
-#endif
-#ifndef KILO_SOUND_KEEP_RUNNING
-#define KILO_SOUND_KEEP_RUNNING 0
-#endif
-#if KILO_REAR_UP < 0 || KILO_REAR_UP > 3
-#error "KILO_REAR_UP must be 0, 1, 2 or 3"
-#endif
-
 using namespace kilo;
 
 // This image's identity for `kilo update --host`: the kernel updater

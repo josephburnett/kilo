@@ -88,9 +88,8 @@ class ImuDetector {
  public:
   explicit ImuDetector(const ImuConfig& cfg = ImuConfig()) : cfg_(cfg) { reset(); }
   void reset();
-  // The current posture's expected attitude (fixed), or learn it again.
+  // The current posture's expected attitude (fixed).
   void set_reference(double pitch, double roll);
-  void learn_reference();
   // The mind moves the body (a posture move...): quiet until t + seconds + settle_s.
   void notify_self_motion(double t, double seconds);
   void feed(const ImuSample& s, PerceptEvents& out);

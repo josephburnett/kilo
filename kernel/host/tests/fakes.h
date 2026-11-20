@@ -6,13 +6,34 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
 #include "platform.h"
 #include "proto/kilo_frame.h"
+#include "proto/kilo_protocol.h"
 
 namespace kilo {
+
+// The vectors' hex strings ("-": none) as bytes.
+inline std::vector<uint8_t> unhex(const std::string& s) {
+  std::vector<uint8_t> out;
+  if (s == "-") return out;
+  for (size_t i = 0; i + 1 < s.size(); i += 2) out.push_back((uint8_t)std::strtoul(s.substr(i, 2).c_str(), nullptr, 16));
+  return out;
+}
+
+// A body's HELLO as the core fills it: protocol KILO_PROTO_MAJOR, the
+// core's limits, the epoch. A test sets the rest.
+inline kilo_hello_t body_hello(uint8_t epoch = 0) {
+  kilo_hello_t h = {};
+  h.proto_major = KILO_PROTO_MAJOR;
+  h.max_payload = KILO_MAX_PAYLOAD;
+  h.joint_count = KILO_JOINT_COUNT;
+  h.epoch = epoch;
+  return h;
+}
 
 struct Sent {
   uint8_t type;
@@ -53,6 +74,23 @@ class FakeSerial final : public Serial {
     uint8_t wire[KILO_MAX_WIRE];
     uint8_t n = kilo_frame_encode(type, seq, (const uint8_t*)payload, len, wire);
     in.insert(in.end(), wire, wire + n);
+  }
+  // The body's frames (body_hello(), a bare TELEMETRY, an EVENT).
+  void feed_hello(uint8_t seq, const kilo_hello_t& h) { feed_frame(KILO_MSG_HELLO, seq, &h, sizeof h); }
+  void feed_telemetry(uint8_t seq, uint16_t tick, uint8_t epoch, uint8_t mode = KILO_MODE_IDLE) {
+    kilo_telemetry_t t = {};
+    t.tick = tick;
+    t.mode = mode;
+    t.epoch = epoch;
+    feed_frame(KILO_MSG_TELEMETRY, seq, &t, sizeof t);
+  }
+  void feed_event(uint8_t seq, uint8_t code, int16_t arg, uint8_t epoch, uint16_t tick = 0) {
+    kilo_event_t e = {};
+    e.code = code;
+    e.arg = arg;
+    e.tick = tick;
+    e.epoch = epoch;
+    feed_frame(KILO_MSG_EVENT, seq, &e, sizeof e);
   }
   // The frames written since the last call (all must decode).
   std::vector<Sent> take_sent() {

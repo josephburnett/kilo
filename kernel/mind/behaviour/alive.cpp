@@ -1,4 +1,5 @@
 #include "behaviour/alive.h"
+#include "link/consts.h"
 #include "remote/client.h"
 #include "tricks/model.h"
 #include "util/dmath.h"
@@ -27,8 +28,6 @@ enum : int { kTail = 2, kShLF = 3, kShRF = 4, kShRB = 5, kShLB = 6, kKnLF = 7, k
 // legs and tail (legacy slots 2, 8-15): the head stays the tree's
 constexpr uint16_t kSitMask = (1u << 2) | 0xFF00u;
 
-double clampd(double v, double lo, double hi) { return v < lo ? lo : v > hi ? hi : v; }
-int irnd(double v) { return (int)(v < 0 ? v - 0.5 : v + 0.5); }
 double sgn(double v) { return v < 0 ? -1.0 : 1.0; }
 
 }  // namespace
@@ -69,10 +68,10 @@ Alive::Variant Alive::wanted() const {
 void Alive::send_pose(const BodyPose& p) {
   kilo_set_body_pose_t g;
   g.epoch = 0;  // the link stamps it
-  g.pitch = (int16_t)irnd(p.pitch * 16);
-  g.roll = (int16_t)irnd(p.roll * 16);
-  g.dheight_mm = (int8_t)irnd(p.dh);
-  g.xshift_mm = (int8_t)irnd(p.xs);
+  g.pitch = (int16_t)d_iround(to_a16(p.pitch));
+  g.roll = (int16_t)d_iround(to_a16(p.roll));
+  g.dheight_mm = (int8_t)d_iround(p.dh);
+  g.xshift_mm = (int8_t)d_iround(p.xs);
   if (link_.set_goal(KILO_MSG_SET_BODY_POSE, (const uint8_t*)&g, sizeof g)) pose_sent_ = true;
   cur_ = p;
 }
@@ -165,7 +164,7 @@ void Alive::plan_stand(AliveMove m, double head_pan) {
     }
     case AliveMove::Follow: {  // lean toward where the head looks (pan + = left, assumed: roll right side up)
       double s = head_pan == 0 ? side : sgn(head_pan);
-      add({0, s * clampd(1.0 + (head_pan < 0 ? -head_pan : head_pan) / 25.0, 1.0, 2.5), 0, rng_.uniform(1, 3)}, dur,
+      add({0, s * d_clamp(1.0 + (head_pan < 0 ? -head_pan : head_pan) / 25.0, 1.0, 2.5), 0, rng_.uniform(1, 3)}, dur,
           hold);
       break;
     }
@@ -223,11 +222,11 @@ void Alive::build_sit(const SitMoveDef& d, double a, bool mirror, bool head) {
   auto frame = [&](const double dd[KILO_JOINT_COUNT], double dur_s, double hold_s) {
     kilo_keyframe_t& f = frames_[n++];
     mem_zero(&f, sizeof f);
-    f.dur = (uint8_t)clampd(dur_s * 50, 1, 255);
-    f.hold = (uint8_t)clampd(hold_s * 50, 0, 255);
+    f.dur = (uint8_t)d_clamp(dur_s * kTicksPerS, 1, 255);
+    f.hold = (uint8_t)d_clamp(hold_s * kTicksPerS, 0, 255);
     f.flags = KILO_EASING_COSINE;
     for (int k = 0; k < (int)KILO_JOINT_COUNT; k++)
-      f.ang[k] = (k == 0 || (k == 1 && !head)) ? tricks::kAngleUnchanged : (int8_t)irnd((double)kSit[k] + dd[k]);
+      f.ang[k] = (k == 0 || (k == 1 && !head)) ? tricks::kAngleUnchanged : (int8_t)d_iround((double)kSit[k] + dd[k]);
   };
   bool quick = d.move == AliveMove::Tail || d.move == AliveMove::Flinch;
   for (int i = 0; i < d.n && i < 3; i++) {
@@ -284,7 +283,7 @@ bool Alive::flinch() {
   counts_[(int)AliveMove::Flinch]++;
   uint32_t ticks = 0;
   tricks::total_ticks(trick_, tricks::kSpeedUnity, &ticks);
-  if (variant_ == Variant::Sit) next_at_ = next_at_ > 0 ? next_at_ + ticks * 0.02 : 0;
+  if (variant_ == Variant::Sit) next_at_ = next_at_ > 0 ? next_at_ + ticks * kTickS : 0;
   logf(log_.status(), LogLevel::Info, "alive: flinch (leaning back, %u ticks)", (unsigned)ticks);
   return true;
 }
@@ -358,8 +357,8 @@ void Alive::poll(double now, bool running, bool calm, double head_pan) {
     counts_[(int)m]++;
     char line[96];
     format(line, sizeof line, "alive: %s (standing; pitch %d roll %d dh %d xs %d, tenths)", alive_move_name(m),
-           irnd(steps_[0].to.pitch * 10), irnd(steps_[0].to.roll * 10), irnd(steps_[0].to.dh * 10),
-           irnd(steps_[0].to.xs * 10));
+           d_iround(steps_[0].to.pitch * 10), d_iround(steps_[0].to.roll * 10), d_iround(steps_[0].to.dh * 10),
+           d_iround(steps_[0].to.xs * 10));
     logf(log_.status(), LogLevel::Info, "%s", line);
     return;
   }
@@ -375,7 +374,7 @@ void Alive::poll(double now, bool running, bool calm, double head_pan) {
   tricks::total_ticks(trick_, tricks::kSpeedUnity, &ticks);
   double pause = rng_.random() < kSitRestChance ? rng_.uniform(kSitRestMinS, kSitRestMaxS)
                                                 : rng_.uniform(kSitPauseMinS, kSitPauseMaxS);
-  next_at_ = now + ticks * 0.02 + pause;
+  next_at_ = now + ticks * kTickS + pause;
   last_ = m;
   if (play_ == 0) {
     sit_failures_++;

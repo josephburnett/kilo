@@ -1,4 +1,5 @@
 #include "tricks/player.h"
+#include "link/consts.h"
 #include "link/names.h"
 #include "proto/kilo_names.h"
 #include "util/fmt.h"
@@ -48,7 +49,7 @@ uint32_t TrickPlayer::start(const Trick& trick, bool mirror, uint8_t speed_q6, c
   uint32_t ticks = 0;
   result_.has_expected = total_ticks(trick, speed_q6, &ticks);
   result_.expected_ticks = ticks;
-  timeout_us_ = result_.has_expected ? (uint64_t)(ticks + 1) * KILO_TICK_MS * 1000u + kDoneMarginUs : 0;
+  timeout_us_ = result_.has_expected ? ticks_to_us(ticks + 1) + kDoneMarginUs : 0;
   watch_.reset(trick, speed_q6);
   return result_.play;
 }

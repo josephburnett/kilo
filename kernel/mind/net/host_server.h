@@ -294,6 +294,14 @@ class HostServer final : public record::BenchSink {
   void cal_request(uint32_t i, uint8_t seq, const uint8_t* p);
   void cal_step(uint64_t now);
   void cal_fail(uint8_t code, const char* why);
+  // The flash and update requests' common checks and their texts (refused()), and their status pump.
+  struct Busy {
+    const char *unsupported, *flashing, *persist, *updating, *rebooting;
+  };
+  static const Busy kFlashBusy, kUpdateBusy;
+  enum : unsigned { kNoBridge = 1, kNoFlash = 2, kNoPersist = 4, kNoUpdate = 8, kNoReboot = 16 };
+  bool refused(uint32_t i, uint8_t seq, uint8_t type, bool have, unsigned checks, const Busy& b);
+  bool send_status(int32_t client, uint8_t type, const void* st, uint32_t len, bool last, uint32_t& sent);
   void flash_begin(uint32_t i, uint8_t seq, const uint8_t* p);
   void flash_commit(uint32_t i, uint8_t seq);
   void drop_image(const char* why);
@@ -325,6 +333,8 @@ class HostServer final : public record::BenchSink {
   void flush(uint32_t i, bool all = false);
 
   bool enqueue(uint32_t i, uint8_t type, uint8_t seq, const void* payload, uint32_t len);
+  // A frame of the mind's own (no reply) with the client's next out_seq: false if it does not fit.
+  bool push(uint32_t i, uint8_t type, const void* payload, uint32_t len);
   void reply(uint32_t i, uint8_t seq, const void* payload, uint32_t len, uint8_t type);
   void result(uint32_t i, uint8_t seq, uint8_t request, uint8_t code, const char* text = "");
   uint32_t room(uint32_t i) const { return kTxBytes - clients_[i].tx_len; }

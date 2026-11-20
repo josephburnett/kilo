@@ -40,9 +40,7 @@ const char* op_name(uint8_t op) {
 
 // "+8.50": an a16 angle in degrees, two decimals.
 void deg(char* out, uint32_t n, int16_t a16) {
-  int32_t v = (int32_t)a16 * 100 / 16;
-  int32_t a = v < 0 ? -v : v;
-  format(out, n, "%s%d.%02d", v < 0 ? "-" : "+", (int)(a / 100), (int)(a % 100));
+  format_fixed(out, n, (int32_t)a16 * 100 / 16, 2, true);
 }
 
 }  // namespace

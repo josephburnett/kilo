@@ -2,6 +2,7 @@
 #include "behaviour/tree.h"
 #include "remote/client.h"
 #include "tricks/library.h"
+#include "util/dmath.h"
 #include "util/fmt.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -22,14 +23,6 @@ constexpr uint64_t kTrickStopWaitUs = 2000000;  // TRICK_STOP's ACK and the TRIC
 constexpr uint64_t kStepLeadUs = 300000;  // a lower stage's hold: down this long before it ends without A2
 const char* const kStageTop[] = {"up", "mid", "top"};  // rear_up.py: each stage's top frame (its last guard)
 
-// The rear-up stage of a trick (rear_up 1, rear_up_2 2, rear_up_3 3), 0 for another.
-int rear_up_stage_of(const char* name) {
-  if (str_eq(name, "rear_up")) return 1;
-  if (str_eq(name, "rear_up_2")) return 2;
-  if (str_eq(name, "rear_up_3")) return 3;
-  return 0;
-}
-
 // The frame of stage k's top in trick t (its guard named so), -1 if none.
 int stage_frame(const tricks::Trick& t, int k) {
   for (uint8_t i = 0; i < t.n_guards; i++)
@@ -40,10 +33,7 @@ int stage_frame(const tricks::Trick& t, int k) {
 int iabs(int v) { return v < 0 ? -v : v; }
 
 // "55.6": one decimal, as the walker logs its speed
-void format_speed(char* buf, uint32_t cap, double mm_s) {
-  int v10 = (int)(mm_s * 10.0 + 0.5);
-  format(buf, cap, "%d.%d", v10 / 10, v10 % 10);
-}
+void format_speed(char* buf, uint32_t cap, double mm_s) { format_fixed(buf, cap, d_iround(mm_s * 10.0), 1); }
 
 bool stop_key(const Key& k) { return k.kind == Kind::Posture && (str_eq(k.name, "stand") || str_eq(k.name, "rest")); }
 }  // namespace
@@ -431,7 +421,7 @@ void RemoteControl::stop_trick() {
   }
   step_trick_ = nullptr;
   player_.stop();
-  settle_us_ = ticks != 0 ? (uint64_t)ticks * KILO_TICK_MS * 1000u + 100000u : 0;  // ir.py _stop_trick
+  settle_us_ = ticks != 0 ? ticks_to_us(ticks) + 100000u : 0;  // ir.py _stop_trick
 }
 
 void RemoteControl::start_trick() {
@@ -471,7 +461,7 @@ void RemoteControl::start_trick() {
   }
   uint32_t ticks = 0;
   tricks::total_ticks(*t, tricks::kSpeedUnity, &ticks);
-  int stages = rear_up_stage_of(t->name);
+  int stages = (int)tricks::rear_up_stage(t->name);
   step_trick_ = stages > 0 ? t : nullptr;
   step_play_ = player_.result().play;
   step_max_ = stages;
@@ -508,8 +498,8 @@ int RemoteControl::step_at(uint64_t* hold_end_us) const {
     if (f < 0) continue;
     uint32_t start = 0;
     for (int i = 0; i < f; i++) start += t.frames[i].dur + t.frames[i].hold;
-    uint64_t from = t0 + (uint64_t)start * KILO_TICK_MS * 1000u;
-    uint64_t end = from + (uint64_t)(t.frames[f].dur + t.frames[f].hold) * KILO_TICK_MS * 1000u;
+    uint64_t from = t0 + ticks_to_us(start);
+    uint64_t end = from + ticks_to_us(t.frames[f].dur + t.frames[f].hold);
     if (now >= from && now < end) {
       *hold_end_us = end;
       return k;

@@ -37,12 +37,13 @@ PLANNER_VECTORS := tests/planner_vectors.txt
 NOISE_VECTORS := tests/noise_vectors.txt
 
 # The laptop interface (docs/fast-boot.md P2): POSIX sockets for --listen, its
-# unit tests, and the build id STATUS reports (the commit's first 8 hex digits,
-# as kernel/Makefile's KILO_BUILD; build/mind-build-id changes only with it).
+# unit tests, and the build id STATUS reports (kernel/build-id.mk, as
+# kernel/Makefile's KILO_BUILD).
 HOST_SRCS += net_posix.cpp
 TESTS += test_host
-MIND_BUILD := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo 0)
-$(shell mkdir -p $(B) && (echo $(MIND_BUILD) | cmp -s - $(B)/mind-build-id || echo $(MIND_BUILD) > $(B)/mind-build-id))
+BUILD_ID_FILE := $(B)/mind-build-id
+include $(KERNEL)/build-id.mk
+MIND_BUILD := $(BUILD_ID)
 $(B)/obj/host/main.o: CXXFLAGS += -DKILO_MIND_BUILD=0x$(MIND_BUILD)
 # --authorized-keys' default: this checkout's key list, the one the Circle kernel builds in.
 $(B)/obj/host/main.o: CXXFLAGS += -DKILO_AUTHORIZED_KEYS='"$(abspath $(KERNEL)/keys/authorized_keys)"'
@@ -209,10 +210,10 @@ ALLOWED += exp log sin cos sincos
 # remote's keys and the saver), the distance guard, the alive layer, the sounds and the Mind use the planner's
 # float types: the double-planner builds (the vector test's twin, the bench) leave them out
 # (their recipes expand these at run time).
-DBL_OBJS := $(filter-out $(B)/san/mind/remote/% $(B)/san/mind/record/% $(B)/san/mind/net/host_% $(B)/san/mind/power/% $(B)/san/mind/mind.o \
-                          $(B)/san/mind/guard/% $(B)/san/mind/behaviour/alive.o $(B)/san/mind/sound/%,$(DBL_OBJS))
-BENCH_DBL_OBJS := $(filter-out $(B)/obj/mind/remote/% $(B)/obj/mind/record/% $(B)/obj/mind/net/host_% $(B)/obj/mind/power/% $(B)/obj/mind/mind.o \
-                                $(B)/obj/mind/guard/% $(B)/obj/mind/behaviour/alive.o $(B)/obj/mind/sound/%,$(BENCH_DBL_OBJS))
+FLOAT_ONLY := mind/remote/% mind/record/% mind/net/host_% mind/power/% mind/mind.o mind/guard/% mind/behaviour/alive.o \
+              mind/sound/%
+DBL_OBJS := $(filter-out $(addprefix $(B)/san/,$(FLOAT_ONLY)),$(DBL_OBJS))
+BENCH_DBL_OBJS := $(filter-out $(addprefix $(B)/obj/,$(FLOAT_ONLY)),$(BENCH_DBL_OBJS))
 
 # ---- finding Kilo by name (net/mdns.h) ----------------------------------------------------
 # The responder on a loopback UDP port, for test.sh's `kilo find --ask`.

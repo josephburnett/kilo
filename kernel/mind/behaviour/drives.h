@@ -22,7 +22,6 @@ namespace behaviour {
 
 // drives.ACTIVITIES: how the running behaviour spends energy.
 enum class Activity : uint8_t { Rest, Idle, Active, Explore, Social };
-const char* activity_name(Activity a);
 
 struct DriveInputs {
   Activity activity = Activity::Idle;

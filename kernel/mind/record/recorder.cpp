@@ -39,33 +39,18 @@ void Line::str(const char* key, const char* v) { n_ += format(buf_ + n_, sizeof 
 void Line::fixed(const char* key, real v, int decimals) {
   if (v != v) return str(key, "nan");
   if (v > (real)2e6 || v < (real)-2e6) return str(key, v > 0 ? "inf" : "-inf");
-  uint32_t scale = decimals == 1 ? 10u : decimals == 2 ? 100u : 1000u;
-  int32_t q = planner::round_i(v * (real)scale);  // |q| < 2e9
-  const char* sign = q < 0 ? "-" : "";
-  uint32_t a = q < 0 ? (uint32_t)-q : (uint32_t)q;
-  const char* f = decimals == 1 ? " %s=%s%u.%01u" : decimals == 2 ? " %s=%s%u.%02u" : " %s=%s%u.%03u";
-  n_ += format(buf_ + n_, sizeof buf_ - n_, f, key, sign, (unsigned)(a / scale), (unsigned)(a % scale));
+  n_ += format(buf_ + n_, sizeof buf_ - n_, " %s=", key);
+  n_ += format_fixed(buf_ + n_, sizeof buf_ - n_, planner::fixed_i(v, decimals), decimals);  // |n| < 2e9
 }
 
 int16_t a16(real deg) {
-  long v = (long)planner::round_i(deg * 16);
+  long v = (long)planner::round_i(to_a16(deg));
   return (int16_t)(v < -32767 ? -32767 : v > 32767 ? 32767 : v);
 }
 
 int16_t mm10(real mm) {
   if (mm != mm || mm > (real)3276 || mm < (real)-3276) return -32768;  // none, or off the scale
   return (int16_t)planner::round_i(mm * 10);
-}
-
-// The rear_up stages (docs/rear-up-trick.md): their number, 0 for another trick.
-unsigned rear_up_stage(const char* name) {
-  const char* r = "rear_up";
-  size_t i = 0;
-  for (; r[i] != '\0'; i++)
-    if (name[i] != r[i]) return 0;
-  if (name[i] == '\0') return 1;
-  if (name[i] == '_' && (name[i + 1] == '2' || name[i + 1] == '3') && name[i + 2] == '\0') return (unsigned)(name[i + 1] - '0');
-  return 0;
 }
 
 constexpr uint64_t kKeyRecentUs = 5000000;  // a trick started this soon after a remote key: by=remote
@@ -212,7 +197,7 @@ void Recorder::trick_header(const tricks::Trick& t, uint32_t id, uint8_t speed, 
   l.unum("id", (unsigned)id);
   l.unum("format", KILO_HOST_WALK_FORMAT);
   l.str("trick", t.name);
-  unsigned stage = rear_up_stage(t.name);
+  unsigned stage = tricks::rear_up_stage(t.name);
   if (stage != 0) l.unum("stage", stage);
   l.unum("tid", tricks::trick_id_for(t));
   char crc[8];
@@ -248,7 +233,7 @@ void Recorder::begin_trick(const tricks::TrickPlayer& p, uint64_t now) {
   if (t == nullptr) return;
   trick_header(*t, r->id, p.speed(), p.mirrored(), now);
   char text[KILO_HOST_WALK_TEXT_MAX + 1];
-  unsigned stage = rear_up_stage(t->name);
+  unsigned stage = tricks::rear_up_stage(t->name);
   if (stage != 0) format(text, sizeof text, "trick=%s stage=%u", t->name, stage);
   else format(text, sizeof text, "trick=%s", t->name);
   set_text(r, text);
@@ -291,7 +276,7 @@ void Recorder::trick_refused(const char* trick, const char* why) {
   const tricks::Trick* t = tricks::find_trick(trick);
   if (t != nullptr) trick_header(*t, r->id, tricks::kSpeedUnity, false, now);
   char text[KILO_HOST_WALK_TEXT_MAX + 1];
-  unsigned stage = rear_up_stage(trick);
+  unsigned stage = tricks::rear_up_stage(trick);
   if (stage != 0) format(text, sizeof text, "trick=%s stage=%u", trick, stage);
   else format(text, sizeof text, "trick=%s", trick);
   set_text(r, text);

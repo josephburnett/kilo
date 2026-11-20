@@ -267,8 +267,7 @@ void HostServer::pump_fetch(uint32_t i) {
     d.status = gone ? KILO_WALK_DATA_STATUS_GONE : n == 0 ? KILO_WALK_DATA_STATUS_END : KILO_WALK_DATA_STATUS_DATA;
     if (d.status != KILO_WALK_DATA_STATUS_DATA) n = 0;
     uint32_t len = KILO_HOST_WALK_DATA_MIN_LEN + (uint32_t)n;
-    if (!enqueue(i, KILO_HOST_MSG_WALK_DATA, c.out_seq, &d, len)) return;
-    c.out_seq++;
+    if (!push(i, KILO_HOST_MSG_WALK_DATA, &d, len)) return;
     if (d.status != KILO_WALK_DATA_STATUS_DATA) {
       c.fetch_on = c.fetch_card = c.fetch_ram = false;
       if (!gone) stats_.walk_fetches++;
@@ -344,7 +343,7 @@ void HostServer::rec_bench(uint32_t i, uint8_t seq, const uint8_t* p) {
 void HostServer::bench_result(const kilo_host_bench_result_t& r) {
   if (bench_client_ < 0) return;
   uint32_t i = (uint32_t)bench_client_;
-  if (enqueue(i, KILO_HOST_MSG_BENCH_RESULT, clients_[i].out_seq, &r, sizeof r)) clients_[i].out_seq++;
+  push(i, KILO_HOST_MSG_BENCH_RESULT, &r, sizeof r);
   if (r.write_bytes == 0) bench_client_ = -1;
 }
 

@@ -49,7 +49,6 @@
 namespace kilo {
 namespace planner {
 
-constexpr uint32_t kTickUs = KILO_TICK_MS * 1000u;
 constexpr int kLookahead = KILO_FEET_LOOKAHEAD_TICKS;
 constexpr int kClockWindow = 100;      // telemetry frames in the body-clock estimate (2 s at 50 Hz)
 constexpr int kClockResetFrames = 5;   // ...restarted after this many frames in a row a tick below its maximum
@@ -179,9 +178,6 @@ class Walker {
   const Planner& planner() const { return planner_; }
   const ErrorTracker& tracker() const { return tracker_; }
   const BodyClock& body_clock() const { return clock_est_; }
-  // The divisors the walk puts back (SET_STREAM telem, JOINTS, IMU_RAW);
-  // the owner sets them when it changes the streams (client.stream_divs).
-  void set_stream_divs(uint8_t telem, uint8_t joints, uint8_t imu_raw);
   // One log line: pattern, speed, what the stream did, the model's error.
   void log_status(LogLevel level) const;
 

@@ -88,20 +88,8 @@ struct Rig : LinkListener {
     if (walker_too) walker.poll();
     collect();
   }
-  void telemetry() {
-    kilo_telemetry_t t = {};
-    t.tick = tick++;
-    t.mode = mode;
-    t.epoch = epoch;
-    serial.feed_frame(KILO_MSG_TELEMETRY, body_seq++, &t, sizeof t);
-  }
-  void event(uint8_t code, int16_t arg) {
-    kilo_event_t e = {};
-    e.code = code;
-    e.arg = arg;
-    e.epoch = epoch;
-    serial.feed_frame(KILO_MSG_EVENT, body_seq++, &e, sizeof e);
-  }
+  void telemetry() { serial.feed_telemetry(body_seq++, tick++, epoch, mode); }
+  void event(uint8_t code, int16_t arg) { serial.feed_event(body_seq++, code, arg, epoch); }
   // Time passes in 4 ms steps; the body sends TELEMETRY 1 ms after each of its ticks.
   void run_ms(uint32_t ms, bool walker_too = true) {
     for (uint32_t i = 0; i < ms; i += 4) {
@@ -115,12 +103,7 @@ struct Rig : LinkListener {
     body_t0 = clock.t - (uint64_t)tick * 20000u;
     link.connect();
     poll(false);
-    kilo_hello_t h = {};
-    h.proto_major = 2;
-    h.max_payload = KILO_MAX_PAYLOAD;
-    h.joint_count = KILO_JOINT_COUNT;
-    h.epoch = epoch;
-    serial.feed_frame(KILO_MSG_HELLO, body_seq++, &h, sizeof h);
+    serial.feed_hello(body_seq++, body_hello(epoch));
     run_ms(40, false);
     other.clear();
   }

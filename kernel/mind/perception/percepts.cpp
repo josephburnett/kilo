@@ -1,10 +1,10 @@
 #include "perception/percepts.h"
+#include "link/consts.h"
 
 namespace kilo {
 namespace perception {
 
 namespace {
-constexpr double kA16 = 16.0;  // 1/16 degree
 }
 
 bool Sample::same(const Sample& o) const {
@@ -19,12 +19,12 @@ bool Sample::same(const Sample& o) const {
 Sample sample_from_telemetry(const kilo_telemetry_t& m, double t) {
   Sample s = {};
   s.t = t;
-  s.pitch = m.pitch / kA16;
-  s.roll = m.roll / kA16;
+  s.pitch = from_a16((double)m.pitch);
+  s.roll = from_a16((double)m.roll);
   s.has_rates = true;
-  s.rates[0] = m.rate_pitch / kA16;
-  s.rates[1] = m.rate_roll / kA16;
-  s.rates[2] = m.rate_yaw / kA16;
+  s.rates[0] = from_a16((double)m.rate_pitch);
+  s.rates[1] = from_a16((double)m.rate_roll);
+  s.rates[2] = from_a16((double)m.rate_yaw);
   s.has_dist = m.dist_mm != 0;
   s.dist_mm = m.dist_mm;
   s.has_flags = true;

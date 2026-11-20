@@ -27,8 +27,7 @@ void tenths(char* out, uint32_t n, int32_t x10) {
     format(out, n, "?");
     return;
   }
-  int32_t a = x10 < 0 ? -x10 : x10;
-  format(out, n, "%s%d.%d", x10 < 0 ? "-" : "", (int)(a / 10), (int)(a % 10));
+  format_fixed(out, n, x10, 1);
 }
 
 }  // namespace

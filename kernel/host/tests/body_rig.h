@@ -34,14 +34,10 @@ struct FakeBody {
   std::function<uint8_t(const Sent&)> answer = [](const Sent&) -> uint8_t { return KILO_ACK_STATUS_OK; };
 
   void hello() {
-    kilo_hello_t h = {};
-    h.proto_major = KILO_PROTO_MAJOR;
-    h.max_payload = KILO_MAX_PAYLOAD;
-    h.joint_count = KILO_JOINT_COUNT;
+    kilo_hello_t h = body_hello(epoch);
     h.trick_capacity = KILO_TRICK_CAPACITY;
-    h.epoch = epoch;
     h.caps = eyes ? KILO_HELLO_CAPS_EYES : 0;
-    serial.feed_frame(KILO_MSG_HELLO, seq++, &h, sizeof h);
+    serial.feed_hello(seq++, h);
   }
   void telemetry() {
     kilo_telemetry_t t = {};
@@ -56,12 +52,7 @@ struct FakeBody {
     serial.feed_frame(KILO_MSG_TELEMETRY, seq++, &t, sizeof t);
   }
   void event(uint8_t code, int16_t arg) {
-    kilo_event_t e = {};
-    e.code = code;
-    e.arg = arg;
-    e.tick = tick;
-    e.epoch = epoch;
-    serial.feed_frame(KILO_MSG_EVENT, seq++, &e, sizeof e);
+    serial.feed_event(seq++, code, arg, epoch, tick);
   }
   // Read what the mind wrote; ACK its commands. FEET enter GAIT; the
   // STANCE posture ends it (EVENT GAIT_STOPPED), as the body does.

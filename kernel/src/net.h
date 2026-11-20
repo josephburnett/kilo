@@ -22,6 +22,7 @@
 #ifndef KILO_SRC_NET_H
 #define KILO_SRC_NET_H
 
+#include "options.h"
 #include "platform_net.h"	// the core's network seams (mind/platform_net.h)
 #include "net/mdns.h"
 #include "proto/kilo_protocol.h"
@@ -32,12 +33,6 @@
 #include <circle/sched/task.h>
 #include <circle/types.h>
 #include <circle/usb/usbhcidevice.h>
-
-// Answer for kilo.local and the laptop service over mDNS (CKiloMdns below).
-// make -C kernel KILO_MDNS=0 leaves it out.
-#ifndef KILO_MDNS
-#define KILO_MDNS 1
-#endif
 
 // A byte ring of fixed size, one producer and one consumer.
 template <unsigned N>

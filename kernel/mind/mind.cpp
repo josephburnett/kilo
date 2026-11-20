@@ -535,7 +535,7 @@ double Mind::head_held(int field) const {
   const Goal* g = const_cast<SerialLink&>(link_).goal(KILO_MSG_SET_HEAD);
   if (g == nullptr || g->payload[1] != KILO_HEAD_MODE_HOLD) return 0;
   int16_t v = (int16_t)(g->payload[field] | (g->payload[field + 1] << 8));
-  return v == KILO_HEAD_NOT_HELD ? 0 : (double)v / 16.0;
+  return v == KILO_HEAD_NOT_HELD ? 0 : from_a16((double)v);
 }
 
 // Lying with the head down: the REST or LIMP posture asked (A7, light sleep) and no walk, or the

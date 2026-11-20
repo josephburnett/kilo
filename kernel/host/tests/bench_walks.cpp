@@ -15,6 +15,7 @@
 #include "tests/check.h"
 #include "tests/fake_net.h"
 #include "tests/fakes.h"
+#include "tests/host_rig.h"
 #include "util/logring.h"
 
 using namespace kilo;
@@ -48,9 +49,7 @@ struct Rig {
   HostServer server{listener, link, serial, clock, ring, ring, 0};
   Rig() {
     link.connect();
-    uint32_t n;
-    const AuthorizedKey* keys = test_keys(&n);
-    server.set_keys(keys, n, random);
+    use_test_keys(server, random);
   }
   void pass() {
     link.mark_alive();
@@ -87,12 +86,7 @@ int main() {
               (double)f.used_bytes() / 1048576.0);
   r.clock.t = 1000000 + (uint64_t)ticks * 20000;
   r.server.attach_recorder(rec);
-  FakeConn& c = r.listener.connect(0);
-  for (int k = 0; k < 10 && !c.established; k++) {
-    r.pass();
-    c.pump();
-  }
-  r.pass();
+  FakeConn& c = connect_client(r.listener, 0, [&r] { r.pass(); });
   c.take();
 
   Stat idle;

@@ -99,4 +99,11 @@ size_t format(char* buf, size_t cap, const char* fmt, ...) {
   return n;
 }
 
+size_t format_fixed(char* buf, size_t cap, int32_t n, int decimals, bool plus) {
+  const uint32_t scale = decimals == 1 ? 10u : decimals == 2 ? 100u : 1000u;
+  const char* f = decimals == 1 ? "%s%u.%01u" : decimals == 2 ? "%s%u.%02u" : "%s%u.%03u";
+  uint32_t a = n < 0 ? 0u - (uint32_t)n : (uint32_t)n;
+  return format(buf, cap, f, n < 0 ? "-" : plus ? "+" : "", (unsigned)(a / scale), (unsigned)(a % scale));
+}
+
 }  // namespace kilo

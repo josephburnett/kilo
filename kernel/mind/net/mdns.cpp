@@ -1,6 +1,7 @@
 #include "net/mdns.h"
 #include "util/fmt.h"
 #include "util/mem.h"
+#include "util/str.h"
 
 namespace kilo {
 namespace mdns {
@@ -17,8 +18,6 @@ constexpr uint32_t kTextMax = 256;  // a dotted name read or built
 enum : uint8_t { RecA = 1, RecPtr = 2, RecSrv = 4, RecTxt = 8, RecSvc = 16 };
 
 uint16_t rd16(const uint8_t* p) { return (uint16_t)((p[0] << 8) | p[1]); }
-
-char lower(char c) { return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c; }
 
 bool zero_ip(const uint8_t ip[4]) { return (ip[0] | ip[1] | ip[2] | ip[3]) == 0; }
 bool same_ip(const uint8_t a[4], const uint8_t b[4]) {
@@ -103,14 +102,6 @@ bool read_rr(const uint8_t* p, uint32_t n, uint32_t* off, char* name, uint16_t* 
 }
 
 }  // namespace
-
-bool name_eq(const char* a, const char* b) {
-  while (*a != '\0' && lower(*a) == lower(*b)) {
-    a++;
-    b++;
-  }
-  return lower(*a) == lower(*b);
-}
 
 bool read_name(const uint8_t* p, uint32_t n, uint32_t off, char* out, uint32_t outn, uint32_t* next) {
   uint32_t w = 0;
@@ -296,7 +287,7 @@ bool Responder::conflicting(const uint8_t* p, uint32_t n, uint32_t off, uint16_t
     uint16_t type, rdlen;
     const uint8_t* rd;
     if (!read_rr(p, n, &off, name, &type, &rd, &rdlen)) return false;
-    if (!name_eq(name, host)) continue;
+    if (!str_ieq(name, host)) continue;
     if (state_ == State::Probing) return true;  // anyone else answering for the name we want
     if (type == kTypeA && rdlen == 4 && !same_ip(rd, ip_)) return true;  // ours, with another address
   }
@@ -335,10 +326,10 @@ bool Responder::receive(const uint8_t* p, uint32_t n, const uint8_t src[4], uint
     if (cls != kClassIn && cls != kTypeAny) continue;
     bool any = qtype == kTypeAny;
     uint8_t asked = 0;
-    if (name_eq(name, nm.host) && (any || qtype == kTypeA)) asked |= RecA;
-    if (name_eq(name, kService) && (any || qtype == kTypePtr)) asked |= RecPtr;
-    if (name_eq(name, kServices) && (any || qtype == kTypePtr)) asked |= RecSvc;
-    if (name_eq(name, nm.instance)) {
+    if (str_ieq(name, nm.host) && (any || qtype == kTypeA)) asked |= RecA;
+    if (str_ieq(name, kService) && (any || qtype == kTypePtr)) asked |= RecPtr;
+    if (str_ieq(name, kServices) && (any || qtype == kTypePtr)) asked |= RecSvc;
+    if (str_ieq(name, nm.instance)) {
       if (any || qtype == kTypeSrv) asked |= RecSrv;
       if (any || qtype == kTypeTxt) asked |= RecTxt;
     }
