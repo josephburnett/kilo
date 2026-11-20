@@ -380,16 +380,6 @@ def rest(g3: Geometry3, js: Mapping, R0: np.ndarray | None = None, max_topples: 
                  margin=m, edge=edge, topples=tuple(topples), clear=clear)
 
 
-def margin_without(g3: Geometry3, js: Mapping, r: Rest3, drop: set) -> float:
-    """The support margin if the points in ``drop`` carried nothing (lifted
-    or unloaded) at the same attitude: > 0, the rest stands without them."""
-    left = [(x, y, lb) for lb, (x, y) in r.contacts.items() if lb not in drop]
-    if not left:
-        return -1e9
-    sup = _hull2(left)
-    return _poly_margin(sup, (r.com[0], r.com[1]))[0]
-
-
 @dataclass(frozen=True)
 class Sample3:
     frame: int

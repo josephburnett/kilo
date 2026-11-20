@@ -361,7 +361,3 @@ def load(path: str | Path) -> Stream:
     s = parse_blocks(data, meta)
     s.meta.setdefault("path", str(p))
     return s
-
-
-def run_kind_of_info(info: Any) -> str:
-    return "trick" if info.flags & P.WalkFlags.TRICK else "walk"

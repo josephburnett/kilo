@@ -26,7 +26,7 @@ import os
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from kilo.link import consts
 from kilo.logs import kilolog
@@ -285,10 +285,3 @@ def load(path: str | os.PathLike) -> LogData:
     if kilolog.is_kilolog(p):
         return _read_kilolog(p)
     return _read_jsonl(p)
-
-
-def fields_available(samples: Iterable[TelemetrySample]) -> list[str]:
-    s = next(iter(samples), None)
-    if s is None:
-        return []
-    return [k for k, v in vars(s).items() if k not in ("t", "flags") and v is not None]

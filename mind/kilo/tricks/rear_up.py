@@ -388,10 +388,6 @@ def joints_of(kf: Keyframe) -> dict:
     return {k: kf.joints[k] for k in JOINTS}
 
 
-def keyframe_names(st=1) -> list[str]:
-    return [f.name for f in frames(st)]
-
-
 # ---- what the model predicts -------------------------------------------------------------------
 def play_rests(g3: T.Geometry3, js_frames: Sequence[dict], start: dict = STAND, steps: int = 12):
     """stance.follow from ``start`` through the frames."""
@@ -437,10 +433,6 @@ def build(g: S.Geometry | None = None, st=1) -> Trick:
             f"end posture SIT; TRICK_STOP crossfades to it over stop_ticks ({st.stop_ticks})",
         ),
     ).validate()
-
-
-def build_all(g: S.Geometry | None = None) -> dict:
-    return {st.name: build(g, st) for st in STAGES}
 
 
 # ---- the check ----------------------------------------------------------------------------------
