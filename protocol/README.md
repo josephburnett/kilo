@@ -10,10 +10,12 @@ from it and committed, so consumers never need to run the generator.
 spec.toml              messages, enums, flags, link constants, live params, and the shared
                        defaults and limits (gait patterns, joint limits, balance, head)
 gen.py                 generator (stdlib only, Python 3.11+)
-vendor.py              copies gen/ + c/ into body/src/proto and kernel/mind/proto, gen/ + py/ codec into mind/kilo/protocol
+vendor.py              copies gen/ + c/ into body/src/proto and kernel/mind/proto (kilo_names.h: the mind's only),
+                       gen/ + py/ codec into mind/kilo/protocol
 doc_check.py           fails when docs/architecture.md §3b/§3d/§3f or mind/README.md quote other numbers
 vector_cases.py        the test-vector cases gen.py turns into vectors/*.json
 gen/kilo_protocol.h    C99/C++: ids, enums, packed payload structs, constants, length rules
+gen/kilo_names.h       C99/C++: the name of every message and enum value (kilo_<enum>_name()), for the mind
 gen/kilo_protocol.py   Python: dataclasses with pack()/unpack(), enums, constants
 c/cobs.[ch]            COBS encode/decode
 c/crc16.[ch]           CRC-16/CCITT-FALSE (same semantics as avr-libc _crc_xmodem_update)

@@ -1,20 +1,13 @@
 #include "tricks/player.h"
 #include "link/names.h"
+#include "proto/kilo_names.h"
 #include "util/fmt.h"
 #include "util/log.h"
 
 namespace kilo {
 namespace tricks {
 
-const char* done_reason_name(uint8_t reason) {
-  switch (reason) {
-    case KILO_TRICK_DONE_REASON_DONE: return "DONE";
-    case KILO_TRICK_DONE_REASON_STOPPED: return "STOPPED";
-    case KILO_TRICK_DONE_REASON_PREEMPTED: return "PREEMPTED";
-    case KILO_TRICK_DONE_REASON_FELL: return "FELL";
-    default: return "?";
-  }
-}
+const char* done_reason_name(uint8_t reason) { return kilo_trick_done_reason_name(reason); }
 
 void TrickPlayer::on_event(const kilo_event_t& e) {
   if (e.code != KILO_EVENT_TRICK_DONE) return;

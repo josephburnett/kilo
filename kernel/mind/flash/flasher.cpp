@@ -1,5 +1,6 @@
 #include "flash/flasher.h"
 #include "link/names.h"
+#include "proto/kilo_names.h"
 #include "util/log.h"
 #include "util/mem.h"
 
@@ -40,43 +41,20 @@ constexpr uint64_t kLeaveSettleUs = 50000;
 // DMP init and the first HELLO take about 2.2 s on Kilo).
 constexpr uint64_t kHelloUs = 8000000;
 
-const char* phase_name(uint8_t p) {
-  switch (p) {
-    case KILO_FLASH_PHASE_RESETTING: return "resetting";
-    case KILO_FLASH_PHASE_SYNCING: return "syncing";
-    case KILO_FLASH_PHASE_PROGRAMMING: return "programming";
-    case KILO_FLASH_PHASE_VERIFYING: return "verifying";
-    case KILO_FLASH_PHASE_BOOTING: return "booting";
-    case KILO_FLASH_PHASE_DONE: return "done";
-    case KILO_FLASH_PHASE_FAILED: return "failed";
-    default: return "?";
+// A phase's name in lower case ("programming"), for the log: the spec's, from proto/kilo_names.h.
+struct PhaseName {
+  char s[16];
+  explicit PhaseName(uint8_t p) {
+    const char* n = kilo_flash_phase_name(p);
+    uint32_t i = 0;
+    for (; n[i] != '\0' && i + 1 < sizeof s; i++) s[i] = (n[i] >= 'A' && n[i] <= 'Z') ? (char)(n[i] - 'A' + 'a') : n[i];
+    s[i] = '\0';
   }
-}
+};
 
 }  // namespace
 
-const char* flash_error_name(uint8_t e) {
-  switch (e) {
-    case KILO_FLASH_ERROR_NONE: return "NONE";
-    case KILO_FLASH_ERROR_BAD_SIZE: return "BAD_SIZE";
-    case KILO_FLASH_ERROR_BAD_BUILD: return "BAD_BUILD";
-    case KILO_FLASH_ERROR_BAD_OFFSET: return "BAD_OFFSET";
-    case KILO_FLASH_ERROR_SHORT: return "SHORT";
-    case KILO_FLASH_ERROR_CRC_MISMATCH: return "CRC_MISMATCH";
-    case KILO_FLASH_ERROR_SYNC_TIMEOUT: return "SYNC_TIMEOUT";
-    case KILO_FLASH_ERROR_NO_REPLY: return "NO_REPLY";
-    case KILO_FLASH_ERROR_BAD_REPLY: return "BAD_REPLY";
-    case KILO_FLASH_ERROR_BAD_SIGNATURE: return "BAD_SIGNATURE";
-    case KILO_FLASH_ERROR_VERIFY_MISMATCH: return "VERIFY_MISMATCH";
-    case KILO_FLASH_ERROR_SERIAL: return "SERIAL";
-    case KILO_FLASH_ERROR_BAUD: return "BAUD";
-    case KILO_FLASH_ERROR_NO_HELLO: return "NO_HELLO";
-    case KILO_FLASH_ERROR_WRONG_BUILD: return "WRONG_BUILD";
-    case KILO_FLASH_ERROR_BAD_RESET_CAUSE: return "BAD_RESET_CAUSE";
-    case KILO_FLASH_ERROR_CONTROL_LOST: return "CONTROL_LOST";
-    default: return "?";
-  }
-}
+const char* flash_error_name(uint8_t e) { return kilo_flash_error_name(e); }
 
 Flasher::Flasher(Serial& serial, Clock& clock, Gpio& gpio, SerialLink& link, Log& log)
     : serial_(serial), clock_(clock), gpio_(gpio), link_(link), log_(log) {}
@@ -375,7 +353,7 @@ void Flasher::discard_rx() {
 
 void Flasher::attempt_failed(uint8_t error, uint64_t now) {
   logf(log_, LogLevel::Warn, "flash: attempt %u failed in %s: %s (command %02x)", (unsigned)status_.attempt,
-       phase_name(status_.phase), flash_error_name(error), (unsigned)status_.stk_cmd);
+       PhaseName(status_.phase).s, flash_error_name(error), (unsigned)status_.stk_cmd);
   if (status_.attempt >= kAttempts) return fail(error);
   // A desynced optiboot has already reset into the firmware (or will, 1 s
   // after the last byte): a fresh reset starts it over.
@@ -426,7 +404,7 @@ void Flasher::set_phase(uint8_t phase) {
   status_.phase = phase;
   changed();
   if (phase != KILO_FLASH_PHASE_DONE && phase != KILO_FLASH_PHASE_FAILED)
-    logf(log_, LogLevel::Debug, "flash: %s (attempt %u)", phase_name(phase), (unsigned)status_.attempt);
+    logf(log_, LogLevel::Debug, "flash: %s (attempt %u)", PhaseName(phase).s, (unsigned)status_.attempt);
 }
 
 }  // namespace kilo

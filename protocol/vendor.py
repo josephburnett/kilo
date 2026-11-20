@@ -9,6 +9,7 @@ include paths relative to kernel/. So all of them vendor exact copies, which
 this script keeps in step:
 
   protocol/gen/kilo_protocol.h          -> body/src/proto/, kernel/mind/proto/
+  protocol/gen/kilo_names.h             -> kernel/mind/proto/ (the mind's only: no flash for it in the body)
   protocol/c/{cobs,crc16,kilo_frame}.*  -> body/src/proto/, kernel/mind/proto/
   protocol/gen/kilo_protocol.py         -> mind/kilo/protocol/
   protocol/py/kilo_link_codec.py        -> mind/kilo/protocol/
@@ -35,6 +36,7 @@ C_SOURCES = [HERE / "gen" / "kilo_protocol.h",
 COPIES = [
     *((src, BODY) for src in C_SOURCES),
     *((src, KERNEL) for src in C_SOURCES),
+    (HERE / "gen" / "kilo_names.h", KERNEL),
     (HERE / "gen" / "kilo_protocol.py", MIND),
     (HERE / "py" / "kilo_link_codec.py", MIND),
 ]

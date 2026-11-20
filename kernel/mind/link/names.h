@@ -1,10 +1,9 @@
 // names: printable names for message types and the spec's enums, for log
 // lines. Python counterpart: the name dicts in kilo/link/consts.py (NAMES,
 // EVENTS, ACK_STATUS, MODES, RESET_CAUSES, CONFIG_STATES), which come from
-// the generated module. The C header has the message names only (its
-// message table); the enum names are listed in names.cpp and
-// kernel/host/tests/test_names.cpp checks them against
-// protocol/gen/kilo_protocol.py.
+// the generated module; these come from the generated proto/kilo_names.h
+// (kernel/host/tests/test_names.cpp checks them against
+// protocol/gen/kilo_protocol.py).
 //
 // Every function returns a static string; unknown values give "?".
 #ifndef KILO_MIND_LINK_NAMES_H

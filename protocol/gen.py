@@ -3,6 +3,7 @@
 
 Outputs (all committed):
   protocol/gen/kilo_protocol.h    C99/C++ header: ids, enums, packed structs, constants
+  protocol/gen/kilo_names.h       C99/C++ header: message and enum value names (the mind's only)
   protocol/gen/kilo_protocol.py   Python dataclasses with pack/unpack, enums, constants
   protocol/vectors/frames.json    framed test vectors (cases in vector_cases.py)
   protocol/vectors/cobs.json      COBS-only vectors
@@ -27,6 +28,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SPEC = HERE / "spec.toml"
 OUT_H = HERE / "gen" / "kilo_protocol.h"
+OUT_NAMES = HERE / "gen" / "kilo_names.h"
 OUT_PY = HERE / "gen" / "kilo_protocol.py"
 OUT_FRAMES = HERE / "vectors" / "frames.json"
 OUT_COBS = HERE / "vectors" / "cobs.json"
@@ -849,6 +851,45 @@ def gen_c_host(spec: dict, w) -> None:
 
 
 # ---------------------------------------------------------------------------
+# C names (the mind's only)
+
+def gen_names(spec: dict) -> str:
+    """kilo_names.h: the printable name of every message and enum value, for
+    the mind's log lines. A separate header that only the mind vendors: the
+    body has no flash for the strings."""
+    L = []
+    w = L.append
+    w(f"/* {HEADER_NOTE}")
+    w(" *")
+    w(" * Printable names of the spec's messages and enum values (as the spec writes")
+    w(" * them), for the mind's log lines; \"?\" for a value the spec does not name.")
+    w(" * Not for the body (protocol/vendor.py copies it to the mind only). */")
+    w("#ifndef KILO_NAMES_H")
+    w("#define KILO_NAMES_H")
+    w("")
+    w('#include "kilo_protocol.h"')
+    w("")
+
+    def fn(name: str, cases: list[tuple[str, str]]) -> None:
+        w(f"static inline const char *{name}(unsigned v)")
+        w("{")
+        w("    switch (v) {")
+        for c, s in cases:
+            w(f'    case {c}: return "{s}";')
+        w('    default: return "?";')
+        w("    }")
+        w("}")
+        w("")
+
+    fn("kilo_msg_name", [(f"KILO_MSG_{m['name']}", m["name"]) for m in spec["messages"]])
+    fn("kilo_host_msg_name", [(f"KILO_HOST_MSG_{m['name']}", m["name"]) for m in spec["host_messages"]])
+    for ename, vals in spec["enums"].items():
+        fn(f"kilo_{ename}_name", [(f"KILO_{ename.upper()}_{vn}", vn) for vn in vals])
+    w("#endif /* KILO_NAMES_H */")
+    return "\n".join(L) + "\n"
+
+
+# ---------------------------------------------------------------------------
 # Python module
 
 def py_fmt(spec: dict, fields: list) -> str:
@@ -1380,7 +1421,7 @@ def render() -> dict[Path, str]:
     h = gen_c(spec)
     py = gen_py(spec)
     frames, cobs, host = gen_vectors(py)
-    return {OUT_H: h, OUT_PY: py, OUT_FRAMES: frames, OUT_COBS: cobs, OUT_HOST: host}
+    return {OUT_H: h, OUT_NAMES: gen_names(spec), OUT_PY: py, OUT_FRAMES: frames, OUT_COBS: cobs, OUT_HOST: host}
 
 
 def main(argv: list[str] | None = None) -> int:
