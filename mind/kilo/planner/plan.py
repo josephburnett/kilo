@@ -62,6 +62,15 @@ How a tick is made (docs/walking-and-balance.md §10):
   shoulder takes one more step to it; then the body moves back to level at
   the stance height and ``done`` is set: the walker hands over to the
   STANCE posture.
+- **The quick stop** (``halt``; the remote's B6 and C7 and the distance
+  guard): every foot in the air comes down at once where it is (in three
+  ticks, as a catch) and no other lifts; the strides go to 0 in
+  HALT_TICKS ticks (the feet on the ground stop sliding: the body stops);
+  all four feet stay down until HALT_HOLD_TICKS after the halt; then each
+  leg more than HALT_SQUARE_MM from under its shoulder steps to it (the
+  crawl at its fastest cadence), the body levels and ``done`` is set, as
+  for the stop. A leg caught on its way (the body tipping toward it) stays
+  where it landed: the quick stop never steps it again (STANCE sets it).
 - **The sent attitude** stays inside FEET's +-30 deg (the body refuses a
   FEET beyond it).
 """
@@ -84,6 +93,10 @@ RECENTRED_MM = 1.5    # a stopping leg this close to its target does not step ag
 SWITCH_SLACK_MM = 4.0  # a pattern change: every foot within the new half stride plus this (_switch_ok)
 STANCE_SLEW = 0.02    # the stance time (and with it the feet's slide) changes at most 2 % per tick
 LEAN_UNITS_PER_TICK = 4  # units of a lean solve (Planner._solve_steps) per tick
+HALT_TICKS = 6        # the quick stop: the strides go to 0 in this many ticks (120 ms) ...
+HALT_HOLD_TICKS = 10  # ... and all four feet stay down this long from the halt (200 ms) ...
+HALT_SQUARE_MM = 5.0  # ... then a leg further than this from under its shoulder steps to it
+HALT_NOT_LIFTED = -1000  # caught[leg] tick for a leg the quick stop keeps down (it slides, never lifts)
 
 
 @dataclass
@@ -188,6 +201,11 @@ class Planner:
         self.levelling = False       # this slot's shift levels the body out of the crawl's lean: strides held at 0
         self.caught: dict[int, tuple[int, float]] = {}  # leg -> (tick of the catch, lift at the catch)
         self.stopping = False
+        self.halting = False         # the quick stop (halt): implies stopping
+        self.halt_t = 0              # ticks planned since the halt
+        self._halt_slew = 0.0        # the strides' slew per tick in the quick stop
+        self._halt_fast = False      # the square-up's cadence was set
+        self._halt_kept: set = set()  # legs caught in the quick stop: they stay where they landed
         self.finishing = False       # stopped: the last move back to level
         self.done = False
         self.err = (0.0, 0.0)        # measured - predicted - offset (pitch, roll), the latest
@@ -298,6 +316,38 @@ class Planner:
         self._pending_pattern = None
         self._apply_timing()
 
+    def halt(self) -> None:
+        """The quick stop (the module docstring): feet in the air down where
+        they are, the strides to 0 in HALT_TICKS, four feet down until
+        HALT_HOLD_TICKS, then the legs square up and the body levels. Also
+        during the planned stop (it becomes this); nothing once finishing."""
+        if self.done or self.finishing or self.halting:
+            return
+        self.stopping = True
+        self.halting = True
+        self.halt_t = 0
+        self._halt_kept = set()
+        self._pending_pattern = None
+        self._halt_slew = max(self.pattern.stride_slew_mm, max(abs(v) for v in self.s_cur) / HALT_TICKS)
+        self._apply_timing()
+        self._next = None
+        W = self.swing_ticks
+        if self._job is not None or self.skip or self.t < self.S:
+            # every foot is down (the shift, or a slot waiting for its lean): the slot ends now
+            self._job = None
+            self.skip = True
+            self.S = self.t
+            return
+        for leg in self._group():
+            if leg in self.caught:
+                continue
+            j = self.t - self.S - self._offset(leg) + 1  # the next tick's place in its swing
+            if j <= 1:
+                self.caught[leg] = (HALT_NOT_LIFTED, 0.0)  # still down: it stays down
+            elif j < W:
+                self.caught[leg] = (self.t - self.S,
+                                    self.swing_h[leg] * (1 - math.cos(2 * math.pi * (j - 1) / W)) / 2)
+
     def observe(self, err_pitch: float, err_roll: float) -> None:
         """The body's latest error: measured - predicted - the steady offset (degrees)."""
         self.err = (err_pitch, err_roll)
@@ -310,8 +360,13 @@ class Planner:
         return self.pattern.groups[self.k]
 
     def _home(self) -> bool:
+        tol = self._recentred()
         return (all(abs(self.s_cur[i]) < 0.05 for i in (0, 1))
-                and all(abs(self.xg[leg]) < RECENTRED_MM for leg in LEGS))
+                and all(abs(self.xg[leg]) < tol or leg in self._halt_kept for leg in LEGS))
+
+    def _recentred(self) -> float:
+        """A stopping leg this close to under its shoulder does not step again."""
+        return HALT_SQUARE_MM if self.halting else RECENTRED_MM
 
     def _switch_ok(self, p: pat.Pattern) -> bool:
         """The new pattern can take over at this slot start: the strides are
@@ -353,14 +408,36 @@ class Planner:
             self.k = -1
             self._apply_timing()
             self.stance_ticks = self.stance_tgt
+        if self.halting and self.halt_t < HALT_HOLD_TICKS:
+            # the quick stop's hold: four feet down, the strides going to 0, the lean as it is
+            self.t = 0
+            self.held = 0
+            self.levelling = False
+            self.caught = {}
+            self.skip = True
+            self._next = None
+            self.lean_from = Lean(self.lean.dx, self.lean.pitch, self.lean.roll)
+            self.lean_to = self.lean_from
+            self.tr_ticks = 1
+            self.S = HALT_HOLD_TICKS - self.halt_t
+            return
+        if self.halting and not self._halt_fast:
+            # the square-up: the crawl steps at its fastest cadence (the strides are 0: no slide)
+            self._halt_fast = True
+            if self._leaning():
+                self.speed_mm_s = pat.speed_range(self.pattern.name)[1]
+                self._apply_timing()
+                self.stance_ticks = self.stance_tgt
         self.k = (self.k + 1) % len(self.pattern.groups)
         self.t = 0
         self.held = 0
         self.levelling = False
         self.caught = {}
         g = self._group()
+        tol = self._recentred()
         self.skip = (self.stopping or (self.changing and not self._direct_change())) and all(
-            abs(self.s_cur[0]) < 0.05 and abs(self.s_cur[1]) < 0.05 and abs(self.xg[leg]) < RECENTRED_MM for leg in g)
+            abs(self.s_cur[0]) < 0.05 and abs(self.s_cur[1]) < 0.05 and (abs(self.xg[leg]) < tol or leg in self._halt_kept)
+            for leg in g)
         self.lean_from = Lean(self.lean.dx, self.lean.pitch, self.lean.roll)
         nxt, self._next = self._next, None
         if self.stopping and self._home():
@@ -427,7 +504,7 @@ class Planner:
         """One tick of the strides, the stance time and the height toward
         their targets (the stance time by at most STANCE_SLEW of itself, so
         a speed change never jumps the feet's slide either)."""
-        d = self.pattern.stride_slew_mm
+        d = self._halt_slew if self.halting else self.pattern.stride_slew_mm
         tgt = (0.0, 0.0) if self.levelling and self.t < self.S else self.s_tgt
         s = [s[i] + max(-d, min(d, tgt[i] - s[i])) for i in (0, 1)]
         stance = min(stance * (1.0 + STANCE_SLEW), max(stance / (1.0 + STANCE_SLEW), self.stance_tgt))
@@ -598,8 +675,8 @@ class Planner:
             else:
                 wait = True
                 self.stats["waits"] += 1
-        if not wait and self.t == self.S and not self.skip and not self.finishing and self.held < cfg.hold_max \
-                and max(abs(self.err[0]), abs(self.err[1])) > cfg.gate_deg:
+        if not wait and self.t == self.S and not self.skip and not self.finishing and not self.halting \
+                and self.held < cfg.hold_max and max(abs(self.err[0]), abs(self.err[1])) > cfg.gate_deg:
             wait = True
             self.held += 1
             self.stats["holds"] += 1
@@ -633,6 +710,8 @@ class Planner:
                         prev_lift = self.swing_h[leg] * (1 - math.cos(2 * math.pi * (j - 1) / W)) / 2
                         self.caught[leg] = (self.t - self.S, prev_lift)
                         self.stats["catches"] += 1
+                        if self.halting:
+                            self._halt_kept.add(leg)
                         self._next = None  # it lands elsewhere: the next slot's lean is solved when it starts
                 for leg in g:
                     j = js[leg]
@@ -688,6 +767,8 @@ class Planner:
         self.tick += 1
         if not wait:
             self.t += 1
+        if self.halting:
+            self.halt_t += 1
         # The next slot's lean, solved a little every tick of this swing (so
         # no tick carries a whole solve), from where the feet will be when
         # that slot starts; used if nothing changes before then.

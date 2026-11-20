@@ -13,7 +13,7 @@ Line format (space separated; SPEED -1 is the pattern's default speed):
     fit X0..X3 Z0..Z3 SUPPORT PP PR  pitch roll               fit_attitude with prev (PP, PR)
     stab X0..X3 Z0..Z3 SUPPORT P R  margin                    stability
     S NAME PATTERN DIRECTION SPEED TICK                       a new Planner
-    speed V | dir D | steer K | pattern P | stop | observe EP ER
+    speed V | dir D | steer K | pattern P | stop | halt | observe EP ER
                                                               a command before the next tick
     t TICK X0..X3 Z0..Z3 SUPPORT PITCH ROLL PLAN_PITCH PLAN_ROLL MARGIN LIFTING
                                                               one Planner.next() (LIFTING: a bit mask)
@@ -109,6 +109,9 @@ def scenario(name, pattern, direction="forward", speed=None, tick=1000, script=(
         elif kind == "stop":
             line("stop")
             p.stop()
+        elif kind == "halt":
+            line("halt")
+            p.halt()
         elif kind == "observe":
             line("observe", repr(float(item[1])), repr(float(item[2])))
             p.observe(item[1], item[2])
@@ -162,6 +165,28 @@ def scenarios() -> None:
     scenario("crawl_steer", "crawl", "back", script=[("steer", -1.0), ("run", 260)])
     # a turn in place, then straight on (the remote's B7 while turning)
     scenario("trot_turn_go", "trot", "right", script=[("run", 60), ("dir", "forward"), ("run", 60)])
+    # the quick stop (halt: the remote's B6 and C7, the distance guard) at every gait and phase:
+    # mid-swing, in the shift, the walk's second leg not yet lifted, during the planned stop, steering,
+    # turning, the crawl mid-lean, at the top speeds
+    for n in (3, 7, 12, 20, 31):
+        scenario(f"trot_halt_{n}", "trot", speed=230.4, script=[("run", 40 + n), ("halt",), ("until_done", 200)])
+    for n in (0, 3, 5, 9):
+        scenario(f"walk_halt_{n}", "walk", speed=97.0, script=[("run", 44 + n), ("halt",), ("until_done", 200)])
+    for n in (0, 9, 21, 40):
+        scenario(f"crawl_halt_{n}", "crawl", speed=27.0, script=[("run", 130 + n), ("halt",), ("until_done", 600)])
+    scenario("trot_stop_halt", "trot", speed=187.2, script=[("run", 60), ("stop",), ("run", 7), ("halt",),
+                                                             ("until_done", 200)])
+    scenario("trot_steer_halt", "trot", speed=230.4, script=[("steer", 0.5), ("run", 63), ("halt",), ("halt",),
+                                                              ("until_done", 200)])
+    scenario("trot_turn_halt", "trot", "left", script=[("run", 45), ("halt",), ("until_done", 200)])
+    scenario("walk_back_halt", "walk", "back", script=[("run", 50), ("halt",), ("until_done", 200)])
+    # the body tipping toward the legs that square up: caught, they stay where they land (the end comes)
+    scenario("crawl_halt_catch", "crawl", script=[("run", 140), ("halt",), ("observe", 0.0, 9.0), ("run", 30),
+                                                  ("observe", -8.0, -9.0), ("until_done", 600)])
+    scenario("trot_halt_catch", "trot", speed=187.2, script=[("run", 50), ("halt",), ("observe", 9.0, 0.0),
+                                                             ("until_done", 200)])
+    scenario("crawl_change_halt", "crawl", script=[("run", 90), ("pattern", "walk"), ("run", 30), ("halt",),
+                                                   ("until_done", 600)])
     scenario("trot_gate", "trot", speed=2 * pat.default_speed("trot"),
              script=[("run", 40), ("observe", 6.0, 0.0), ("run", 40), ("observe", 0.0, 0.0), ("run", 30)])
 

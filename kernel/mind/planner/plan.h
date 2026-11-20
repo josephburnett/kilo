@@ -26,6 +26,13 @@
 //   swinging leg lands at once when the body tips toward it by catch_deg.
 // - Stop: the strides go to 0, each leg steps home, the body levels at the
 //   stance height, then done.
+// - The quick stop (halt(); the remote's B6 and C7, the distance guard):
+//   every foot in the air comes down where it is (three ticks, as a catch)
+//   and no other lifts; the strides go to 0 in kHaltTicks (the feet on the
+//   ground stop sliding: the body stops); four feet down until
+//   kHaltHoldTicks after the halt; then each leg further than kHaltSquareMm
+//   from home steps there (the crawl at its fastest cadence), the body
+//   levels, done. A leg caught on its way stays where it landed.
 //
 // Fixed-size state, no heap. Planner::next() is what the Walker calls once
 // per tick, about five ticks ahead of the body.
@@ -47,6 +54,10 @@ constexpr real kRecentredMm = (real)1.5;  // a stopping leg this close to its ta
 constexpr real kSwitchSlackMm = (real)4.0;  // a pattern change: every foot within the new half stride plus this
 constexpr real kStanceSlew = (real)0.02;
 constexpr int kLeanUnitsPerTick = 4;      // units of a lean solve per tick
+constexpr int kHaltTicks = 6;             // the quick stop: the strides to 0 in this many ticks (120 ms) ...
+constexpr int kHaltHoldTicks = 10;        // ... four feet down this long from the halt (200 ms) ...
+constexpr real kHaltSquareMm = (real)5.0;  // ... then a leg further than this from home steps there
+constexpr int kHaltNotLifted = -1000;     // caught_j_ of a leg the quick stop keeps down (it slides)
 
 struct TickPlan {
   uint32_t tick;     // unwrapped body tick
@@ -213,6 +224,9 @@ class Planner {
   // walking pattern cancels a change under way; ignored once stopping.
   void set_pattern(const Pattern& p);
   void stop();
+  // The quick stop (above). Also during the planned stop (it becomes this);
+  // nothing once finishing.
+  void halt();
   // The body's latest error: measured - predicted - the steady offset (degrees).
   void observe(real err_pitch, real err_roll) {
     err_[0] = err_pitch;
@@ -226,6 +240,8 @@ class Planner {
   int swing_ticks() const;
   bool changing() const { return pending_ != nullptr; }
   bool stopping() const { return stopping_; }
+  bool halting() const { return halting_; }
+  int halt_ticks() const { return halt_t_; }  // ticks planned since the halt
   bool done() const { return done_; }
   uint32_t tick() const { return tick_; }
   int lead() const { return lead_; }      // the lift after the lean's move, ticks (negative: before its end)
@@ -258,6 +274,7 @@ class Planner {
   bool switch_ok(const Pattern& p) const;
   int first_group() const;
   bool home() const;
+  real recentred() const { return halting_ ? kHaltSquareMm : kRecentredMm; }
   void apply_timing();
   void start_slot();
   void slewed(real s[2], real* stance, real* h) const;
@@ -304,6 +321,11 @@ class Planner {
   int caught_j_[kLegs] = {};  // the slot tick (after the shift) of the catch
   real caught_lift_[kLegs] = {};
   bool stopping_ = false;
+  bool halting_ = false;
+  int halt_t_ = 0;
+  real halt_slew_ = 0;
+  bool halt_fast_ = false;
+  bool halt_kept_[kLegs] = {};  // caught in the quick stop: it stays where it landed
   bool finishing_ = false;
   bool done_ = false;
   real err_[2] = {};

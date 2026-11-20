@@ -158,6 +158,8 @@ int main(int argc, char** argv) {
       planner.set_pattern(pat(f[1]));
     } else if (k == "stop") {
       planner.stop();
+    } else if (k == "halt") {
+      planner.halt();
     } else if (k == "observe") {
       planner.observe((real)num(f[1]), (real)num(f[2]));
     } else if (k == "t") {

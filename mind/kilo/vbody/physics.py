@@ -22,6 +22,15 @@ geometry of kilo.planner.model.BodyModel, at 2 ms steps:
   degrees past the edge at 80 mm this goes 30 degrees in about 0.2 s, as
   the floor traces of 2026-10-14 show.
 - **Fallen.** Past ``fall_deg`` of pitch or roll the body reports a fall.
+- **Momentum** (``inertia``, off by default; on for the stopping study,
+  mind/tests/stopsim.py). The body's speed over the ground is the speed
+  at which its feet on the ground move back under it; when it changes, the
+  body's inertia acts at the centre of mass like a shift of it by
+  ``-a h / g`` (a the body's acceleration, h the centre of mass's height):
+  a body that brakes leans its weight toward its front feet. The
+  acceleration is filtered over ``inertia_ms`` (the frame and the feet are
+  not rigid). Without it the model is quasi-static: the speed itself never
+  matters, only where the feet are.
 
 Yaw and sliding are not modelled; the ground is flat and level.
 """
@@ -40,8 +49,17 @@ TICK_S = 0.020
 class Physics:
     def __init__(self, model: BodyModel | None = None, lag_ms: float | None = None, contact_mm: float = 0.6,
                  fall_deg: float = 35.0, settle_s: float = 0.02, feet=None, inset_mm: float = 5.0,
-                 tau_ms: float | None = None):
+                 tau_ms: float | None = None, inertia: bool | None = None, inertia_ms: float = 20.0):
         self.model = model or BodyModel()
+        self.inertia = Physics.INERTIA if inertia is None else inertia
+        self.inertia_ms = inertia_ms
+        self.v_body = 0.0      # mm/s forward over the ground (inertia)
+        self.a_body = 0.0      # mm/s^2, filtered
+        self.max_a_body = 0.0  # the largest |a_body| seen
+        self.dist_mm = 0.0     # how far the body went over the ground (forward +)
+        self._shift = 0.0      # the inertia's shift of the centre of mass, mm forward
+        self._prev = None      # xs of the last substep
+        self._age = [0, 0, 0, 0]  # substeps each foot has been on the ground
         self.lag_ms = self.model.servo_lag_ms if lag_ms is None else float(lag_ms)
         self.tau_ms = self.model.servo_tau_ms if tau_ms is None else float(tau_ms)
         self.contact_mm = contact_mm
@@ -63,6 +81,8 @@ class Physics:
         self.xs, self.zs = list(x0), list(z0)
         self._resp = (list(x0), list(z0))  # the first-order response's state (the delayed commands filtered)
         self.rates = (0.0, 0.0)  # pitch, roll rate, deg/s (last tick)
+
+    INERTIA = False  # the default for new Physics (the stopping study turns it on)
 
     def command(self, xs, zs) -> None:
         """This tick's commanded feet (after the body's slew limit and its corrections)."""
@@ -92,16 +112,42 @@ class Physics:
                 yx[leg] += (ux[leg] - yx[leg]) * a
                 yz[leg] += (uz[leg] - yz[leg]) * a
             self.xs, self.zs = list(yx), list(yz)
+            self._motion(dt)
             self._substep(dt)
             if self.fallen:
                 break
         self.rates = ((self.pitch - p0) / TICK_S, (self.roll - r0) / TICK_S)
         self.max_tilt = max(self.max_tilt, abs(self.pitch), abs(self.roll))
 
+    def _motion(self, dt: float) -> None:
+        """The body's speed over the ground (its feet on the ground move back
+        under it), its acceleration, and the inertia's shift of the mass."""
+        prev, self._prev = self._prev, list(self.xs)
+        for leg in LEGS:  # substeps on the ground (self.contacts: the last substep's)
+            self._age[leg] = self._age[leg] + 1 if self.contacts & (1 << leg) else 0
+        if prev is None:
+            return
+        # the feet down for a tick and more carry the body: a foot that just landed (at its
+        # swing's end it moves with the body, not yet with the ground) or is about to lift is not the ground's
+        down = [leg for leg in LEGS if self._age[leg] >= SUBSTEPS]
+        if not down:
+            return
+        v = -sum(self.xs[leg] - prev[leg] for leg in down) / len(down) / dt
+        self.dist_mm += v * dt
+        a = (v - self.v_body) / dt
+        self.v_body = v
+        k = min(1.0, dt * 1000.0 / self.inertia_ms) if self.inertia_ms > 0 else 1.0
+        self.a_body += (a - self.a_body) * k
+        self.max_a_body = max(self.max_a_body, abs(self.a_body))
+        if self.inertia:
+            h = self.model.com(self.xs, self.zs)[2] + max(self.zs) + self.model.foot_r_mm
+            self._shift = -self.a_body * h / G_MM_S2
+
     def _world(self, pitch: float, roll: float):
         m = self.model
         R = rotation(pitch, roll)
         cx, cy, cz = m.com(self.xs, self.zs)
+        cx += self._shift  # the inertia (_motion): 0 without it
         com = _rot(R, cx, cy, cz)
         feet = []
         for leg in LEGS:
