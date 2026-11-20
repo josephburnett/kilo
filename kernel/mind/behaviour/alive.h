@@ -20,16 +20,22 @@
 // these ramps, so the ramp is what Kilo shows.
 //
 // Sitting (SIT latched): SIT has no IK, so each move is a short trick built
-// here and played on the legs and tail only (the head stays the tree's):
-// from SIT to a few degrees off it and back, ending in SIT: a lean to one
-// side (the front knees and shoulders against each other), forward or
-// back, a front shoulder dip, the hips shifting, a sway, a tail flick, and
-// now and then a small stretch of the front legs. Within the joint limits
-// (trick_problem()); the feet stay down, a few mm of change.
+// here and played on the legs and tail (kSitMoves in alive.cpp, up to three
+// keyframes off SIT and back to it): a lean to one side (the front knees and
+// shoulders against each other), the shoulders forward or back, one
+// shoulder dipping, a sway, a stretch of the front legs, the hips lowering,
+// a tail swish, a front paw lifted (the weight on the other side first),
+// a shrug. Livelier since 2026-11-19: larger (4-14 degrees, the tail 15-30),
+// quicker frames, and mostly short pauses (0.3-2 s, one in five a rest of
+// 3-5 s). Between and during them the head looks around (SET_HEAD, a new
+// look every 0.8-3 s, 45 degrees to each side). Every move inside what the
+// joints reach and statically stable on Kilo (mind/tests/test_alive_sit.py).
+// flinch(): the distance guard's "very close while sitting": shoulders and
+// knees back, the head pulled up, the tail up, held 0.9 s, back to SIT.
 //
 // Timing and choice come from a seeded RNG (the runner's seed): a pause of
-// 1.5-6 s between moves, never the same move twice in a row, the sizes and
-// sides drawn each time. All of it stops at once with the runner (the
+// 1.5-6 s between standing moves, never the same move twice in a row, the
+// sizes and sides drawn each time. All of it stops at once with the runner (the
 // remote's B6, A7, C7: stop()): the pose goes back to level, a move's trick
 // is stopped.
 #ifndef KILO_MIND_BEHAVIOUR_ALIVE_H
@@ -57,8 +63,22 @@ struct BodyPose {
 // mass, the shift taken at full CoM height: an upper bound on the shift).
 double stance_margin_mm(const planner::BodyModel& m, const BodyPose& p);
 
-enum class AliveMove : uint8_t { Shift, Lean, Height, Dip, Sway, Follow, Stretch, Hips, Tail, kCount };
+enum class AliveMove : uint8_t { Shift, Lean, Height, Dip, Sway, Follow, Stretch, Hips, Tail, Paw, Shrug, Flinch, kCount };
 const char* alive_move_name(AliveMove m);
+
+// A sitting move (alive.cpp kSitMoves): per keyframe, each joint's change from SIT in percent of
+// the amplitude (canonical order); sided: mirrored half the time.
+struct SitMoveDef {
+  AliveMove move;
+  const char* name;
+  double a_lo, a_hi;  // the amplitude, degrees
+  bool sided;
+  uint8_t n;  // keyframes before the one back to SIT
+  struct {
+    int8_t c[KILO_JOINT_COUNT];
+  } f[3];
+};
+const SitMoveDef* sit_move_def(AliveMove m);
 
 class Alive {
  public:
@@ -72,6 +92,10 @@ class Alive {
   void poll(double now, bool running, bool calm, double head_pan);
   // At once: level the pose, stop a move's trick (the runner stopped).
   void stop();
+  // The guard's lean back while sitting (a trick on the legs, the head and the tail); false if the
+  // player is busy or refused it.
+  bool flinch();
+  uint32_t looks() const { return looks_; }
 
   bool standing() const { return variant_ == Variant::Stand; }
   bool sitting() const { return variant_ == Variant::Sit; }
@@ -102,6 +126,8 @@ class Alive {
   AliveMove pick(bool standing);
   void plan_stand(AliveMove m, double head_pan);
   void plan_sit(AliveMove m);
+  void build_sit(const SitMoveDef& d, double a, bool mirror, bool head);
+  void sit_look(double now);
   void send_pose(const BodyPose& p);
   void stand_step(double now);
 
@@ -125,7 +151,9 @@ class Alive {
   kilo_keyframe_t frames_[kMaxSteps] = {};
   tricks::Trick trick_ = {};
   uint32_t play_ = 0;
-  uint32_t moves_ = 0, counts_[(int)AliveMove::kCount] = {}, sit_failures_ = 0;
+  uint32_t moves_ = 0, counts_[(int)AliveMove::kCount] = {}, sit_failures_ = 0, looks_ = 0;
+  double look_at_ = 0;
+  bool looked_ = false;  // the sitting looks moved the head
 };
 
 }  // namespace behaviour
