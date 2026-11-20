@@ -504,17 +504,44 @@ void HostServer::reboot(uint32_t i, uint8_t seq) {
 
 // ---- flash --------------------------------------------------------------------------
 
+const HostServer::Busy HostServer::kFlashBusy = {"no flasher on this mind", "a flash is running",
+                                                "the last image is not on SD yet", "the kernel is being updated",
+                                                "the kernel is being updated"};
+const HostServer::Busy HostServer::kUpdateBusy = {"no kernel store (kilo-mind-host: --card DIR)",
+                                                 "the body is being flashed", "the body image is not on SD yet",
+                                                 "an update is being written", "rebooting"};
+
+// The checks FLASH_* and UPDATE_* share, in this order: the mind has the
+// part (have), this client is the controller, then those in checks. The
+// first that fails is answered, with its text from b: true, the caller stops.
+bool HostServer::refused(uint32_t i, uint8_t seq, uint8_t type, bool have, unsigned checks, const Busy& b) {
+  uint8_t code = KILO_HOST_RESULT_CODE_OK;
+  const char* why = nullptr;
+  if (!have) {
+    code = KILO_HOST_RESULT_CODE_UNSUPPORTED, why = b.unsupported;
+  } else if (controller_ != (int32_t)i) {
+    code = KILO_HOST_RESULT_CODE_NOT_CONTROLLER, why = "take control first";
+  } else if ((checks & kNoBridge) && bridge_) {
+    code = KILO_HOST_RESULT_CODE_BRIDGED, why = "the bridge is open";
+  } else if ((checks & kNoFlash) && flashing()) {
+    code = KILO_HOST_RESULT_CODE_FLASHING, why = b.flashing;
+  } else if ((checks & kNoPersist) && flasher_ != nullptr && flasher_->persist_pending()) {
+    // The last body image is still to be written to SD (PERSIST): it must not change under the platform.
+    code = KILO_HOST_RESULT_CODE_FLASHING, why = b.persist;
+  } else if ((checks & kNoUpdate) && updating()) {
+    code = KILO_HOST_RESULT_CODE_UPDATING, why = b.updating;
+  } else if ((checks & kNoReboot) && reboot_) {
+    code = KILO_HOST_RESULT_CODE_UPDATING, why = b.rebooting;
+  }
+  if (why == nullptr) return false;
+  result(i, seq, type, code, why);
+  return true;
+}
+
 void HostServer::flash_begin(uint32_t i, uint8_t seq, const uint8_t* p) {
   const uint8_t type = KILO_HOST_MSG_FLASH_BEGIN;
-  if (flasher_ == nullptr) return result(i, seq, type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no flasher on this mind");
-  if (controller_ != (int32_t)i) return result(i, seq, type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
-  if (bridge_) return result(i, seq, type, KILO_HOST_RESULT_CODE_BRIDGED, "the bridge is open");
-  if (flashing()) return result(i, seq, type, KILO_HOST_RESULT_CODE_FLASHING, "a flash is running");
-  // The last image is still to be written to SD (PERSIST): it must not change under the platform.
-  if (flasher_->persist_pending())
-    return result(i, seq, type, KILO_HOST_RESULT_CODE_FLASHING, "the last image is not on SD yet");
-  if (updating() || reboot_)
-    return result(i, seq, type, KILO_HOST_RESULT_CODE_UPDATING, "the kernel is being updated");
+  if (refused(i, seq, type, flasher_ != nullptr, kNoBridge | kNoFlash | kNoPersist | kNoUpdate | kNoReboot, kFlashBusy))
+    return;
   if (updater_ != nullptr && updater_->receiving()) drop_update("a body image began");
   kilo_host_flash_begin_t b;
   mem_copy(&b, p, sizeof b);
@@ -536,11 +563,7 @@ void HostServer::flash_begin(uint32_t i, uint8_t seq, const uint8_t* p) {
 
 void HostServer::flash_commit(uint32_t i, uint8_t seq) {
   const uint8_t type = KILO_HOST_MSG_FLASH_COMMIT;
-  if (flasher_ == nullptr) return result(i, seq, type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no flasher on this mind");
-  if (controller_ != (int32_t)i) return result(i, seq, type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
-  if (flashing()) return result(i, seq, type, KILO_HOST_RESULT_CODE_FLASHING, "a flash is running");
-  if (updating() || reboot_)
-    return result(i, seq, type, KILO_HOST_RESULT_CODE_UPDATING, "the kernel is being updated");
+  if (refused(i, seq, type, flasher_ != nullptr, kNoFlash | kNoUpdate | kNoReboot, kFlashBusy)) return;
   if (!receiving_ || flash_client_ != (int32_t)i)
     return result(i, seq, type, KILO_HOST_RESULT_CODE_BAD_ARG, "no FLASH_BEGIN from this client");
   receiving_ = false;
@@ -556,8 +579,7 @@ void HostServer::flash_commit(uint32_t i, uint8_t seq) {
     st.phase = KILO_FLASH_PHASE_FAILED;
     st.error = e;
     st.received = got;
-    Client& c = clients_[i];
-    if (enqueue(i, KILO_HOST_MSG_FLASH_STATUS, c.out_seq, &st, sizeof st)) c.out_seq++;
+    push(i, KILO_HOST_MSG_FLASH_STATUS, &st, sizeof st);
     char why[56];
     format(why, sizeof why, "%s: %u bytes, crc32 %08x", flash_error_name(e), (unsigned)got, (unsigned)crc);
     return result(i, seq, type, KILO_HOST_RESULT_CODE_IMAGE_BAD, why);
@@ -574,15 +596,22 @@ void HostServer::drop_image(const char* why) {
   logf(log_, LogLevel::Info, "host: body image dropped (%s)", why);
 }
 
-// FLASH_STATUS to the flash's client when the flasher's status moved. A
-// full ring skips a progress update; the last one (DONE, FAILED) waits for
-// room.
+// A job's status (FLASH_STATUS, UPDATE_STATUS) to its client after the
+// job's status moved: true when that is dealt with (sent, or no client to
+// send it to). A full ring skips a progress update; the last one (last:
+// DONE, FAILED) waits for room: false, try again next pass.
+bool HostServer::send_status(int32_t client, uint8_t type, const void* st, uint32_t len, bool last, uint32_t& sent) {
+  if (client < 0 || !clients_[client].open) return true;
+  if (push((uint32_t)client, type, st, len)) {
+    sent++;
+    return true;
+  }
+  return !last;
+}
+
+// FLASH_STATUS to the flash's client when the flasher's status moved.
 void HostServer::flash_status() {
   if (flasher_->changes() == flash_sent_) return;
-  if (flash_client_ < 0 || !clients_[flash_client_].open) {
-    flash_sent_ = flasher_->changes();
-    return;
-  }
   const Flasher::Status& f = flasher_->status();
   kilo_host_flash_status_t st;
   st.phase = f.phase;
@@ -595,30 +624,17 @@ void HostServer::flash_status() {
   st.build = f.build;
   st.fw_build = f.fw_build;
   st.reset_cause = f.reset_cause;
-  Client& c = clients_[flash_client_];
   bool last = f.phase == KILO_FLASH_PHASE_DONE || f.phase == KILO_FLASH_PHASE_FAILED;
-  if (enqueue((uint32_t)flash_client_, KILO_HOST_MSG_FLASH_STATUS, c.out_seq, &st, sizeof st)) {
-    c.out_seq++;
-    stats_.flash_status_sent++;
-  } else if (last) {
-    return;  // try again next pass
-  }
-  flash_sent_ = flasher_->changes();
+  if (send_status(flash_client_, KILO_HOST_MSG_FLASH_STATUS, &st, sizeof st, last, stats_.flash_status_sent))
+    flash_sent_ = flasher_->changes();
 }
 
 // ---- kernel update -------------------------------------------------------------------
 
 void HostServer::update_begin(uint32_t i, uint8_t seq, const uint8_t* p) {
   const uint8_t type = KILO_HOST_MSG_UPDATE_BEGIN;
-  if (updater_ == nullptr)
-    return result(i, seq, type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no kernel store (kilo-mind-host: --card DIR)");
-  if (controller_ != (int32_t)i) return result(i, seq, type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
-  if (bridge_) return result(i, seq, type, KILO_HOST_RESULT_CODE_BRIDGED, "the bridge is open");
-  if (flashing()) return result(i, seq, type, KILO_HOST_RESULT_CODE_FLASHING, "the body is being flashed");
-  if (flasher_ != nullptr && flasher_->persist_pending())
-    return result(i, seq, type, KILO_HOST_RESULT_CODE_FLASHING, "the body image is not on SD yet");
-  if (updating()) return result(i, seq, type, KILO_HOST_RESULT_CODE_UPDATING, "an update is being written");
-  if (reboot_) return result(i, seq, type, KILO_HOST_RESULT_CODE_UPDATING, "rebooting");
+  if (refused(i, seq, type, updater_ != nullptr, kNoBridge | kNoFlash | kNoPersist | kNoUpdate | kNoReboot, kUpdateBusy))
+    return;
   if (receiving_) drop_image("a kernel update began");
   kilo_host_update_begin_t b;
   mem_copy(&b, p, sizeof b);
@@ -639,10 +655,7 @@ void HostServer::update_begin(uint32_t i, uint8_t seq, const uint8_t* p) {
 
 void HostServer::update_commit(uint32_t i, uint8_t seq) {
   const uint8_t type = KILO_HOST_MSG_UPDATE_COMMIT;
-  if (updater_ == nullptr)
-    return result(i, seq, type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no kernel store (kilo-mind-host: --card DIR)");
-  if (controller_ != (int32_t)i) return result(i, seq, type, KILO_HOST_RESULT_CODE_NOT_CONTROLLER, "take control first");
-  if (updating()) return result(i, seq, type, KILO_HOST_RESULT_CODE_UPDATING, "an update is being written");
+  if (refused(i, seq, type, updater_ != nullptr, kNoUpdate, kUpdateBusy)) return;
   if (!updater_->receiving() || update_client_ != (int32_t)i)
     return result(i, seq, type, KILO_HOST_RESULT_CODE_BAD_ARG, "no UPDATE_BEGIN from this client");
   uint8_t e = updater_->commit();
@@ -667,30 +680,22 @@ void HostServer::drop_update(const char* why) {
   logf(log_, LogLevel::Info, "host: kernel image dropped (%s)", why);
 }
 
-// UPDATE_STATUS to the update's client when the updater's status moved (a
-// full ring skips a progress update; the last one waits for room), then on
-// DONE the reboot.
+// UPDATE_STATUS to the update's client when the updater's status moved,
+// then on DONE the reboot.
 void HostServer::update_status() {
   if (updater_->changes() != update_sent_) {
-    if (update_client_ >= 0 && clients_[update_client_].open) {
-      const KernelUpdater::Status& u = updater_->status();
-      kilo_host_update_status_t st;
-      st.phase = u.phase;
-      st.error = u.error;
-      st.received = u.received;
-      st.image_size = u.size;
-      st.done = u.done;
-      st.crc32 = u.crc32;
-      st.card_crc32 = u.card_crc32;
-      Client& c = clients_[update_client_];
-      bool last = u.phase == KILO_UPDATE_PHASE_DONE || u.phase == KILO_UPDATE_PHASE_FAILED;
-      if (enqueue((uint32_t)update_client_, KILO_HOST_MSG_UPDATE_STATUS, c.out_seq, &st, sizeof st)) {
-        c.out_seq++;
-        stats_.update_status_sent++;
-      } else if (last) {
-        return;  // try again next pass
-      }
-    }
+    const KernelUpdater::Status& u = updater_->status();
+    kilo_host_update_status_t st;
+    st.phase = u.phase;
+    st.error = u.error;
+    st.received = u.received;
+    st.image_size = u.size;
+    st.done = u.done;
+    st.crc32 = u.crc32;
+    st.card_crc32 = u.card_crc32;
+    bool last = u.phase == KILO_UPDATE_PHASE_DONE || u.phase == KILO_UPDATE_PHASE_FAILED;
+    if (!send_status(update_client_, KILO_HOST_MSG_UPDATE_STATUS, &st, sizeof st, last, stats_.update_status_sent))
+      return;
     update_sent_ = updater_->changes();
   }
   if (updater_->status().phase == KILO_UPDATE_PHASE_DONE && !reboot_) update_reboot();
@@ -752,8 +757,7 @@ void HostServer::streams(uint64_t now) {
       if (b.has_event) t.last_event = b.last_event;
       fill_link_stats(t.link);
       if (b.has_telemetry) t.telemetry = b.telemetry;
-      if (enqueue(i, KILO_HOST_MSG_TELEM, c.out_seq, &t, sizeof t)) {
-        c.out_seq++;
+      if (push(i, KILO_HOST_MSG_TELEM, &t, sizeof t)) {
         stats_.telem_sent++;
       } else {
         stats_.telem_skipped++;
@@ -781,8 +785,7 @@ void HostServer::pump_log(uint32_t i) {
       l.t_ms = e->t_ms;
       l.level = (uint8_t)e->level;
       mem_copy(l.text, e->text, e->len);
-      if (!enqueue(i, KILO_HOST_MSG_LOG_LINE, c.out_seq, &l, KILO_HOST_LOG_LINE_MIN_LEN + e->len)) return;
-      c.out_seq++;
+      if (!push(i, KILO_HOST_MSG_LOG_LINE, &l, KILO_HOST_LOG_LINE_MIN_LEN + e->len)) return;
       stats_.log_sent++;
     }
     if (status) c.log_status++;
@@ -803,6 +806,12 @@ bool HostServer::enqueue(uint32_t i, uint8_t type, uint8_t seq, const void* payl
   mem_copy(c.tx + tail, frame, first);
   mem_copy(c.tx, frame + first, n - first);
   c.tx_len += n;
+  return true;
+}
+
+bool HostServer::push(uint32_t i, uint8_t type, const void* payload, uint32_t len) {
+  if (!enqueue(i, type, clients_[i].out_seq, payload, len)) return false;
+  clients_[i].out_seq++;
   return true;
 }
 
