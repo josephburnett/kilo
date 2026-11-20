@@ -82,12 +82,11 @@ from typing import Sequence
 from . import sagittal as S
 from . import stance as T
 from .library import path_for
-from .model import JOINT_IDS, JOINT_LIMITS, Easing, Guard, Keyframe, Posture, Trick, TICK_MS
+from .model import CANONICAL, JOINT_IDS, JOINT_LIMITS, JOINT_NAMES, Easing, Guard, Keyframe, Posture, Trick, TICK_MS
 
 END = Posture.SIT
 
-JOINTS = ("head_pan", "head_tilt", "tail", "lf_shoulder", "rf_shoulder", "rb_shoulder", "lb_shoulder",
-          "lf_knee", "rf_knee", "rb_knee", "lb_knee")
+JOINTS = tuple(JOINT_NAMES[j] for j in CANONICAL)
 
 
 def J(fs, fk, bs, bk, tail=0, pan=0, tilt=0, *, lb=None, rb=None) -> dict:

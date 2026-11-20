@@ -25,15 +25,13 @@ Easing = P.Easing
 Posture = P.Posture
 
 JOINT_SLOTS = 16
-CANONICAL = (0, 1, 2, 8, 9, 10, 11, 12, 13, 14, 15)   # wire order, spec joint_count = 11
-UNUSED = (3, 4, 5, 6, 7)
+# The joints, from the spec's [[joints]] (P.JOINT_INFO): the driven ones in wire order (0, 1, 2, 8..15;
+# spec joint_count = 11), their names (head_pan, ..., lf_shoulder, ..., lb_knee), the slots never driven.
+CANONICAL = tuple(j.id for j in P.JOINT_INFO.values() if j.driven)
+UNUSED = tuple(j.id for j in P.JOINT_INFO.values() if not j.driven)
 ANGLE_UNCHANGED = -128
 
-JOINT_NAMES = {
-    0: "head_pan", 1: "head_tilt", 2: "tail",
-    8: "lf_shoulder", 9: "rf_shoulder", 10: "rb_shoulder", 11: "lb_shoulder",
-    12: "lf_knee", 13: "rf_knee", 14: "rb_knee", 15: "lb_knee",
-}
+JOINT_NAMES = {j.id: j.name for j in P.JOINT_INFO.values() if j.driven}
 JOINT_IDS = {n: j for j, n in JOINT_NAMES.items()}
 
 # Joint limits in degrees for the driven joints: the spec's [[joints]] (the

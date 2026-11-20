@@ -42,21 +42,23 @@ import math
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
-from kilo.protocol import kilo_protocol as P
+from kilo.tricks.model import CANONICAL as DRIVEN
+from kilo.tricks.model import JOINT_LIMITS
+from kilo.tricks.model import JOINT_NAMES as NAMES
 
 # ---- the body's joint table (body/src/core/joints.cpp JOINTS: dir, mid) --------------------------
 JOINT_DIR = {0: 1, 1: -1, 2: 1, 8: 1, 9: -1, 10: -1, 11: 1, 12: -1, 13: 1, 14: 1, 15: -1}
 JOINT_MID = {0: 0, 1: 15, 2: 0, 8: 10, 9: 10, 10: -10, 11: -10, 12: -30, 13: -30, 14: 30, 15: 30}
 JOINT_CHANNEL = {0: 12, 1: 11, 2: 4, 8: 14, 9: 9, 10: 6, 11: 1, 12: 15, 13: 8, 14: 7, 15: 0}
-DRIVEN = (0, 1, 2, 8, 9, 10, 11, 12, 13, 14, 15)
-NAMES = {j.id: j.name for j in P.JOINT_INFO.values()}
-LIMITS = {j.id: (float(j.lo), float(j.hi)) for j in P.JOINT_INFO.values() if j.driven}
+LIMITS = {j: (float(lo), float(hi)) for j, (lo, hi) in JOINT_LIMITS.items()}
 WHAT = {"head_pan": "head pan", "head_tilt": "head tilt", "tail": "tail",
         "lf_shoulder": "left front upper leg", "rf_shoulder": "right front upper leg",
         "rb_shoulder": "right hind upper leg", "lb_shoulder": "left hind upper leg",
         "lf_knee": "left front lower leg", "rf_knee": "right front lower leg",
         "rb_knee": "right hind lower leg", "lb_knee": "left hind lower leg"}
 
+# servo = zero + dir * angle (degrees), pulse = (A2P * servo + B_US * 1000) / 1000 us, clamped to
+# PULSE_MIN..PULSE_MAX (joints.cpp; a2p and b from Kilo's legacy EEPROM, kilo.tricks.stance).
 A2P = 10963            # us per servo degree x 1000 (every joint)
 B_US = 600
 PULSE_MIN, PULSE_MAX = 500, 2500
@@ -96,13 +98,19 @@ def pulse_us(j: int, angle_deg: float, offset_deg: float) -> float:
     return A2P * (zero_deg(j, offset_deg) + JOINT_DIR[j] * angle_deg) / 1000.0 + B_US
 
 
+def angle_window(j: int, zero: float) -> tuple[float, float]:
+    """The joint angles at 500 and at 2500 us, lower first, for joint j whose
+    servo angle at joint angle 0 is zero (outside them the pulse is clamped)."""
+    s_lo = (PULSE_MIN - B_US) * 1000.0 / A2P   # servo degrees at 500 us
+    s_hi = (PULSE_MAX - B_US) * 1000.0 / A2P   # ...at 2500 us
+    d = JOINT_DIR[j]
+    a, b = (s_lo - zero) * d, (s_hi - zero) * d
+    return min(a, b), max(a, b)
+
+
 def pulse_window(j: int, offset_deg: float) -> tuple[float, float]:
     """The joint angles at 500 and at 2500 us, lower first."""
-    s_lo = (PULSE_MIN - B_US) * 1000.0 / A2P
-    s_hi = (PULSE_MAX - B_US) * 1000.0 / A2P
-    z, d = zero_deg(j, offset_deg), JOINT_DIR[j]
-    a, b = (s_lo - z) * d, (s_hi - z) * d
-    return min(a, b), max(a, b)
+    return angle_window(j, zero_deg(j, offset_deg))
 
 
 def reach(j: int, offset_deg: float) -> tuple[float, float]:
