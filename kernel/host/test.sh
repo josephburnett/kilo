@@ -660,11 +660,11 @@ ctl ir 0x22                   # A6: steer left (walking: the path bends, no stop
 sleep 1
 ctl ir 0x18                   # B3: row 3, nothing
 ctl ir 0x10                   # A2: nothing either (the rear-up key is off without --rear-up)
-ctl ir 0x02                   # B6: stand (the planned stop, then the posture)
+ctl ir 0x02                   # B6: stand (the quick stop, then the posture)
 sleep 4
 ctl ir 0x68                   # A4: trot forward again, at 1x
 sleep 2
-ctl ir 0xE2                   # C7: freeze (the walk aborted, the body settles in STANCE)
+ctl ir 0xE2                   # C7: freeze (the quick stop, the body in STANCE)
 sleep 1
 ctl ir 0x62                   # B7: ignored while frozen
 sleep 0.3
@@ -687,9 +687,10 @@ expect "$OUT/host_ir.log" "remote B5 \(0xA8, slower\): speed 1x \(trot 144\.0 mm
 expect "$OUT/host_ir.log" "remote A6 \(0x22, turn left\): walk forward \(trot\) 144\.0 mm/s, steering left 1" "A6 steered"
 expect "$OUT/host_ir.log" "remote B3 \(0x18, none\): ignored \(no action on this key\)" "B3 did nothing"
 expect "$OUT/host_ir.log" "remote A2 \(0x10, none\): ignored \(no action on this key\)" "A2 did nothing (rear-up key off)"
-expect "$OUT/host_ir.log" "walk ended: stopped" "the planned stop"
-expect "$OUT/host_ir.log" "remote C7 \(0xE2, freeze\): frozen \(walk aborted\): only B6 or A7 act now" "C7 froze"
-expect "$OUT/host_ir.log" "I walk ended: aborted \\(C7 freeze\\)" "the freeze aborted the walk"
+expect "$OUT/host_ir.log" "walk ended: stopped" "the quick stop"
+expect "$OUT/host_ir.log" "remote C7 \(0xE2, freeze\): frozen \(walk: the quick stop\): only B6 or A7 act now" "C7 froze"
+[ "$(grep -c "I walk ended: stopped" "$OUT/host_ir.log")" -ge 2 ] ||
+    { echo "FAILED: the freeze's quick stop did not end the walk (stopped)"; cat "$OUT/host_ir.log"; exit 1; }
 expect "$OUT/host_ir.log" "remote B7 \(0x62, faster\): ignored \(frozen: B6 or A7 to go on\)" "B7 ignored while frozen"
 expect "$OUT/host_ir.log" "remote A7 \(0xA2, sleep\): unfrozen, posture rest" "A7 rested"
 expect "$OUT/host_ir.log" "remote C5 \(0x90, calibration posture\): posture calib" "C5 took the calibration posture"
@@ -697,8 +698,6 @@ expect "$OUT/host_ir.log" "remote A5 \(0xE0, behaviour\): behaviour runner start
 expect "$OUT/host_ir.log" "behaviour: idle \(free\)" "the runner ran"
 expect "$OUT/host_ir.log" "remote B6 \(0x02, stand\): behaviour runner stopped, posture stand" "B6 stopped the runner"
 if grep -Eq "decode errors [1-9]|remote .*failed|no longer stamping" "$OUT/host_ir.log"; then echo "FAILED: errors"; exit 1; fi
-grep -q "event GAIT_STOPPED arg=1" "$OUT/host_ir.log" &&
-    echo "   the freeze: the body settled after the FEET underrun (GAIT_STOPPED arg 1)"
 
 echo "== P3 integration: the behaviour runner idles for 5 s (--behaviour)"
 start_body "$OUT/vbody_bh.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u -m kilo.vbody.core
@@ -764,7 +763,7 @@ sleep 1
 ctl att 4 -3                  # the IMU reports nose down 4, left side up 3 (degrees) from now on
 ctl ir 0xB0                   # C4: walk (one leg at a time: the plan leans, its prediction moves)
 sleep 6
-ctl ir 0x02                   # B6: the planned stop, then stand
+ctl ir 0x02                   # B6: the quick stop, then stand
 for _ in $(seq 1 60); do grep -q "walk ended" "$OUT/host_walks.log" && break; sleep 0.25; done
 sleep 2.5                     # the recording's post-roll
 KPY -m kilo.cli --host "$W" runs | tee "$OUT/walks_list.txt"

@@ -626,8 +626,8 @@ Integration (`kernel/host/test.sh`): `python -m kilo.vbody.core --control
 FIFO` takes `ir CODE`, `att P R`, `batt MV` and `imu ...` lines
 (`CoreBody.serve_control`; the harness has no IR decoder, so IR_KEY frames
 are made in Python), and the script by IR keys stands, trots, speeds up
-and slows down, steers, stands after the planned stop, freezes a trot (the
-walk aborted, the virtual body settling in STANCE), rests, takes the
+and slows down, steers, stands after the quick stop, freezes a trot (the
+quick stop, the virtual body in STANCE), rests, takes the
 calibration posture and starts and stops the behaviour runner, idles the behaviour
 runner 5 s at 10 Hz, and tilts and drops the virtual body for perception
 and the fallen branch.
