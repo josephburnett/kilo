@@ -1,19 +1,12 @@
 #include "behaviour/selector.h"
 #include "util/dmath.h"
 #include "util/fmt.h"
+#include "util/str.h"
 
 namespace kilo {
 namespace behaviour {
 
 namespace {
-
-int str_cmp(const char* a, const char* b) {
-  while (*a != '\0' && *a == *b) {
-    a++;
-    b++;
-  }
-  return (unsigned char)*a - (unsigned char)*b;
-}
 
 void set_reason(Choice& c, const char* r) { format(c.reason, sizeof c.reason, "%s", r); }
 

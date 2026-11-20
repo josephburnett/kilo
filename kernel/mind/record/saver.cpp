@@ -2,6 +2,7 @@
 #include "util/fmt.h"
 #include "util/log.h"
 #include "util/mem.h"
+#include "util/str.h"
 
 namespace kilo {
 namespace record {
@@ -19,27 +20,12 @@ struct RunsHeader {
   uint32_t magic, version, boot, count;
 };
 
-// "123" at s: the number and where it ended; false if no digit.
+// "123" at s: the number and where it ended; false (end untouched) if no digit or over 32 bits.
 bool number(const char* s, uint32_t* v, const char** end) {
-  uint32_t n = 0;
-  const char* p = s;
-  if (*p < '0' || *p > '9') return false;
-  while (*p >= '0' && *p <= '9') n = n * 10u + (uint32_t)(*p++ - '0');
-  *v = n;
+  const char* p = parse_dec_u32(s, s + str_len(s), v);
+  if (p == nullptr) return false;
   *end = p;
   return true;
-}
-
-bool same(const char* a, const char* b) {
-  while (*a != '\0' && *a == *b) a++, b++;
-  return *a == *b;
-}
-
-bool ends_with(const char* s, const char* tail) {
-  uint32_t a = 0, b = 0;
-  while (s[a] != '\0') a++;
-  while (tail[b] != '\0') b++;
-  return a >= b && same(s + a - b, tail);
 }
 
 }  // namespace
@@ -265,16 +251,16 @@ void Saver::step_scan() {
       if (r == RecordCard::Result::Ok) {
         uint32_t boot = 0, seq = 0;
         const char* p;
-        if (same(name, "SAVE_ON")) {
+        if (str_eq(name, "SAVE_ON")) {
           flag_file_ = true;
         } else if (ends_with(name, ".tmp") || ends_with(name, ".rtm")) {
           if (n_clean_ < 16) format(clean_[n_clean_++], sizeof clean_[0], "%s/%s", kDir, name);
           if (ends_with(name, ".rtm") && name[0] == 'b' && number(name + 1, &boot, &p) && boot >= boot_) boot_ = boot;
         } else if (name[0] == 'b' && number(name + 1, &boot, &p)) {
           if (boot > boot_) boot_ = boot;  // boot_ holds the highest so far
-          if (p[0] == '-' && p[1] == 's' && number(p + 2, &seq, &p) && same(p, ".krc")) add_file(boot, seq, size);
-          else if (same(p, ".run") && n_run_boots_ < 64) run_boots_[n_run_boots_++] = boot;
-          else if (same(p, ".log") && n_log_boots_ < 64) log_boots_[n_log_boots_++] = boot;
+          if (p[0] == '-' && p[1] == 's' && number(p + 2, &seq, &p) && str_eq(p, ".krc")) add_file(boot, seq, size);
+          else if (str_eq(p, ".run") && n_run_boots_ < 64) run_boots_[n_run_boots_++] = boot;
+          else if (str_eq(p, ".log") && n_log_boots_ < 64) log_boots_[n_log_boots_++] = boot;
         }
         return;
       }

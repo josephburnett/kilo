@@ -128,8 +128,6 @@ class Responder {
 // out (at most outn bytes, null included). *next: the offset after the name
 // where it was read. False if malformed or too long.
 bool read_name(const uint8_t* p, uint32_t n, uint32_t off, char* out, uint32_t outn, uint32_t* next);
-// ASCII case-insensitive, as DNS names compare.
-bool name_eq(const char* a, const char* b);
 
 }  // namespace mdns
 }  // namespace kilo

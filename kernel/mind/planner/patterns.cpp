@@ -1,5 +1,6 @@
 #include "planner/patterns.h"
 #include "planner/model.h"
+#include "util/str.h"
 
 namespace kilo {
 namespace planner {
@@ -17,29 +18,21 @@ const Pattern kPatternTable[kPatterns] = {
 
 const Pattern& default_pattern() { return kPatternTable[1]; }
 
-static char lower(char c) { return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c; }
-
-static bool same(const char* a, const char* b) {
-  for (; *a && *b; a++, b++)
-    if (lower(*a) != lower(*b)) return false;
-  return *a == *b;
-}
-
 const Pattern* find_pattern(const char* name) {
   for (const Pattern& p : kPatternTable)
-    if (same(name, p.name)) return &p;
+    if (str_ieq(name, p.name)) return &p;
   return nullptr;
 }
 
 static const char* const kDirectionNames[] = {"forward", "back", "left", "right", "march"};
 
 bool find_direction(const char* name, Direction* out) {
-  if (same(name, "backward") || same(name, "backwards")) {
+  if (str_ieq(name, "backward") || str_ieq(name, "backwards")) {
     *out = Direction::Back;
     return true;
   }
   for (int i = 0; i < 5; i++)
-    if (same(name, kDirectionNames[i])) {
+    if (str_ieq(name, kDirectionNames[i])) {
       *out = (Direction)i;
       return true;
     }

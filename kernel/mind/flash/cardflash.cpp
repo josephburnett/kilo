@@ -38,46 +38,13 @@ bool same_image(const Manifest& a, const Manifest& b) {
   return a.build == b.build && a.size == b.size && a.crc32 == b.crc32;
 }
 
-// [p, end) starts with lit: the rest after it, else null.
-const char* after(const char* p, const char* end, const char* lit) {
-  for (; *lit != '\0'; lit++, p++)
-    if (p >= end || *p != *lit) return nullptr;
-  return p;
-}
-
-bool hex8(const char*& p, const char* end, uint32_t* v) {
-  uint32_t x = 0;
-  for (int i = 0; i < 8; i++, p++) {
-    if (p >= end) return false;
-    char c = *p;
-    uint32_t d;
-    if (c >= '0' && c <= '9') d = (uint32_t)(c - '0');
-    else if (c >= 'a' && c <= 'f') d = (uint32_t)(c - 'a' + 10);
-    else return false;
-    x = x << 4 | d;
-  }
-  *v = x;
-  return true;
-}
-
-bool dec(const char*& p, const char* end, uint32_t* v) {
-  if (p >= end || *p < '0' || *p > '9') return false;
-  uint64_t x = 0;
-  while (p < end && *p >= '0' && *p <= '9') {
-    x = x * 10u + (uint32_t)(*p++ - '0');
-    if (x > 0xFFFFFFFFu) return false;
-  }
-  *v = (uint32_t)x;
-  return true;
-}
-
 // The line [p, end) is "image: build XXXXXXXX size N crc32 XXXXXXXX" or "image: none".
 bool parse_image(const char* p, const char* end, Manifest& m) {
   m = {};
-  if (after(p, end, "none") != nullptr) return true;
-  if ((p = after(p, end, "build ")) == nullptr || !hex8(p, end, &m.build)) return false;
-  if ((p = after(p, end, " size ")) == nullptr || !dec(p, end, &m.size)) return false;
-  if ((p = after(p, end, " crc32 ")) == nullptr || !hex8(p, end, &m.crc32)) return false;
+  if (skip_lit(p, end, "none") != nullptr) return true;
+  if ((p = skip_lit(p, end, "build ")) == nullptr || (p = parse_hex32(p, end, &m.build)) == nullptr) return false;
+  if ((p = skip_lit(p, end, " size ")) == nullptr || (p = parse_dec_u32(p, end, &m.size)) == nullptr) return false;
+  if ((p = skip_lit(p, end, " crc32 ")) == nullptr || parse_hex32(p, end, &m.crc32) == nullptr) return false;
   return true;
 }
 
@@ -94,21 +61,21 @@ bool parse_card_record(const char* text, uint32_t len, CardRecord& out) {
     const char* line_end = eol > p && eol[-1] == '\r' ? eol - 1 : eol;
     const char* v;
     if (!magic) {
-      if (after(p, line_end, kResultMagic) != line_end) return false;
+      if (skip_lit(p, line_end, kResultMagic) != line_end) return false;
       magic = true;
-    } else if ((v = after(p, line_end, "outcome: ")) != nullptr) {
+    } else if ((v = skip_lit(p, line_end, "outcome: ")) != nullptr) {
       static const CardOutcome kAll[] = {CardOutcome::Flashed, CardOutcome::Failed, CardOutcome::Refused,
                                          CardOutcome::Same};
       for (CardOutcome o : kAll) {
-        const char* q = after(v, line_end, card_outcome_name(o));
+        const char* q = skip_lit(v, line_end, card_outcome_name(o));
         if (q == line_end) {
           r.outcome = o;
           have_outcome = true;
         }
       }
-    } else if ((v = after(p, line_end, "image: ")) != nullptr) {
+    } else if ((v = skip_lit(p, line_end, "image: ")) != nullptr) {
       have_image = parse_image(v, line_end, r.image);
-    } else if (after(p, line_end, "log:") != nullptr) {
+    } else if (skip_lit(p, line_end, "log:") != nullptr) {
       break;  // the key lines come before the log
     }
     p = eol < end ? eol + 1 : end;

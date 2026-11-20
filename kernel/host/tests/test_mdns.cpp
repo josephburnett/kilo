@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include "net/mdns.h"
+#include "util/str.h"
 #include "tests/check.h"
 
 using namespace kilo;
@@ -79,7 +80,7 @@ struct Msg {
   std::vector<RR> rrs;
   const RR* find(const std::string& name, uint16_t type, int section = 0) const {
     for (const RR& r : rrs)
-      if (name_eq(r.name.c_str(), name.c_str()) && r.type == type && (section == 0 || r.section == section)) return &r;
+      if (str_ieq(r.name.c_str(), name.c_str()) && r.type == type && (section == 0 || r.section == section)) return &r;
     return nullptr;
   }
 };
@@ -164,7 +165,7 @@ void test_read_name() {
         next == 12);
   CHECK(read_name(b.data(), (uint32_t)b.size(), 12, out, sizeof out, &next) &&
         std::string(out) == "_kilo._tcp.local" && next == b.size());
-  CHECK(name_eq("KILO.Local", "kilo.local") && !name_eq("kilo.local", "kilo.locale") && !name_eq("kilo", "kilo-2"));
+  CHECK(str_ieq("KILO.Local", "kilo.local") && !str_ieq("kilo.local", "kilo.locale") && !str_ieq("kilo", "kilo-2"));
   // a pointer to itself, a pointer forward, a cut name, a too-long name: refused
   const uint8_t self[] = {0xC0, 0x00};
   CHECK(!read_name(self, sizeof self, 0, out, sizeof out, &next));
