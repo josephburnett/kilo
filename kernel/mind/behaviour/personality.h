@@ -20,7 +20,6 @@ enum Term : uint8_t {
 };
 
 const char* behaviour_name(uint8_t b);
-const char* term_name(uint8_t t);
 
 // One `term: weight` of a behaviour; a product "a*b" has up to kMaxFactors factors.
 struct Weight {

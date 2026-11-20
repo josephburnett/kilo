@@ -36,11 +36,6 @@ bool client_set_balance(SerialLink& link, bool enable, double kp) {
   return link.set_goal(KILO_MSG_SET_BALANCE, (const uint8_t*)&b, sizeof b);
 }
 
-bool client_balance_enabled(SerialLink& link) {
-  const Goal* g = link.goal(KILO_MSG_SET_BALANCE);
-  return g != nullptr && g->payload[0] != 0;
-}
-
 bool client_look(SerialLink& link, double pan_deg, double tilt_deg) {
   const double lim = to_a16((double)KILO_HEAD_MAX_DEG);
   double pan = d_round(to_a16(pan_deg)), tilt = d_round(to_a16(tilt_deg));

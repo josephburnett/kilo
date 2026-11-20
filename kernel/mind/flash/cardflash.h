@@ -82,7 +82,6 @@ struct CardFacts {
 };
 
 enum class CardAction : uint8_t { Nothing, Refuse, Same, NotRetried, Flash };
-const char* card_action_name(CardAction a);
 
 // The rules above. *why: a static string for the log and the result file.
 CardAction decide_card_flash(const CardFacts& f, const char** why);

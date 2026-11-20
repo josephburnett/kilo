@@ -72,12 +72,6 @@ void ImuDetector::set_reference(double pitch, double roll) {
   ref_fixed_ = true;
 }
 
-void ImuDetector::learn_reference() {
-  ref_fixed_ = false;
-  has_relearn_ = n_ > 0;
-  if (n_ > 0) relearn_from_ = buf(n_ - 1).t;
-}
-
 void ImuDetector::notify_self_motion(double t, double seconds) {
   quiet_from_ = d_max(quiet_from_, t + seconds + cfg_.settle_s);
   if (!ref_fixed_) {

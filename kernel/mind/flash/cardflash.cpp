@@ -19,17 +19,6 @@ const char* card_outcome_name(CardOutcome o) {
   return "none";
 }
 
-const char* card_action_name(CardAction a) {
-  switch (a) {
-    case CardAction::Nothing: return "nothing";
-    case CardAction::Refuse: return "refuse";
-    case CardAction::Same: return "same";
-    case CardAction::NotRetried: return "not retried";
-    case CardAction::Flash: return "flash";
-  }
-  return "?";
-}
-
 // ---- body-result.txt ---------------------------------------------------------------------
 
 namespace {

@@ -94,12 +94,6 @@ void pack_feet(uint8_t epoch, const TickPlan& tp, kilo_feet_t* out) {
 Walker::Walker(SerialLink& link, Clock& clock, Log& log, const BodyModel& model, const PlannerConfig& config)
     : link_(link), clock_(clock), log_(log), planner_(model, config) {}
 
-void Walker::set_stream_divs(uint8_t telem, uint8_t joints, uint8_t imu_raw) {
-  divs_[0] = telem;
-  divs_[1] = joints;
-  divs_[2] = imu_raw;
-}
-
 void Walker::on_telemetry(const kilo_telemetry_t& t) {
   uint64_t rx = link_.state().telemetry_at_us;
   seen_[(seen_head_ + seen_n_) % kClockWindow] = {t.tick, rx};

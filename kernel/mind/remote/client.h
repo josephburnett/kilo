@@ -22,8 +22,6 @@ bool client_posture(SerialLink& link, planner::Walker* walker, const char* name,
 // BodyClient.set_balance(enable, kp): the gains' other values are the
 // body's defaults (Kd 30 ms, dead band 2 deg, clamp 15 deg). kp 0..0.996.
 bool client_set_balance(SerialLink& link, bool enable, double kp = KILO_BALANCE_KP_Q8 / 256.0);
-// The SET_BALANCE goal is latched with enable set.
-bool client_balance_enabled(SerialLink& link);
 // BodyClient.look(pan, tilt): SET_HEAD HOLD, the tail not held, 120 deg/s.
 bool client_look(SerialLink& link, double pan_deg, double tilt_deg);
 

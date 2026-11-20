@@ -17,12 +17,6 @@ const char* behaviour_name(uint8_t b) {
   return b < kBehaviours ? kNames[b] : "?";
 }
 
-const char* term_name(uint8_t t) {
-  static const char* const kNames[kTerms] = {"base", "energy", "fatigue", "curiosity", "sociability", "arousal",
-                                             "calm", "face", "pet", "near", "approaching", "alone"};
-  return t < kTerms ? kNames[t] : "?";
-}
-
 void terms(const Context& ctx, double* t) {
   const Drives& d = ctx.drives;
   const BehaviourPercepts& p = ctx.percepts;
@@ -44,11 +38,6 @@ void terms(const Context& ctx, double* t) {
 UtilitySelector::UtilitySelector(const BehaviourEntry* behaviours, const SafetyEntry* safety, int n_safety,
                                  const Personality& cfg, const char* name)
     : Node(name), b_(behaviours), s_(safety), n_safety_(n_safety < kMaxSafety ? n_safety : kMaxSafety), cfg_(cfg) {}
-
-const char* UtilitySelector::current_name() const {
-  if (current_ < 0) return nullptr;
-  return current_ >= kSafetyBase ? s_[current_ - kSafetyBase].name : b_[current_].name;
-}
 
 Node* UtilitySelector::node(int which) const {
   return which >= kSafetyBase ? s_[which - kSafetyBase].tree : b_[which].tree;

@@ -10,17 +10,6 @@ constexpr double kLn2 = 0.6931471805599453;  // math.log(2), correctly rounded
 
 }  // namespace
 
-const char* activity_name(Activity a) {
-  switch (a) {
-    case Activity::Rest: return "rest";
-    case Activity::Idle: return "idle";
-    case Activity::Active: return "active";
-    case Activity::Explore: return "explore";
-    case Activity::Social: return "social";
-    default: return "?";
-  }
-}
-
 Drives Drives::from_personality(const Personality& p) {
   Drives d;
   d.energy = p.initial_energy;

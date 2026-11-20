@@ -163,7 +163,6 @@ class Saver {
   void boot_name(char* out, uint32_t n, uint32_t boot, const char* ext) const;
   uint32_t fill_log(uint8_t* buf, uint32_t n);
   void bench_report(uint32_t size, uint8_t error);
-  bool card_runs_load(const uint8_t* data, uint32_t n, uint32_t boot);
 
   Clock& clock_;
   Log& log_;
