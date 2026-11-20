@@ -129,13 +129,11 @@ INCLUDE += -I mind
 FPFLAGS := -ffp-contract=off -fno-math-errno
 $(BUILD)/mind/%.o: CPPFLAGS += $(FPFLAGS)
 
-# Build id: the first 8 hex digits of the commit, as for the body
-# (-DKILO_BUILD=0x<hash>, mind/kilo/tools/flash.py); the kernel logs it and
-# serves it as STATUS.mind_build (kernel/host's KILO_MIND_BUILD, same hash).
-# build/build-id changes only when the hash does, so kernel.o is rebuilt
-# only then.
-KILO_BUILD := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo 0)
-$(shell mkdir -p $(BUILD) && (echo $(KILO_BUILD) | cmp -s - $(BUILD)/build-id || echo $(KILO_BUILD) > $(BUILD)/build-id))
+# Build id (build-id.mk): the kernel logs it and serves it as
+# STATUS.mind_build (kernel/host's KILO_MIND_BUILD, same hash).
+BUILD_ID_FILE := $(BUILD)/build-id
+include build-id.mk
+KILO_BUILD := $(BUILD_ID)
 $(BUILD)/src/kernel.o: CPPFLAGS += -DKILO_BUILD=0x$(KILO_BUILD)
 $(BUILD)/src/kernel.o: $(BUILD)/build-id
 

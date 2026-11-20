@@ -32,6 +32,9 @@ HOST="$HERE/build/kilo-mind-host"
 OUT="$HERE/build/integration"
 mkdir -p "$OUT"
 JOBS="$(nproc 2>/dev/null || echo 2)"
+PROTO="$(sed -n 's/^#define KILO_PROTO_MAJOR \([0-9]*\)u$/\1/p' "$REPO/kernel/mind/proto/kilo_protocol.h")"
+[ -n "$PROTO" ] || { echo "FAILED: no KILO_PROTO_MAJOR in kernel/mind/proto/kilo_protocol.h"; exit 1; }
+VBODY_BUILD=45524f43  # the virtual body's HELLO.fw_build (kilo.vbody.core CORE_BUILD, "CORE")
 
 echo "== vendored protocol copies up to date"
 python3 "$REPO/protocol/vendor.py" --check
@@ -48,9 +51,14 @@ make -s -C "$HERE" -j"$JOBS" bench
 echo "== freestanding core"
 make -s -C "$HERE" freestanding
 
+# vectors_current <name>: tests/gen_<name>_vectors.py prints tests/<name>_vectors.txt as committed
+vectors_current() {
+    "$PYTHON" "$HERE/tests/gen_$1_vectors.py" | cmp -s - "$HERE/tests/$1_vectors.txt" ||
+        { echo "FAILED: stale; run: $PYTHON kernel/host/tests/gen_$1_vectors.py > kernel/host/tests/$1_vectors.txt"; exit 1; }
+}
+
 echo "== Noise vectors up to date (noiseprotocol, the published cacophony and snow vectors)"
-"$PYTHON" "$HERE/tests/gen_noise_vectors.py" | cmp -s - "$HERE/tests/noise_vectors.txt" ||
-    { echo "FAILED: stale; run: $PYTHON kernel/host/tests/gen_noise_vectors.py > kernel/host/tests/noise_vectors.txt"; exit 1; }
+vectors_current noise
 
 # Start a body that prints its pty; sets BODY_PID and PTY.
 start_body() {
@@ -78,58 +86,62 @@ expect() {  # expect <log> <grep -E pattern> <what>
     fi
 }
 
+run_host() {  # run_host <log> <args...>: kilo-mind-host against the body start_body started, to its end; status
+    local log="$1"; shift
+    trap stop_body EXIT
+    set +e
+    "$HOST" --port "$PTY" "$@" 2> "$log"
+    status=$?
+    set -e
+    stop_body
+    trap - EXIT
+}
+run_mind() {  # run_mind <log> <args...>: kilo-mind-host in the background, MIND_PID
+    local log="$1"; shift
+    "$HOST" --port "$PTY" "$@" 2> "$log" &
+    MIND_PID=$!
+}
+wait_mind() {  # wait_mind <log>: it must exit 0
+    wait "$MIND_PID" || { echo "FAILED: kilo-mind-host exit status $?"; cat "$1"; exit 1; }
+}
+wait_listening() {  # wait_listening <log>: PORT, the port kilo-mind-host --listen printed in log (5 s)
+    PORT=""
+    for _ in $(seq 1 50); do
+        PORT="$(grep -o 'listening on port [0-9]*' "$1" | grep -o '[0-9]*$' || true)"
+        [ -n "$PORT" ] && return 0
+        sleep 0.1
+    done
+    echo "FAILED: kilo-mind-host did not listen"; cat "$1"; exit 1
+}
+
 echo "== integration: kilo-mind-host against the virtual body (python -m kilo.vbody.core)"
 start_body "$OUT/vbody.log" "$PYTHON" -u -m kilo.vbody.core
-trap stop_body EXIT
-set +e
-"$HOST" --port "$PTY" --duration 3 2> "$OUT/host.log"
-status=$?
-set -e
-stop_body
-trap - EXIT
+run_host "$OUT/host.log" --duration 3
 cat "$OUT/host.log"
 [ "$status" -eq 0 ] || { echo "FAILED: exit status $status"; exit 1; }
-expect "$OUT/host.log" "HELLO proto 2\.[0-9]+ build 45524f43 reset [A-Z_]+ config OK" "HELLO with protocol major 2"
+expect "$OUT/host.log" "HELLO proto $PROTO\.[0-9]+ build $VBODY_BUILD reset [A-Z_]+ config OK" "HELLO with protocol major $PROTO"
 expect "$OUT/host.log" "link: telemetry [1-9][0-9]*/s" "telemetry received"
 expect "$OUT/host.log" "body STATS: uptime" "a STATS_REQ answered"
 if grep -Eq "decode errors [1-9]" "$OUT/host.log"; then echo "FAILED: decode errors"; exit 1; fi
 
 echo "== integration: the virtual body with its config defaulted (--config-state 2)"
 start_body "$OUT/vbody_defaulted.log" "$PYTHON" -u -m kilo.vbody.core --config-state 2
-trap stop_body EXIT
-set +e
-"$HOST" --port "$PTY" --duration 1 2> "$OUT/host_defaulted.log"
-status=$?
-set -e
-stop_body
-trap - EXIT
+run_host "$OUT/host_defaulted.log" --duration 1
 [ "$status" -eq 0 ] || { cat "$OUT/host_defaulted.log"; echo "FAILED: exit status $status"; exit 1; }
-expect "$OUT/host_defaulted.log" "HELLO proto 2\.[0-9]+ .* config DEFAULTED" "HELLO config_state DEFAULTED"
+expect "$OUT/host_defaulted.log" "HELLO proto $PROTO\.[0-9]+ .* config DEFAULTED" "HELLO config_state DEFAULTED"
 expect "$OUT/host_defaulted.log" "event CONFIG_DEFAULTED" "EVENT CONFIG_DEFAULTED"
 
 echo "== integration: a silent pty (no body) -> exit 1, no HELLO"
 start_body "$OUT/silent.log" python3 -u "$HERE/tests/fake_body.py" --silent
-trap stop_body EXIT
-set +e
-"$HOST" --port "$PTY" --duration 1 2> "$OUT/host_silent.log"
-status=$?
-set -e
-stop_body
-trap - EXIT
+run_host "$OUT/host_silent.log" --duration 1
 [ "$status" -eq 1 ] || { cat "$OUT/host_silent.log"; echo "FAILED: exit status $status, want 1"; exit 1; }
 expect "$OUT/host_silent.log" "no HELLO from the body" "the no-HELLO error"
 
 echo "== integration: a protocol-1 body -> exit 2, refusing to drive"
 start_body "$OUT/proto1.log" python3 -u "$HERE/tests/fake_body.py" --proto-major 1
-trap stop_body EXIT
-set +e
-"$HOST" --port "$PTY" --duration 2 2> "$OUT/host_proto1.log"
-status=$?
-set -e
-stop_body
-trap - EXIT
+run_host "$OUT/host_proto1.log" --duration 2
 [ "$status" -eq 2 ] || { cat "$OUT/host_proto1.log"; echo "FAILED: exit status $status, want 2"; exit 1; }
-expect "$OUT/host_proto1.log" "protocol major 1 != expected 2: refusing to drive; flash the body" "the refusal"
+expect "$OUT/host_proto1.log" "protocol major 1 != expected $PROTO: refusing to drive; flash the body" "the refusal"
 
 # ---- the laptop interface (docs/fast-boot.md P2): kilo --host against kilo-mind-host --listen ----
 # The CLI and vbody come from this checkout's mind/ (PYTHONPATH), not the venv's editable install.
@@ -148,24 +160,17 @@ cmp -s "$KEYDIR.line" "$KEYDIR/authorized_keys" || { echo "FAILED: key init and 
 export KILO_HOST_KEY="$KEYDIR/host_key"
 KEYS="$KEYDIR/authorized_keys"
 start_body "$OUT/vbody_host.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u -m kilo.vbody.core
-"$HOST" --port "$PTY" --authorized-keys "$KEYS" --listen 127.0.0.1:0 2> "$OUT/host_listen.log" &
-MIND_PID=$!
+run_mind "$OUT/host_listen.log" --authorized-keys "$KEYS" --listen 127.0.0.1:0
 stop_all() { kill "$MIND_PID" 2>/dev/null || true; wait "$MIND_PID" 2>/dev/null || true; stop_body; }
 trap stop_all EXIT
-HPORT=""
-for _ in $(seq 1 50); do
-    HPORT="$(grep -o 'listening on port [0-9]*' "$OUT/host_listen.log" | grep -o '[0-9]*$' || true)"
-    [ -n "$HPORT" ] && break
-    sleep 0.1
-done
-[ -n "$HPORT" ] || { echo "FAILED: kilo-mind-host did not listen"; cat "$OUT/host_listen.log"; exit 1; }
+wait_listening "$OUT/host_listen.log"; HPORT="$PORT"
 H="127.0.0.1:$HPORT"
 echo "   mind on $H"
 sleep 1  # HELLO and the first telemetry
 
 KPY -m kilo.cli --host "$H" status > "$OUT/cli_status.txt"
 cat "$OUT/cli_status.txt"
-expect "$OUT/cli_status.txt" "firmware +proto 2\.[0-9]+ +build 45524f43" "status: the body's HELLO over --host"
+expect "$OUT/cli_status.txt" "firmware +proto $PROTO\.[0-9]+ +build $VBODY_BUILD" "status: the body's HELLO over --host"
 expect "$OUT/cli_status.txt" "link +connected=True alive=True" "status: the link alive"
 KPY -m kilo.cli status --host "$H" --json > "$OUT/cli_status.json"
 expect "$OUT/cli_status.json" '"mind_build": "[0-9a-f]{8}"' "status --json: the mind build"
@@ -304,7 +309,7 @@ expect "$OUT/host_listen.log" "host: client [0-9]+ gave up control \(closed\): R
 
 echo "== integration: the raw bridge (kilo.link through BridgeTransport)"
 KPY "$HERE/tests/bridge_client.py" "$H" | tee "$OUT/bridge.txt"
-expect "$OUT/bridge.txt" "bridge: HELLO proto 2\.[0-9]+ build 45524f43" "HELLO through the bridge"
+expect "$OUT/bridge.txt" "bridge: HELLO proto $PROTO\.[0-9]+ build $VBODY_BUILD" "HELLO through the bridge"
 expect "$OUT/bridge.txt" "bridge: STATS uptime" "STATS through the bridge"
 expect "$OUT/bridge.txt" "bridge closed: the mind's link has the body again" "the link resumed"
 expect "$OUT/host_listen.log" "host: bridge closed \(BRIDGE_CLOSE\); link resumed" "the mind's bridge log"
@@ -319,16 +324,9 @@ if grep -Eq "decode errors [1-9]" "$OUT/host_listen.log"; then echo "FAILED: dec
 # and kilo-mind-host exits with status 3 (the Circle kernel reboots the Pi there).
 echo "== integration: kilo reboot --host (kilo-mind-host exits 3)"
 start_body "$OUT/vbody_reboot.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u -m kilo.vbody.core
-"$HOST" --port "$PTY" --authorized-keys "$KEYS" --listen 127.0.0.1:0 2> "$OUT/host_reboot.log" &
-MIND_PID=$!
+run_mind "$OUT/host_reboot.log" --authorized-keys "$KEYS" --listen 127.0.0.1:0
 trap stop_all EXIT
-HPORT=""
-for _ in $(seq 1 50); do
-    HPORT="$(grep -o 'listening on port [0-9]*' "$OUT/host_reboot.log" | grep -o '[0-9]*$' || true)"
-    [ -n "$HPORT" ] && break
-    sleep 0.1
-done
-[ -n "$HPORT" ] || { echo "FAILED: kilo-mind-host did not listen"; cat "$OUT/host_reboot.log"; exit 1; }
+wait_listening "$OUT/host_reboot.log"; HPORT="$PORT"
 sleep 1  # HELLO
 KPY -m kilo.cli reboot --host "127.0.0.1:$HPORT" > "$OUT/cli_reboot.txt" 2>&1 \
     || { echo "FAILED: kilo reboot --host exit $?"; cat "$OUT/cli_reboot.txt" "$OUT/host_reboot.log"; exit 1; }
@@ -371,16 +369,9 @@ open(f"{sys.argv[1]}/nokey.img", "wb").write(img)
 open(f"{sys.argv[1]}/loader.img", "wb").write(pattern[:60000])
 EOF
 start_body "$OUT/vbody_update.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u -m kilo.vbody.core
-"$HOST" --port "$PTY" --authorized-keys "$KEYS" --listen 127.0.0.1:0 --card "$UP/card" 2> "$UP/mind.log" &
-MIND_PID=$!
+run_mind "$UP/mind.log" --authorized-keys "$KEYS" --listen 127.0.0.1:0 --card "$UP/card"
 trap stop_all EXIT
-HPORT=""
-for _ in $(seq 1 50); do
-    HPORT="$(grep -o 'listening on port [0-9]*' "$UP/mind.log" | grep -o '[0-9]*$' || true)"
-    [ -n "$HPORT" ] && break
-    sleep 0.1
-done
-[ -n "$HPORT" ] || { echo "FAILED: kilo-mind-host did not listen"; cat "$UP/mind.log"; exit 1; }
+wait_listening "$UP/mind.log"; HPORT="$PORT"
 H="127.0.0.1:$HPORT"
 sleep 1  # HELLO
 set +e
@@ -421,8 +412,7 @@ status=$?
 set -e
 [ "$status" -eq 3 ] || { echo "FAILED: kilo-mind-host exit status $status, not 3"; cat "$UP/mind.log"; exit 1; }
 echo "   kilo-mind-host exit status $status after the update; restarting it on port $HPORT"
-"$HOST" --port "$PTY" --authorized-keys "$KEYS" --listen "$H" 2> "$UP/mind2.log" &
-MIND_PID=$!
+run_mind "$UP/mind2.log" --authorized-keys "$KEYS" --listen "$H"
 set +e
 wait "$CLI_PID"
 s2=$?
@@ -500,15 +490,8 @@ start_flash_rig() {  # start_flash_rig <name> <fake_optiboot args...>
     local name="$1"; shift
     start_body "$FL/$name.body.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u "$HERE/tests/fake_optiboot.py" \
         --reset-fifo "$FL/$name.fifo" "$@"
-    "$HOST" --port "$PTY" --authorized-keys "$KEYS" --listen 127.0.0.1:0 --reset-fifo "$FL/$name.fifo" 2> "$FL/$name.mind.log" &
-    MIND_PID=$!
-    HPORT=""
-    for _ in $(seq 1 50); do
-        HPORT="$(grep -o 'listening on port [0-9]*' "$FL/$name.mind.log" | grep -o '[0-9]*$' || true)"
-        [ -n "$HPORT" ] && break
-        sleep 0.1
-    done
-    [ -n "$HPORT" ] || { echo "FAILED: kilo-mind-host did not listen"; cat "$FL/$name.mind.log"; exit 1; }
+    run_mind "$FL/$name.mind.log" --authorized-keys "$KEYS" --listen 127.0.0.1:0 --reset-fifo "$FL/$name.fifo"
+    wait_listening "$FL/$name.mind.log"; HPORT="$PORT"
     H="127.0.0.1:$HPORT"
     sleep 1  # HELLO
 }
@@ -517,7 +500,7 @@ echo "== integration: kilo flash --host (STK500 through the mind to a fake optib
 start_flash_rig ok --new-build "$FLASH_BUILD" --image-out "$FL/programmed.bin"
 trap stop_all EXIT
 KPY -m kilo.cli --host "$H" status > "$FL/status_before.txt"
-expect "$FL/status_before.txt" "firmware +proto 2\.[0-9]+ +build 56424f44" "the virtual body's build before"
+expect "$FL/status_before.txt" "firmware +proto $PROTO\.[0-9]+ +build 56424f44" "the virtual body's build before"
 set +e
 KPY -m kilo.cli flash --host "$H" --image "$FL/body.bin" > "$FL/flash_ok.txt" 2>&1
 status=$?
@@ -713,14 +696,6 @@ start_ctl_body() {  # start_ctl_body <log>
     echo "FAILED: no control FIFO"; cat "$1"; exit 1
 }
 ctl() { timeout 5 bash -c "echo '$*' > '$FIFO'" || { echo "FAILED: the control FIFO did not take '$*'"; exit 1; }; }
-run_mind() {  # run_mind <log> <args...>: kilo-mind-host in the background, MIND_PID
-    local log="$1"; shift
-    "$HOST" --port "$PTY" "$@" 2> "$log" &
-    MIND_PID=$!
-}
-wait_mind() {  # wait_mind <log>: it must exit 0
-    wait "$MIND_PID" || { echo "FAILED: kilo-mind-host exit status $?"; cat "$1"; exit 1; }
-}
 
 echo "== P3 integration: IR keys from the virtual body -> stand, trot, faster, slower, turn, stand, freeze, rest, calibration posture, behaviour (--remote)"
 start_ctl_body "$OUT/vbody_ir.log"
@@ -828,13 +803,7 @@ WALKS="$OUT/walks"
 rm -rf "$WALKS"
 run_mind "$OUT/host_walks.log" --remote --balance 0.99 --seed 3 --authorized-keys "$KEYS" --listen 127.0.0.1:0 --duration 40
 trap 'kill $MIND_PID 2>/dev/null || true; stop_body' EXIT
-WPORT=""
-for _ in $(seq 1 50); do
-    WPORT="$(grep -o 'listening on port [0-9]*' "$OUT/host_walks.log" | grep -o '[0-9]*$' || true)"
-    [ -n "$WPORT" ] && break
-    sleep 0.1
-done
-[ -n "$WPORT" ] || { echo "FAILED: kilo-mind-host did not listen"; cat "$OUT/host_walks.log"; exit 1; }
+wait_listening "$OUT/host_walks.log"; WPORT="$PORT"
 W="127.0.0.1:$WPORT"
 sleep 1
 ctl ir 0x02                   # B6: stand
@@ -922,13 +891,7 @@ trap stop_body EXIT
 run_mind "$OUT/host_flight.log" --remote --rear-up --authorized-keys "$KEYS" --listen 127.0.0.1:0 --card "$REC/card" \
     --duration 40
 trap 'kill $MIND_PID 2>/dev/null || true; stop_body' EXIT
-FPORT=""
-for _ in $(seq 1 50); do
-    FPORT="$(grep -o 'listening on port [0-9]*' "$OUT/host_flight.log" | grep -o '[0-9]*$' || true)"
-    [ -n "$FPORT" ] && break
-    sleep 0.1
-done
-[ -n "$FPORT" ] || { echo "FAILED: kilo-mind-host did not listen"; cat "$OUT/host_flight.log"; exit 1; }
+wait_listening "$OUT/host_flight.log"; FPORT="$PORT"
 F="127.0.0.1:$FPORT"
 sleep 1
 ctl ir 0x02                   # B6: stand
@@ -998,13 +961,7 @@ start_ctl_body "$OUT/vbody_flight2.log"
 trap stop_body EXIT
 run_mind "$OUT/host_flight2.log" --remote --authorized-keys "$KEYS" --listen 127.0.0.1:0 --card "$REC/card" --duration 10
 trap 'kill $MIND_PID 2>/dev/null || true; stop_body' EXIT
-FPORT=""
-for _ in $(seq 1 50); do
-    FPORT="$(grep -o 'listening on port [0-9]*' "$OUT/host_flight2.log" | grep -o '[0-9]*$' || true)"
-    [ -n "$FPORT" ] && break
-    sleep 0.1
-done
-[ -n "$FPORT" ] || { echo "FAILED: kilo-mind-host did not listen"; cat "$OUT/host_flight2.log"; exit 1; }
+wait_listening "$OUT/host_flight2.log"; FPORT="$PORT"
 F="127.0.0.1:$FPORT"
 sleep 2
 KPY -m kilo.cli --host "$F" runs | tee "$OUT/flight2_runs.txt"
