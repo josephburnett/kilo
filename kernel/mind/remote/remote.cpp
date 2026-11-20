@@ -2,6 +2,7 @@
 #include "behaviour/tree.h"
 #include "remote/client.h"
 #include "tricks/library.h"
+#include "util/dmath.h"
 #include "util/fmt.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -40,10 +41,7 @@ int stage_frame(const tricks::Trick& t, int k) {
 int iabs(int v) { return v < 0 ? -v : v; }
 
 // "55.6": one decimal, as the walker logs its speed
-void format_speed(char* buf, uint32_t cap, double mm_s) {
-  int v10 = (int)(mm_s * 10.0 + 0.5);
-  format(buf, cap, "%d.%d", v10 / 10, v10 % 10);
-}
+void format_speed(char* buf, uint32_t cap, double mm_s) { format_fixed(buf, cap, d_iround(mm_s * 10.0), 1); }
 
 bool stop_key(const Key& k) { return k.kind == Kind::Posture && (str_eq(k.name, "stand") || str_eq(k.name, "rest")); }
 }  // namespace

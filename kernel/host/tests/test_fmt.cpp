@@ -65,6 +65,26 @@ int main() {
   format(two, sizeof two, "%05d", -1);
   CHECK(std::strcmp(two, "-") == 0);
 
+  // format_fixed: a scaled integer with its sign in front, never in the
+  // decimals (the remote's and the walker's speeds once printed -55 as "-5.-5")
+  struct Fixed {
+    int32_t n;
+    int decimals;
+    bool plus;
+    const char* want;
+  };
+  const Fixed fixed[] = {
+      {556, 1, false, "55.6"},   {-556, 1, false, "-55.6"}, {-5, 1, false, "-0.5"},  {0, 1, false, "0.0"},
+      {850, 2, false, "8.50"},   {-7, 2, false, "-0.07"},   {136, 2, true, "+1.36"}, {0, 2, true, "+0.00"},
+      {-136, 2, true, "-1.36"},  {1234, 3, false, "1.234"}, {-1, 3, false, "-0.001"},
+      {INT_MIN, 1, false, "-214748364.8"},
+  };
+  for (const Fixed& f : fixed) {
+    size_t len = format_fixed(buf, sizeof buf, f.n, f.decimals, f.plus);
+    CHECKF(std::strcmp(buf, f.want) == 0 && len == std::strlen(f.want), "%d/%d: \"%s\" != \"%s\"", (int)f.n,
+           f.decimals, buf, f.want);
+  }
+
   // logf: one line per call, cut at kLogLineMax - 1
   CaptureLog log;
   logf(log, LogLevel::Warn, "x=%d", 5);

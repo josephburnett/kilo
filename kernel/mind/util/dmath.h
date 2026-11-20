@@ -25,6 +25,9 @@ inline double d_max(double a, double b) { return b > a ? b : a; }  // Python max
 inline bool d_isfinite(double x) { return x - x == 0.0; }
 constexpr double kNegInf = -__builtin_inf();
 
+// The nearest int, halves away from zero (C's lround, without libm).
+inline int d_iround(double v) { return (int)(v < 0 ? v - 0.5 : v + 0.5); }
+
 // Python round(x) for |x| < 2^52, half away from zero (Python rounds exact
 // halves to even; the callers' values are never exact halves).
 inline double d_round(double x) {

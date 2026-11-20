@@ -39,12 +39,8 @@ void Line::str(const char* key, const char* v) { n_ += format(buf_ + n_, sizeof 
 void Line::fixed(const char* key, real v, int decimals) {
   if (v != v) return str(key, "nan");
   if (v > (real)2e6 || v < (real)-2e6) return str(key, v > 0 ? "inf" : "-inf");
-  uint32_t scale = decimals == 1 ? 10u : decimals == 2 ? 100u : 1000u;
-  int32_t q = planner::round_i(v * (real)scale);  // |q| < 2e9
-  const char* sign = q < 0 ? "-" : "";
-  uint32_t a = q < 0 ? (uint32_t)-q : (uint32_t)q;
-  const char* f = decimals == 1 ? " %s=%s%u.%01u" : decimals == 2 ? " %s=%s%u.%02u" : " %s=%s%u.%03u";
-  n_ += format(buf_ + n_, sizeof buf_ - n_, f, key, sign, (unsigned)(a / scale), (unsigned)(a % scale));
+  n_ += format(buf_ + n_, sizeof buf_ - n_, " %s=", key);
+  n_ += format_fixed(buf_ + n_, sizeof buf_ - n_, planner::fixed_i(v, decimals), decimals);  // |n| < 2e9
 }
 
 int16_t a16(real deg) {

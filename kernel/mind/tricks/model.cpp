@@ -106,8 +106,7 @@ bool total_ticks(const Trick& t, uint8_t speed_q6, uint32_t* ticks) {
 namespace {
 // a16 as "-12.3" (tenths, truncated toward zero)
 const char* deg(char* buf, int a16) {
-  int t = a16 * 10 / 16;
-  format(buf, 12, "%s%d.%d", t < 0 ? "-" : "", (t < 0 ? -t : t) / 10, (t < 0 ? -t : t) % 10);
+  format_fixed(buf, 12, a16 * 10 / 16, 1);
   return buf;
 }
 }  // namespace

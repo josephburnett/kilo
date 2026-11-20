@@ -88,6 +88,10 @@ inline int32_t round_i(real v) {
   if (d < (real)0.5) return f;
   return (f & 1) ? f + 1 : f;
 }
+// v * 10^decimals rounded as round_i: the integer util/fmt's format_fixed prints.
+inline int32_t fixed_i(real v, int decimals) {
+  return round_i(v * (real)(decimals == 1 ? 10 : decimals == 2 ? 100 : 1000));
+}
 
 }  // namespace planner
 }  // namespace kilo
