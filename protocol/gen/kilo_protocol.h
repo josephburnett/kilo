@@ -709,6 +709,14 @@ KILO_STATIC_ASSERT(offsetof(kilo_feet_t, z_mm) == 7, kilo_sa_feet_z_mm);
 KILO_STATIC_ASSERT(offsetof(kilo_feet_t, pitch) == 11, kilo_sa_feet_pitch);
 KILO_STATIC_ASSERT(offsetof(kilo_feet_t, roll) == 13, kilo_sa_feet_roll);
 KILO_STATIC_ASSERT(offsetof(kilo_feet_t, support) == 15, kilo_sa_feet_support);
+#define KILO_FEET_X_MM_MIN (-60)
+#define KILO_FEET_X_MM_MAX (60)
+#define KILO_FEET_Z_MM_MIN (30)
+#define KILO_FEET_Z_MM_MAX (95)
+#define KILO_FEET_PITCH_MIN (-480)
+#define KILO_FEET_PITCH_MAX (480)
+#define KILO_FEET_ROLL_MIN (-480)
+#define KILO_FEET_ROLL_MAX (480)
 
 /* 0x12 SET_HEAD: goal, epoch. Hold (mode 1) or release (mode 0) pan, tilt, tail. Held joints follow the targets slew-limited at max_speed_dps (0 = only the safety slew) while the head joints' owner is IDLE or GAIT, without balance corrections; released by mode 0, head_hold_ms without a refresh, or an epoch bump. BAD_ARG for mode > 1; mode 0 is never stale; mode 1: STALE, FALLEN, LOW_BATT. TELEMETRY flags HEAD_HELD, head owner nibble PI_HOLD. */
 #define KILO_SET_HEAD_LEN 10u
@@ -759,6 +767,12 @@ KILO_STATIC_ASSERT(offsetof(kilo_set_balance_t, kp_q8) == 1, kilo_sa_set_balance
 KILO_STATIC_ASSERT(offsetof(kilo_set_balance_t, kd_ms) == 2, kilo_sa_set_balance_kd_ms);
 KILO_STATIC_ASSERT(offsetof(kilo_set_balance_t, deadband_deg) == 3, kilo_sa_set_balance_deadband_deg);
 KILO_STATIC_ASSERT(offsetof(kilo_set_balance_t, max_corr_deg) == 4, kilo_sa_set_balance_max_corr_deg);
+#define KILO_SET_BALANCE_ENABLE_MIN (0)
+#define KILO_SET_BALANCE_ENABLE_MAX (1)
+#define KILO_SET_BALANCE_DEADBAND_DEG_MIN (0)
+#define KILO_SET_BALANCE_DEADBAND_DEG_MAX (30)
+#define KILO_SET_BALANCE_MAX_CORR_DEG_MIN (0)
+#define KILO_SET_BALANCE_MAX_CORR_DEG_MAX (30)
 
 /* 0x20 TRICK_BEGIN: command. Trick header; empties the store. BUSY while a trick plays; BAD_ARG for n_frames outside 1..trick_capacity (24), loop_end >= n_frames, loop_start > loop_end, a joint_mask bit outside the 11 driven joints (or none), unknown flags, or an end_posture without angles (LIMP, STANCE). */
 #define KILO_TRICK_BEGIN_LEN 11u
@@ -785,6 +799,8 @@ KILO_STATIC_ASSERT(offsetof(kilo_trick_begin_t, flags) == 7, kilo_sa_trick_begin
 KILO_STATIC_ASSERT(offsetof(kilo_trick_begin_t, end_posture) == 8, kilo_sa_trick_begin_end_posture);
 KILO_STATIC_ASSERT(offsetof(kilo_trick_begin_t, exp_roll) == 9, kilo_sa_trick_begin_exp_roll);
 KILO_STATIC_ASSERT(offsetof(kilo_trick_begin_t, exp_pitch) == 10, kilo_sa_trick_begin_exp_pitch);
+#define KILO_TRICK_BEGIN_N_FRAMES_MIN (1)
+#define KILO_TRICK_BEGIN_N_FRAMES_MAX (24)
 
 /* 0x21 TRICK_FRAMES: command. Up to 4 keyframes starting at index `first`, in order: first must equal the number of frames received since TRICK_BEGIN (else BAD_ARG), first + count <= n_frames, dur >= 1, easing != 3. NO_TRICK without a header; BUSY while a trick plays. */
 #define KILO_TRICK_FRAMES_MIN_LEN 16u
@@ -823,6 +839,8 @@ KILO_STATIC_ASSERT(offsetof(kilo_trick_play_t, epoch) == 0, kilo_sa_trick_play_e
 KILO_STATIC_ASSERT(offsetof(kilo_trick_play_t, trick_id) == 1, kilo_sa_trick_play_trick_id);
 KILO_STATIC_ASSERT(offsetof(kilo_trick_play_t, speed_q6) == 2, kilo_sa_trick_play_speed_q6);
 KILO_STATIC_ASSERT(offsetof(kilo_trick_play_t, flags) == 3, kilo_sa_trick_play_flags);
+#define KILO_TRICK_PLAY_SPEED_Q6_MIN (16)
+#define KILO_TRICK_PLAY_SPEED_Q6_MAX (255)
 
 /* 0x24 TRICK_STOP: command. Stop the playing trick: crossfade over transition_ticks (0 = XFADE_TICKS) to its end posture, EVENT TRICK_DONE(STOPPED). OK also when nothing plays. */
 #define KILO_TRICK_STOP_LEN 1u
@@ -870,6 +888,10 @@ typedef struct KILO_PACKED kilo_cal_set_s {
 KILO_STATIC_ASSERT(sizeof(kilo_cal_set_t) == 3, kilo_sa_cal_set_size);
 KILO_STATIC_ASSERT(offsetof(kilo_cal_set_t, joint) == 0, kilo_sa_cal_set_joint);
 KILO_STATIC_ASSERT(offsetof(kilo_cal_set_t, offset_a16) == 1, kilo_sa_cal_set_offset_a16);
+#define KILO_CAL_SET_JOINT_MIN (0)
+#define KILO_CAL_SET_JOINT_MAX (15)
+#define KILO_CAL_SET_OFFSET_A16_MIN (-400)
+#define KILO_CAL_SET_OFFSET_A16_MAX (400)
 
 /* 0x3A CAL_SAVE: command. Queue a config slot write; acked when queued, EVENT EEPROM_SAVED when written. */
 #define KILO_CAL_SAVE_LEN 0u
@@ -896,6 +918,8 @@ KILO_STATIC_ASSERT(offsetof(kilo_imu_offsets_set_t, gyro_x) == 6, kilo_sa_imu_of
 KILO_STATIC_ASSERT(offsetof(kilo_imu_offsets_set_t, gyro_y) == 8, kilo_sa_imu_offsets_set_gyro_y);
 KILO_STATIC_ASSERT(offsetof(kilo_imu_offsets_set_t, gyro_z) == 10, kilo_sa_imu_offsets_set_gyro_z);
 KILO_STATIC_ASSERT(offsetof(kilo_imu_offsets_set_t, save) == 12, kilo_sa_imu_offsets_set_save);
+#define KILO_IMU_OFFSETS_SET_SAVE_MIN (0)
+#define KILO_IMU_OFFSETS_SET_SAVE_MAX (1)
 
 /* 0x3D PARAM_GET: command. Answered by PARAM_VALUE. */
 #define KILO_PARAM_GET_LEN 1u
@@ -916,6 +940,8 @@ KILO_STATIC_ASSERT(sizeof(kilo_param_set_t) == 4, kilo_sa_param_set_size);
 KILO_STATIC_ASSERT(offsetof(kilo_param_set_t, id) == 0, kilo_sa_param_set_id);
 KILO_STATIC_ASSERT(offsetof(kilo_param_set_t, value) == 1, kilo_sa_param_set_value);
 KILO_STATIC_ASSERT(offsetof(kilo_param_set_t, persist) == 3, kilo_sa_param_set_persist);
+#define KILO_PARAM_SET_PERSIST_MIN (0)
+#define KILO_PARAM_SET_PERSIST_MAX (1)
 
 /* 0x3F EEPROM_READ: command. Answered by EEPROM_DATA. */
 #define KILO_EEPROM_READ_LEN 3u
@@ -926,6 +952,8 @@ typedef struct KILO_PACKED kilo_eeprom_read_s {
 KILO_STATIC_ASSERT(sizeof(kilo_eeprom_read_t) == 3, kilo_sa_eeprom_read_size);
 KILO_STATIC_ASSERT(offsetof(kilo_eeprom_read_t, addr) == 0, kilo_sa_eeprom_read_addr);
 KILO_STATIC_ASSERT(offsetof(kilo_eeprom_read_t, len) == 2, kilo_sa_eeprom_read_len);
+#define KILO_EEPROM_READ_LEN_MIN (1)
+#define KILO_EEPROM_READ_LEN_MAX (56)
 
 /* 0x7E REBOOT: command. Watchdog restart of the application (not the bootloader). magic must be 0x4B49. */
 #define KILO_REBOOT_LEN 2u
@@ -934,6 +962,8 @@ typedef struct KILO_PACKED kilo_reboot_s {
 } kilo_reboot_t;
 KILO_STATIC_ASSERT(sizeof(kilo_reboot_t) == 2, kilo_sa_reboot_size);
 KILO_STATIC_ASSERT(offsetof(kilo_reboot_t, magic) == 0, kilo_sa_reboot_magic);
+#define KILO_REBOOT_MAGIC_MIN (19273)
+#define KILO_REBOOT_MAGIC_MAX (19273)
 
 /* 0x80 HELLO: event, reply to HELLO_REQ. Versions, build hash, reset cause, last alive tick, capabilities, epoch. Also sent unsolicited on boot. */
 #define KILO_HELLO_LEN 16u

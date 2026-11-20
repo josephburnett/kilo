@@ -2885,6 +2885,26 @@ MESSAGES: dict[int, type] = {
 }
 
 
+# (message, field) -> the field's valid raw values, inclusive (the body refuses others BAD_ARG).
+FIELD_RANGES: dict[tuple[str, str], tuple[int, int]] = {
+    ('FEET', 'x_mm'): (-60, 60),
+    ('FEET', 'z_mm'): (30, 95),
+    ('FEET', 'pitch'): (-480, 480),
+    ('FEET', 'roll'): (-480, 480),
+    ('SET_BALANCE', 'enable'): (0, 1),
+    ('SET_BALANCE', 'deadband_deg'): (0, 30),
+    ('SET_BALANCE', 'max_corr_deg'): (0, 30),
+    ('TRICK_BEGIN', 'n_frames'): (1, 24),
+    ('TRICK_PLAY', 'speed_q6'): (16, 255),
+    ('CAL_SET', 'joint'): (0, 15),
+    ('CAL_SET', 'offset_a16'): (-400, 400),
+    ('IMU_OFFSETS_SET', 'save'): (0, 1),
+    ('PARAM_SET', 'persist'): (0, 1),
+    ('EEPROM_READ', 'len'): (1, 56),
+    ('REBOOT', 'magic'): (19273, 19273),
+}
+
+
 # Queries (answered by their data reply only, never de-duplicated) -> reply type.
 QUERY_REPLY: dict[int, int] = {
     0x01: 0x80,  # HELLO_REQ -> HELLO
