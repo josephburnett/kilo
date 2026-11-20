@@ -7,6 +7,7 @@
 #ifndef KILO_KERNEL_H
 #define KILO_KERNEL_H
 
+#include "options.h"
 #include "seams.h"
 #include "bootcard.h"
 #include "net.h"
