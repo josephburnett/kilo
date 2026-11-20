@@ -41,6 +41,7 @@ import math
 from collections import deque
 
 from kilo.planner.model import LEGS, BodyModel, G_MM_S2, hull, margin, rotation
+from kilo.protocol import kilo_protocol as P
 
 SUBSTEPS = 10
 TICK_S = 0.020
@@ -75,7 +76,7 @@ class Physics:
         self.margin = 0.0      # mm of the centre of mass inside the contacts' polygon
         self.max_tilt = 0.0
         x0 = [0.0] * 4 if feet is None else list(feet[0])
-        z0 = [self.model.stance_height(205)] * 4 if feet is None else list(feet[1])
+        z0 = [self.model.stance_height(P.GAIT_STANCE_H_256)] * 4 if feet is None else list(feet[1])
         n = int(round(self.lag_ms / (TICK_S * 1000))) + 2
         self._cmd: deque = deque([(tuple(x0), tuple(z0))] * n, maxlen=n)
         self.xs, self.zs = list(x0), list(z0)

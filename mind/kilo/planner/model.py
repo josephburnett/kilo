@@ -5,8 +5,10 @@ Everything the planner (kilo.planner.plan) and the virtual body's physics
 The lengths are measured (2026-10-11), the total mass and the centre of
 gravity too (2026-11-14, with the Pi mounted; the split into parts is a
 fit, see below). The servo lag is an ESTIMATE until a servo step test with
-the IMU recording (docs/walking-and-balance.md §9, §10). Change them here
-and in kernel/mind/planner/model.h, nowhere else.
+the IMU recording (docs/walking-and-balance.md §9, §10). The numbers are
+protocol/spec.toml's (the LEG_* params and [model]), which this and its C++
+port kernel/mind/planner/model.h read from the generated bindings: change
+them there and regenerate.
 
 Frames and conventions:
 
@@ -39,6 +41,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from kilo.protocol import kilo_protocol as P
+
 LF, RF, RB, LB = 0, 1, 2, 3
 LEGS = (LF, RF, RB, LB)
 LEG_NAMES = ("LF", "RF", "RB", "LB")
@@ -56,44 +60,39 @@ class Mass:
     z: float
 
 
+def _param(name: str) -> float:
+    return float(P.PARAMS_BY_NAME[name].default)
+
+
+def _mass(v: tuple) -> Mass:
+    return Mass(*(float(x) for x in v))
+
+
 @dataclass(frozen=True)
 class BodyModel:
-    # ---- geometry: measured (params LEG_L1_MM, LEG_L2_MM, LEG_LB_MM, LEG_W_MM) ----
-    l1_mm: float = 45.0          # upper link, shoulder axle to knee axle
-    l2_mm: float = 50.0          # lower link, knee axle to the foot disc's centre
-    foot_r_mm: float = 6.0       # the floor is this far below the foot disc's centre
-    length_mm: float = 123.0     # front to back shoulder axle
-    track_mm: float = 65.0       # left to right foot centre
-    # ---- masses: measured 2026-11-14, the Pi 2 B on the NyBoard's socket ----
-    # The owner's readings, Kilo in STAND: 358 g in all; the centre of
-    # gravity 54 mm behind the front shoulder axles (7.5 mm ahead of the
-    # origin), about 3 mm below the axles, taken as centred left to right.
-    # The split below is a fit to those: the battery was weighed (58 g,
-    # 2026-10-15) and sits about 16 mm below the axles; the Pi is the
-    # catalogue 45 g, about 20 mm above; the legs are estimates; the body is
-    # the rest, placed so that com() at STAND gives the measured point.
-    # The frame with the NyBoard, the four shoulder servos, the head (two
-    # servos) and the tail servo; the head makes it nose-heavy.
-    body: Mass = Mass(183.0, 17.0, 0.0, 8.0)
-    # The 2S pack under the belly.
-    battery: Mass = Mass(58.0, 0.0, 0.0, -16.0)
-    # The Pi 2 B on the NyBoard's socket, on the back.
-    pi: Mass = Mass(45.0, -10.0, 0.0, 20.0)
-    upper_leg_g: float = 14.0    # upper link with the knee servo (est.)
-    upper_leg_at: float = 0.8    # ...its centre this far from the shoulder (the servo sits at the knee)
-    lower_leg_g: float = 4.0     # lower link and foot (est.)
-    lower_leg_at: float = 0.5
+    # The defaults are protocol/spec.toml's: the LEG_* and SLEW_MAX_A16 params
+    # and [model], where their provenance is (measured, fitted or estimated).
+    # ---- geometry: measured ----
+    l1_mm: float = _param("LEG_L1_MM")      # upper link, shoulder axle to knee axle
+    l2_mm: float = _param("LEG_L2_MM")      # lower link, knee axle to the foot disc's centre
+    foot_r_mm: float = float(P.MODEL_FOOT_R_MM)  # the floor is this far below the foot disc's centre
+    length_mm: float = _param("LEG_LB_MM")  # front to back shoulder axle
+    track_mm: float = _param("LEG_W_MM")    # left to right foot centre
+    # ---- masses: a fit to the centre of gravity measured 2026-11-14 ----
+    stand_com_x_mm: float = float(P.MODEL_STAND_COM_X_MM)  # measured: ahead of the origin at STAND
+    body: Mass = _mass(P.MODEL_BODY_MASS)        # frame, NyBoard, shoulder, head and tail servos
+    battery: Mass = _mass(P.MODEL_BATTERY_MASS)  # the 2S pack under the belly
+    pi: Mass = _mass(P.MODEL_PI_MASS)            # the Pi 2 B on the NyBoard's socket, on the back
+    upper_leg_g: float = float(P.MODEL_UPPER_LEG_G)    # upper link with the knee servo (est.)
+    upper_leg_at: float = float(P.MODEL_UPPER_LEG_AT)  # ...its centre this fraction of L1 from the shoulder
+    lower_leg_g: float = float(P.MODEL_LOWER_LEG_G)    # lower link and foot (est.)
+    lower_leg_at: float = float(P.MODEL_LOWER_LEG_AT)
     # ---- servos: fitted to the floor recordings of 2026-11-15 ----
-    # The attitude follows the legs' commands as a dead time then a first-order
-    # lag (docs/walking-and-balance.md §12): the recorded roll of the walk and
-    # the crawl, replayed through the virtual body with the body's recorded
-    # corrections, fits best at 50 ms + 70 ms (rms 1.15 deg; a pure 140 ms
-    # delay, the best pure delay, leaves 1.55). The mean delay is 120 ms.
-    servo_lag_ms: float = 50.0   # dead time, command to the start of the motion
-    servo_tau_ms: float = 70.0   # then a first-order response with this time constant
-    slew_deg_per_tick: float = 10.0  # the body's safety slew (SLEW_MAX_A16)
-    reach_frac: float = 0.95     # the IK keeps d <= 0.95 (L1 + L2) (core/ik.h)
-    knee_max_deg: float = 150.0  # ...and the knee bend <= 150 deg
+    servo_lag_ms: float = float(P.MODEL_SERVO_LAG_MS)  # dead time, command to the start of the motion
+    servo_tau_ms: float = float(P.MODEL_SERVO_TAU_MS)  # then a first-order response with this time constant
+    slew_deg_per_tick: float = _param("SLEW_MAX_A16") / 16  # the body's safety slew
+    reach_frac: float = float(P.MODEL_REACH_FRAC)      # the IK keeps d <= reach_frac (L1 + L2) (core/ik.h)
+    knee_max_deg: float = float(P.MODEL_KNEE_MAX_DEG)  # ...and the knee bend <= this
 
     # ---- derived -------------------------------------------------------------------
     @property

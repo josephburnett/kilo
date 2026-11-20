@@ -34,7 +34,7 @@ def test_spec_constants():
     assert P.FRAME_OVERHEAD == 6
     assert P.MAX_WIRE == 66
     assert P.TELEMETRY_DEFAULT_HZ == 25
-    assert P.WD_STOP_MS == 500 and P.WD_REST_MS == 1500
+    assert P.PARAMS_BY_NAME["WD_STOP_MS"].default == 500 and P.PARAMS_BY_NAME["WD_REST_MS"].default == 1500
     assert P.Telemetry.MIN_LEN == 35 and P.Stats.MIN_LEN == 23 and P.Hello.MIN_LEN == 16 and P.Feet.MIN_LEN == 16
 
 

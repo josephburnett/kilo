@@ -13,13 +13,13 @@ KILO_NOINLINE bool ik_leg(uint8_t leg, int16_t x_q2, int16_t z_q2, int16_t* shou
   int32_t l1 = l1_q2(), l2 = l2_q2();
   int32_t l1l2 = l1 * l2;
   int32_t sq = l1 * l1 + l2 * l2;
-  // Workspace: d <= 0.95 (L1 + L2) (243/256 = 0.949; the knee keeps >= ~36
+  // Workspace (spec [model]): d <= 0.95 (L1 + L2) (243/256 = 0.949; the knee keeps >= ~36
   // deg of bend for L1 = L2, so the c/s error amplification stays small:
   // Appendix B6), and d^2 >= L1^2 + L2^2 - 2 L1 L2 cos 30 deg (bend <= 150
   // deg; 7094/4096 = 1.732 = 2 cos 30). With L <= 480 q2 these are < 2^20.
-  int32_t dmax = ((l1 + l2) * 243) >> 8;
+  int32_t dmax = ((l1 + l2) * KILO_MODEL_REACH_256) >> 8;
   int32_t d2max = dmax * dmax;
-  int32_t d2min = sq - ((l1l2 * 7094) >> 12);
+  int32_t d2min = sq - ((l1l2 * KILO_MODEL_KNEE_2COS_Q12) >> 12);
   int32_t d2 = (int32_t)x_q2 * x_q2 + (int32_t)z_q2 * z_q2;
   bool ok = true;
   if (d2 > d2max) {

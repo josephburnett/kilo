@@ -98,7 +98,7 @@ const double* speed_factors(const planner::Pattern& p);
 constexpr int kSteerSteps = 3;
 extern const double kSteerLevels[kSteerSteps];   // ir.py STEER_LEVELS
 constexpr int kDefaultLevel = 3;                  // +3: 1x, the gait's spec defaults
-constexpr uint16_t kTrickMinMv = 7400;            // ir.py TRICK_MIN_MV: A2 refuses below this pack voltage
+constexpr uint16_t kTrickMinMv = KILO_BATTERY_TRICK_MIN_MV;  // spec [battery]: A2 refuses below this pack voltage
 
 enum class Heading : uint8_t { Straight, Left, Right };
 

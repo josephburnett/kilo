@@ -38,16 +38,12 @@ MIND_ALIVE_MS = 1000
 CMD_RETRY_MS = 50
 CMD_MAX_RETRIES = 3
 DEDUP_WINDOW_MS = 500
-WD_STOP_MS = 500
-WD_REST_MS = 1500
-WD_LIMP_S = 10
 BODY_LOST_MS = 300
 HELLO_POLL_HZ = 2
 GOAL_REFUSED_MIN_INTERVAL_MS = 1000
 HEAD_HOLD_MS = 2000
 TX_RING_BYTES = 96
 EVENT_QUEUE_DEPTH = 8
-DEFAULT_TRANSITION_TICKS = 25
 EEPROM_READ_MAX = 56
 REBOOT_MAGIC = 0x4B49
 RESET_PULSE_MS = 100
@@ -2977,7 +2973,7 @@ PARAMS: dict[int, ParamInfo] = {
 PARAMS_BY_NAME: dict[str, ParamInfo] = {p.name: p for p in PARAMS.values()}
 
 
-# ---- Shared defaults and limits (spec [gait], [[joints]], [balance], [head]) ----
+# ---- Shared defaults and limits (spec [gait], [[joints]], [balance], [head], [battery], [model]) ----
 GAIT_STANCE_H_256 = 205
 
 
@@ -3016,6 +3012,26 @@ BALANCE_LIMIT_DEG = 30
 HEAD_SPEED_DPS = 120
 HEAD_MAX_DEG = 180
 HEAD_NOT_HELD = -32768
+# Battery, the mind's side (the body's trips are the BATT_* params): A2's rear-up and the card flash
+# refuse below these pack mV; the resting curve, (pack mV, percent) ascending, interpolated and clamped.
+BATTERY_TRICK_MIN_MV = 7400
+BATTERY_FLASH_MIN_MV = 6600
+BATTERY_CURVE: tuple[tuple[int, int], ...] = ((6600, 0), (7000, 5), (7200, 12), (7300, 20), (7400, 30), (7500, 40), (7600, 50), (7800, 65), (8000, 80), (8200, 90), (8400, 100))
+# The body model (spec [model]; the leg lengths are the LEG_* params' defaults): kilo.planner.model.BodyModel;
+# a mass is (grams, x, y, z).
+MODEL_FOOT_R_MM = 6
+MODEL_REACH_FRAC = 0.95
+MODEL_KNEE_MAX_DEG = 150
+MODEL_STAND_COM_X_MM = 7.5
+MODEL_BODY_MASS = (183, 17, 0, 8)
+MODEL_BATTERY_MASS = (58, 0, 0, -16)
+MODEL_PI_MASS = (45, -10, 0, 20)
+MODEL_UPPER_LEG_G = 14
+MODEL_UPPER_LEG_AT = 0.8
+MODEL_LOWER_LEG_G = 4
+MODEL_LOWER_LEG_AT = 0.5
+MODEL_SERVO_LAG_MS = 50
+MODEL_SERVO_TAU_MS = 70
 
 
 def payload_len_status(msg_type: int, payload: bytes) -> int:

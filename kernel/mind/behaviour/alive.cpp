@@ -20,7 +20,6 @@ constexpr double kLookMinS = 0.8, kLookMaxS = 3.0;  // sitting: a new look this 
 constexpr double kSitLookPanDeg = 45;               // ... this far to each side
 constexpr double kSitLookTiltLo = -32, kSitLookTiltHi = -5;  // ... around SIT's -20 (- = down)
 constexpr double kSendEveryS = 0.1;     // the pose's ramp, sent at 10 Hz
-constexpr double kComX = 7.5;           // the centre of mass ahead of the feet's centre at STAND (model.h, measured 2026-11-14)
 // SIT as the body holds it (body/src/core/posture.cpp; the rear shoulders' -90 clamped to their -80 limit),
 // canonical order: pan, tilt, tail, shoulders LF RF RB LB, knees LF RF RB LB.
 const int8_t kSit[KILO_JOINT_COUNT] = {10, -20, -60, 30, 30, -80, -80, 60, 60, 45, 45};
@@ -41,8 +40,8 @@ const char* alive_move_name(AliveMove m) {
 }
 
 double stance_margin_mm(const planner::BodyModel& m, const BodyPose& p) {
-  double h = (double)m.stance_height(205) + (p.dh > 0 ? p.dh : 0);  // the CoM's height, at most
-  double fore = kComX + h * d_sin(p.pitch * 3.14159265358979 / 180.0) - p.xs;
+  double h = (double)m.stance_height(KILO_GAIT_STANCE_H_256) + (p.dh > 0 ? p.dh : 0);  // the CoM's height, at most
+  double fore = (double)m.stand_com_x_mm + h * d_sin(p.pitch * 3.14159265358979 / 180.0) - p.xs;
   double side = h * d_sin(p.roll * 3.14159265358979 / 180.0);
   double mf = (double)m.length_mm / 2 - (fore < 0 ? -fore : fore);
   double ms = (double)m.track_mm / 2 - (side < 0 ? -side : side);

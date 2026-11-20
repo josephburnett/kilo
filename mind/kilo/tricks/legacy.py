@@ -35,6 +35,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from kilo.protocol import kilo_protocol as P
+
 from .model import (CANONICAL, JOINT_LIMITS, JOINT_NAMES, JOINT_SLOTS, REPEAT_FOREVER,
                     TICK_MS, UNUSED, Easing, Keyframe, Posture, Trick, Trigger, _round)
 
@@ -49,7 +51,7 @@ LEGACY_STEP_MS = 5.5
 LEGACY_DELAY_MS = 50
 # Legacy postures move from wherever the robot is at 2 deg/step; the start is
 # unknown, so a posture trick uses the body's default posture transition.
-POSTURE_DUR_TICKS = 25   # spec default_transition_ticks
+POSTURE_DUR_TICKS = P.PARAMS_BY_NAME["POSTURE_TICKS"].default  # the body's default posture transition
 # Gait frames: legacy writes one joint per loop() pass, 12 passes a frame
 # (head + 8 legs), ≈ one 20 ms tick at Kilo's rate (est.).
 GAIT_FRAME_TICKS = 1

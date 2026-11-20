@@ -669,7 +669,7 @@ static void test_end() {
   st = start_stream(p);
   for (int t = 0; t < 20; t++) stream_tick(st, p);
   heartbeat = false;
-  tick(KILO_WD_STOP_MS / 20 + 5);
+  tick(KILO_PARAM_WD_STOP_MS_DEFAULT / 20 + 5);
   CHECK(count_ev(EV_GAIT_STOPPED, 1) == 1 && count_ev(EV_WATCHDOG) == 1 && count_ev(EV_GAIT_STOPPED) == 1);
   // A reflex (low battery: an epoch bump and REST) ends it with arg 0.
   stance();

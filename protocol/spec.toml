@@ -54,8 +54,8 @@ crc_poly = 0x1021
 crc_check = 0x29B1             # CRC of ASCII "123456789"
 tick_hz = 50
 tick_ms = 20
-telemetry_default_div = 2      # SET_STREAM telem_div default: 50 Hz / 2
-telemetry_default_hz = 25
+telemetry_default_div = 2      # SET_STREAM telem_div default: 50 Hz / 2 (= param TELEM_DIV's default; gen.py checks)
+telemetry_default_hz = 25      # tick_hz / telemetry_default_div
 goal_refresh_hz = 5            # mind re-sends active goals at this rate (and on change)
 feet_depth = 8                 # FEET ticks the body queues (160 ms); a FEET further ahead than this is dropped (STATS feet_late counts both)
 feet_lookahead_ticks = 5       # how far ahead of the body's tick the mind streams (100 ms): covers a GC pause or an SD stall on the Pi
@@ -65,16 +65,12 @@ mind_alive_ms = 1000           # ...but only while its asyncio loop proved alive
 cmd_retry_ms = 50              # command retry timeout
 cmd_max_retries = 3
 dedup_window_ms = 500          # body forgets the cached (seq, type, status) after this (a new mind session reuses seqs)
-wd_stop_ms = 500               # body watchdog stage 1: stop motion, epoch bump, EVENT WATCHDOG
-wd_rest_ms = 1500              # body watchdog stage 2: REST
-wd_limp_s = 10                 # LIMP this long after watchdog REST
 body_lost_ms = 300             # mind treats the body as lost after this long without TELEMETRY
 hello_poll_hz = 2              # mind polls HELLO_REQ at this rate while the body is lost
 goal_refused_min_interval_ms = 1000   # EVENT GOAL_REFUSED rate limit, per message type
 head_hold_ms = 2000            # SET_HEAD hold released after this long without a refresh
 tx_ring_bytes = 96
 event_queue_depth = 8
-default_transition_ticks = 25  # SET_POSTURE transition_ticks = 0 means this
 eeprom_read_max = 56
 reboot_magic = 0x4B49          # "KI"
 reset_pulse_ms = 100           # GPIO4 low time for the flash reset (Appendix F)
@@ -1130,6 +1126,64 @@ limit_deg = 30
 speed_dps = 120
 max_deg = 180
 not_held = -32768
+
+# Battery (the mind's side; the body's own trips are the BATT_* params). A 2S
+# Li-ion pack, mV of TELEMETRY batt_mv.
+#   curve_mv, curve_pct  the resting curve, pack mV -> percent, interpolated
+#                 linearly and clamped at both ends (est.; replace with a measured
+#                 curve for Kilo's ZCF503060 pack). kilo.body.state.battery_percent
+#                 and the kernel's battery_percent (link/body_state.cpp) read it;
+#                 the personality's safety.*_battery_pct marks are percents on it.
+#   trick_min_mv  the remote's rear-up key (A2) refuses below this pack voltage at
+#                 rest, so that the body's low-battery reflex does not fire half way
+#                 up (docs/rear-up-trick.md; kernel remote/remote.h, kilo.ir)
+#   flash_min_mv  the card flash (kernel flash/cardflash.h) refuses below this: a
+#                 flash wants margin above the body's LOW trip (BATT_LOW_MV)
+[battery]
+curve_mv = [6600, 7000, 7200, 7300, 7400, 7500, 7600, 7800, 8000, 8200, 8400]
+curve_pct = [0, 5, 12, 20, 30, 40, 50, 65, 80, 90, 100]
+trick_min_mv = 7400
+flash_min_mv = 6600
+
+# The body model (mind/kilo/planner/model.py BodyModel and its C++ port
+# kernel/mind/planner/model.h; the IK limits also body/src/core/ik.cpp). The
+# leg lengths are the LEG_* params' defaults and the slew SLEW_MAX_A16's; the
+# rest is here. Frames: x forward, y left, z up, mm, origin midway between the
+# shoulder axles (model.py's docstring).
+#   foot_r_mm       the floor is this far below the foot disc's centre
+#   reach_frac      the IK keeps d <= reach_frac (L1 + L2) (the body: x 256, rounded)
+#   knee_max_deg    ...and the knee bend <= this
+#   stand_com_x_mm  measured 2026-11-14 with the Pi on the NyBoard's socket (358 g in
+#                   all): the centre of gravity at STAND, 54 mm behind the front
+#                   shoulder axles, so this far ahead of the origin (and about 3 mm
+#                   below the axles, centred left to right)
+#   *_mass          lumped masses {grams, x, y, z}, a fit to that measurement: the
+#                   battery weighed (58 g, 2026-10-15) about 16 mm below the axles;
+#                   the Pi 2 B the catalogue 45 g, about 20 mm above, on the back;
+#                   the body (frame, NyBoard, shoulder, head and tail servos; the
+#                   head makes it nose-heavy) is the rest, placed so that com() at
+#                   STAND gives the measured point
+#   upper_leg_g/_at upper link with the knee servo (est.), its centre this fraction
+#                   of L1 from the shoulder (the servo sits at the knee)
+#   lower_leg_g/_at lower link and foot (est.)
+#   servo_lag_ms, servo_tau_ms  fitted to the floor recordings of 2026-11-15: the
+#                   attitude follows the legs' commands as a dead time then a
+#                   first-order lag (docs/walking-and-balance.md §12; 50 + 70 ms
+#                   fits at rms 1.15 deg, the best pure delay, 140 ms, at 1.55)
+[model]
+foot_r_mm = 6
+reach_frac = 0.95
+knee_max_deg = 150
+stand_com_x_mm = 7.5
+body_mass = [183, 17, 0, 8]
+battery_mass = [58, 0, 0, -16]
+pi_mass = [45, -10, 0, 20]
+upper_leg_g = 14
+upper_leg_at = 0.8
+lower_leg_g = 4
+lower_leg_at = 0.5
+servo_lag_ms = 50
+servo_tau_ms = 70
 
 # ---------------------------------------------------------------------------
 # Laptop interface: the host channel (docs/fast-boot.md §5, phase P2).
