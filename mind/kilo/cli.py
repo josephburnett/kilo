@@ -71,6 +71,7 @@ from kilo.link.messages import fields_of
 from kilo.link.ports import detect_port
 from kilo.link.serial_link import CommandError, LinkError, SerialLink
 from kilo.link.transport import DEFAULT_BAUD, open_port
+from kilo.planner.model import LEG_NAMES
 from kilo.protocol import kilo_protocol as P
 from kilo.remote import DaemonError
 
@@ -532,8 +533,6 @@ def _walk_row(snap: dict[str, Any]) -> str:
         return "-"
     ref, corr = snap["ref_deg"], snap["corr_deg"]
     feet = snap.get("support") or 0
-    from kilo.planner.model import LEG_NAMES
-
     down = "".join(n for i, n in enumerate(LEG_NAMES) if feet >> i & 1) or "-"
     return (f"ref {ref[0]:+.1f}° {ref[1]:+.1f}°  error {err[0]:+.1f}° {err[1]:+.1f}°  "
             f"corr {corr[0]:+.1f}° {corr[1]:+.1f}°  down {down}  queued {snap.get('feet_queued')}")
