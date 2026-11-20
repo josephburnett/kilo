@@ -383,6 +383,31 @@ class CalOp(enum.IntEnum):
     REVERT = 3
 
 
+class SoundOp(enum.IntEnum):
+    STATUS = 0
+    PLAY = 1
+    ON = 2
+    OFF = 3
+    VOLUME = 4
+
+
+class SoundResult(enum.IntEnum):
+    OK = 0
+    QUEUED = 1
+    UNKNOWN = 2
+    OFF = 3
+    NO_SOUNDS = 4
+    ASLEEP = 5
+
+
+class SoundState(enum.IntEnum):
+    NONE = 0
+    IDLE = 1
+    PLAYING = 2
+    ASLEEP = 3
+    FAILED = 4
+
+
 class RecFetchWhat(enum.IntEnum):
     BLOCKS = 0
     LOG = 1
@@ -3194,7 +3219,11 @@ class HostMsgId(enum.IntEnum):
     METRICS = 0x88
     BENCH_RESULT = 0x89
     GUARD_STATUS = 0x8A
+    SOUND = 0x5A
+    SOUND_LIST = 0x5B
     CAL_STATUS = 0x8B
+    SOUND_STATUS = 0x8C
+    SOUND_INFO = 0x8D
     FLASH_STATUS = 0xC0
     UPDATE_STATUS = 0xC1
 
@@ -5075,6 +5104,93 @@ class HostGuardStatus:
 
 
 @dataclass
+class HostSound:
+    """host 0x5A SOUND (command). Kilo's sounds (docs/sound.md): ask, play a sound or a family by name, on, off, or set the volume. Answered by SOUND_STATUS (result says what a PLAY did); BAD_ARG for an unknown op or a volume over 100. Any client (kilo sound ... --host). Neither on/off nor the volume survives a reboot."""
+    ID: ClassVar[int] = 0x5A
+    NAME: ClassVar[str] = 'SOUND'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = True
+    REPLY: ClassVar[int | None] = 0x8C
+    MIN_LEN: ClassVar[int] = 2
+    MAX_LEN: ClassVar[int] = 17
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BB')
+    op: int = 0  # enum sound_op
+    volume: int = 0  # VOLUME: 0..100; else 0
+    name: bytes = b''  # 0..15 B
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.op)
+        v.append(self.volume)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['op'] = v[0]
+        kw['volume'] = v[1]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        tail = bytes(self.name)
+        if not 0 <= len(tail) <= 15:
+            raise PayloadError('name: 0..15 bytes, got %d' % len(tail))
+        try:
+            return self._FMT.pack(*self._fixed_values()) + tail
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data[:2]), name=data[2:])
+
+
+@dataclass
+class HostSoundList:
+    """host 0x5B SOUND_LIST (command). Answered by SOUND_INFO: entry `index` of the sounds built into the image. A client asks for 0, 1, ... until index >= count. Any client."""
+    ID: ClassVar[int] = 0x5B
+    NAME: ClassVar[str] = 'SOUND_LIST'
+    KIND: ClassVar[Kind] = Kind.COMMAND
+    DIR: ClassVar[str] = 'client_to_mind'
+    IS_QUERY: ClassVar[bool] = True
+    REPLY: ClassVar[int | None] = 0x8D
+    MIN_LEN: ClassVar[int] = 1
+    MAX_LEN: ClassVar[int] = 1
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<B')
+    index: int = 0
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.index)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['index'] = v[0]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        try:
+            return self._FMT.pack(*self._fixed_values())
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
 class HostCalStatus:
     """host 0x8B CAL_STATUS (event). The body's 16 calibration offsets after the CAL (as CAL_VALUES), the op it answers, and for SAVE whether EEPROM_SAVED came within host.cal_save_wait_ms."""
     ID: ClassVar[int] = 0x8B
@@ -5120,6 +5236,133 @@ class HostCalStatus:
         if host_payload_len_status(cls.ID, data) != LEN_OK:
             raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
         return cls._from_fixed(cls._FMT.unpack(data))
+
+
+@dataclass
+class HostSoundStatus:
+    """host 0x8C SOUND_STATUS (event). Kilo's sounds after the SOUND: what it did, on or off, the volume, how many sounds the image has, the output's state, the counters since boot, and the sound playing now or played last."""
+    ID: ClassVar[int] = 0x8C
+    NAME: ClassVar[str] = 'SOUND_STATUS'
+    KIND: ClassVar[Kind] = Kind.EVENT
+    DIR: ClassVar[str] = 'mind_to_client'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 29
+    MAX_LEN: ClassVar[int] = 44
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BBBBBIIIIII')
+    result: int = 0  # enum sound_result
+    enabled: int = 0  # 1 on (the kernel's default), 0 off
+    volume: int = 0  # 0..100 (default 70)
+    sounds: int = 0  # sounds in the image
+    state: int = 0  # enum sound_state
+    played: int = 0  # sounds started
+    requests: int = 0  # play requests (events, keys, the host)
+    unknown: int = 0  # requests for a name the image does not have
+    dropped: int = 0  # requests not played: replaced by a newer one, waited too long, off, asleep or no sounds
+    late: int = 0  # audio chunks refilled late (more than 1.5 chunk periods after the one before): a click is likely
+    callback_max_us: int = 0  # us; the longest the audio interrupt took to fill a chunk (0: no output)
+    last: bytes = b''  # 0..15 B
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.result)
+        v.append(self.enabled)
+        v.append(self.volume)
+        v.append(self.sounds)
+        v.append(self.state)
+        v.append(self.played)
+        v.append(self.requests)
+        v.append(self.unknown)
+        v.append(self.dropped)
+        v.append(self.late)
+        v.append(self.callback_max_us)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['result'] = v[0]
+        kw['enabled'] = v[1]
+        kw['volume'] = v[2]
+        kw['sounds'] = v[3]
+        kw['state'] = v[4]
+        kw['played'] = v[5]
+        kw['requests'] = v[6]
+        kw['unknown'] = v[7]
+        kw['dropped'] = v[8]
+        kw['late'] = v[9]
+        kw['callback_max_us'] = v[10]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        tail = bytes(self.last)
+        if not 0 <= len(tail) <= 15:
+            raise PayloadError('last: 0..15 bytes, got %d' % len(tail))
+        try:
+            return self._FMT.pack(*self._fixed_values()) + tail
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data[:29]), last=data[29:])
+
+
+@dataclass
+class HostSoundInfo:
+    """host 0x8D SOUND_INFO (event). One sound built into the image: its name, sample rate and length. index >= count: past the end (name empty)."""
+    ID: ClassVar[int] = 0x8D
+    NAME: ClassVar[str] = 'SOUND_INFO'
+    KIND: ClassVar[Kind] = Kind.EVENT
+    DIR: ClassVar[str] = 'mind_to_client'
+    IS_QUERY: ClassVar[bool] = False
+    REPLY: ClassVar[int | None] = None
+    MIN_LEN: ClassVar[int] = 8
+    MAX_LEN: ClassVar[int] = 23
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BBHI')
+    index: int = 0
+    count: int = 0  # sounds in the image
+    rate: int = 0  # Hz; the stored sample rate
+    samples: int = 0  # its length in samples (seconds = samples / rate)
+    name: bytes = b''  # 0..15 B
+
+    def _fixed_values(self) -> list:
+        v: list = []
+        v.append(self.index)
+        v.append(self.count)
+        v.append(self.rate)
+        v.append(self.samples)
+        return v
+
+    @classmethod
+    def _from_fixed(cls, v: tuple, **extra):
+        kw: dict = {}
+        kw['index'] = v[0]
+        kw['count'] = v[1]
+        kw['rate'] = v[2]
+        kw['samples'] = v[3]
+        kw.update(extra)
+        return cls(**kw)
+
+    def pack(self) -> bytes:
+        tail = bytes(self.name)
+        if not 0 <= len(tail) <= 15:
+            raise PayloadError('name: 0..15 bytes, got %d' % len(tail))
+        try:
+            return self._FMT.pack(*self._fixed_values()) + tail
+        except struct.error as e:
+            raise PayloadError(f'{type(self).__name__}: {e}') from None
+
+    @classmethod
+    def unpack(cls, data: bytes):
+        data = bytes(data)
+        if host_payload_len_status(cls.ID, data) != LEN_OK:
+            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
+        return cls._from_fixed(cls._FMT.unpack(data[:8]), name=data[8:])
 
 
 @dataclass
@@ -5287,7 +5530,11 @@ HOST_MESSAGES: dict[int, type] = {
     0x88: HostMetrics,
     0x89: HostBenchResult,
     0x8A: HostGuardStatus,
+    0x5A: HostSound,
+    0x5B: HostSoundList,
     0x8B: HostCalStatus,
+    0x8C: HostSoundStatus,
+    0x8D: HostSoundInfo,
     0xC0: HostFlashStatus,
     0xC1: HostUpdateStatus,
 }
@@ -5374,8 +5621,16 @@ def host_payload_len_status(msg_type: int, payload: bytes) -> int:
         return LEN_OK if n == 31 else LEN_BAD
     if msg_type == 0x8A:
         return LEN_OK if n == 31 else LEN_BAD
+    if msg_type == 0x5A:
+        return LEN_OK if 2 <= n <= 17 else LEN_BAD
+    if msg_type == 0x5B:
+        return LEN_OK if n == 1 else LEN_BAD
     if msg_type == 0x8B:
         return LEN_OK if n == 34 else LEN_BAD
+    if msg_type == 0x8C:
+        return LEN_OK if 29 <= n <= 44 else LEN_BAD
+    if msg_type == 0x8D:
+        return LEN_OK if 8 <= n <= 23 else LEN_BAD
     if msg_type == 0xC0:
         return LEN_OK if n == 21 else LEN_BAD
     if msg_type == 0xC1:

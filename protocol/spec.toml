@@ -1478,6 +1478,28 @@ SET = 1                        # one joint's absolute offset (CAL_SET), then rea
 SAVE = 2                       # write the calibration to the EEPROM slot (CAL_SAVE), wait for EEPROM_SAVED, then read
 REVERT = 3                     # reload the saved calibration (CAL_REVERT), then read
 
+[enums.sound_op]               # SOUND.op
+STATUS = 0                     # only ask
+PLAY = 1                       # play name (a sound, or a family: "meow" picks one of meow1, meow2, ...)
+ON = 2                         # sounds on (the kernel's default)
+OFF = 3                        # sounds off: every play request is refused and counted
+VOLUME = 4                     # the software volume, 0..100 (SOUND.volume)
+
+[enums.sound_result]           # SOUND_STATUS.result: what the SOUND did
+OK = 0                         # done (STATUS, ON, OFF, VOLUME)
+QUEUED = 1                     # PLAY: it plays once nothing else does and the gap since the last sound has passed
+UNKNOWN = 2                    # PLAY: no sound or family of that name in the image
+OFF = 3                        # PLAY: sounds are off
+NO_SOUNDS = 4                  # PLAY: the image has no sounds (none were packed, or built with KILO_SOUND=0)
+ASLEEP = 5                     # PLAY: light sleep (the output is stopped); dropped
+
+[enums.sound_state]            # SOUND_STATUS.state: the output
+NONE = 0                       # no sound output (built with KILO_SOUND=0, or no device)
+IDLE = 1                       # nothing playing
+PLAYING = 2                    # a sound is playing (or fading out)
+ASLEEP = 3                     # light sleep: the output is silenced and stopped
+FAILED = 4                     # the device failed to start (DMA): nothing plays
+
 [enums.rec_fetch_what]         # REC_FETCH.what
 BLOCKS = 0                     # the flight recorder's blocks covering the range
 LOG = 1                        # the boot's saved log (text lines "t_ms L text"), the range ignored
@@ -2055,6 +2077,30 @@ fields = [
 ]
 
 [[host_messages]]
+name = "SOUND"
+id = 0x5A
+dir = "client_to_mind"
+kind = "command"
+query = true
+doc = "Kilo's sounds (docs/sound.md): ask, play a sound or a family by name, on, off, or set the volume. Answered by SOUND_STATUS (result says what a PLAY did); BAD_ARG for an unknown op or a volume over 100. Any client (kilo sound ... --host). Neither on/off nor the volume survives a reboot."
+fields = [
+  { name = "op", type = "u8", enum = "sound_op" },
+  { name = "volume", type = "u8", note = "VOLUME: 0..100; else 0" },
+  { name = "name", type = "bytes", min = 0, max = 15, note = "PLAY: the sound or family (ASCII, no null); else empty" },
+]
+
+[[host_messages]]
+name = "SOUND_LIST"
+id = 0x5B
+dir = "client_to_mind"
+kind = "command"
+query = true
+doc = "Answered by SOUND_INFO: entry `index` of the sounds built into the image. A client asks for 0, 1, ... until index >= count. Any client."
+fields = [
+  { name = "index", type = "u8" },
+]
+
+[[host_messages]]
 name = "CAL_STATUS"
 id = 0x8B
 dir = "mind_to_client"
@@ -2065,6 +2111,43 @@ fields = [
   { name = "op", type = "u8", enum = "cal_op" },
   { name = "saved", type = "u8", note = "SAVE: 1 EEPROM_SAVED came, 0 not within the wait (queued only); else 0" },
   { name = "offset", type = "i16", count = 16, unit = "deg", scale = 0.0625, note = "by legacy joint id" },
+]
+
+[[host_messages]]
+name = "SOUND_STATUS"
+id = 0x8C
+dir = "mind_to_client"
+kind = "event"
+reply_to = "SOUND"
+doc = "Kilo's sounds after the SOUND: what it did, on or off, the volume, how many sounds the image has, the output's state, the counters since boot, and the sound playing now or played last."
+fields = [
+  { name = "result", type = "u8", enum = "sound_result" },
+  { name = "enabled", type = "u8", note = "1 on (the kernel's default), 0 off" },
+  { name = "volume", type = "u8", note = "0..100 (default 70)" },
+  { name = "sounds", type = "u8", note = "sounds in the image" },
+  { name = "state", type = "u8", enum = "sound_state" },
+  { name = "played", type = "u32", note = "sounds started" },
+  { name = "requests", type = "u32", note = "play requests (events, keys, the host)" },
+  { name = "unknown", type = "u32", note = "requests for a name the image does not have" },
+  { name = "dropped", type = "u32", note = "requests not played: replaced by a newer one, waited too long, off, asleep or no sounds" },
+  { name = "late", type = "u32", note = "audio chunks refilled late (more than 1.5 chunk periods after the one before): a click is likely" },
+  { name = "callback_max_us", type = "u32", unit = "us", note = "the longest the audio interrupt took to fill a chunk (0: no output)" },
+  { name = "last", type = "bytes", min = 0, max = 15, note = "the sound playing now, or played last (empty: none yet)" },
+]
+
+[[host_messages]]
+name = "SOUND_INFO"
+id = 0x8D
+dir = "mind_to_client"
+kind = "event"
+reply_to = "SOUND_LIST"
+doc = "One sound built into the image: its name, sample rate and length. index >= count: past the end (name empty)."
+fields = [
+  { name = "index", type = "u8" },
+  { name = "count", type = "u8", note = "sounds in the image" },
+  { name = "rate", type = "u16", unit = "Hz", note = "the stored sample rate" },
+  { name = "samples", type = "u32", note = "its length in samples (seconds = samples / rate)" },
+  { name = "name", type = "bytes", min = 0, max = 15 },
 ]
 
 [[host_messages]]
