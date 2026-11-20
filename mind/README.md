@@ -510,86 +510,24 @@ and stops within 0.1 s of SIGTERM; `$KILO_PERSONALITY` (in
 
 **IR remote.** The body decodes the Petoi IR remote (NEC, on the NyBoard's
 receiver at D4) and relays every key as `EVENT IR_KEY` (arg = the NEC
-command byte, `| 0x100` for a held-key repeat; HELLO caps bit `IR`). Keys
-are named by where they sit: columns A, B, C from left to right, rows 1 to 7
-from the bottom to the top (B7 is the middle key of the top row). `kilo
-monitor` shows a key as `IR_KEY B6 (0x02, stand)` (`... repeat` while held),
-the passive timeline as `EVENT IR_KEY ...`. The key table is `kilo.ir.KEYS`
-(from the legacy `src/infrared.h`). `kilo run --remote` (off by default,
-like `--behaviour`; on the Pi add it to `KILO_RUN_ARGS` in
-`~/.config/kilo/env`) acts on the keys through the daemon's own BodyClient,
-and the mind kernel does the same (`kernel/mind/remote/`, a port of
-`kilo.ir`). The owner's map (2026-11-15; the steering, the way out of a
-turn and A2 since 2026-11-17):
-
-| Key | Command | `--remote` |
-|---|---|---|
-| A7 | 0xA2 | sleep: stop a walk the planned way, then posture rest |
-| B7 | 0x62 | faster: one speed level up (only while walking); turning in place, stop turning and walk straight forward |
-| C7 | 0xE2 | freeze: abort the walk, stop a trick and the behaviour runner; then only B6 and A7 act |
-| A6 | 0x22 | from standing: turn left in place in the selected gait at 1×; walking forward or backward: steer one level more to the left (or one less to the right), without stopping |
-| B6 | 0x02 | stand and stop: stop a walk the planned way, then posture stand |
-| C6 | 0xC2 | the same to the right |
-| A5 | 0xE0 | start the behaviour runner |
-| B5 | 0xA8 | slower: one speed level down, past the slowest into backward; turning in place, stop turning and walk straight backward |
-| C5 | 0x90 | the calibration posture (CALIB), after stopping a walk the planned way |
-| A4 | 0x68 | trot: walk forward in it, or change the walk to it |
-| B4 | 0x98 | crawl: likewise |
-| C4 | 0xB0 | walk: likewise |
-| A2 | 0x10 | off unless `KILO_REAR_UP=1`, `2` or `3`: rear up (the trick `rear_up`, `rear_up_2` or `rear_up_3` by that stage, docs/rear-up-trick.md); pressed again while it plays, it comes down (TRICK_STOP over 1.5 to 2.5 s to SIT); refused below 7400 mV. It was B2 until 2026-11-17 |
-| B2 | 0x38 | the C++ mind only: a meow (docs/sound.md); the daemon has no speaker, so here it does nothing |
-| rows 1-3 but A2 and B2 | | nothing (logged as ignored) |
-
-**The gait and turn keys make Kilo walk: use the remote with Kilo on the
-floor only, never on a desk.** The remote keeps a gait (trot at start), a
-speed level, a heading (straight, or turning in place) and a steer. Levels
-+1 to +5 walk forward at 0.4, 0.7, 1, 1.3 and 1.6 × the trot's default
-speed (the walk's and the crawl's: 0.4, 0.7, 1, 1.15, 1.25), −1 to −5
-backward at the same factors; there is no level 0, so from +1 B5 goes to −1
-(backward at 0.4×), and from −1 B7 goes to +1. B7 stops at +5, B5 at −5.
-The speeds are clamped like `kilo walk --speed` (the crawl's 1.25× is its
-26.9 mm/s cap), and the log line shows the real speed. In mm/s, levels 1 to
-5: crawl 8.9, 15.6, 22.2, 25.6, 26.9; walk 32, 56, 80, 92, 97; trot 57.6,
-100.8, 144, 187.2, 230.4 (since 2026-11-17; 165.6 and 180 at levels 4 and 5
-before). B7 and B5 while not walking do nothing.
-
-**Turning and steering** (2026-11-17). From standing, A6 / C6 turn in place
-at 1×; while turning, the other key turns the other way, and B7 or B5 stops
-the turn and walks straight forward or backward at once (no stop first; the
-strides change 1.5 mm a tick, straight within 0.7 s). While walking forward
-or backward, A6 / C6 steer instead of turning: each press bends the path one
-level further (left 1, 2, 3 or right 1, 2, 3; the opposite key steps back
-through straight), without stopping; the nose turns toward the key's side
-whether Kilo walks forward or backward. The levels shorten the inner side's
-stride by 0.25, 0.5 and 1 of it and lengthen the outer's as much (scaled
-down together to the longest stride, so at level 5 a steer slows the trot);
-about 1 m, 0.5 m and 0.25 m of radius, estimated from the turns in the
-recordings (docs/walking-and-balance.md §13). Each press, not holding the
-key: the remote's held-key repeats are ignored, and a hold would need
-the mind to guess the release from a gap in the repeats. B7 and B5 keep the
-steer; the gait key in use straightens it (straight forward); every stop
-forgets it. The log line ends `, steering left 2`.
-
-A gait key while standing walks forward in that gait at +3 (1×). While
-walking it changes the gait (between the walk and the trot at the next
-step, under a second; into or out of the crawl after every leg has stepped
-home, up to ~5 s out of the crawl), keeping the level, the heading and the steer; the gait already in use
-brings Kilo back to straight forward at the current magnitude (from a turn,
-a steer or from backward), and does nothing when he already walks straight forward.
-Every stop (B6, A7, C5, C7, a walk that ended by itself) puts the level back
-to +3, the heading to straight and the steer to 0. A posture key first stops the walk the
-planned way and waits for it (each leg steps home, STANCE), then stops a
-playing trick, then takes the posture. C7 ends the walk at once instead (no
-planned stop): the body holds the last pose for `link.feet_hold_ticks`
-(100 ms), sets the swing feet down to the ground and stays in STANCE with
-the servos powered (EVENT GAIT_STOPPED arg 1); no LIMP is sent, and the
-daemon's idle REST/LIMP timeline stays off. Until B6 or A7, every other key
-is logged as `ignored (frozen: B6 or A7 to go on)`. A posture key still
-waiting for a planned stop when C7 comes gives up (`cancelled`). A5 starts
-the behaviour runner (after stopping a walk and a trick): while it runs, B6,
-A7 and C7 stop it and then do their own action, A5 again does nothing, and
-the other keys are ignored; `--behaviour` still starts it at boot, and
-without it the runner is off until A5.
+command byte, `| 0x100` for a held-key repeat; HELLO caps bit `IR`). What each key does, and how keys are named (columns A to C, rows 1 to 7
+from the bottom), is in `kernel/README.md` "The remote's keys": that is the
+C++ mind's map, and the daemon follows it except where this paragraph says.
+`kilo monitor` shows a key as `IR_KEY B6 (0x02, stand)` (`... repeat` while
+held), the passive timeline as `EVENT IR_KEY ...`. The key table is
+`kilo.ir.KEYS` (from the legacy `src/infrared.h`). `kilo run --remote` (off
+by default, like `--behaviour`; on the Pi add it to `KILO_RUN_ARGS` in
+`~/.config/kilo/env`) acts on the keys through the daemon's own BodyClient.
+The daemon differs from the C++ mind in three ways: B2 does nothing (the
+daemon has no speaker); B6, A7 and C5 stop a walk the planned way (each leg
+steps home, then STANCE) and wait for it, where the C++ mind uses the quick
+stop; and C7 ends the walk at once with no planned stop (the body holds the
+last pose for `link.feet_hold_ticks`, 100 ms, sets the swing feet down and
+stays in STANCE, powered; EVENT GAIT_STOPPED arg 1), after which every
+other key is logged as `ignored (frozen: B6 or A7 to go on)`. A posture key
+still waiting for a planned stop when C7 comes gives up (`cancelled`).
+`--behaviour` starts the runner at boot; without it the runner is off until
+A5.
 
 In the C++ mind (on Kilo), A5's behaviour also moves the body a little
 (`kernel/mind/behaviour/alive.h`): standing, slow weight shifts, leans,
@@ -749,6 +687,12 @@ starts the LIMP timer at the REST trip (11.5 s).
 
 ### Flashing
 
+The steps of a body flash through the C++ mind on Kilo (the build, the
+image, the mind's flash sequence, the check) are in `kernel/README.md`
+"Flashing the body". This section is the `kilo flash` command, and its
+numbered steps are the direct route of the retired Pi (avrdude on the
+robot, docs/architecture.md Appendix F).
+
 `kilo flash` follows Appendix F:
 
 1. `arduino-cli compile --fqbn arduino:avr:uno --output-dir ~/.cache/kilo-build body/`
@@ -796,11 +740,10 @@ Through a C++ mind (docs/fast-boot.md §6, P4; no avrdude on the robot):
 - `kilo flash --host IP[:PORT] [--persist]`: the same build and size
   harness on the laptop, then `body.bin` (the HEX as raw flash bytes) and
   `body.json` (its manifest: build hash, size, CRC-32; kilo/tools/body_image.py)
-  in the build dir, sent over the host channel. The mind resets the body
-  into optiboot, programs and verifies it over STK500v1, prints progress
-  (`flash: programming 120/245`, ...), and the command ends with the new
-  firmware's HELLO from STATUS: `verified: HELLO build 3d441ec0 reset
-  FLASHED`. `--persist` asks the mind to keep the image on its SD card
+  in the build dir, sent over the host channel. The mind flashes it
+  (`kernel/README.md` "Flashing the body"), the command prints progress
+  (`flash: programming 120/245`, ...) and ends with the new firmware's
+  HELLO from STATUS: `verified: HELLO build 3d441ec0 reset FLASHED`. `--persist` asks the mind to keep the image on its SD card
   (written by the kernel after a good flash). `--flash-timeout S` (60).
 - `kilo flash --sd MOUNT`: the same two files onto the mind's boot card,
   mounted at MOUNT (refused unless it is a mounted FAT partition holding
