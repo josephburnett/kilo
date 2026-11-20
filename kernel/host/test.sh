@@ -599,12 +599,13 @@ trap - EXIT
 if grep -Eq "decode errors [1-9]" "$FL/ok.mind.log" "$FL/nosync.mind.log"; then echo "FAILED: decode errors"; exit 1; fi
 
 echo "== kilo flash --sd: onto a directory that looks like the boot card (--force-dir, as make-sd.sh)"
-mkdir -p "$FL/card" "$FL/notcard"
+mkdir -p "$FL/card/kilorec" "$FL/notcard"  # kilorec/: a sign of Kilo's card (kilo.cli_card.check_card)
 touch "$FL/card/kernel7.img" "$FL/card/config.txt" "$FL/notcard/config.txt"
 KPY -m kilo.cli flash --sd "$FL/card" --force-dir --image "$FL/body.bin" | tee "$FL/sd.txt"
 cmp "$FL/body.bin" "$FL/card/body.bin" && cmp "$FL/body.json" "$FL/card/body.json" \
     || { echo "FAILED: the card's files differ"; exit 1; }
 expect "$FL/sd.txt" "build $FLASH_BUILD" "--sd: the manifest's build"
+expect "$FL/sd.txt" "read back" "--sd: the card's files read back"
 set +e
 KPY -m kilo.cli flash --sd "$FL/notcard" --force-dir --image "$FL/body.bin" > "$FL/sd_refused.txt" 2>&1
 s1=$?

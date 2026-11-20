@@ -877,7 +877,7 @@ decides, in this order:
 4. `body-result.txt` says a flash of this very image (build, size and
    CRC-32) **failed**: not retried (`NOT flashing: a flash of this same
    image failed at an earlier boot`) until `body.bin` or `body.json`
-   change; `kilo card` removes `body-result.txt` when it writes them;
+   change; `kilo card` and `kilo flash --sd` remove `body-result.txt` when they write them;
 5. the battery reads under 6600 mV (too low to flash safely; the
    body's own LOW trip is lower, 6200 mV): **refused**, checked again at the next boot; on USB power
    or with no TELEMETRY there is no reading and no refusal;

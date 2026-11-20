@@ -55,8 +55,9 @@ Through a C++ mind (docs/fast-boot.md §6, phase P4), where no avrdude runs:
   (kernel/mind/flash/flasher.h), reporting FLASH_STATUS, and ends with the
   new firmware's HELLO.fw_build. ``--persist`` asks the mind to keep the
   image on its SD card afterwards.
-- ``kilo flash --sd MOUNT`` (``flash_sd``): the same two files onto the boot
-  card's FAT partition, which the mind compares with HELLO.fw_build at boot.
+- ``kilo flash --sd MOUNT``: the same two files onto the boot card's FAT
+  partition (checked and written by kilo.cli_card, as ``kilo card``), which
+  the mind compares with HELLO.fw_build at boot.
 - ``--image body.bin [--manifest body.json]`` skips the build for either.
 """
 
@@ -547,53 +548,3 @@ def flash_host(hl: Any, data: bytes, manifest: Any, persist: bool = False,
         say("flash: " + describe_flash_status(st))
     say(f"flash ended in {time.monotonic() - t0:.1f} s")
     return st
-
-
-def looks_like_boot_card(path: Path, force_dir: bool = False) -> str | None:
-    """Why ``path`` is not the mind's boot card, or None. It must hold
-    kernel7.img and config.txt (kernel/tools/make-sd.sh writes both) and,
-    unless ``force_dir`` (tests, as make-sd.sh --force-dir), be the root of
-    a mounted FAT filesystem."""
-    if not path.is_dir():
-        return f"{path}: not a directory"
-    if not force_dir:
-        real = path.resolve()
-        fstype = None
-        try:
-            for line in Path("/proc/mounts").read_text().splitlines():
-                parts = line.split()
-                if len(parts) >= 3 and Path(parts[1].replace("\\040", " ")) == real:
-                    fstype = parts[2]
-        except OSError:
-            pass
-        if fstype is None:
-            return f"{path} is not a mount point"
-        if fstype not in ("vfat", "msdos"):
-            return f"{path} is {fstype}, not FAT"
-    missing = [n for n in ("kernel7.img", "config.txt") if not (path / n).is_file()]
-    if missing:
-        return (f"{path} has no {' or '.join(missing)}: not a Kilo boot card "
-                "(write one with kernel/tools/make-sd.sh)")
-    return None
-
-
-def flash_sd(mount: Path, data: bytes, manifest: Any, force_dir: bool = False,
-             say: Callable[[str], None] = print) -> tuple[Path, Path]:
-    """Copy body.bin and body.json onto the boot card. At boot the mind
-    compares the manifest's build with HELLO.fw_build and flashes only if
-    they differ (kernel/mind/README.md "Flashing")."""
-    from kilo.tools import body_image as BI
-
-    why = looks_like_boot_card(mount, force_dir)
-    if why is not None:
-        raise FlashError(why + "; refusing")
-    try:
-        bin_path, man_path = BI.write_image(mount, data, manifest)
-        os.sync()
-    except OSError as e:
-        raise FlashError(f"writing to {mount}: {e}") from None
-    say(f"wrote {bin_path} ({manifest.size} bytes) and {man_path.name} (build {manifest.build:08x}, crc32 "
-        f"{manifest.crc32:08x}); at its next boot the mind flashes the body unless HELLO.fw_build is already "
-        f"{manifest.build:08x}")
-    return bin_path, man_path
-
