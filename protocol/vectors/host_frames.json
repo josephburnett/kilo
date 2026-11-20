@@ -1058,6 +1058,33 @@
    "note": "holding after a stop at BLUE"
   },
   {
+   "name": "guard_status_tired",
+   "msg": "GUARD_STATUS",
+   "type": 138,
+   "dir": "mind_to_client",
+   "kind": "event",
+   "seq": 28,
+   "fields": {
+    "enabled": 1,
+    "zone": 0,
+    "action": 0,
+    "eyes": 3,
+    "eyes_driven": 1,
+    "dist_mm": 0,
+    "raw_mm": 0,
+    "blue_mm": 200,
+    "red_mm": 150,
+    "speed_mm_s": 0,
+    "zone_changes": 6,
+    "stops": 1,
+    "pullbacks": 1,
+    "refused": 0
+   },
+   "payload": "010000030100000000c8009600000006000000010000000100000000000000",
+   "wire": "23008a1c010000030100000000c8009600000006000000010000000100000000000000cff4",
+   "note": "clear, the eyes orange: low battery"
+  },
+  {
    "name": "cal_set",
    "msg": "CAL",
    "type": 89,

@@ -369,6 +369,13 @@ class GuardZone(enum.IntEnum):
     RED = 2
 
 
+class GuardEyes(enum.IntEnum):
+    GREEN = 0
+    BLUE = 1
+    RED = 2
+    ORANGE = 3
+
+
 class GuardAction(enum.IntEnum):
     WATCH = 0
     STOPPING = 1
@@ -5039,7 +5046,7 @@ class HostGuardStatus:
     enabled: int = 0  # 1 on (the kernel's default), 0 off
     zone: int = 0  # enum guard_zone
     action: int = 0  # enum guard_action
-    eyes: int = 0  # enum guard_zone; the eye colour the mind asks for (green, blue, red)
+    eyes: int = 0  # enum guard_eyes; the eye colour the mind asks for: the zone's, or orange for low battery while green
     eyes_driven: int = 0  # 1: SET_EYES goes to the body (HELLO caps EYES); 0: the firmware has no eyes
     dist_mm: int = 0  # mm; filtered range; 0 = none (no echo, or the readings ignored)
     raw_mm: int = 0  # mm; the last fresh reading as the body sent it (0 = no echo)

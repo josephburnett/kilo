@@ -381,6 +381,13 @@ enum kilo_guard_zone {
     KILO_GUARD_ZONE_RED = 2,
 };
 
+enum kilo_guard_eyes {
+    KILO_GUARD_EYES_GREEN = 0,
+    KILO_GUARD_EYES_BLUE = 1,
+    KILO_GUARD_EYES_RED = 2,
+    KILO_GUARD_EYES_ORANGE = 3,
+};
+
 enum kilo_guard_action {
     KILO_GUARD_ACTION_WATCH = 0,
     KILO_GUARD_ACTION_STOPPING = 1,
@@ -2049,7 +2056,7 @@ typedef struct KILO_PACKED kilo_host_guard_status_s {
     uint8_t enabled; /* 1 on (the kernel's default), 0 off */
     uint8_t zone; /* enum guard_zone */
     uint8_t action; /* enum guard_action */
-    uint8_t eyes; /* enum guard_zone; the eye colour the mind asks for (green, blue, red) */
+    uint8_t eyes; /* enum guard_eyes; the eye colour the mind asks for: the zone's, or orange for low battery while green */
     uint8_t eyes_driven; /* 1: SET_EYES goes to the body (HELLO caps EYES); 0: the firmware has no eyes */
     uint16_t dist_mm; /* mm; filtered range; 0 = none (no echo, or the readings ignored) */
     uint16_t raw_mm; /* mm; the last fresh reading as the body sent it (0 = no echo) */

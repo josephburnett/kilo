@@ -1461,10 +1461,16 @@ SAVING = 3                     # writing, a chunk a pass
 BACKOFF = 4                    # a write was slow or failed: waiting before the next
 FAILED = 5                     # the card refused too often: saving stopped until REC_SAVE
 
-[enums.guard_zone]             # GUARD_STATUS.zone, .eyes
+[enums.guard_zone]             # GUARD_STATUS.zone
 GREEN = 0                      # clear (or nothing seen)
 BLUE = 1                       # too close: a forward walk stops, Kilo sits
 RED = 2                        # very close: a forward walk backs off first
+
+[enums.guard_eyes]             # GUARD_STATUS.eyes: the colour the mind asks for
+GREEN = 0                      # clear (or nothing seen)
+BLUE = 1                       # too close
+RED = 2                        # very close
+ORANGE = 3                     # low battery: Kilo is tired (the battery at rest below the low mark, or the body's LOW_BATT) and the zone is green; blue and red win over it
 
 [enums.guard_action]           # GUARD_STATUS.action
 WATCH = 0                      # nothing to do
@@ -2063,7 +2069,7 @@ fields = [
   { name = "enabled", type = "u8", note = "1 on (the kernel's default), 0 off" },
   { name = "zone", type = "u8", enum = "guard_zone" },
   { name = "action", type = "u8", enum = "guard_action" },
-  { name = "eyes", type = "u8", enum = "guard_zone", note = "the eye colour the mind asks for (green, blue, red)" },
+  { name = "eyes", type = "u8", enum = "guard_eyes", note = "the eye colour the mind asks for: the zone's, or orange for low battery while green" },
   { name = "eyes_driven", type = "u8", note = "1: SET_EYES goes to the body (HELLO caps EYES); 0: the firmware has no eyes" },
   { name = "dist_mm", type = "u16", unit = "mm", note = "filtered range; 0 = none (no echo, or the readings ignored)" },
   { name = "raw_mm", type = "u16", unit = "mm", note = "the last fresh reading as the body sent it (0 = no echo)" },
