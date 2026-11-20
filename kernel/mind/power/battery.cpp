@@ -76,5 +76,30 @@ void BatteryTrend::state_changed(uint64_t now_us, uint8_t state) {
   cur_start_s_ = now_s;
 }
 
+void RestedBattery::add(uint64_t now_us, uint16_t mv, bool no_battery) {
+  if (no_battery) {
+    for (uint32_t i = 0; i < kWindowS; i++) max_[i] = 0;
+    return;
+  }
+  if (mv == 0) return;
+  uint32_t s = (uint32_t)(now_us / 1000000u);
+  uint32_t k = s % kWindowS;
+  if (sec_[k] != s) {  // a new second in this slot: the old one (kWindowS ago) leaves
+    sec_[k] = s;
+    max_[k] = 0;
+  }
+  if (mv > max_[k]) max_[k] = mv;
+}
+
+bool RestedBattery::mv(uint64_t now_us, uint16_t* out) const {
+  uint32_t s = (uint32_t)(now_us / 1000000u);
+  uint16_t best = 0;
+  for (uint32_t i = 0; i < kWindowS; i++)
+    if (max_[i] != 0 && s - sec_[i] < kWindowS && max_[i] > best) best = max_[i];
+  if (best == 0) return false;
+  *out = best;
+  return true;
+}
+
 }  // namespace power
 }  // namespace kilo

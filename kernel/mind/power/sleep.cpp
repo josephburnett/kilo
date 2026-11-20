@@ -78,6 +78,7 @@ bool Sleep::moving_mode() const {
 }
 
 void Sleep::on_telemetry(const kilo_telemetry_t& t) {
+  rested_.add(clock_.now_us(), t.batt_mv, (t.flags & KILO_TELEMETRY_FLAGS_NO_BATTERY) != 0);
   if (t.flags & KILO_TELEMETRY_FLAGS_NO_BATTERY) return;
   battery_.add(clock_.now_us(), t.batt_mv, trend_state(state_));
 }
@@ -282,9 +283,12 @@ void Sleep::metric_line(uint32_t i, char* out, uint32_t n) const {
       tenths(t15, sizeof t15, battery_.trend(now, 900));
       tenths(t30, sizeof t30, battery_.trend(now, 1800));
       tenths(ts, sizeof ts, battery_.segment_trend());
-      format(out, n, "battery: mv=%u min_mv=%u mv_per_min_1m=%s 5m=%s 15m=%s 30m=%s this_state=%s samples=%u",
+      uint16_t rest = 0;
+      rested_.mv(now, &rest);
+      format(out, n, "battery: mv=%u min_mv=%u mv_per_min_1m=%s 5m=%s 15m=%s 30m=%s this_state=%s samples=%u "
+                     "rested_mv=%u",
              (unsigned)battery_.last_mv(), (unsigned)battery_.min_mv(), t1, t5, t15, t30, ts,
-             (unsigned)battery_.samples());
+             (unsigned)battery_.samples(), (unsigned)rest);
       return;
     }
     case 3: {

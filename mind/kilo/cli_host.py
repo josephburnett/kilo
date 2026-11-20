@@ -127,7 +127,7 @@ def guard_dict(g: Any) -> dict[str, Any]:
     d = P.to_dict(g)
     d["zone"] = _name(P.GuardZone, g.zone).lower()
     d["action"] = _name(P.GuardAction, g.action).lower()
-    d["eyes"] = _name(P.GuardZone, g.eyes).lower()
+    d["eyes"] = _name(P.GuardEyes, g.eyes).lower()
     return d
 
 
@@ -135,7 +135,9 @@ def guard_lines(g: Any) -> list[str]:
     """`kilo status --host`'s and `kilo guard`'s lines."""
     zone = _name(P.GuardZone, g.zone).lower()
     dist = f"{g.dist_mm} mm" if g.dist_mm else "no range"
-    eyes = _name(P.GuardZone, g.eyes).lower()
+    eyes = _name(P.GuardEyes, g.eyes).lower()
+    if g.eyes == P.GuardEyes.ORANGE:
+        eyes += ": low battery, Kilo is tired (the battery at rest is low, or the body says LOW_BATT)"
     lights = "on the eyes" if g.eyes_driven else "not shown: the body firmware has no eyes yet (flash it)"
     speed = f"  at {g.speed_mm_s} mm/s" if g.speed_mm_s else ""
     return [f"guard       {'on' if g.enabled else 'OFF'}  zone {zone}  {_name(P.GuardAction, g.action).lower()}  "

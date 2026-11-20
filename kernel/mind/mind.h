@@ -256,6 +256,14 @@ class Mind final : public LinkListener,
   bool hello_said_ = false;       // the first HELLO's mew
   uint32_t pullbacks_said_ = 0;   // the guard's pullbacks hissed at
   void sound_events();
+  // Low battery, judged at rest (power/battery.h RestedBattery): the eyes' orange.
+  bool tired_ = false;
+  void battery_step();
+ public:
+  bool tired() const { return tired_; }
+  // The battery at rest in percent (what the behaviour runner and the eyes judge by); false if none.
+  bool rested_pct(double* pct) const;
+ private:
   bool trick_playing() const;     // a trick other than the alive layer's sitting moves
   record::Recorder recorder_;
   record::Metrics metrics_;

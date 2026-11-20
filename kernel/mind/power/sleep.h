@@ -136,6 +136,9 @@ class Sleep {
   // Time in each state so far, the running one included.
   uint64_t time_in_us(State s) const;
   const BatteryTrend& battery() const { return battery_; }
+  // The battery at rest (battery.h RestedBattery), from every TELEMETRY.
+  const RestedBattery& rested() const { return rested_; }
+  bool rested_mv(uint16_t* mv) const { return rested_.mv(clock_.now_us(), mv); }
   const char* last_wake() const { return last_wake_; }
 
   // The metrics lines (`kilo power --host`): "power: ...", "power_hw: ...", "battery: ...",
@@ -180,6 +183,7 @@ class Sleep {
   uint64_t soc_next_us_ = 0;
 
   BatteryTrend battery_;
+  RestedBattery rested_;
 };
 
 }  // namespace power

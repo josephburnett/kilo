@@ -20,6 +20,15 @@ const char* zone_name(Zone z) {
   }
 }
 
+const char* eyes_name(Eyes e) {
+  switch (e) {
+    case Eyes::Blue: return "blue";
+    case Eyes::Red: return "red";
+    case Eyes::Orange: return "orange";
+    default: return "green";
+  }
+}
+
 const char* action_name(Action a) {
   switch (a) {
     case Action::Stopping: return "stopping";
@@ -281,14 +290,19 @@ bool DistanceGuard::eyes_driven() const {
 }
 
 void DistanceGuard::eyes_step() {
-  eyes_ = zone_;
+  eyes_ = zone_ == Zone::Red ? Eyes::Red : zone_ == Zone::Blue ? Eyes::Blue : tired_ ? Eyes::Orange : Eyes::Green;
   if (!eyes_driven()) {
     eyes_sent_ = false;
     return;
   }
   const Goal* g = link_.goal(KILO_MSG_SET_EYES);
-  uint8_t want[KILO_SET_EYES_LEN] = {0x3F, 0, 0, 0};
-  want[1 + (eyes_ == Zone::Red ? 0 : eyes_ == Zone::Green ? 1 : 2)] = kEyeLevel;
+  uint8_t want[KILO_SET_EYES_LEN] = {0x3F, 0, 0, 0};  // the mask, then r, g, b
+  if (eyes_ == Eyes::Orange) {
+    want[1] = kEyeLevel;
+    want[2] = kOrangeGreen;
+  } else {
+    want[1 + (eyes_ == Eyes::Red ? 0 : eyes_ == Eyes::Green ? 1 : 2)] = kEyeLevel;
+  }
   bool same = g != nullptr && g->len == sizeof want;
   for (uint32_t i = 0; same && i < sizeof want; i++) same = g->payload[i] == want[i];
   if (same) return;
@@ -317,7 +331,7 @@ void DistanceGuard::metrics_line(char* out, uint32_t n) const {
   format(out, n,
          "guard: on=%u zone=%s action=%s eyes=%s eyes_driven=%u zone_changes=%u stops=%u pullbacks=%u refused=%u "
          "releases=%u readings=%u dropouts=%u floor_ignored=%u min_mm=%d",
-         on_ ? 1u : 0u, zone_name(zone_), action_name(action_), zone_name(eyes_), eyes_driven() ? 1u : 0u,
+         on_ ? 1u : 0u, zone_name(zone_), action_name(action_), eyes_name(eyes_), eyes_driven() ? 1u : 0u,
          (unsigned)zone_changes_, (unsigned)stops_, (unsigned)pullbacks_, (unsigned)refused_, (unsigned)releases_,
          (unsigned)filter_.readings(), (unsigned)filter_.dropouts(), (unsigned)filter_.floor_ignored(),
          has_min_ ? rnd(min_mm_) : -1);

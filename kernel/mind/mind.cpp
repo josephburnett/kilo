@@ -1,4 +1,5 @@
 #include "mind.h"
+#include "behaviour/library.h"
 #include "link/names.h"
 #include "remote/client.h"
 #include "remote/keys.h"
@@ -183,6 +184,7 @@ void Mind::poll() {
     bool calm = c != nullptr && (c->chosen == behaviour::kIdle || c->chosen == behaviour::kExplore);
     alive_.poll((double)clock_.now_us() / 1e6, behaviour_active() && !host_controls(), calm, head_held(2));
   }
+  battery_step();
   guard_.poll();
   recorder_.poll(player_);
   card_safe_ = safe_for_card(clock_.now_us());
@@ -194,6 +196,43 @@ void Mind::poll() {
   sleep_.poll(act);
   sound_events();
   sound_.poll();
+}
+
+// ---- low battery ----------------------------------------------------------------------------
+
+bool Mind::rested_pct(double* pct) const {
+  const BodyState& b = link_.state();
+  uint16_t mv;
+  if (!b.has_telemetry || (b.telemetry.flags & KILO_TELEMETRY_FLAGS_NO_BATTERY) || !sleep_.rested_mv(&mv)) return false;
+  *pct = battery_percent(mv);
+  return true;
+}
+
+// Tired: the battery at rest below the personality's low mark (the behaviour tree's rule and its +5 %
+// to clear), or the body in LOW_BATT; whether or not the behaviour runner is on. The eyes turn orange.
+void Mind::battery_step() {
+  const BodyState& b = link_.state();
+  bool low_mode = b.has_telemetry && b.telemetry.mode == KILO_MODE_LOW_BATT;
+  double pct = 0;
+  bool has = rested_pct(&pct);
+  double low = personality(cfg_).low_battery_pct;
+  uint16_t mv = 0;
+  sleep_.rested_mv(&mv);
+  if (!tired_ && (low_mode || (has && pct < low))) {
+    tired_ = true;
+    if (low_mode && !(has && pct < low))
+      logf(log_, LogLevel::Info, "battery: tired (the body's LOW_BATT mode): the eyes orange while the way is clear");
+    else
+      logf(log_, LogLevel::Info, "battery: tired (%u mV at rest, %d %%, below %d %%): the eyes orange while the way is clear",
+           (unsigned)mv, (int)pct, (int)low);
+  } else if (tired_ && !low_mode && (!has || pct >= low + behaviour::kLowBatteryHysteresisPct)) {
+    tired_ = false;
+    if (has)
+      logf(log_, LogLevel::Info, "battery: no longer tired (%u mV at rest, %d %%)", (unsigned)mv, (int)pct);
+    else
+      logf(log_, LogLevel::Info, "battery: no longer tired (no battery reading: USB power?)");
+  }
+  guard_.set_tired(tired_);
 }
 
 // ---- Kilo's sounds (docs/sound.md) ----------------------------------------------------------
@@ -585,7 +624,7 @@ void Mind::Body::snapshot(behaviour::Snapshot& out) {
   out.mode = s.has_telemetry ? s.telemetry.mode : -1;
   out.fallen = s.fallen();
   out.moving = s.moving();
-  out.has_battery = s.battery_pct(&out.battery_pct);
+  out.has_battery = m_.rested_pct(&out.battery_pct);  // at rest: a walk's sag does not send him to REST
   out.has_dist = s.distance_mm(&out.dist_mm);
   out.has_approach = s.approach_mm_s(&out.approach_mm_s);
   for (int i = 0; i < m_.n_events_; i++) out.events[i] = m_.events_[i];

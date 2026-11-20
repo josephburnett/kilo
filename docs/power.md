@@ -87,6 +87,12 @@ Two parts, very different in size.
    from the battery through the 5 V converter. That is about 10 to 25 %
    of what the Pi and boards draw.
 
+The mind's own low-battery mark (the A5 behaviour lies down in REST to
+save the battery below 20 %, 7300 mV, and the eyes turn orange:
+docs/distance-guard.md, "Low battery: orange") is judged on the battery at
+rest: the highest reading of the last 20 seconds, so the sag of a walk does
+not trip it. The body's own trips below are on its raw reading.
+
 So, **estimate**: lying awake in REST, about 90 mV per minute; in light
 sleep, about 6 to 7 mV per minute. From 7.6 V to the low-battery trip at
 6.6 V that is about 11 minutes awake against about 2 to 3 hours asleep.
