@@ -47,6 +47,8 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
+from kilo.calibration import angle_window
+
 from . import sagittal as S
 from .model import JOINT_IDS, JOINT_LIMITS
 
@@ -58,11 +60,8 @@ from .model import JOINT_IDS, JOINT_LIMITS
 # CZP, a2p 0x2ad3 = 10963 for every joint, b 60 x 10). If the owner
 # recalibrates (kilo cal set ...), `kilo cal show` gives the new offsets and
 # CZP = 90 + dir * mid + dir * offset.
-JOINT_DIR = {0: 1, 1: -1, 2: 1, 8: 1, 9: -1, 10: -1, 11: 1, 12: -1, 13: 1, 14: 1, 15: -1}
+# JOINT_DIR and the a2p, b and pulse range: kilo.calibration's table (angle_window).
 KILO_CZP = (73, 69, 85, 90, 45, 135, 45, 135, 111, 83, 116, 82, 141, 67, 127, 59)  # by legacy joint id
-KILO_A2P = 10963      # counts per servo degree x 1000
-KILO_B_COUNTS = 600
-PULSE_MIN, PULSE_MAX = 500, 2500
 
 LEGS = ("lf", "rf", "rb", "lb")
 FRONT = {"lf": True, "rf": True, "rb": False, "lb": False}
@@ -72,11 +71,7 @@ LEFT = {"lf": True, "rf": False, "rb": False, "lb": True}
 def servo_reach(j: int, czp: Sequence[int] = KILO_CZP) -> tuple[float, float]:
     """(lo, hi): the joint angles (deg) between which joint j's pulse is not
     clamped. Outside them the servo stops at the end of the pulse range."""
-    s_lo = (PULSE_MIN - KILO_B_COUNTS) * 1000.0 / KILO_A2P   # servo degrees at 500 us
-    s_hi = (PULSE_MAX - KILO_B_COUNTS) * 1000.0 / KILO_A2P   # ...at 2500 us
-    d = JOINT_DIR[j]
-    a, b = (s_lo - czp[j]) * d, (s_hi - czp[j]) * d
-    return (min(a, b), max(a, b))
+    return angle_window(j, czp[j])
 
 
 def reach(j: int, czp: Sequence[int] = KILO_CZP) -> tuple[float, float]:
@@ -383,16 +378,6 @@ def rest(g3: Geometry3, js: Mapping, R0: np.ndarray | None = None, max_topples: 
     pitch, roll = attitude(R)
     return Rest3(R=R, pitch=pitch, roll=roll, contacts=touch, support=tuple(sup), com=tuple(float(v) for v in c),
                  margin=m, edge=edge, topples=tuple(topples), clear=clear)
-
-
-def margin_without(g3: Geometry3, js: Mapping, r: Rest3, drop: set) -> float:
-    """The support margin if the points in ``drop`` carried nothing (lifted
-    or unloaded) at the same attitude: > 0, the rest stands without them."""
-    left = [(x, y, lb) for lb, (x, y) in r.contacts.items() if lb not in drop]
-    if not left:
-        return -1e9
-    sup = _hull2(left)
-    return _poly_margin(sup, (r.com[0], r.com[1]))[0]
 
 
 @dataclass(frozen=True)

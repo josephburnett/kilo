@@ -53,14 +53,13 @@ import zlib
 from pathlib import Path
 from typing import Any
 
+from kilo import EXIT_ERR, EXIT_OK
 from kilo import cli_power, cli_record, cli_sound, hostkey, mdns
-from kilo.hostlink import REBOOT_CLOSE_WAIT_S, HostError, HostKeyRefused, HostLink, HostRefused, has_kernel_marker
+from kilo.hostlink import REBOOT_CLOSE_WAIT_S, HostError, HostKeyRefused, HostLink, HostRefused, enum_name
+from kilo.kernel_image import DEFAULT_KERNEL, check_kernel
 from kilo.protocol import kilo_protocol as P
 
-EXIT_OK, EXIT_ERR = 0, 1
 LEVEL_TAG = "DIWE"
-# `kilo update`'s default image: the mind kernel `make -C kernel` builds in this checkout.
-DEFAULT_KERNEL_IMAGE = Path(__file__).resolve().parents[2] / "kernel" / "build" / "kernel7.img"
 # After an update: how often `kilo update` tries to reach the rebooted mind.
 UPDATE_POLL_S = 0.5
 
@@ -69,18 +68,11 @@ def _flags(value: int, cls: Any) -> list[str]:
     return [f.name for f in cls if value & f]
 
 
-def _name(cls: Any, v: int) -> str:
-    try:
-        return cls(v).name
-    except ValueError:
-        return str(v)
-
-
 def status_dict(st: Any) -> dict[str, Any]:
     """`kilo --host status --json`: the STATUS reply as plain data."""
     d = P.to_dict(st)
     d["state"] = _flags(st.state, P.HostState)
-    d["controller"] = _name(P.HostController, st.controller)
+    d["controller"] = enum_name(P.HostController, st.controller)
     d["mind_build"] = f"{st.mind_build:08x}"
     if P.HostState.HAS_HELLO & st.state:
         d["hello"]["fw_build"] = f"{st.hello.fw_build:08x}"
@@ -97,18 +89,18 @@ def print_status(st: Any) -> None:
     s, h, t = st.state, st.hello, st.telemetry
     up = st.uptime_ms / 1000
     print(f"mind        build {st.mind_build:08x}  up {up:.1f} s  host channel v{st.host_version}  "
-          f"clients {st.clients}  controller {_name(P.HostController, st.controller)}")
+          f"clients {st.clients}  controller {enum_name(P.HostController, st.controller)}")
     print(f"link        connected={bool(s & P.HostState.LINK_CONNECTED)} alive={bool(s & P.HostState.BODY_ALIVE)} "
           f"contact={bool(s & P.HostState.CONTACT)}" + ("  BRIDGED (link paused)" if s & P.HostState.BRIDGE else ""))
     if s & P.HostState.HAS_HELLO:
         print(f"firmware    proto {h.proto_major}.{h.proto_minor}  build {h.fw_build:08x}  reset "
-              f"{_name(P.ResetCause, h.reset_cause)}  config {_name(P.ConfigState, h.config_state)}"
+              f"{enum_name(P.ResetCause, h.reset_cause)}  config {enum_name(P.ConfigState, h.config_state)}"
               + ("" if st.proto_ok else "  PROTOCOL MISMATCH: the mind refuses to drive"))
     else:
         print("firmware    no HELLO yet")
     if s & P.HostState.HAS_TELEMETRY:
         age = "" if st.telemetry_age_ms == 0xFFFF else f"  age {st.telemetry_age_ms} ms"
-        print(f"mode        {_name(P.Mode, t.mode)}  epoch {t.epoch}  flags "
+        print(f"mode        {enum_name(P.Mode, t.mode)}  epoch {t.epoch}  flags "
               f"{','.join(_flags(t.flags, P.TelemetryFlags)) or '-'}{age}")
         print(f"attitude    pitch {t.pitch / 16:+7.2f}°  roll {t.roll / 16:+7.2f}°")
         print(f"battery     {t.batt_mv} mV")
@@ -117,7 +109,7 @@ def print_status(st: Any) -> None:
         print("mode        no telemetry yet")
     if st.event_count:
         e = st.last_event
-        print(f"events      {st.event_count}, last {_name(P.EventCode, e.code)}({e.arg}) at tick {e.tick}")
+        print(f"events      {st.event_count}, last {enum_name(P.EventCode, e.code)}({e.arg}) at tick {e.tick}")
     print(f"body        reboots {st.reboots}  telemetry frames {st.telemetry_count}")
     print("link stats  " + " ".join(f"{k}={v}" for k, v in P.to_dict(st.link).items() if v))
 
@@ -125,22 +117,22 @@ def print_status(st: Any) -> None:
 def guard_dict(g: Any) -> dict[str, Any]:
     """`kilo guard --json`: GUARD_STATUS as plain data."""
     d = P.to_dict(g)
-    d["zone"] = _name(P.GuardZone, g.zone).lower()
-    d["action"] = _name(P.GuardAction, g.action).lower()
-    d["eyes"] = _name(P.GuardEyes, g.eyes).lower()
+    d["zone"] = enum_name(P.GuardZone, g.zone).lower()
+    d["action"] = enum_name(P.GuardAction, g.action).lower()
+    d["eyes"] = enum_name(P.GuardEyes, g.eyes).lower()
     return d
 
 
 def guard_lines(g: Any) -> list[str]:
     """`kilo status --host`'s and `kilo guard`'s lines."""
-    zone = _name(P.GuardZone, g.zone).lower()
+    zone = enum_name(P.GuardZone, g.zone).lower()
     dist = f"{g.dist_mm} mm" if g.dist_mm else "no range"
-    eyes = _name(P.GuardEyes, g.eyes).lower()
+    eyes = enum_name(P.GuardEyes, g.eyes).lower()
     if g.eyes == P.GuardEyes.ORANGE:
         eyes += ": low battery, Kilo is tired (the battery at rest is low, or the body says LOW_BATT)"
     lights = "on the eyes" if g.eyes_driven else "not shown: the body firmware has no eyes yet (flash it)"
     speed = f"  at {g.speed_mm_s} mm/s" if g.speed_mm_s else ""
-    return [f"guard       {'on' if g.enabled else 'OFF'}  zone {zone}  {_name(P.GuardAction, g.action).lower()}  "
+    return [f"guard       {'on' if g.enabled else 'OFF'}  zone {zone}  {enum_name(P.GuardAction, g.action).lower()}  "
             f"{dist} (raw {g.raw_mm or '-'})  blue < {g.blue_mm} mm  red < {g.red_mm} mm{speed}",
             f"eyes        {eyes} ({lights})",
             f"guard count stops {g.stops}  pullbacks {g.pullbacks}  forward keys refused {g.refused}  "
@@ -196,7 +188,7 @@ def cmd_status(args: argparse.Namespace, hl: HostLink) -> int:
         d = status_dict(st)
         if rs is not None:
             d["recorder"] = P.to_dict(rs)
-            d["recorder"]["card_state"] = _name(P.RecordCardState, rs.card_state)
+            d["recorder"]["card_state"] = enum_name(P.RecordCardState, rs.card_state)
         if lines:
             d["metrics"] = lines
         if g is not None:
@@ -247,7 +239,7 @@ def telem_record(m: Any) -> dict[str, Any]:
     t = m.telemetry
     has = bool(m.state & P.HostState.HAS_TELEMETRY)
     return {"time": round(time.time(), 3), "mind_ms": m.uptime_ms, "alive": bool(m.state & P.HostState.BODY_ALIVE),
-            "tick": t.tick if has else None, "mode": _name(P.Mode, t.mode) if has else None,
+            "tick": t.tick if has else None, "mode": enum_name(P.Mode, t.mode) if has else None,
             "epoch": t.epoch if has else None, "pitch_deg": t.pitch / 16 if has else None,
             "roll_deg": t.roll / 16 if has else None, "batt_mv": t.batt_mv if has else None,
             "age_ms": None if m.telemetry_age_ms == 0xFFFF else m.telemetry_age_ms,
@@ -419,7 +411,7 @@ def cmd_flash(args: argparse.Namespace, hl: HostLink) -> int:
     # The end check: what the mind's link now knows of the body.
     s = hl.status()
     ok = bool(s.state & P.HostState.HAS_HELLO) and s.hello.fw_build == m.build
-    seen = (f"build {s.hello.fw_build:08x} reset {_name(P.ResetCause, s.hello.reset_cause)}"
+    seen = (f"build {s.hello.fw_build:08x} reset {enum_name(P.ResetCause, s.hello.reset_cause)}"
             if s.state & P.HostState.HAS_HELLO else "no HELLO")
     _release(hl)
     if not ok:
@@ -435,7 +427,7 @@ def cmd_reboot(args: argparse.Namespace, hl: HostLink) -> int:
     hl.take_control(keepalive=False)
     r = hl.reboot()
     text = r.text.decode("ascii", "replace")
-    print(f"REBOOT: {_name(P.HostResultCode, r.code)}" + (f" ({text})" if text else ""), flush=True)
+    print(f"REBOOT: {enum_name(P.HostResultCode, r.code)}" + (f" ({text})" if text else ""), flush=True)
     if hl.wait_closed(REBOOT_CLOSE_WAIT_S):
         print("the mind closed the connection: it is restarting")
     else:
@@ -458,7 +450,7 @@ UPDATE_ERROR_HELP = {
 
 
 def describe_update_status(st: Any) -> str:
-    err = _name(P.UpdateError, st.error)
+    err = enum_name(P.UpdateError, st.error)
     help_ = UPDATE_ERROR_HELP.get(err, "")
     return f"{err}" + (f": {help_}" if help_ else "") + f" ({st.received} of {st.image_size} bytes received)"
 
@@ -476,7 +468,7 @@ def cmd_update(args: argparse.Namespace, hl: HostLink) -> int:
     def progress(st: Any) -> None:
         # A phase's last slice and the next phase's start arrive as one status
         # (the latest): each phase's first status says the one before is done.
-        phase = _name(P.UpdatePhase, st.phase)
+        phase = enum_name(P.UpdatePhase, st.phase)
         first = phase not in shown
         if first and phase == "CHECKING":
             print(f"update: the mind checked the image (size, crc32 {st.crc32:08x}"
@@ -544,7 +536,7 @@ def _wait_for_mind(addr: str, wait_s: float, before: int, key: Any = None) -> in
 
 def _prepare_update(args: argparse.Namespace) -> int | None:
     """Read and check the image for `kilo update` (args.update_image); an exit code on failure."""
-    path = Path(args.image) if args.image is not None else DEFAULT_KERNEL_IMAGE
+    path = Path(args.image) if args.image is not None else DEFAULT_KERNEL
     args.image_path = path
     try:
         data = path.read_bytes()
@@ -552,26 +544,16 @@ def _prepare_update(args: argparse.Namespace) -> int | None:
         hint = " (build it: make -C kernel)" if args.image is None else ""
         print(f"kilo update: cannot read {path}: {e.strerror}{hint}", file=sys.stderr)
         return EXIT_ERR
-    if not 0 < len(data) <= P.HOST_UPDATE_MAX_IMAGE:
-        print(f"kilo update: {path} is {len(data)} bytes; the mind takes 1..{P.HOST_UPDATE_MAX_IMAGE}",
-              file=sys.stderr)
+    try:
+        key = hostkey.load(getattr(args, "key", None))
+    except hostkey.HostKeyError:
+        key = None  # the connection says what is wrong with it
+    errors, warnings = check_kernel(data, path, args.force, key, verb="install")
+    if errors:
+        print(f"kilo update: {errors[0]}", file=sys.stderr)
         return EXIT_ERR
-    if not args.force and not has_kernel_marker(data):
-        print(f"kilo update: {path} has no {P.HOST_UPDATE_MARKER}: it is not the mind kernel (the netboot loader "
-              "is not either). To install it anyway: --force", file=sys.stderr)
-        return EXIT_ERR
-    if not args.force:
-        # The kernel has its authorized keys in its image as raw bytes
-        # (build/gen/authorized_keys.h): one without this laptop's would lock it out.
-        try:
-            key = hostkey.load(getattr(args, "key", None))
-        except hostkey.HostKeyError:
-            key = None  # the connection says what is wrong with it
-        if key is not None and key.public not in data:
-            print(f"kilo update: {path} does not have this laptop's key ({key.fingerprint}) built in: the new "
-                  f"kernel would refuse this laptop. Add `kilo key show`'s line to {hostkey.KEYS_FILE} and rebuild "
-                  "(make -C kernel); to install it anyway: --force", file=sys.stderr)
-            return EXIT_ERR
+    for w in warnings:
+        print(f"kilo update: warning: {w}", file=sys.stderr)
     args.update_image = data
     return None
 
@@ -585,15 +567,14 @@ def _release(hl: HostLink) -> None:
 
 def _prepare_flash(args: argparse.Namespace) -> int | None:
     """Build or read the image for `kilo flash --host` (args.flash_image); an exit code on failure."""
-    from kilo.cli import flash_image_options
-    from kilo.tools.flash import FlashError, prepare_image
+    from kilo.tools.flash import FlashError, image_options, prepare_image
 
     if args.legacy or args.hex or args.sd is not None or args.rollback:
         print("kilo flash --host: not with --legacy, --hex, --sd or --rollback (use --image/--manifest)",
               file=sys.stderr)
         return EXIT_ERR
     try:
-        args.flash_image = prepare_image(flash_image_options(args))
+        args.flash_image = prepare_image(image_options(args))
     except FlashError as e:
         print(f"kilo flash: {e}", file=sys.stderr)
         return EXIT_ERR

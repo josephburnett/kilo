@@ -24,7 +24,7 @@ from noise_mind import Responder
 from kilo.protocol import kilo_link_codec as C
 from kilo.protocol import kilo_protocol as P
 from kilo.tools import body_image as BI
-from kilo.tools.flash import FlashError, describe_flash_status, flash_sd, looks_like_boot_card
+from kilo.tools.flash import describe_flash_status
 
 
 def ihex(data: bytes, base: int = 0, width: int = 16, ext: int | None = None) -> str:
@@ -109,28 +109,38 @@ def test_manifest_round_trip_and_checks(tmp_path):
 # ---- kilo flash --sd -----------------------------------------------------------------------
 
 def test_flash_sd(tmp_path, capsys):
+    """--sd checks the card and writes it as `kilo card --no-kernel` does (kilo.cli_card, tests/test_card.py)."""
     data = random.Random(4).randbytes(3000)
     img = tmp_path / "build"
     BI.write_image(img, data, BI.make_manifest(data, 0x12345678))
     card = tmp_path / "card"
     card.mkdir()
-    assert "has no kernel7.img or config.txt" in looks_like_boot_card(card, force_dir=True)
-    (card / "kernel7.img").write_bytes(b"k")
-    assert "has no config.txt" in looks_like_boot_card(card, force_dir=True)
-    (card / "config.txt").write_text("")
-    assert looks_like_boot_card(card, force_dir=True) is None
-    assert "not a mount point" in looks_like_boot_card(card)  # tmp_path is no FAT mount
-    assert "not a directory" in looks_like_boot_card(tmp_path / "nope", force_dir=True)
 
-    rc = cli.main(["flash", "--sd", str(card), "--force-dir", "--image", str(img / "body.bin")])
-    assert rc == 0, capsys.readouterr().err
+    def sd(*extra: str) -> int:
+        return cli.main(["flash", "--sd", str(card), "--image", str(img / "body.bin"), *extra])
+
+    assert sd("--force-dir") == 1
+    assert "has no kernel7.img or config.txt: not a Kilo boot card" in capsys.readouterr().err
+    (card / "kernel7.img").write_bytes(b"k")
+    (card / "config.txt").write_text("")
+    assert sd("--force-dir") == 1  # no sign of Kilo: the netboot loader's card, say
+    assert "not Kilo's mind kernel" in capsys.readouterr().err
+    assert not (card / "body.bin").exists()
+    (card / "kernel7.img").write_bytes(b"k" + P.HOST_UPDATE_MARKER.encode())
+    (card / "body-result.txt").write_text("kilo-body-result 1\noutcome: flashed\n")
+    assert sd("--force-dir") == 0, capsys.readouterr().err
     assert (card / "body.bin").read_bytes() == data
     assert BI.Manifest.from_json((card / "body.json").read_text()).build == 0x12345678
-    assert "build 12345678" in capsys.readouterr().out
-    assert cli.main(["flash", "--sd", str(card), "--image", str(img / "body.bin")]) == 1
+    assert not (card / "body-result.txt").exists()  # the mind decides afresh
+    out = capsys.readouterr().out
+    assert "build 12345678" in out and "read back" in out and "removed body-result.txt" in out
+    assert sd() == 1
     assert "not a mount point" in capsys.readouterr().err
-    with pytest.raises(FlashError, match="not a Kilo boot card"):
-        flash_sd(tmp_path / "build", data, BI.make_manifest(data, 1), force_dir=True)
+    (card / "cmdline.txt").write_text("")
+    assert sd("--force-dir") == 1
+    assert "a Raspberry Pi OS card" in capsys.readouterr().err
+    assert sd("--force-dir", "--force") == 0
+    assert "warning:" in capsys.readouterr().err
 
 
 def test_flash_cli_refusals(capsys):

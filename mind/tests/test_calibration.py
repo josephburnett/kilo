@@ -34,7 +34,6 @@ def test_joint_table_matches_joints_cpp():
     got = {int(j): (int(ch), int(d), int(m)) for ch, d, m, j in rows}
     for j in C.DRIVEN:
         assert got[j] == (C.JOINT_CHANNEL[j], C.JOINT_DIR[j], C.JOINT_MID[j]), j
-    assert C.JOINT_DIR == T.JOINT_DIR
 
 
 def test_postures_match_posture_cpp():

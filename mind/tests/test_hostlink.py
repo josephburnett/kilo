@@ -19,7 +19,8 @@ import pytest
 
 from kilo import cli, hostkey
 from kilo.hostlink import (BridgeTransport, HostError, HostKeyProblem, HostKeyRefused, HostLink, HostRefused,
-                           has_kernel_marker, parse_address)
+                           parse_address)
+from kilo.kernel_image import has_marker
 from kilo.protocol import kilo_link_codec as C
 from kilo.protocol import kilo_protocol as P
 from noise_mind import Responder
@@ -155,7 +156,7 @@ class FakeMind:
             error = P.UpdateError.SHORT
         elif zlib.crc32(data) != b.crc32:
             error = P.UpdateError.CRC_MISMATCH
-        elif not b.flags & P.UpdateFlags.FORCE and not has_kernel_marker(data):
+        elif not b.flags & P.UpdateFlags.FORCE and not has_marker(data):
             error = P.UpdateError.NOT_A_KERNEL
         if error:  # as HostServer: the FAILED status first, then RESULT IMAGE_BAD
             self._send(c, status(P.UpdatePhase.FAILED, int(error)), 0)
@@ -381,10 +382,10 @@ def kernel_bytes(n: int = 1000, marker: bool = True, key: bool = True) -> bytes:
     return body
 
 
-def test_has_kernel_marker():
-    assert has_kernel_marker(kernel_bytes()) and not has_kernel_marker(kernel_bytes(marker=False))
+def test_has_marker():
+    assert has_marker(kernel_bytes()) and not has_marker(kernel_bytes(marker=False))
     assert P.HOST_UPDATE_MARKER == "KILO-MIND-KERNEL-1"
-    assert not has_kernel_marker(MARKER[:-1])
+    assert not has_marker(MARKER[:-1])
 
 
 def test_update(mind):
@@ -448,7 +449,9 @@ def test_cli_update_refuses_locally(mind, tmp_path, capsys):
     assert "cannot read" in capsys.readouterr().err
     assert mind.got == []  # nothing reached the mind
     assert cli.main(["update", "--host", mind.addr, "--image", str(loader), "--force", "--wait", "0"]) == 0
-    assert "with --force" in capsys.readouterr().out and bytes(mind.update_data) == loader.read_bytes()
+    cap = capsys.readouterr()
+    assert "with --force" in cap.out and bytes(mind.update_data) == loader.read_bytes()
+    assert "is not the mind kernel (no KILO-MIND-KERNEL-1); installed anyway (--force)" in cap.err
 
 
 def test_cli_update_failures(mind, tmp_path, capsys):

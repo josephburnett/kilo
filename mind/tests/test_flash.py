@@ -43,7 +43,7 @@ def test_commands():
 
 def test_compile_cmd_carries_the_size_flags():
     """-mcall-prologues for C and C++ and -Wl,--relax for the link (doc §3h),
-    with or without a build hash, and the same flags size_check.sh expects."""
+    with or without a build hash, and the same flags size_check.sh expects (body/tools/build_flags.sh)."""
     for h in ("abc12345", None):
         cmd = fl.compile_cmd(Path("/r/body"), Path("/o"), h)
         props = dict(cmd[i + 1].split("=", 1) for i, a in enumerate(cmd) if a == "--build-property")
@@ -51,8 +51,9 @@ def test_compile_cmd_carries_the_size_flags():
         assert "-mcall-prologues" in props["compiler.c.extra_flags"].split()
         assert "-Wl,--relax" in props["compiler.c.elf.extra_flags"].split()
         assert ("-DKILO_BUILD=0xabc12345" in props["compiler.cpp.extra_flags"].split()) == (h is not None)
-    sh = (fl.REPO_DIR / "body" / "tools" / "size_check.sh").read_text()
-    assert f'CFLAGS="{fl.CFLAGS}"' in sh and f'LDFLAGS="{fl.LDFLAGS}"' in sh
+    assert fl.build_flags() == ("-mcall-prologues", "-Wl,--relax")
+    for script in ("size_check.sh", "stack_check.sh"):  # they source the same file
+        assert '. "$BODY/tools/build_flags.sh"' in (fl.REPO_DIR / "body" / "tools" / script).read_text()
 
 
 def test_reset_method():

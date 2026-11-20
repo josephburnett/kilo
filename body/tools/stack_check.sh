@@ -23,8 +23,7 @@ CLI="${ARDUINO_CLI:-$HOME/.local/bin/arduino-cli}"
 MIN_MARGIN="${MIN_MARGIN:-128}"
 if [ "${1:-}" = "--min-margin" ]; then MIN_MARGIN="${2:?--min-margin needs a value}"; shift 2; fi
 BUILD="${1:-${TMPDIR:-/tmp}/kilo-body-stack}"
-CFLAGS="-mcall-prologues"
-LDFLAGS="-Wl,--relax"
+. "$BODY/tools/build_flags.sh"  # CFLAGS, LDFLAGS
 PY="${PYTHON:-python3}"
 
 mkdir -p "$BUILD"

@@ -58,13 +58,15 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from kilo.log import DEFAULT_DIR
+
 from .body_events import BodyEvents
 from .drives import DriveInputs, Drives
 from .library import build_root
 from .personality import load as load_personality
 from .tree import Context
 
-DEFAULT_LOG_DIR = Path.home() / "kilo-logs"
+DEFAULT_LOG_DIR = DEFAULT_DIR
 
 
 def default_log_path() -> Path:

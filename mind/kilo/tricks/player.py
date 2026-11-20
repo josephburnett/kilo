@@ -18,9 +18,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Sequence
 
+from kilo.protocol import kilo_protocol as P
+
 SPEED_UNITY = 64
 FOREVER = 255
-TICK_S = 0.02
+TICK_S = P.TICK_MS / 1000
 
 
 def phase_ticks(n: int, speed_q6: int = SPEED_UNITY) -> int:

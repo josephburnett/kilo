@@ -62,7 +62,7 @@ import tty
 from pathlib import Path
 from typing import Any, Sequence
 
-from kilo import __version__
+from kilo import EXIT_ERR, EXIT_OK, __version__
 from kilo.body.client import (BALANCE_CLAMP, BALANCE_DEADBAND, BALANCE_KD_S, BALANCE_KP, POSTURE_CHOICES,
                               BodyClient, ProtocolMismatch)
 from kilo.cli_tools import add_log_parser, cmd_log, fix_kilolog_argv
@@ -71,10 +71,11 @@ from kilo.link.messages import fields_of
 from kilo.link.ports import detect_port
 from kilo.link.serial_link import CommandError, LinkError, SerialLink
 from kilo.link.transport import DEFAULT_BAUD, open_port
+from kilo.planner.model import LEG_NAMES
 from kilo.protocol import kilo_protocol as P
 from kilo.remote import DaemonError
 
-EXIT_OK, EXIT_ERR, EXIT_USAGE = 0, 1, 2
+EXIT_USAGE = 2
 
 
 # ---- argument parsing -------------------------------------------------------------
@@ -223,11 +224,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--dry-run", action="store_true", help="print the commands only")
     s.add_argument("--force", action="store_true",
                    help="flash even if another process holds the port (warns; avrdude and that process "
-                        "will fight over it)")
+                        "will fight over it); with --sd: write to a MOUNT that does not look like Kilo's card")
     # Through a C++ mind (docs/fast-boot.md §6): `kilo flash --host IP` (kilo.cli_host), `--sd MOUNT`.
     s.add_argument("--sd", type=Path, metavar="MOUNT",
                    help="copy body.bin + body.json to the mind's boot card (its FAT partition, mounted here): "
-                        "the mind flashes the body at boot if HELLO.fw_build differs")
+                        "the mind flashes the body at boot if HELLO.fw_build differs; the card is checked "
+                        "and the files read back as kilo card does")
     s.add_argument("--image", type=Path, metavar="BIN",
                    help="with --host/--sd: flash this body.bin instead of building (manifest: --manifest, "
                         "default body.json next to it)")
@@ -531,7 +533,7 @@ def _walk_row(snap: dict[str, Any]) -> str:
         return "-"
     ref, corr = snap["ref_deg"], snap["corr_deg"]
     feet = snap.get("support") or 0
-    down = "".join(n for i, n in enumerate(("LF", "RF", "RB", "LB")) if feet >> i & 1) or "-"
+    down = "".join(n for i, n in enumerate(LEG_NAMES) if feet >> i & 1) or "-"
     return (f"ref {ref[0]:+.1f}° {ref[1]:+.1f}°  error {err[0]:+.1f}° {err[1]:+.1f}°  "
             f"corr {corr[0]:+.1f}° {corr[1]:+.1f}°  down {down}  queued {snap.get('feet_queued')}")
 
@@ -843,26 +845,25 @@ def cmd_update(args: argparse.Namespace) -> int:
     return EXIT_ERR
 
 
-def flash_image_options(args: argparse.Namespace) -> Any:
-    from kilo.tools.flash import DEFAULT_BUILD_DIR, DEFAULT_SKETCH, ImageOptions
-
-    return ImageOptions(image=args.image, manifest=args.manifest, sketch=args.sketch or DEFAULT_SKETCH,
-                        build_dir=args.build_dir or DEFAULT_BUILD_DIR, size_check=not args.no_size_check)
-
-
 def cmd_flash_sd(args: argparse.Namespace) -> int:
-    """`kilo flash --sd MOUNT`: body.bin + body.json onto the mind's boot card."""
-    from kilo.tools.flash import FlashError, flash_sd, prepare_image
+    """`kilo flash --sd MOUNT`: body.bin + body.json onto the mind's boot card, checked and written as
+    `kilo card MOUNT --no-kernel` does (kilo.cli_card)."""
+    from kilo.cli_card import CardError, Plan, check_card, write_card
+    from kilo.tools.flash import FlashError, image_options, prepare_image
 
     if args.legacy or args.hex or getattr(args, "host", None):
         print("kilo flash --sd: not with --legacy, --hex or --host", file=sys.stderr)
         return EXIT_ERR
     try:
-        data, m = prepare_image(flash_image_options(args))
-        flash_sd(args.sd, data, m, force_dir=args.force_dir)
-    except FlashError as e:
+        for w in check_card(args.sd, args.force, args.force_dir):
+            print(f"kilo flash: warning: {w} (--force)", file=sys.stderr)
+        data, m = prepare_image(image_options(args))
+        write_card(args.sd, Plan(body=(data, m)))
+    except (CardError, FlashError) as e:
         print(f"kilo flash: {e}", file=sys.stderr)
         return EXIT_ERR
+    print(f"At its next boot the mind flashes the body unless HELLO.fw_build is already {m.build:08x}. "
+          f"Unmount (eject) {args.sd} before taking the card out.")
     return EXIT_OK
 
 

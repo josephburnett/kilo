@@ -82,12 +82,11 @@ from typing import Sequence
 from . import sagittal as S
 from . import stance as T
 from .library import path_for
-from .model import JOINT_IDS, JOINT_LIMITS, Easing, Guard, Keyframe, Posture, Trick, TICK_MS
+from .model import CANONICAL, JOINT_IDS, JOINT_LIMITS, JOINT_NAMES, Easing, Guard, Keyframe, Posture, Trick, TICK_MS
 
 END = Posture.SIT
 
-JOINTS = ("head_pan", "head_tilt", "tail", "lf_shoulder", "rf_shoulder", "rb_shoulder", "lb_shoulder",
-          "lf_knee", "rf_knee", "rb_knee", "lb_knee")
+JOINTS = tuple(JOINT_NAMES[j] for j in CANONICAL)
 
 
 def J(fs, fk, bs, bk, tail=0, pan=0, tilt=0, *, lb=None, rb=None) -> dict:
@@ -389,10 +388,6 @@ def joints_of(kf: Keyframe) -> dict:
     return {k: kf.joints[k] for k in JOINTS}
 
 
-def keyframe_names(st=1) -> list[str]:
-    return [f.name for f in frames(st)]
-
-
 # ---- what the model predicts -------------------------------------------------------------------
 def play_rests(g3: T.Geometry3, js_frames: Sequence[dict], start: dict = STAND, steps: int = 12):
     """stance.follow from ``start`` through the frames."""
@@ -438,10 +433,6 @@ def build(g: S.Geometry | None = None, st=1) -> Trick:
             f"end posture SIT; TRICK_STOP crossfades to it over stop_ticks ({st.stop_ticks})",
         ),
     ).validate()
-
-
-def build_all(g: S.Geometry | None = None) -> dict:
-    return {st.name: build(g, st) for st in STAGES}
 
 
 # ---- the check ----------------------------------------------------------------------------------

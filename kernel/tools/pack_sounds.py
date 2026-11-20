@@ -25,7 +25,8 @@ resolves. The budget (default 1.5 MB of samples) is the most the sounds
 may add to the image; over it the build fails with what is largest,
 rather than leaving any sound out.
 
-Standard library only (the kernel build may run without the mind's venv).
+Standard library only (the kernel build may run without the mind's venv),
+plus this checkout's generated protocol table (mind/kilo/protocol, stdlib only).
 """
 
 from __future__ import annotations
@@ -39,7 +40,10 @@ import wave
 from dataclasses import dataclass
 from pathlib import Path
 
-NAME_MAX = 15                  # kernel/mind/sound/sound.h kNameMax
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mind"))
+from kilo.protocol import kilo_protocol as P  # noqa: E402
+
+NAME_MAX = P.HostSound.MAX_LEN - 2  # 15: kernel/mind/sound/sound.h kNameMax, SOUND.name (kilo.cli_sound)
 NAME_RE = re.compile(r"^[a-z0-9_]{1,%d}$" % NAME_MAX)
 MAX_RATE = 22050               # stored at most this
 MIN_RATE, TOP_RATE = 8000, 48000  # files outside this are refused

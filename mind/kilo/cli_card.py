@@ -47,15 +47,15 @@ import time
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable
 
+from kilo import EXIT_ERR, EXIT_OK
+from kilo import kernel_image as KI
+from kilo.kernel_image import DEFAULT_KERNEL, KERNEL_DIR, KERNEL_FILE, KERNEL_NEW, KERNEL_OLD, has_marker
+from kilo.log import DEFAULT_DIR_TEXT
 from kilo.protocol import kilo_protocol as P
+from kilo.tools.body_image import IMAGE_FILE, MANIFEST_FILE
 
-EXIT_OK, EXIT_ERR = 0, 1
-REPO_DIR = Path(__file__).resolve().parents[2]
-KERNEL_DIR = REPO_DIR / "kernel"
-DEFAULT_KERNEL = KERNEL_DIR / "build" / "kernel7.img"
-KERNEL_FILE, KERNEL_NEW, KERNEL_OLD = "kernel7.img", "kernel7.new", "kernel7.old"
 RESULT_FILE, RESULT_NEW = "body-result.txt", "body-result.new"  # kernel/mind/flash/cardflash.h
 RESULT_MAGIC = "kilo-body-result 1"
 REC_DIR = "kilorec"
@@ -90,8 +90,10 @@ def add_parser(sub: Any) -> None:
     g = s.add_mutually_exclusive_group()
     g.add_argument("--status", action="store_true", help="what the mind left on the card: the body flash's "
                                                          "result, the saved log's last lines, the recordings")
-    g.add_argument("--fetch", action="store_true", help="copy the card's recordings to --out (default ~/kilo-logs)")
-    s.add_argument("--out", default="~/kilo-logs", metavar="DIR", help="--fetch: where to (default ~/kilo-logs)")
+    g.add_argument("--fetch", action="store_true",
+                   help=f"copy the card's recordings to --out (default {DEFAULT_DIR_TEXT})")
+    s.add_argument("--out", default=DEFAULT_DIR_TEXT, metavar="DIR",
+                   help=f"--fetch: where to (default {DEFAULT_DIR_TEXT})")
     s.add_argument("--lines", type=int, default=40, metavar="N", help="--status: the saved log's last N lines")
     s.add_argument("--no-build", action="store_true",
                    help="do not build: the last kernel (kernel/build/kernel7.img) and the last body build "
@@ -137,10 +139,6 @@ def _mounted_fat(path: Path) -> str | None:
     return None
 
 
-def has_marker(data: bytes) -> bool:
-    return P.HOST_UPDATE_MARKER.encode("ascii") in data
-
-
 def check_card(path: Path, force: bool, force_dir: bool = False) -> list[str]:
     """CardError if path is not Kilo's boot card (unless force); the warnings that force let through."""
     if not path.is_dir():
@@ -157,7 +155,7 @@ def check_card(path: Path, force: bool, force_dir: bool = False) -> list[str]:
     if pi_os:
         problems.append(f"{path} has {' and '.join(pi_os)}: a Raspberry Pi OS card, not Kilo's")
     if not missing:
-        signs = [(path / REC_DIR).is_dir(), (path / "body.json").exists(), (path / KERNEL_OLD).exists(),
+        signs = [(path / REC_DIR).is_dir(), (path / MANIFEST_FILE).exists(), (path / KERNEL_OLD).exists(),
                  (path / RESULT_FILE).exists()]
         if not any(signs):
             try:
@@ -269,48 +267,27 @@ class Plan:
     warnings: list[str] = field(default_factory=list)
 
 
-def _sh(cmd: Sequence[str], what: str, run: Callable[..., Any], say: Callable[[str], None]) -> None:
-    say("$ " + " ".join(cmd))
-    try:
-        run(list(cmd), check=True)
-    except subprocess.CalledProcessError as e:
-        raise CardError(f"{what} failed (exit {e.returncode})") from None
-    except OSError as e:
-        raise CardError(f"{what}: {e}") from None
-
-
 def check_kernel(data: bytes, path: Path, force: bool, key_path: str | None, say: Callable[[str], None]) -> list[str]:
-    """The checks `kilo update` makes: size, the marker, this laptop's key. CardError, or the warnings."""
+    """The checks `kilo update` makes (kilo.kernel_image.check_kernel). CardError, or the warnings."""
     from kilo import hostkey
 
     warnings: list[str] = []
-    if not 0 < len(data) <= P.HOST_UPDATE_MAX_IMAGE:
-        raise CardError(f"{path} is {len(data)} bytes; a kernel is 1..{P.HOST_UPDATE_MAX_IMAGE}")
-    if not has_marker(data):
-        if not force:
-            raise CardError(f"{path} has no {P.HOST_UPDATE_MARKER}: it is not the mind kernel (the netboot loader is "
-                            "not either); to write it anyway: --force")
-        warnings.append(f"{path} is not the mind kernel (no {P.HOST_UPDATE_MARKER}); written anyway (--force)")
     try:
         key = hostkey.load(key_path)
     except hostkey.HostKeyMissing:
+        key = None
         warnings.append("this laptop has no key (kilo key init): the card route needs none, but the network route "
                         "(kilo --host) will refuse this laptop until its key is in kernel/keys/authorized_keys "
                         "and the kernel is rebuilt")
-        return warnings
     except hostkey.HostKeyError as e:
+        key = None
         warnings.append(f"this laptop's key cannot be used ({e}); the card route needs none")
-        return warnings
-    if key.public in data:
+    errors, more = KI.check_kernel(data, path, force, key)
+    if errors:
+        raise CardError(errors[0])
+    if key is not None and key.public in data:
         say(f"kernel: this laptop's key ({key.fingerprint}) is built in: kilo --host will work from here")
-    elif not force:
-        raise CardError(f"{path} does not have this laptop's key ({key.fingerprint}) built in: the new kernel would "
-                        f"refuse this laptop over the network. Add `kilo key show`'s line to "
-                        f"{hostkey.KEYS_FILE} and rebuild; to write it anyway: --force")
-    else:
-        warnings.append(f"the kernel does not have this laptop's key ({key.fingerprint}): kilo --host from here "
-                        "will be refused (--force)")
-    return warnings
+    return more + warnings
 
 
 def prepare(args: argparse.Namespace, run: Callable[..., Any] = subprocess.run,
@@ -332,8 +309,8 @@ def prepare(args: argparse.Namespace, run: Callable[..., Any] = subprocess.run,
         else:
             path = DEFAULT_KERNEL
             if not args.no_build:
-                _sh(["make", "-C", str(KERNEL_DIR), f"-j{os.cpu_count() or 2}", *args.make_vars], "make -C kernel",
-                    run, say)
+                F.run_command(["make", "-C", str(KERNEL_DIR), f"-j{os.cpu_count() or 2}", *args.make_vars],
+                              "make -C kernel", run, say, error=CardError)
         try:
             data = path.read_bytes()
         except OSError as e:
@@ -344,13 +321,11 @@ def prepare(args: argparse.Namespace, run: Callable[..., Any] = subprocess.run,
     if not args.no_body:
         image = args.image
         if image is None and args.no_build:
-            image = (args.build_dir or F.DEFAULT_BUILD_DIR) / "body.bin"
+            image = (args.build_dir or F.DEFAULT_BUILD_DIR) / IMAGE_FILE
             if not image.exists():
                 raise CardError(f"no earlier body build at {image}: drop --no-build (or give --image)")
-        opts = F.ImageOptions(image=image, manifest=args.manifest, sketch=args.sketch or F.DEFAULT_SKETCH,
-                              build_dir=args.build_dir or F.DEFAULT_BUILD_DIR)
         try:
-            plan.body = F.prepare_image(opts, say=say, run=run)
+            plan.body = F.prepare_image(F.image_options(args, image), say=say, run=run)
         except F.FlashError as e:
             raise CardError(f"body: {e}") from None
     return plan

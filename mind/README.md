@@ -746,12 +746,15 @@ Through a C++ mind (docs/fast-boot.md §6, P4; no avrdude on the robot):
   HELLO from STATUS: `verified: HELLO build 3d441ec0 reset FLASHED`. `--persist` asks the mind to keep the image on its SD card
   (written by the kernel after a good flash). `--flash-timeout S` (60).
 - `kilo flash --sd MOUNT`: the same two files onto the mind's boot card,
-  mounted at MOUNT (refused unless it is a mounted FAT partition holding
-  `kernel7.img` and `config.txt`). At boot the mind flashes the body only if
+  mounted at MOUNT, checked and written as `kilo card MOUNT --no-kernel`
+  does (kilo/cli_card.py): refused unless it is a mounted FAT partition (or
+  a WSL Windows drive) holding `kernel7.img` and `config.txt`, with no
+  Raspberry Pi OS files and some sign of Kilo (`--force` writes anyway);
+  each file read back after writing; the last `body-result.txt` removed so
+  the next boot decides afresh. At boot the mind flashes the body only if
   the manifest's build differs from HELLO.fw_build, and writes the outcome
-  to `body-result.txt`. `kilo card MOUNT` (kilo/cli_card.py) does this and
-  the kernel together, removes the last result so the next boot decides
-  afresh, and reads the result back afterwards (`--status`, `--fetch`):
+  to `body-result.txt`. `kilo card MOUNT` does this and the kernel
+  together, and reads the result back afterwards (`--status`, `--fetch`):
   kernel/README.md "Three ways to install", docs/laptop-setup.md.
 - `--image body.bin [--manifest body.json]` skips the build for either
   (the manifest defaults to body.json next to the image).

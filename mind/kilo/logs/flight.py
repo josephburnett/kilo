@@ -37,7 +37,6 @@ REC_STATUS.clock_ms gives it; else 0: the Pi's clock starts near 0). A
 
 from __future__ import annotations
 
-import json
 import struct
 import zlib
 from dataclasses import dataclass, field
@@ -335,29 +334,18 @@ def walk_of(s: Stream, run: RunSpan | None = None) -> walkrec.Walk:
 # ---- the file ----------------------------------------------------------------------------
 
 def write_file(path: str | Path, meta: dict[str, Any], blocks: bytes) -> Path:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    m = json.dumps(meta, separators=(",", ":"), sort_keys=True).encode()
-    if len(m) > 0xFFFF:
-        raise ValueError("krec meta too long")
-    path.write_bytes(FILE_MAGIC + struct.pack("<H", len(m)) + m + bytes(blocks))
-    return path
+    return walkrec.write_container(path, FILE_MAGIC, meta, blocks, "krec")
 
 
 def is_krec(path: str | Path) -> bool:
-    try:
-        with open(path, "rb") as f:
-            return f.read(len(FILE_MAGIC)) == FILE_MAGIC
-    except OSError:
-        return False
+    return walkrec.has_magic(path, FILE_MAGIC)
 
 
 def read_file(path: str | Path) -> tuple[dict[str, Any], bytes]:
     data = Path(path).read_bytes()
-    if data.startswith(FILE_MAGIC) and len(data) >= len(FILE_MAGIC) + 2:
-        (n,) = struct.unpack_from("<H", data, len(FILE_MAGIC))
-        start = len(FILE_MAGIC) + 2
-        return json.loads(data[start:start + n].decode()), data[start + n:]
+    got = walkrec.split_container(data, FILE_MAGIC)
+    if got is not None:
+        return got
     if is_blocks(data):  # raw blocks (e.g. copied off the SD card's kilorec/ folder)
         return {}, data
     raise ValueError(f"{path}: not a flight recording (.krec, or raw blocks)")
@@ -373,7 +361,3 @@ def load(path: str | Path) -> Stream:
     s = parse_blocks(data, meta)
     s.meta.setdefault("path", str(p))
     return s
-
-
-def run_kind_of_info(info: Any) -> str:
-    return "trick" if info.flags & P.WalkFlags.TRICK else "walk"
