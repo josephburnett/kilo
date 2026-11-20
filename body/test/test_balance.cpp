@@ -14,21 +14,14 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <map>
 #include <sstream>
 #include <string>
 #include "../src/core/body.h"
 #include "../src/core/posture.h"
 #include "check.h"
+#include "slurp.h"
 #include "fake_eeprom.h"
-
-static std::string slurp(const char* rel) {
-  std::ifstream f(std::string(REPO_ROOT) + "/" + rel);
-  std::stringstream s;
-  s << f.rdbuf();
-  return s.str();
-}
 
 // ---- Legacy reference (src/motion.h, src/skill.h), in double -------------
 static double LEG[16][2];  // adaptiveParameterArray as stored (int8 in EEPROM)
@@ -104,7 +97,7 @@ static void test_legacy_mapping() {
   double worst = 0;
   for (int cr = -240; cr <= 240; cr += 12)
     for (int cp = -240; cp <= 240; cp += 12)
-      for (int k = 0; k < DRIVEN_COUNT; k++) {
+      for (uint8_t k = 0; k < DRIVEN_COUNT; k++) {
         double devR = LEGACY_ROLL_SIGN * (-cr / 16.0), devP = LEGACY_PITCH_SIGN * (-cp / 16.0);
         double want = legacy_adjust(KJ[k], devR, devP);
         double got = balance_map((uint8_t)k, (int16_t)cr, (int16_t)cp) / 16.0;
@@ -138,7 +131,7 @@ static void test_legacy_mapping() {
     double tolR = c.legacy_tol ? TOL[0] : c.db, tolP = c.legacy_tol ? TOL[1] : c.db;
     double yprR = LEGACY_ROLL_SIGN * c.roll, yprP = LEGACY_PITCH_SIGN * c.pitch;
     double devR = legacy_dev(yprR, 0, tolR), devP = legacy_dev(yprP, 0, tolP);
-    for (int k = 0; k < DRIVEN_COUNT; k++) {
+    for (uint8_t k = 0; k < DRIVEN_COUNT; k++) {
       double want = legacy_adjust(KJ[k], devR, devP);
       double got = balance_joint(bal, (uint8_t)k) / 16.0;
       worst_ctl = std::fmax(worst_ctl, std::fabs(got - want));
@@ -168,7 +161,7 @@ static void test_directions() {
   // left legs (8, 11, 12, 15) 1.2x as far as the right (9, 10, 13, 14), so
   // the left side drops. -corr_roll: the right legs crouch further.
   for (int sign : {1, -1}) {
-    for (int k = 3; k < DRIVEN_COUNT; k++) {
+    for (uint8_t k = 3; k < DRIVEN_COUNT; k++) {
       int toward = sgn(posture_angle(POSTURE_REST, (uint8_t)k) - posture_angle(POSTURE_STAND, (uint8_t)k));
       CHECKF(sgn(balance_map((uint8_t)k, (int16_t)(80 * sign), 0)) == toward, "roll corr %d, joint %d", sign, KJ[k]);
     }
@@ -317,7 +310,7 @@ static void tick(int n = 1) {
   }
 }
 static bool at(uint8_t p) {
-  for (int k = 0; k < DRIVEN_COUNT; k++)
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++)
     if (b.arb.out[k] != joint_clamp(joint_id((uint8_t)k), posture_angle(p, (uint8_t)k))) return false;
   return true;
 }
@@ -346,7 +339,7 @@ static void test_gating() {
   std::memcpy(before, b.arb.out, sizeof before);
   CHECK(body_goal_posture(b, b.epoch, POSTURE_SIT, 0, 1) == GOAL_OK);
   tick();
-  for (int k = 0; k < DRIVEN_COUNT; k++) CHECK(std::abs(b.arb.out[k] - before[k]) <= 48);
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++) CHECK(std::abs(b.arb.out[k] - before[k]) <= 48);
   CHECK(!b.bal.active && b.bal.ax[BAL_PITCH].corr == 0);
   tick(23);
   CHECK(!b.bal.active);
@@ -385,7 +378,7 @@ static void test_gating() {
   std::memcpy(prev, b.arb.out, sizeof prev);
   for (int t = 0; t < 60; t++) {
     tick();
-    for (int k = 0; k < DRIVEN_COUNT; k++) CHECK(std::abs(b.arb.out[k] - prev[k]) <= 48);
+    for (uint8_t k = 0; k < DRIVEN_COUNT; k++) CHECK(std::abs(b.arb.out[k] - prev[k]) <= 48);
     std::memcpy(prev, b.arb.out, sizeof prev);
   }
   CHECK(b.imu_fault && !b.bal.active && at(POSTURE_STAND));

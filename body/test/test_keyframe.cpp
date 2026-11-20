@@ -140,7 +140,7 @@ static uint8_t play(uint8_t id, uint8_t speed = 64, uint8_t flags = 0) {
 }
 
 static bool at_posture(uint8_t p) {
-  for (int k = 0; k < DRIVEN_COUNT; k++) {
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++) {
     uint8_t j = joint_id((uint8_t)k);
     if (b.arb.out[k] != joint_clamp(j, posture_angle(p, (uint8_t)k))) return false;
   }

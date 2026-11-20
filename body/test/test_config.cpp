@@ -160,7 +160,7 @@ int main() {
     config_boot(v);
     v.img.version = 1;
     v.img.params[3] = 777;
-    for (int i = CFG_PARAM_COUNT_V1; i < CFG_PARAM_COUNT; i++) v.img.params[i] = 0;  // v1 reserved = 0
+    for (uint8_t i = CFG_PARAM_COUNT_V1; i < CFG_PARAM_COUNT; i++) v.img.params[i] = 0;  // v1 reserved = 0
     v.img.crc = 0;
     // seal by hand as v1: config_seal() would stamp CFG_VERSION
     config_seal(v.img);
@@ -172,7 +172,7 @@ int main() {
     Config f;
     config_boot(f);
     CHECK(f.state == CFG_OK && f.newest == 0 && f.img.version == 1 && f.img.params[3] == 777);
-    for (int i = CFG_PARAM_COUNT_V1; i < CFG_PARAM_COUNT; i++) CHECK(f.img.params[i] == CFG_PARAM_DEFAULT);
+    for (uint8_t i = CFG_PARAM_COUNT_V1; i < CFG_PARAM_COUNT; i++) CHECK(f.img.params[i] == CFG_PARAM_DEFAULT);
     CHECK(f.img.cal.zero_a16[8] == v.img.cal.zero_a16[8]);
     config_save(f);
     run_writer(f);

@@ -156,7 +156,7 @@ static bool at_pose(const Pose& p) {
 }
 static double max_step(const int16_t* prev) {
   double m = 0;
-  for (int k = 3; k < DRIVEN_COUNT; k++) m = std::fmax(m, std::fabs((b.arb.out[k] - prev[k]) / 16.0));
+  for (uint8_t k = 3; k < DRIVEN_COUNT; k++) m = std::fmax(m, std::fabs((b.arb.out[k] - prev[k]) / 16.0));
   return m;
 }
 static GoalResult pose(int16_t pitch_a16, int16_t roll_a16, int8_t dh, int8_t xs) {
@@ -786,7 +786,7 @@ static void plant_tick() {
 
 // The joint angles (canonical, a16) of a pose, for the plant alone.
 static void pose_out(const Pose& p, int16_t out[DRIVEN_COUNT]) {
-  for (int k = 0; k < DRIVEN_COUNT; k++) out[k] = 0;
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++) out[k] = 0;
   for (int l = 0; l < 4; l++)
     ik_leg((uint8_t)l, (int16_t)std::lround(p.x[l] * 4), (int16_t)std::lround(p.z[l] * 4), &out[3 + l], &out[7 + l]);
 }

@@ -194,7 +194,7 @@ static void dump(void) {
               b.tick, b.epoch, body_mode(b), arbiter_idle_posture(a), arbiter_idle_moving(a) ? 1 : 0, b.holder,
               a.reflex_active, a.reflex.posture);
   int16_t own[DRIVEN_COUNT];
-  for (int k = 0; k < DRIVEN_COUNT; k++) own[k] = a.owner[k];
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++) own[k] = a.owner[k];
   list("owner", own, DRIVEN_COUNT);
   list("out", a.out, DRIVEN_COUNT);
   std::printf(" head_ttl=%u", a.head_ttl);

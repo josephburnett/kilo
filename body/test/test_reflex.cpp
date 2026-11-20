@@ -82,7 +82,7 @@ static void att(int roll_deg, int pitch_deg, int rate_dps = 0) {
   in.att.rate_roll = in.att.rate_pitch = in.att.rate_yaw = (int16_t)(rate_dps * 16);
 }
 static bool at_posture(uint8_t p) {
-  for (int k = 0; k < DRIVEN_COUNT; k++)
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++)
     if (b.arb.out[k] != joint_clamp(joint_id((uint8_t)k), posture_angle(p, (uint8_t)k))) return false;
   return true;
 }
@@ -92,12 +92,12 @@ static int16_t rc_out(int i, bool mirror, int k) {
   return joint_clamp(joint_id((uint8_t)k), posture_angle(id, (uint8_t)k));
 }
 static bool at_rc(int i, bool mirror) {
-  for (int k = 0; k < DRIVEN_COUNT; k++)
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++)
     if (b.arb.out[k] != rc_out(i, mirror, k)) return false;
   return true;
 }
 static bool all_owned(uint8_t own) {
-  for (int k = 0; k < DRIVEN_COUNT; k++)
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++)
     if (b.arb.owner[k] != own) return false;
   return true;
 }
@@ -252,7 +252,7 @@ static void test_fall_and_recover(bool right_up) {
   std::memcpy(prev, b.arb.out, sizeof prev);
   for (int t = 0; t < 40; t++) {
     tick();
-    for (int k = 0; k < DRIVEN_COUNT; k++) {
+    for (uint8_t k = 0; k < DRIVEN_COUNT; k++) {
       CHECK(std::abs(b.arb.out[k] - prev[k]) <= PARAM(SLEW_MAX_A16));
       prev[k] = b.arb.out[k];
     }
@@ -293,7 +293,7 @@ static void test_retries_and_failure() {
   tick(FALL_LIMP_TICKS - 1);
   CHECK(b.arb.out[0] != JOINT_OFF);
   tick();
-  for (int k = 0; k < DRIVEN_COUNT; k++) CHECK(b.arb.out[k] == JOINT_OFF);
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++) CHECK(b.arb.out[k] == JOINT_OFF);
   tick();
   CHECK(b.fall.state == FS_UPRIGHT && b.holder == RH_NONE && body_mode(b) == KILO_MODE_LIMP);
   tick(100);  // LIMP: no detection although still on its side
@@ -394,7 +394,7 @@ static void test_goals_while_fallen() {
   CHECK(body_goal_posture(b, old, POSTURE_LIMP, 0, 0) == GOAL_OK);
   CHECK(b.fall.state == FS_UPRIGHT && b.holder == RH_NONE && !b.arb.reflex_active);
   tick();
-  for (int k = 0; k < DRIVEN_COUNT; k++) CHECK(b.arb.out[k] == JOINT_OFF);
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++) CHECK(b.arb.out[k] == JOINT_OFF);
   CHECK(body_mode(b) == KILO_MODE_LIMP && count(EV_RECOVERED) == 0);
   // Through the link: SET_POSTURE refused FALLEN as EVENT GOAL_REFUSED.
   reset();
