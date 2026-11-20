@@ -801,7 +801,11 @@ Through a C++ mind (docs/fast-boot.md §6, P4; no avrdude on the robot):
 - `kilo flash --sd MOUNT`: the same two files onto the mind's boot card,
   mounted at MOUNT (refused unless it is a mounted FAT partition holding
   `kernel7.img` and `config.txt`). At boot the mind flashes the body only if
-  the manifest's build differs from HELLO.fw_build.
+  the manifest's build differs from HELLO.fw_build, and writes the outcome
+  to `body-result.txt`. `kilo card MOUNT` (kilo/cli_card.py) does this and
+  the kernel together, removes the last result so the next boot decides
+  afresh, and reads the result back afterwards (`--status`, `--fetch`):
+  kernel/README.md "Three ways to install", docs/laptop-setup.md.
 - `--image body.bin [--manifest body.json]` skips the build for either
   (the manifest defaults to body.json next to the image).
 - `--rollback` is not implemented yet.

@@ -268,7 +268,8 @@ mind.poll()                       timed: the loop stats line
   remote.poll()                   IR keys (on)
   runner.poll()                   the behaviour runner at 10 Hz (KILO_BEHAVIOUR=1 only)
 end of a flash: log it; --persist: write the image to SD
-boot flash check                  once, after the first HELLO (or 3 s): SD image, flash if another build
+boot flash check                  once, after the first HELLO (or 3 s): SD image, flash if another build,
+                                  the outcome in body-result.txt ("Flashing the body")
 link.connect() again              once a second, only if the Serial failed
 planner bench step                once, after the first laptop client (below)
 Circle's log events -> the ring   (USB, Ethernet, DHCP lines for `kilo log --host`)
@@ -790,6 +791,55 @@ against the 5 V rail (docs/fast-boot.md P6). On by default;
 read only after the first HELLO, so the probe never includes it, nor a
 boot-time flash.
 
+### Three ways to install
+
+A new mind kernel and new body firmware (the program on Kilo's board, the
+NyBoard) reach Kilo in one of three ways. All three end the same: the Pi
+boots `kernel7.img` from its SD card, and the body runs what the mind
+flashed into it. A laptop is set up for all three by
+`docs/laptop-setup.md`.
+
+| | Network (a router) | Card (the laptop's card reader) | Direct cable (no router) |
+|---|---|---|---|
+| kernel | `kilo update --host IP` | `kilo card PATH` | `kilo update --host 169.254.75.73` |
+| body | `kilo flash --host IP [--persist]` | `kilo card PATH`: flashed at the next boot | `kilo flash --host 169.254.75.73` |
+| needs | the laptop's key built into the kernel | nothing but the card | the key, a link-local address on the laptop |
+| what happened | printed at once | `kilo card PATH --status` after the next boot (`body-result.txt`) | printed at once |
+| recordings | `kilo runs --host`, `kilo record fetch --host` | `kilo card PATH --fetch` (saved ones only) | as the network |
+
+**Network.** The laptop sends the image over the host channel (the
+encrypted, key-checked connection on port 5300). The mind checks it and
+writes `kernel7.new`, reads it back, renames (`kernel7.old` kept) and
+reboots ("Updating the kernel over the network"), or flashes the body
+through its UART and the body's RESET line ("Flashing the body").
+
+**Card.** With Kilo off, the card goes into the laptop's reader and
+`kilo card PATH` (mind/kilo/cli_card.py) builds both programs and writes
+them with read-back: `kernel7.new`, `kernel7.img` renamed to `kernel7.old`,
+`kernel7.new` to `kernel7.img` (what the mind does for an update), then
+`body.bin` and `body.json` (manifest last), and removes the last
+`body-result.txt`. At the next power-on the Pi boots the new kernel, which
+flashes the body from the card if it runs another build ("From the SD card
+at boot" below) and writes the outcome to `body-result.txt`. It checks the
+kernel as `kilo update` does: the marker, and this laptop's key if it has
+one (refused without it unless `--force`, since the network route would
+then refuse this laptop; with no key on the laptop only a warning: the card
+route needs none). A path that does not look like Kilo's card is refused
+unless `--force`: it must be the root of a mounted FAT partition (on
+Linux), hold `kernel7.img` and `config.txt`, no Raspberry Pi OS files
+(`cmdline.txt`, `overlays/`), and a sign of Kilo (the mind kernel's marker,
+`kilorec/`, `body.json` or `kernel7.old`).
+
+**Direct cable.** The network route over one cable: with no DHCP lease
+three seconds after the Ethernet link comes up, the mind takes
+169.254.75.73/16 (`host.fallback_ip`, "Network bring-up"); the laptop's
+port needs a link-local address (`docs/laptop-setup.md`).
+
+Whoever holds the card can install any kernel and any body firmware: the
+card route checks nothing the holder cannot change. That was already true
+of the kernel (`kernel7.img` is a plain file); the network routes stay
+authenticated (only built-in keys, "Who may talk to Kilo: keys").
+
 ### Flashing the body
 
 Phase P4 (docs/fast-boot.md §6; the core's side in `mind/README.md`
@@ -808,23 +858,69 @@ before it starts the flasher.
 The kernel logs the end: `body flashed from the laptop: build ..., HELLO
 build ... reset FLASHED`, or `body flash from the laptop FAILED: ...`.
 
-**From the SD card at boot** (§6 path B, `kilo flash --sd MOUNT` or
-`make-sd.sh --body DIR`): once the body's first HELLO has arrived, or 3 s
-after `link.connect()` with none (no firmware, a broken one, or the body
-is off), the main loop mounts the card's FAT partition, reads `body.json`
-(`parse_manifest`) and `body.bin` (`load_from`: size and CRC), and asks
-`needs_flash(hello or null)`. Another build: the flasher starts with that
-image (no `--persist`), the host server polls it, and the kernel logs
-`body flashed from the SD card (boot): ...`. The same build: nothing
-(`boot flash check: the body runs build X, the card's: no flash`). A
-missing or bad file is not an error: one Info line (`SD: no body.json:
-nothing to flash at boot`, `... does not match ...`) and the boot goes on.
-With no HELLO and a good image, the kernel flashes: with the body
-switched off that fails in sync (two attempts, about 3 s) and the link is
-restored; the check runs once per boot. The SD image has its own 32 KB
-buffer, separate from the laptop's, so a laptop sending an image at that
-moment cannot have it overwritten (its `FLASH_COMMIT` is refused
-`FLASHING` while the boot flash runs).
+**From the SD card at boot** (`kilo card PATH`, or `kilo flash --sd MOUNT`,
+or `make-sd.sh --body DIR`; the core's `CardFlash`, `mind/flash/cardflash.h`):
+once per boot, after the body's first HELLO and its first TELEMETRY (1 s at
+most after the HELLO: the battery reading comes with it), or 3 s after
+`link.connect()` with no HELLO (no firmware, a broken one, or the body is
+off), the main loop reads `body.json`, `body.bin` and `body-result.txt`
+through the card's `KernelStore` (the updater's; never while an update
+writes it, nor while the bridge or a laptop's flash has the UART) and
+decides, in this order:
+
+1. no `body.json`: nothing (`boot flash check: ... no image on the card:
+   nothing to do`);
+2. `body.json` is not a manifest, `body.bin` is missing, shorter or longer
+   than the manifest says, or its CRC-32 differs (a damaged or half-copied
+   file): **refused**, checked again at every boot;
+3. the HELLO's `fw_build` is the manifest's build: **same**, no flash;
+4. `body-result.txt` says a flash of this very image (build, size and
+   CRC-32) **failed**: not retried (`NOT flashing: a flash of this same
+   image failed at an earlier boot`) until `body.bin` or `body.json`
+   change; `kilo card` removes `body-result.txt` when it writes them;
+5. the battery reads under 6600 mV (the body's own LOW trip,
+   `BATT_LOW_MV`): **refused**, checked again at the next boot; on USB power
+   or with no TELEMETRY there is no reading and no refusal;
+6. otherwise the flasher starts with the card's image (its own 32 KB
+   buffer, no `--persist`): **flashed** once the HELLO after the reset
+   reports the image's build, else **failed** with the flasher's error.
+
+Nothing in this reboots anything and a flash is started at most once per
+boot, so there is no loop. The outcome goes to `body-result.txt` (written
+as `body-result.new`, then renamed over it): for flashed, failed and
+refused, and for same unless the file already says flashed or same for this
+image (so a good flash's record stays until the next image). Its format,
+plain text, one `key: value` a line:
+
+```
+kilo-body-result 1
+outcome: flashed | failed | refused | same
+image: build 3d441ec0 size 31234 crc32 cbf43926     (or "image: none": body.json unreadable)
+why: one line, for people
+body before: build 56424f44                         (or "no HELLO")
+body after: build 3d441ec0 reset FLASHED            (flashed, failed: the HELLO after the flash)
+error: none | SYNC_TIMEOUT | ...                    (flashed, failed)
+battery: 7810 mV                                    (or "no reading")
+mind: build 1234abcd, 4100 ms after the link came up
+next boot: what the next boot will do with this image
+log:
+  3.100 I boot flash check: ...                     (the log lines from the check to the end, 48 at most)
+```
+
+The mind reads back only `outcome:` and `image:`; `kilo card PATH --status`
+prints the rest. The sounds tell someone with no laptop how it went:
+**trill** after a good flash, **hiss** after a failed one or a refusal,
+nothing for same or not retried (the player is paused while the flasher has
+the UART, so nothing plays during the flash). A card that cannot be written
+(write-protected) is logged (`boot flash check: body-result.txt is NOT on
+the card`) and the flash happens anyway. The battery rule is the mind's
+own: the network flash path checks no battery; neither needs the servos
+powered or off (the reset leaves the PCA9685 servo driver holding its last
+pulses until the new firmware starts; at boot the body is in its start-up
+posture).
+
+kilo-mind-host runs the same check with `--card DIR` (DIR stands for the
+card, against tests/fake_optiboot.py in kernel/host/test.sh).
 
 **Order at boot**: link up -> HELLO (or 3 s) -> SD card -> flash if needed
 -> the go-ahead for the net task's USB scan (the default
@@ -852,8 +948,9 @@ write takes a fraction of a second right after a flash.
 **SD card access**: Circle's FatFs addon (`addon/fatfs`, long file names,
 read and write; Circle's own `lib/fs/fat` reads 8.3 names only, and
 `body.json` is not one) over its SD driver (`addon/SDCard`; on the Pi 2 B
-the SDHOST controller, PIO). Mounted read-write, at the first use; nothing
-is written except by `--persist`. The SD driver busy-waits (Circle's
+the SDHOST controller, PIO). Mounted read-write, at the first use; written
+by `--persist`, the boot check's `body-result.txt`, a kernel update and the
+flight recorder's saver. The SD driver busy-waits (Circle's
 `NO_BUSY_WAIT` is off; turning it on changes the USB driver too), so every
 card access stalls the main loop, logged: `SD: FAT partition mounted in
 N ms (card M ms ...)`, `SD: body image ... (read in N ms)`, `SD: --persist:
@@ -1175,8 +1272,12 @@ ms after release` timing on the real 328P; a whole flash's time; the SD
 card: Circle's SDHOST driver on Kilo's card, how long initialisation,
 mount and the 31 KB read take (the log lines), FatFs writing body.bin and
 body.json and the laptop then reading them; the boot flash check with a
-matching build, another build and no HELLO; `--persist`; the LED's double
-flash; the USB scan waiting for the go-ahead (`pl011` build). Kernel
+matching build, another build and no HELLO (never run on the Pi at all),
+its `body-result.txt` written through FatFs and read back by `kilo card
+--status` on a laptop, the trill and hiss after it, the battery refusal
+against a real reading, `kilo card` on a real card in a laptop's reader;
+`--persist`; the LED's double flash; the USB scan waiting for the go-ahead
+(`pl011` build). Kernel
 updates: FatFs writing, reading back and renaming `kernel7.*` on Kilo's
 card, the slices' time, the 4 MB heap buffer, the reboot into the new
 kernel and `kilo update` seeing it come back. The
