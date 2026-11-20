@@ -18,6 +18,7 @@
 #ifndef KILO_MIND_PLANNER_FMATH_H
 #define KILO_MIND_PLANNER_FMATH_H
 #include <stdint.h>
+#include "util/dmath.h"  // d_fabs, for the parts solved in double
 
 namespace kilo {
 namespace planner {
@@ -69,7 +70,6 @@ inline real degrees(real rad) { return rad * ((real)180.0 / kPi); }
 inline real m_min(real a, real b) { return b < a ? b : a; }  // Python's min(a, b): a on a tie
 inline real m_max(real a, real b) { return b > a ? b : a; }
 inline real clamp(real v, real lo, real hi) { return m_min(hi, m_max(lo, v)); }  // min(hi, max(lo, v))
-inline double d_fabs(double x) { return __builtin_fabs(x); }
 
 // floor of a value well inside int32 (no libm floorf).
 inline int32_t floor_i(real v) {

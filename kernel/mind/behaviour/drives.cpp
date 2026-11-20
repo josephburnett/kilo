@@ -6,7 +6,6 @@ namespace behaviour {
 
 namespace {
 
-double clamp01(double v) { return v < 0.0 ? 0.0 : v > 1.0 ? 1.0 : v; }
 constexpr double kLn2 = 0.6931471805599453;  // math.log(2), correctly rounded
 
 }  // namespace
@@ -34,7 +33,7 @@ Drives Drives::from_personality(const Personality& p) {
 double Drives::battery_cap(const Personality& p, bool has_battery, double pct) const {
   if (!has_battery) return 1.0;
   double lo = p.battery_empty_pct, hi = p.battery_full_pct;
-  return clamp01((pct - lo) / (hi - lo));
+  return d_clamp((pct - lo) / (hi - lo), 0.0, 1.0);
 }
 
 void Drives::update(double dt, const DriveInputs& in, const Personality& p, PyRandom* rng) {
@@ -63,10 +62,10 @@ void Drives::update(double dt, const DriveInputs& in, const Personality& p, PyRa
     curiosity += rng->gauss(0, k);
     sociability += rng->gauss(0, k);
   }
-  energy = clamp01(d_min(energy, battery_cap(p, in.has_battery, in.battery_pct)));
-  curiosity = clamp01(curiosity);
-  sociability = clamp01(sociability);
-  arousal = clamp01(arousal);
+  energy = d_clamp(d_min(energy, battery_cap(p, in.has_battery, in.battery_pct)), 0.0, 1.0);
+  curiosity = d_clamp(curiosity, 0.0, 1.0);
+  sociability = d_clamp(sociability, 0.0, 1.0);
+  arousal = d_clamp(arousal, 0.0, 1.0);
 }
 
 }  // namespace behaviour

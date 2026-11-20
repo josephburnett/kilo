@@ -2,6 +2,7 @@
 #include "remote/remote.h"
 #include "util/dmath.h"
 #include "util/fmt.h"
+#include "util/dmath.h"
 #include "util/log.h"
 #include "util/mem.h"
 #include "util/str.h"
@@ -10,7 +11,6 @@ namespace kilo {
 namespace guard {
 
 namespace {
-int rnd(double v) { return (int)(v < 0 ? v - 0.5 : v + 0.5); }
 constexpr double kPi = 3.14159265358979;
 }  // namespace
 
@@ -188,12 +188,12 @@ void DistanceGuard::decide(const char* state, const char* reason) {
   char line[192];
   if (filter_.has())
     format(line, sizeof line, "guard decides: zone=%s mm=%d raw=%u seen=%s%s blue=%d floor_from=%d action=%s state=%s",
-           zone_name(zone_), rnd(filter_.mm()), (unsigned)filter_.raw(), seen_name(filter_.last()),
-           filter_.close_hold() ? " (holding: no echo after very close)" : "", rnd(blue_), rnd(floor_mm_),
+           zone_name(zone_), d_iround(filter_.mm()), (unsigned)filter_.raw(), seen_name(filter_.last()),
+           filter_.close_hold() ? " (holding: no echo after very close)" : "", d_iround(blue_), d_iround(floor_mm_),
            action_name(action_), key);
   else
     format(line, sizeof line, "guard decides: zone=%s mm=none raw=%u seen=%s blue=%d floor_from=%d action=%s state=%s",
-           zone_name(zone_), (unsigned)filter_.raw(), seen_name(filter_.last()), rnd(blue_), rnd(floor_mm_),
+           zone_name(zone_), (unsigned)filter_.raw(), seen_name(filter_.last()), d_iround(blue_), d_iround(floor_mm_),
            action_name(action_), key);
   note(line);
 }
@@ -234,11 +234,11 @@ void DistanceGuard::on_telemetry(const kilo_telemetry_t& t, double head_tilt_deg
     char line[128];
     if (filter_.has())
       format(line, sizeof line, "guard zone=%s mm=%d raw=%u blue=%d red=%d v=%d gait=%s action=%s", zone_name(z),
-             rnd(filter_.mm()), (unsigned)filter_.raw(), rnd(blue_), rnd(kRedMm), rnd(v), gait[0] ? gait : "-",
+             d_iround(filter_.mm()), (unsigned)filter_.raw(), d_iround(blue_), d_iround(kRedMm), d_iround(v), gait[0] ? gait : "-",
              action_name(action_));
     else
       format(line, sizeof line, "guard zone=%s mm=none raw=%u blue=%d red=%d v=%d action=%s", zone_name(z),
-             (unsigned)filter_.raw(), rnd(blue_), rnd(kRedMm), rnd(v), action_name(action_));
+             (unsigned)filter_.raw(), d_iround(blue_), d_iround(kRedMm), d_iround(v), action_name(action_));
     note(line);
   }
   uint64_t us = clock_.now_us();
@@ -252,7 +252,7 @@ void DistanceGuard::set_action(Action a, const char* why) {
   action_at_ = clock_.now_us();
   char line[160];
   format(line, sizeof line, "guard action=%s zone=%s mm=%d blue=%d v=%d gait=%s: %s", action_name(a), zone_name(zone_),
-         filter_.has() ? rnd(filter_.mm()) : 0, rnd(blue_), rnd(v_), gait_[0] ? gait_ : "-", why);
+         filter_.has() ? d_iround(filter_.mm()) : 0, d_iround(blue_), d_iround(v_), gait_[0] ? gait_ : "-", why);
   note(line);
 }
 
@@ -524,11 +524,11 @@ void DistanceGuard::fill(kilo_host_guard_status_t& s) const {
   s.action = (uint8_t)action_;
   s.eyes = (uint8_t)eyes_;
   s.eyes_driven = eyes_driven() ? 1 : 0;
-  s.dist_mm = filter_.has() ? (uint16_t)rnd(filter_.mm()) : 0;
+  s.dist_mm = filter_.has() ? (uint16_t)d_iround(filter_.mm()) : 0;
   s.raw_mm = filter_.raw();
-  s.blue_mm = (uint16_t)rnd(blue_);
-  s.red_mm = (uint16_t)rnd(kRedMm);
-  s.speed_mm_s = (uint16_t)rnd(v_);
+  s.blue_mm = (uint16_t)d_iround(blue_);
+  s.red_mm = (uint16_t)d_iround(kRedMm);
+  s.speed_mm_s = (uint16_t)d_iround(v_);
   s.zone_changes = zone_changes_;
   s.stops = stops_;
   s.pullbacks = pullbacks_;
@@ -542,7 +542,7 @@ void DistanceGuard::metrics_line(char* out, uint32_t n) const {
          on_ ? 1u : 0u, zone_name(zone_), action_name(action_), eyes_name(eyes_), eyes_driven() ? 1u : 0u,
          (unsigned)zone_changes_, (unsigned)stops_, (unsigned)pullbacks_, (unsigned)refused_, (unsigned)releases_,
          (unsigned)reactions_, (unsigned)hisses_, (unsigned)filter_.readings(), (unsigned)filter_.dropouts(),
-         (unsigned)filter_.floor_ignored(), has_min_ ? rnd(min_mm_) : -1);
+         (unsigned)filter_.floor_ignored(), has_min_ ? d_iround(min_mm_) : -1);
 }
 
 }  // namespace guard

@@ -22,6 +22,7 @@ inline double d_sin(double x) { return __builtin_sin(x); }
 inline double d_cos(double x) { return __builtin_cos(x); }
 inline double d_min(double a, double b) { return b < a ? b : a; }  // Python min(a, b)
 inline double d_max(double a, double b) { return b > a ? b : a; }  // Python max(a, b)
+inline double d_clamp(double v, double lo, double hi) { return v < lo ? lo : v > hi ? hi : v; }
 inline bool d_isfinite(double x) { return x - x == 0.0; }
 constexpr double kNegInf = -__builtin_inf();
 

@@ -1,4 +1,5 @@
 #include "planner/errors.h"
+#include "util/dmath.h"
 
 namespace kilo {
 namespace planner {
@@ -11,8 +12,6 @@ static real round2(double v) {  // Python's round(v, 2), half to even
   if (d > 0.5 || (d == 0.5 && (i & 1))) i++;
   return (real)((double)i / 100.0);
 }
-
-static double d_sqrt(double v) { return __builtin_sqrt(v); }
 
 void ErrorTracker::reset() {
   head_ = 0;
