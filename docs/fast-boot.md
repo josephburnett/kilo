@@ -193,36 +193,15 @@ One image format for both paths: `body.bin` (raw binary from
 build hash (the `-DKILO_BUILD` value), size, CRC-32. The image is at most
 32 KB less optiboot, so it fits in RAM.
 
-**Build (laptop):** the existing `arduino-cli compile` step from
-`mind/kilo/tools/flash.py`, then `body/tools/size_check.sh`, then `objcopy`
-and the manifest. `arduino-cli` leaves the Pi.
+The steps (the build, the two ways to get the image to the mind, the
+mind's flash sequence and the check) are in `kernel/README.md` "Flashing
+the body". The two paths:
 
-**Path A, network push:** `kilo flash --host <ip> [--persist]`
-
-1. Send manifest + image over the flash channel.
-2. Mind checks CRC, size and build hash; with `--persist` writes both to SD.
-3. Flash (below), report result.
-
-**Path B, SD card written on the laptop:** `kilo card <mountpoint>` (with
-the kernel; `kilo flash --sd <mountpoint>` for the body alone)
-
-1. Copy `body.bin` + manifest to the FAT partition.
-2. At boot the mind compares the manifest's build hash with `HELLO.fw_build`
-   and flashes only if they differ. Same image, no reflash, no boot cost.
-3. The outcome goes to `body-result.txt` on the card; a failed image is not
-   flashed again until the files change (`kernel/mind/flash/cardflash.h`;
-   kernel/README.md "Three ways to install").
-
-**Flash sequence (mind):**
-
-1. Stop streaming; send REST (or let the body watchdog do it).
-2. Take the UART exclusively; switch to 115200.
-3. Pulse GPIO4 as the emulated open-drain the Python side uses today
-   (`mind/kilo/tools/gpio.py`: never driven high). Optiboot listens ~1 s.
-4. STK500v1: `GET_SYNC` (retry until answered); per 128-byte page
-   `LOAD_ADDRESS` + `PROG_PAGE`; verify with `READ_PAGE`; `LEAVE_PROGMODE`.
-5. Back to the link baud; restart the link; expect `HELLO.fw_build` equal to
-   the manifest's hash and the reset cause the mind expects after a flash.
+- **Path A, network push:** `kilo flash --host <ip> [--persist]`.
+- **Path B, SD card written on the laptop:** `kilo card <mountpoint>` (with
+  the kernel; `kilo flash --sd <mountpoint>` for the body alone). At boot
+  the mind flashes only if the manifest's build differs from
+  `HELLO.fw_build`: the same image costs no reflash and no boot time.
 
 Failure: optiboot survives an interrupted flash, so retry. Keep the last good
 image on SD for a `kilo flash --rollback`.

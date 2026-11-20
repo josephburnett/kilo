@@ -50,7 +50,7 @@ static constexpr uint32_t BUILD_TIME_HASH = fnv(__DATE__ " " __TIME__, 216613626
 Body g_body;
 Config g_config;
 BodyStats g_stats;
-uint16_t g_counts[16];
+uint16_t g_counts[JOINT_COUNT];
 uint8_t g_pkt[DMP_PACKET_SIZE];
 
 static Sched sched;
@@ -92,7 +92,7 @@ static void run_tick(void) {
 #endif
   if (b.tick % BATT_PERIOD_TICKS == 0) adc_start();
 #if KILO_BUZZER
-  if (notes_tick(b.notes, TICK_MS)) buzzer_set(b.notes.hz);
+  if (notes_tick(b.notes, KILO_TICK_MS)) buzzer_set(b.notes.hz);
 #endif
   // 10. Telemetry, watchdog, canary, timing.
   link_tick();

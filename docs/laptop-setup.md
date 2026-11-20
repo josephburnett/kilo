@@ -197,6 +197,9 @@ the card route.
    the card only while saving is on (`kilo record save on --host`, or a
    kernel built with `KILO_RECORD_SAVE=1`).
 
+What the Pi decides at power-on, in full, and how it flashes:
+`kernel/README.md` "Flashing the body".
+
 **If the flash failed**, the Pi does not try that same firmware again at
 every power-on: it would fail the same way. It tries again when the files
 change, and `kilo card` counts as a change (it removes `body-result.txt`

@@ -23,7 +23,7 @@ struct BodyStats {
 extern Body g_body;
 extern Config g_config;
 extern BodyStats g_stats;
-extern uint16_t g_counts[16];  // the last counts written to the PCA9685
+extern uint16_t g_counts[JOINT_COUNT];  // the last counts written to the PCA9685
 extern uint8_t g_pkt[DMP_PACKET_SIZE];  // the last DMP packet (IMU_RAW)
 
 #endif

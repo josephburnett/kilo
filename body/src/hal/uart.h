@@ -11,9 +11,10 @@
 #ifndef KILO_HAL_UART_H
 #define KILO_HAL_UART_H
 #include <stdint.h>
+#include "../proto/kilo_protocol.h"
 
 #define UART_RX_SIZE 192
-#define UART_TX_SIZE 96
+#define UART_TX_SIZE KILO_TX_RING_BYTES
 
 void uart_init(void);
 

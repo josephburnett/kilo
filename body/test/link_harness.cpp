@@ -26,18 +26,13 @@
 #include "../src/core/params.h"
 #include "../src/core/reset.h"
 #include "fake_eeprom.h"
+#include "body_fixture.h"
 #include "fake_link_hal.h"
 
 static Config cfg;
 
 static void boot(uint8_t state, uint8_t batt, uint8_t epoch = 0) {
-  g_ee.reset();
-  config_defaults(cfg.img);
-  cfg.state = (ConfigState)state;
-  cfg.writing = 0;
-  cfg.saved = 0;
-  cfg.newest = 0xFF;
-  params_load(cfg.img);
+  fixture_config(cfg, state);
   body_init(g_body, &cfg, nullptr, true, epoch);
   g_body.batt.level = (BattLevel)batt;
   g_lh.reset();

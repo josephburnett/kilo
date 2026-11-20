@@ -5,6 +5,10 @@
 // Rings: the ISR writes rx_head and reads tx_tail; the main loop writes
 // rx_tail and tx_head. Each index has exactly one writer and is one byte,
 // so it is read atomically and no locking is needed for the data path.
+// 250000 baud at normal speed (U2X off): UBRR = F_CPU / (16 * baud) - 1 = 3.
+#define UART_UBRR (F_CPU / (16UL * KILO_BAUD) - 1)
+static_assert(F_CPU % (16UL * KILO_BAUD) == 0, "KILO_BAUD is not exact at this F_CPU without U2X");
+
 static volatile uint8_t rx_buf[UART_RX_SIZE];
 static volatile uint8_t rx_head, rx_tail;
 static volatile uint8_t tx_buf[UART_TX_SIZE];
@@ -16,7 +20,7 @@ static inline uint8_t rx_next(uint8_t i) { return (uint8_t)(i + 1 == UART_RX_SIZ
 static inline uint8_t tx_next(uint8_t i) { return (uint8_t)(i + 1 == UART_TX_SIZE ? 0 : i + 1); }
 
 void uart_init(void) {
-  UBRR0 = 3;
+  UBRR0 = UART_UBRR;
   UCSR0A = 0;  // optiboot leaves U2X0 set (it runs 115200 that way): clear it
   UCSR0C = _BV(UCSZ01) | _BV(UCSZ00);  // 8N1
   UCSR0B = _BV(RXEN0) | _BV(TXEN0) | _BV(RXCIE0);

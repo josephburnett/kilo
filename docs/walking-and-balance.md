@@ -4,8 +4,11 @@ Written 2026-10-13 after the first floor drives (trot at 1000 ms with
 balance on: "wobbles so much when walking that he tipped over"; tricks fine).
 Numbers use Kilo's measured geometry: legs 45 + 50 mm, body 123 mm long,
 feet 65 mm apart, body height 0.80 × 95 = 76 mm, centre of mass about 80 mm
-up. Code: `body/src/core/gait.cpp`, `balance.cpp`, `body.cpp` (the wiring);
-design: `docs/architecture.md` §3d, §3f.
+up. Code at the time: `body/src/core/gait.cpp`, `balance.cpp`, `body.cpp`
+(the wiring); design: `docs/architecture.md` §3d, §3f. The body's gait
+generator is gone since protocol 2.0 (commit a38580e): the mind now plans
+the feet (`kernel/mind/planner/`) and streams them to the body, which plays
+them (`body/src/core/feet.cpp`).
 
 ## 1. What we have
 
@@ -166,8 +169,9 @@ are tests/test_planner.py and tests/test_walk_sim.py (section 10).*
    `kilo walk` set stride and stance time with a fixed swing, instead of a
    period. Continuous speed, two-foot time constant.
    **Done (2026-10-13)**: `kilo.body.client.gait_timing(pattern, speed)`,
-   `kilo walk --speed MM_S`, and the remote's C5 / C1 (slower / faster, 0.5x
-   to 2x of the default speed). Each pattern keeps its default's swing time
+   `kilo walk --speed MM_S`, and the remote's slower / faster keys (C5 / C1
+   then, 0.5x to 2x of the default speed; today B5 / B7 and the levels in
+   `kernel/README.md` "The remote's keys"). Each pattern keeps its default's swing time
    (trot 150 ms; walk 500 and crawl 297 ms, which their higher steps need
    under the slew limit), stance = stride / speed, period = swing + stance.
    Below the longest stance (duty 230/256 or period 2000 ms; the trot's is

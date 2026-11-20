@@ -34,6 +34,8 @@ below 128 B of margin; `STACK_CHECK=0` skips it); `protocol/test.sh` needs the v
 
 ## The Pi
 
+> **Retired route.** This section sets up the old Pi: Raspberry Pi OS, the Python mind in a venv on it, and systemd (Linux's service manager) to start it. Kilo no longer runs that: the Pi now starts the mind kernel straight from the SD card, with no operating system under it (`docs/fast-boot.md` section 8 lists what is retired). The current setup is `docs/laptop-setup.md`; the kernel is in `kernel/README.md`. This text stays until the owner decides what to do with it.
+
 Raspberry Pi 2 Model B, Raspbian 13 (trixie) 32-bit, user `joe`, hostname
 `kilo`, USB Wi-Fi on the home LAN. Its LAN address comes from DHCP and has
 changed (192.168.88.32, then .27 on 2026-10-12); the stable address is the
@@ -264,6 +266,8 @@ systemctl list-dependencies --reverse network-online.target     # what still ask
 ```
 
 ## Day-to-day loop
+
+> **Retired route.** Steps 2 and 3 update and flash from the old Pi (Raspberry Pi OS, `update.sh`, `kilo flash` run there). Kilo no longer runs that: the Pi now starts the mind kernel straight from the SD card, with no operating system under it (`docs/fast-boot.md` section 8 lists what is retired). Today the laptop builds and installs both programs: `docs/laptop-setup.md`, and `kernel/README.md` "Flashing the body". This text stays until the owner decides what to do with it.
 
 1. Edit and run the four suites on the dev host. Commit on `main`, push.
 2. On the Pi, one command, no password (the system-service install adds a

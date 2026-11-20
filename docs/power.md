@@ -160,8 +160,9 @@ then A7 and 2.5 minutes lying in REST), read with `kilo power FILE`:
   walking draws roughly 0.4 to 0.8 A more than standing while it lasts.
 - **Tricks** (rear-up): a 60 to 90 mV sag, the same kind.
 - **Standing** stretches were too short (under 90 s) for a slope.
-- At about 90 mV per minute, a full pack (8.1 V) reaches the low-battery
-  trip (6.6 V) in about 16 minutes: the 15 minutes you see.
+- At about 90 mV per minute, a full pack (8.1 V) reaches the body's
+  low-battery trip of the time (6.6 V; 6.2 V since 2026-11-20) in about
+  16 minutes: the 15 minutes you see.
 
 **Is the low-battery reflex ending play early?** Not in this recording
 (it ended at 7.5 V, no LOW_BATTERY event). The trips (body parameters at the time):
@@ -187,7 +188,8 @@ below is a choice, not a measurement; none has run on the robot yet.
 
 6000 mV is 3.0 V per cell under load, the usual lowest figure for Li-ion
 cells. Not lowered: the rear-up refusal (7400 mV at rest) and the card
-flash refusal (6600 mV). The mind's two limits come with the kernel; the
+flash refusal (6600 mV). So 6600 mV now means three things: the body's LOW
+clear level, the card flash refusal floor and the mind's 0 % mark. The mind's two limits come with the kernel; the
 body's three need the body firmware flashed (or `kilo param set NAME VALUE
 --persist`). What to watch: weak or slow legs near the end, and whether
 the pack's own cutoff comes before 6000 mV (on 2026-10-10 it cut out from

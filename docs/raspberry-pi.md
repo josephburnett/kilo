@@ -28,6 +28,8 @@ Petoi documents them; unconfirmed items are flagged at the end.
 
 ## Kilo mind service (the daemon under systemd)
 
+> **Retired route.** This section runs the Python mind as a service on Raspberry Pi OS. Kilo no longer runs that: the Pi now starts the mind kernel straight from the SD card, with no operating system under it (`docs/fast-boot.md` section 8 lists what is retired). The current setup is `docs/laptop-setup.md`; the kernel is in `kernel/README.md`. This text stays until the owner decides what to do with it.
+
 Kilo's own mind (not Petoi's token protocol) runs as `kilo run`, a daemon that
 owns the serial port and serves `kilo` commands over a Unix socket. Details:
 mind/README.md "Daemon and systemd". On the Pi (joe, mind venv in

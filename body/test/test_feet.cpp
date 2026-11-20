@@ -30,6 +30,7 @@
 #include "../src/core/params.h"
 #include "../src/core/posture.h"
 #include "check.h"
+#include "body_fixture.h"
 #include "fake_eeprom.h"
 #include "fake_link_hal.h"
 #include "tip_plant.h"
@@ -69,19 +70,13 @@ static void collect() {
 }
 
 static void reset(uint8_t cfg_state = CFG_MIGRATED) {
-  g_ee.reset();
-  config_defaults(cfg.img);
-  cfg.state = (ConfigState)cfg_state;
-  params_load(cfg.img);
-  body_init(b, &cfg, nullptr, true);
+  fixture_body(b, cfg, cfg_state);
   g_lh.reset();
   link_init(0xFEE7FEE7u, KILO_HELLO_CAPS_DMP);
   g_lh.feed(frame(KILO_MSG_SET_STREAM, 0xFF, {1, 0, 0}));  // TELEMETRY every tick
   link_poll();
   g_lh.take();
-  in = TickIn();
-  in.imu = IMU_FRESH;
-  in.att.gz = 16384;
+  in = fixture_upright();
   heartbeat = true;
   evlog.clear();
   tlog.clear();
@@ -156,7 +151,7 @@ static bool at_pose(const Pose& p) {
 }
 static double max_step(const int16_t* prev) {
   double m = 0;
-  for (int k = 3; k < DRIVEN_COUNT; k++) m = std::fmax(m, std::fabs((b.arb.out[k] - prev[k]) / 16.0));
+  for (uint8_t k = 3; k < DRIVEN_COUNT; k++) m = std::fmax(m, std::fabs((b.arb.out[k] - prev[k]) / 16.0));
   return m;
 }
 static GoalResult pose(int16_t pitch_a16, int16_t roll_a16, int8_t dh, int8_t xs) {
@@ -786,7 +781,7 @@ static void plant_tick() {
 
 // The joint angles (canonical, a16) of a pose, for the plant alone.
 static void pose_out(const Pose& p, int16_t out[DRIVEN_COUNT]) {
-  for (int k = 0; k < DRIVEN_COUNT; k++) out[k] = 0;
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++) out[k] = 0;
   for (int l = 0; l < 4; l++)
     ik_leg((uint8_t)l, (int16_t)std::lround(p.x[l] * 4), (int16_t)std::lround(p.z[l] * 4), &out[3 + l], &out[7 + l]);
 }

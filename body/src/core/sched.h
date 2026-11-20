@@ -2,16 +2,16 @@
 // using a timer interrupt: nearly all tick work is I2C, which cannot run in
 // an ISR, so an ISR could only set a flag anyway.
 //
-// The deadline advances by exactly 20 ms each tick (a fixed grid: a tick
+// The deadline advances by exactly one tick (KILO_TICK_MS, 20 ms) each tick (a fixed grid: a tick
 // that starts late does not push the next ones later, so there is no drift).
 // If the loop falls more than two ticks behind, it resynchronises instead of
 // running a burst of catch-up ticks, and counts an overrun.
 #ifndef KILO_CORE_SCHED_H
 #define KILO_CORE_SCHED_H
 #include <stdint.h>
+#include "../proto/kilo_protocol.h"
 
-#define TICK_US ((uint32_t)20000)
-#define TICK_MS 20
+#define TICK_US ((uint32_t)KILO_TICK_MS * 1000u)
 
 struct Sched {
   uint32_t next;

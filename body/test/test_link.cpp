@@ -14,6 +14,7 @@
 #include "../src/core/posture.h"
 #include "../src/core/reset.h"
 #include "check.h"
+#include "body_fixture.h"
 #include "fake_eeprom.h"
 #include "fake_link_hal.h"
 
@@ -21,13 +22,7 @@ static Config cfg;
 static Body& b = g_body;
 
 static void setup(uint8_t config_state = CFG_MIGRATED) {
-  g_ee.reset();
-  config_defaults(cfg.img);
-  cfg.state = (ConfigState)config_state;
-  cfg.writing = 0;
-  cfg.newest = 0xFF;
-  params_load(cfg.img);
-  body_init(b, &cfg, nullptr, true);
+  fixture_body(b, cfg, config_state);
   g_lh.reset();
   link_init(0xC0FFEE01u, KILO_HELLO_CAPS_DMP);
 }
@@ -482,9 +477,7 @@ static void test_streams_and_priority(void) {
   setup();
   rx(KILO_MSG_HEARTBEAT, 1, {});
   uint16_t cnt[16];
-  TickIn in = TickIn();
-  in.imu = IMU_FRESH;
-  in.att.gz = 16384;
+  TickIn in = fixture_upright();
   for (int i = 0; i < 26; i++) body_tick(b, in, cnt);
   link_send_events();
   out = g_lh.take();

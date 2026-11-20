@@ -2,8 +2,6 @@
 // cross-checks against the legacy sources: the DMP image bytes and the
 // built-in postures.
 #include <cctype>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <vector>
 #include "../src/proto/crc16.h"
@@ -14,17 +12,7 @@
 #include "../src/core/sched.h"
 #include "../src/hal/dmp_image.h"
 #include "check.h"
-
-#ifndef REPO_ROOT
-#define REPO_ROOT "../.."
-#endif
-
-static std::string slurp(const char* rel) {
-  std::ifstream f(std::string(REPO_ROOT) + "/" + rel);
-  std::stringstream ss;
-  ss << f.rdbuf();
-  return ss.str();
-}
+#include "slurp.h"
 
 // Every integer literal (decimal or 0x hex, optionally negative) in s,
 // skipping /* comments */ (the DMP image has "/* bank # 0 */" markers).
@@ -101,7 +89,7 @@ int main() {
   CHECK(notes_tick(n, 20) && n.hz == 0);      // rest 20 ms
   CHECK(notes_tick(n, 20) && n.hz == 2217);   // 10 ms note still gets a tick
   CHECK(notes_tick(n, 20) && n.hz == 0 && n.count == 0);
-  for (int i = 0; i < NOTES_LEN; i++) CHECK(notes_push(n, 1, 1));
+  for (uint8_t i = 0; i < NOTES_LEN; i++) CHECK(notes_push(n, 1, 1));
   CHECK(!notes_push(n, 1, 1));
   // ---- events: FIFO, bounded, never overwrites.
   EventQueue e;

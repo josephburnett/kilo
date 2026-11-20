@@ -30,7 +30,7 @@ int main() {
   // JOINTS[] names its joint's KILO_JOINT_<NAME>_LO/HI by hand, so check the
   // rows against the id-ordered table.
   static const int8_t spec_limits[JOINT_COUNT][2] = KILO_JOINT_LIMITS_INIT;
-  for (int j = 0; j < JOINT_COUNT; j++)
+  for (uint8_t j = 0; j < JOINT_COUNT; j++)
     CHECKF(joint_lo_a16((uint8_t)j) == spec_limits[j][0] * 16 && joint_hi_a16((uint8_t)j) == spec_limits[j][1] * 16,
            "joint %d limits != spec", j);
   srand(7);
@@ -51,7 +51,7 @@ int main() {
       cal.a2p[j] = (int16_t)a2p;
     }
     cal.b_offset_counts = (uint16_t)(bb * 10);
-    for (int k = 0; k < DRIVEN_COUNT; k++) {
+    for (uint8_t k = 0; k < DRIVEN_COUNT; k++) {
       int j = joint_id((uint8_t)k);
       int lo = joint_lo_a16((uint8_t)j) / 16, hi = joint_hi_a16((uint8_t)j) / 16;
       for (int deg = lo; deg <= hi; deg++) {

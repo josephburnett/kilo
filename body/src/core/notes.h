@@ -8,8 +8,9 @@
 #ifndef KILO_CORE_NOTES_H
 #define KILO_CORE_NOTES_H
 #include <stdint.h>
+#include "../proto/kilo_protocol.h"
 
-#define NOTES_LEN 8
+#define NOTES_LEN KILO_BEEP_MAX_NOTES
 #define NOTE_MIN (-60)
 #define NOTE_MAX_BODY 23
 

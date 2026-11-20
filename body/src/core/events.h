@@ -10,6 +10,7 @@
 #ifndef KILO_CORE_EVENTS_H
 #define KILO_CORE_EVENTS_H
 #include <stdint.h>
+#include "../proto/kilo_protocol.h"
 
 enum EventCode : uint8_t {
   EV_BOOT = 1,
@@ -33,7 +34,7 @@ enum EventCode : uint8_t {
   EV_FEET_UNDERRUN = 19,  // arg = ticks since the last FEET arrived
 };
 
-#define EVENT_QUEUE_LEN 8
+#define EVENT_QUEUE_LEN KILO_EVENT_QUEUE_DEPTH
 
 struct Event {
   uint8_t code;

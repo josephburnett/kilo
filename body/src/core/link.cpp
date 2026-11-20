@@ -25,7 +25,6 @@ static_assert(SAME(EV_BOOT, KILO_EVENT_BOOT) && SAME(EV_FELL, KILO_EVENT_FELL) &
                   SAME(EV_TX_DROPPED, KILO_EVENT_TX_DROPPED) && SAME(EV_IR_KEY, KILO_EVENT_IR_KEY) &&
                   SAME(EV_FEET_UNDERRUN, KILO_EVENT_FEET_UNDERRUN),
               "core/events.h codes != spec");
-static_assert(SAME(EVENT_QUEUE_LEN, KILO_EVENT_QUEUE_DEPTH), "event queue depth != spec");
 static_assert(SAME(GOAL_BAD_ARG, KILO_GOAL_REFUSED_REASON_BAD_ARG) && SAME(GOAL_LOW_BATT, KILO_GOAL_REFUSED_REASON_LOW_BATT) &&
                   SAME(GOAL_STALE, KILO_GOAL_REFUSED_REASON_STALE) &&
                   SAME(GOAL_FALLEN, KILO_GOAL_REFUSED_REASON_FALLEN) &&
@@ -55,10 +54,7 @@ static_assert(SAME(CFG_OK, KILO_CONFIG_STATE_OK) && SAME(CFG_MIGRATED, KILO_CONF
 static_assert(SAME(OWN_IDLE, KILO_OWNER_IDLE) && SAME(OWN_GAIT, KILO_OWNER_GAIT) && SAME(OWN_TRICK, KILO_OWNER_TRICK) &&
                   SAME(OWN_REFLEX, KILO_OWNER_REFLEX) && SAME(OWN_PI_HOLD, KILO_OWNER_PI_HOLD),
               "owners != spec");
-static_assert(SAME(DRIVEN_COUNT, KILO_JOINT_COUNT) && SAME(JOINT_COUNT, KILO_CHANNEL_COUNT), "joint counts != spec");
-static_assert(SAME(PCA_FULL_OFF, KILO_PCA_FULL_OFF_BIT), "full-off bit != spec");
 static_assert(SAME(JOINT_OFF, KILO_HEAD_NOT_HELD), "SET_HEAD not-held value != JOINT_OFF");
-static_assert(SAME(NOTES_LEN, KILO_BEEP_MAX_NOTES), "BEEP queue != spec");
 static_assert(SAME(GOAL_BUSY, KILO_ACK_STATUS_BUSY) && SAME(GOAL_NO_TRICK, KILO_ACK_STATUS_NO_TRICK) &&
                   SAME(GOAL_STALE, KILO_ACK_STATUS_STALE) && SAME(GOAL_LOW_BATT, KILO_ACK_STATUS_REFUSED_LOW_BATT),
               "TRICK_PLAY results != ACK statuses");
@@ -70,8 +66,7 @@ static_assert(SAME(KF_LINEAR, KILO_EASING_LINEAR) && SAME(KF_COSINE, KILO_EASING
                   SAME(KF_STEP, KILO_EASING_STEP) && SAME(KF_BALANCE_BIT, KILO_KEYFRAME_FLAGS_BALANCE),
               "keyframe easing/flags != spec");
 
-#define DEDUP_TICKS (KILO_DEDUP_WINDOW_MS / 20u)  // 25 ticks
-#define TICKS_PER_S 50u
+#define DEDUP_TICKS (KILO_DEDUP_WINDOW_MS / KILO_TICK_MS)  // 25 ticks
 
 // The one body (app/main.cpp; the host tests define their own). A global
 // rather than a pointer: on the AVR every access is then a direct load.
@@ -483,7 +478,7 @@ KILO_NOINLINE static bool due(uint16_t tick, uint8_t div) { return div && tick %
 
 void link_tick(void) {
   const Body& b = *B;
-  if (++L.sec_ticks >= TICKS_PER_S) {
+  if (++L.sec_ticks >= KILO_TICK_HZ) {
     L.sec_ticks = 0;
     L.cnt.uptime_s++;
     L.refused_mask = 0;

@@ -13,7 +13,6 @@
 #include "config.h"
 
 static_assert(KILO_PARAM_COUNT <= CFG_PARAM_COUNT, "every param needs a persisted slot");
-static_assert(KILO_PARAM_SLOTS == CFG_PARAM_COUNT, "spec param_slots = config slot params[]");
 
 extern int16_t g_param[KILO_PARAM_COUNT];
 
@@ -27,6 +26,6 @@ void param_info(uint8_t id, int16_t out[3]);
 bool param_ok(uint8_t id, int16_t v);
 
 // Derived values in ticks, for the reflexes.
-inline uint16_t param_ms_ticks(uint8_t id) { return (uint16_t)((uint16_t)g_param[id] / 20u); }
+inline uint16_t param_ms_ticks(uint8_t id) { return (uint16_t)((uint16_t)g_param[id] / KILO_TICK_MS); }
 
 #endif

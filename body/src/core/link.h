@@ -75,7 +75,7 @@ void link_hal_sample(LinkSample* s);                   // and reset the "since" 
 void link_hal_stats(kilo_stats_t* s);
 uint16_t link_hal_imu_packets(void);                   // DMP packets since boot (wraps)
 void link_hal_imu_raw(int16_t raw[6]);                 // last packet: accel xyz, gyro xyz
-bool link_hal_pca_read(uint16_t counts[16]);           // false on an I2C error
+bool link_hal_pca_read(uint16_t counts[KILO_CHANNEL_COUNT]);           // false on an I2C error
 void link_hal_imu_offsets(const int16_t offsets[6]);   // write the MPU offset registers
 void link_hal_reboot(void);                            // after the ACK is queued
 // SET_EYES (led_mask, r, g, b): shown at once unless an echo is being

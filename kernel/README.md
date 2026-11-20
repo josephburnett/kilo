@@ -782,6 +782,81 @@ The runner's wind-down ends in a poweroff, which the daemon ran through
 systemd. The kernel cannot switch the Pi off: it logs `behaviour runner
 asked for poweroff ...` once and keeps the link up (the runner has stopped).
 
+### The remote's keys
+
+This is the one map of the IR remote, as the C++ mind has it. The table is
+`mind/remote/keys.cpp`; what each key does is `mind/remote/remote.h`. Other
+documents point here.
+
+Keys are named by where they sit on the remote: columns A, B and C from
+left to right, rows 1 to 7 from the bottom (B7 is the middle key of the top
+row). The body decodes the remote and passes each key on to the mind as
+`EVENT IR_KEY`, with the key's code (the byte the remote sends, in the NEC
+format all such remotes use) plus 0x100 while the key is held down. A held
+key's repeats do nothing: each press counts once. Every key leaves one line
+in the log: `remote <key> (0x.., <label>): <what it did>`.
+
+**The gait and turn keys make Kilo walk: use the remote with Kilo on the
+floor only, never on a desk.**
+
+| Key | Code | What it does |
+|---|---|---|
+| A7 | 0xA2 | sleep: the quick stop (below), then lie down (REST). With light sleep on, 30 s of nothing after it puts the Pi to sleep (docs/power.md) |
+| B7 | 0x62 | faster: one speed level up, while walking. While turning in place: stop turning and walk straight forward. Standing: nothing |
+| C7 | 0xE2 | freeze: at once, ahead of any key still waiting. The quick stop, stop a trick and the behaviour runner; standing, Kilo keeps his posture. Then every key but B6 and A7 is ignored |
+| A6 | 0x22 | standing: turn left in place, in the gait last chosen, at 1×. Walking forward or backward: steer one step more to the left |
+| B6 | 0x02 | stand: the quick stop, then stand |
+| C6 | 0xC2 | the same as A6, to the right |
+| A5 | 0xE0 | start the behaviour runner (Kilo acting on his own, `mind/behaviour/`). While it runs, B6, A7 and C7 stop it and then do their own job, and the other keys are ignored (the distance guard's sitting lets the walking keys through: docs/distance-guard.md) |
+| B5 | 0xA8 | slower: one speed level down, past the slowest into backward. While turning in place: stop turning and walk straight backward |
+| C5 | 0x90 | the quick stop, then the calibration posture (CALIB) |
+| A4 | 0x68 | trot |
+| B4 | 0x98 | crawl |
+| C4 | 0xB0 | walk |
+| A2 | 0x10 | rear up, only when switched on (below); otherwise nothing |
+| B2 | 0x38 | a meow (docs/sound.md). It moves nothing, so it works at any time, also while Kilo walks |
+| A3, B3, C3, C2, A1, B1, C1 | | nothing (logged as ignored) |
+
+**Gait keys** (A4, B4, C4). Standing: walk forward in that gait at level
++3. Walking in another gait: change to it and keep the speed level, the
+direction and the steer (between the walk and the trot at the next step;
+into or out of the crawl once every leg has stepped home, up to about 5 s).
+The gait already in use: walk straight forward again at the same speed
+(from a turn, a steer or from backward); already straight forward, nothing
+changes.
+
+**Speed levels.** Levels +1 to +5 walk forward at 0.4, 0.7, 1, 1.3 and 1.6
+times the trot's default speed (the walk's and the crawl's: 0.4, 0.7, 1,
+1.15, 1.25), and -1 to -5 walk backward at the same factors. There is no
+level 0: from +1, B5 goes to -1, and from -1, B7 goes to +1. B7 stops at +5
+and B5 at -5. The speeds are limited as `kilo walk --speed` limits them,
+and the log line shows the real speed. In mm/s, levels 1 to 5: crawl 8.9,
+15.6, 22.2, 25.6, 26.9; walk 32, 56, 80, 92, 97; trot 57.6, 100.8, 144,
+187.2, 230.4.
+
+**Steering.** While walking forward or backward, each press of A6 or C6
+bends the path one step further that way, up to 3 each way; the other key
+steps back through straight. The steps shorten the inner side's stride (how
+far a foot travels per step) by 0.25, 0.5 and 1 of it and lengthen the
+outer side's as much: a circle of about 1 m, 0.5 m and 0.25 m radius. The
+nose turns toward the key's side, walking forward or backward. B7 and B5
+keep the steer; the gait key in use straightens it; every stop forgets it.
+
+**Stops.** B6, A7, C5 and C7 stop a walk with the quick stop: the feet go
+down where they are, the body stops in about 0.2 s, and the legs square up
+(`mind/planner/plan.h` halt(); docs/walking-and-balance.md section 14). It
+ends in STANCE (the standing pose the walk uses) with the servos on. Every
+stop sets the speed level back to +3, the heading to straight and the steer
+to 0. A playing trick is stopped first (TRICK_STOP).
+
+**The rear-up key.** A2 is off unless the kernel is built with
+`KILO_REAR_UP=1`, `2` or `3` (`rear_up_key` in "The Mind's settings";
+docs/rear-up-trick.md). Switched on, A2 stops a walk and rears Kilo up to
+stage 1. A2 again while he goes up to or holds a stage's top takes him on
+to the next stage, up to the one built in; A2 at any other moment, B6 or C7
+bring him down to SIT. A2 is refused below 7400 mV (the highest battery
+reading of the last 20 s at rest) and on USB power.
+
 ### Boot probe
 
 GPIO21, header pin 40 (pin 39 is ground), outside the NyBoard socket's pins
@@ -842,9 +917,36 @@ authenticated (only built-in keys, "Who may talk to Kilo: keys").
 
 ### Flashing the body
 
-Phase P4 (docs/fast-boot.md §6; the core's side in `mind/README.md`
-"Flashing"). The flasher (`mind/flash/flasher.*`) programs the 328P
-through optiboot on the body link's UART, resetting it with GPIO4.
+Phase P4 (docs/fast-boot.md §6 has the design). This is the one place
+that lists the steps of a body flash; other documents point here. The
+flasher (`mind/flash/flasher.*`) programs the 328P through optiboot (the
+small loader that stays in the chip and accepts a new program for about a
+second after a reset) on the body link's UART, resetting it with GPIO4.
+
+**The steps.**
+
+1. **Build, on the laptop** (`mind/kilo/tools/flash.py`): `arduino-cli
+   compile` of `body/` with the size flags and the commit's first 8 hex
+   digits as `-DKILO_BUILD`, then `body/tools/size_check.sh --elf` on the
+   result. `kilo/tools/body_image.py` turns it into `body.bin` (the raw
+   flash bytes, so the mind never parses Intel HEX) and `body.json` (the
+   manifest: build, size, CRC-32). `--image body.bin` skips the build.
+2. **Get the image to the mind**, one of two ways: over the network with
+   `kilo flash --host IP [--persist]`, or on the SD card with `kilo card
+   CARD` (docs/laptop-setup.md "The card route, step by step") or `kilo
+   flash --sd MOUNT`. Both are below.
+3. **The mind flashes** (`mind/flash/flasher.h` has the detail): it takes
+   the UART from the link (the body's watchdog covers the gap), switches to
+   115200 baud, pulls the body's RESET low on GPIO4 for 100 ms and lets it
+   go (never driving it high), then speaks STK500v1 to optiboot: sync,
+   check the 328P's signature, write the image in 128-byte pages, read each
+   page back to compare. An attempt that fails is retried once from a fresh
+   reset; optiboot survives an interrupted flash.
+4. **Check**: back at the link's baud, the new firmware's HELLO must
+   report the image's build and the reset cause FLASHED. Through the
+   network, `kilo flash` prints it (`verified: HELLO build 3d441ec0 reset
+   FLASHED`); from the card, `body-result.txt` records it and Kilo trills
+   (or hisses on a failure or a refusal).
 
 **From the laptop**, `kilo flash --host IP [--persist]`: `HostServer`
 fills a 32 KB image from `FLASH_BEGIN`/`FLASH_DATA`, starts the flasher at
@@ -878,8 +980,9 @@ decides, in this order:
    CRC-32) **failed**: not retried (`NOT flashing: a flash of this same
    image failed at an earlier boot`) until `body.bin` or `body.json`
    change; `kilo card` removes `body-result.txt` when it writes them;
-5. the battery reads under 6600 mV (too low to flash safely; the
-   body's own LOW trip is lower, 6200 mV): **refused**, checked again at the next boot; on USB power
+5. the battery reads under 6600 mV, the card flash refusal floor (too low
+   to flash safely; the body's own LOW trip is lower, 6200 mV, and clears
+   at the same 6600 mV): **refused**, checked again at the next boot; on USB power
    or with no TELEMETRY there is no reading and no refusal;
 6. otherwise the flasher starts with the card's image (its own 32 KB
    buffer, no `--persist`): **flashed** once the HELLO after the reset

@@ -18,6 +18,7 @@
 #include "../src/core/reflex.h"
 #include "../src/proto/crc16.h"
 #include "check.h"
+#include "body_fixture.h"
 #include "fake_eeprom.h"
 #include "fake_link_hal.h"
 
@@ -28,28 +29,14 @@ static TickIn in;
 static std::vector<Event> evs;  // every event since reset()
 
 static void reset(uint8_t state = CFG_MIGRATED) {
-  g_ee.reset();
-  config_defaults(cfg.img);
-  cfg.state = (ConfigState)state;
-  cfg.writing = 0;
-  cfg.newest = 0xFF;
-  params_load(cfg.img);
-  body_init(b, &cfg, nullptr, true);
+  fixture_body(b, cfg, state);
   g_lh.reset();
   link_init(1, 0);
-  in = TickIn();
-  in.imu = IMU_FRESH;
-  in.att.gz = 16384;
+  in = fixture_upright();
   evs.clear();
 }
 
-static void drain() {
-  const Event* e;
-  while ((e = events_peek(b.ev)) != nullptr) {
-    evs.push_back(*e);
-    events_pop(b.ev);
-  }
-}
+static void drain() { fixture_drain(b.ev, evs); }
 
 static void tick(int n = 1) {
   for (int i = 0; i < n; i++) {
@@ -82,7 +69,7 @@ static void att(int roll_deg, int pitch_deg, int rate_dps = 0) {
   in.att.rate_roll = in.att.rate_pitch = in.att.rate_yaw = (int16_t)(rate_dps * 16);
 }
 static bool at_posture(uint8_t p) {
-  for (int k = 0; k < DRIVEN_COUNT; k++)
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++)
     if (b.arb.out[k] != joint_clamp(joint_id((uint8_t)k), posture_angle(p, (uint8_t)k))) return false;
   return true;
 }
@@ -92,12 +79,12 @@ static int16_t rc_out(int i, bool mirror, int k) {
   return joint_clamp(joint_id((uint8_t)k), posture_angle(id, (uint8_t)k));
 }
 static bool at_rc(int i, bool mirror) {
-  for (int k = 0; k < DRIVEN_COUNT; k++)
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++)
     if (b.arb.out[k] != rc_out(i, mirror, k)) return false;
   return true;
 }
 static bool all_owned(uint8_t own) {
-  for (int k = 0; k < DRIVEN_COUNT; k++)
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++)
     if (b.arb.owner[k] != own) return false;
   return true;
 }
@@ -252,7 +239,7 @@ static void test_fall_and_recover(bool right_up) {
   std::memcpy(prev, b.arb.out, sizeof prev);
   for (int t = 0; t < 40; t++) {
     tick();
-    for (int k = 0; k < DRIVEN_COUNT; k++) {
+    for (uint8_t k = 0; k < DRIVEN_COUNT; k++) {
       CHECK(std::abs(b.arb.out[k] - prev[k]) <= PARAM(SLEW_MAX_A16));
       prev[k] = b.arb.out[k];
     }
@@ -293,7 +280,7 @@ static void test_retries_and_failure() {
   tick(FALL_LIMP_TICKS - 1);
   CHECK(b.arb.out[0] != JOINT_OFF);
   tick();
-  for (int k = 0; k < DRIVEN_COUNT; k++) CHECK(b.arb.out[k] == JOINT_OFF);
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++) CHECK(b.arb.out[k] == JOINT_OFF);
   tick();
   CHECK(b.fall.state == FS_UPRIGHT && b.holder == RH_NONE && body_mode(b) == KILO_MODE_LIMP);
   tick(100);  // LIMP: no detection although still on its side
@@ -394,7 +381,7 @@ static void test_goals_while_fallen() {
   CHECK(body_goal_posture(b, old, POSTURE_LIMP, 0, 0) == GOAL_OK);
   CHECK(b.fall.state == FS_UPRIGHT && b.holder == RH_NONE && !b.arb.reflex_active);
   tick();
-  for (int k = 0; k < DRIVEN_COUNT; k++) CHECK(b.arb.out[k] == JOINT_OFF);
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++) CHECK(b.arb.out[k] == JOINT_OFF);
   CHECK(body_mode(b) == KILO_MODE_LIMP && count(EV_RECOVERED) == 0);
   // Through the link: SET_POSTURE refused FALLEN as EVENT GOAL_REFUSED.
   reset();

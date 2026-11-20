@@ -12,7 +12,6 @@
 #define KILO_HAL_ULTRASONIC_H
 #include <stdint.h>
 
-#define US_PERIOD_TICKS 4      // 80 ms: longer than the module's ~60 ms ring-down
 #define US_TIMEOUT_US 25000UL  // no echo end within 25 ms (~4.3 m) = no echo
 
 void us_init(void);

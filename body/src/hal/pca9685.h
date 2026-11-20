@@ -7,6 +7,7 @@
 #ifndef KILO_HAL_PCA9685_H
 #define KILO_HAL_PCA9685_H
 #include <stdint.h>
+#include "../core/joints.h"
 
 #define PCA_ADDR 0x40
 
@@ -26,7 +27,7 @@
 // Boot probe. True (= warm start) if the chip is awake, auto-incrementing,
 // set to our prescaler, and at least one channel is driving a pulse; then
 // counts[ch] holds each channel's OFF count (bit 12 = full-off).
-bool pca_probe_warm(uint16_t counts[16]);
+bool pca_probe_warm(uint16_t counts[JOINT_COUNT]);
 
 // Cold start: configure (sleep, prescale, totem-pole outputs, auto-
 // increment) with every channel full-off, then wake. Blocks ~1 ms (boot only).
@@ -35,9 +36,9 @@ uint8_t pca_init_cold(void);
 // One 66 B burst: address, LED0_ON_L, then ON_L ON_H OFF_L OFF_H for all 16
 // channels with auto-increment. ON is always 0 (as legacy). The outputs all
 // change together at the STOP (MODE2.OCH = 0), so a pose is never half-new.
-uint8_t pca_write_all(const uint16_t counts[16]);
+uint8_t pca_write_all(const uint16_t counts[JOINT_COUNT]);
 
 // Read the 16 OFF counts back (PCA_COUNTS, warm boot).
-uint8_t pca_read_all(uint16_t counts[16]);
+uint8_t pca_read_all(uint16_t counts[JOINT_COUNT]);
 
 #endif

@@ -6,6 +6,7 @@
 #include "../src/core/posture.h"
 #include "../src/core/reset.h"
 #include "check.h"
+#include "body_fixture.h"
 #include "fake_eeprom.h"
 
 static Config cfg;
@@ -22,7 +23,7 @@ static bool all_off() {
   return true;
 }
 static bool at_posture(uint8_t p) {
-  for (int k = 0; k < DRIVEN_COUNT; k++) {
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++) {
     uint8_t j = joint_id((uint8_t)k);
     int16_t a = joint_clamp(j, posture_angle(p, (uint8_t)k));
     if (counts[joint_channel(j)] != joint_counts(cfg.img.cal, j, a)) return false;
@@ -40,12 +41,8 @@ static bool has_event(uint8_t code, int16_t arg = -1) {
 }
 static void clear_events() { events_init(b.ev); }
 static void reset(const int16_t* warm = nullptr) {
-  config_defaults(cfg.img);
-  cfg.state = CFG_MIGRATED;
-  body_init(b, &cfg, warm, true);
-  in = TickIn();
-  in.imu = IMU_FRESH;
-  in.att.gz = 16384;
+  fixture_body(b, cfg, CFG_MIGRATED, warm);
+  in = fixture_upright();
 }
 
 int main() {
@@ -62,12 +59,12 @@ int main() {
   // ---- REST -> STAND over the default 25 ticks: monotonic, slew-bounded.
   CHECK(body_goal_posture(b, b.epoch, POSTURE_STAND, 0, 0) == GOAL_OK);
   int16_t prev[DRIVEN_COUNT];
-  for (int k = 0; k < DRIVEN_COUNT; k++) prev[k] = b.arb.out[k];
+  for (uint8_t k = 0; k < DRIVEN_COUNT; k++) prev[k] = b.arb.out[k];
   int moved_ticks = 0;
   for (int t = 0; t < 30; t++) {
     tick();
     bool moved = false;
-    for (int k = 0; k < DRIVEN_COUNT; k++) {
+    for (uint8_t k = 0; k < DRIVEN_COUNT; k++) {
       int16_t d = (int16_t)(b.arb.out[k] - prev[k]);
       CHECK(std::abs(d) <= PARAM(SLEW_MAX_A16));
       int16_t dir = (int16_t)(posture_angle(POSTURE_STAND, (uint8_t)k) - posture_angle(POSTURE_REST, (uint8_t)k));
@@ -161,7 +158,7 @@ int main() {
     config_defaults(cfg.img);
     int16_t warm[DRIVEN_COUNT];
     uint16_t want[16];
-    for (int k = 0; k < DRIVEN_COUNT; k++) {
+    for (uint8_t k = 0; k < DRIVEN_COUNT; k++) {
       uint8_t j = joint_id((uint8_t)k);
       uint16_t c = joint_counts(cfg.img.cal, j, posture_angle(POSTURE_STAND, (uint8_t)k));
       want[joint_channel(j)] = c;
@@ -172,7 +169,7 @@ int main() {
     for (int i = 0; i < WARM_HOLD_TICKS - 1; i++) {
       tick();
       bool same = true;
-      for (int k = 0; k < DRIVEN_COUNT; k++) {
+      for (uint8_t k = 0; k < DRIVEN_COUNT; k++) {
         uint8_t ch = joint_channel(joint_id((uint8_t)k));
         if (counts[ch] != want[ch]) same = false;
       }
@@ -193,7 +190,7 @@ int main() {
       tick();
     }
     bool same = true;
-    for (int k = 0; k < DRIVEN_COUNT; k++) {
+    for (uint8_t k = 0; k < DRIVEN_COUNT; k++) {
       uint8_t ch = joint_channel(joint_id((uint8_t)k));
       if (counts[ch] != want[ch]) same = false;
     }
@@ -206,12 +203,9 @@ int main() {
     ResetRecord rec = {0, 0, 0, 0, 0};
     uint16_t last;
     reset_classify(rec, 5, last);  // cold boot (invalid magic)
-    config_defaults(cfg.img);
-    cfg.state = CFG_MIGRATED;
+    fixture_config(cfg);
     body_init(b, &cfg, nullptr, true, rec.epoch);
-    in = TickIn();
-    in.imu = IMU_FRESH;
-    in.att.gz = 16384;
+    in = fixture_upright();
     CHECK(b.epoch == 1);
     for (int boot = 0; boot < 3; boot++) {
       uint8_t old = b.epoch;

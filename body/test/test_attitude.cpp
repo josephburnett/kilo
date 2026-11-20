@@ -3,12 +3,11 @@
 // and the active dmpGetYawPitchRoll() branch with the gz < 0 reflection.
 #include <cmath>
 #include <cstdlib>
-#include <fstream>
 #include <random>
-#include <sstream>
 #include <string>
 #include "../src/core/attitude.h"
 #include "check.h"
+#include "slurp.h"
 
 static void legacy_ypr(const int16_t qi[4], double* pitch, double* roll, double* gz_out, double* horiz) {
   double w = qi[0] / 16384.0, x = qi[1] / 16384.0, y = qi[2] / 16384.0, z = qi[3] / 16384.0;
@@ -42,13 +41,6 @@ static void legacy_ypr_float(const int16_t qi[4], float* pitch, float* roll) {
   const float degPerRad = (float)(180.0 / M_PI);
   *pitch = p * degPerRad;
   *roll = r * degPerRad;
-}
-
-static std::string slurp(const char* rel) {
-  std::ifstream f(std::string(REPO_ROOT) + "/" + rel);
-  std::stringstream s;
-  s << f.rdbuf();
-  return s.str();
 }
 
 static double wrap(double d) { return std::fmod(d + 540.0, 360.0) - 180.0; }

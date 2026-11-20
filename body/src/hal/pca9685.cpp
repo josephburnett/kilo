@@ -15,7 +15,7 @@
 #define MODE1_SLEEP 0x10
 #define MODE2_OUTDRV 0x04
 
-bool pca_probe_warm(uint16_t counts[16]) {
+bool pca_probe_warm(uint16_t counts[JOINT_COUNT]) {
   uint8_t m1, pre;
   if (i2c_read(PCA_ADDR, MODE1, &m1, 1) || i2c_read(PCA_ADDR, PRESCALE, &pre, 1)) return false;
   // Power-on state is SLEEP set and prescale 30: that is a cold chip.
@@ -23,7 +23,7 @@ bool pca_probe_warm(uint16_t counts[16]) {
   if (pca_read_all(counts)) return false;
   // Awake but every servo channel off (legacy shutServos) means the pose is
   // unknown again: treat as cold.
-  for (uint8_t c = 0; c < 16; c++)
+  for (uint8_t c = 0; c < JOINT_COUNT; c++)
     if (!(counts[c] & PCA_FULL_OFF)) return true;
   return false;
 }
@@ -44,9 +44,9 @@ uint8_t pca_init_cold(void) {
   return e;
 }
 
-uint8_t pca_write_all(const uint16_t counts[16]) {
+uint8_t pca_write_all(const uint16_t counts[JOINT_COUNT]) {
   i2c_begin_write(PCA_ADDR, LED0_ON_L);
-  for (uint8_t c = 0; c < 16; c++) {
+  for (uint8_t c = 0; c < JOINT_COUNT; c++) {
     uint16_t v = counts[c];
     i2c_put(0);  // ON_L
     i2c_put(0);  // ON_H
@@ -56,9 +56,9 @@ uint8_t pca_write_all(const uint16_t counts[16]) {
   return i2c_end();
 }
 
-uint8_t pca_read_all(uint16_t counts[16]) {
+uint8_t pca_read_all(uint16_t counts[JOINT_COUNT]) {
   i2c_begin_read(PCA_ADDR, LED0_ON_L);
-  for (uint8_t c = 0; c < 16; c++) {
+  for (uint8_t c = 0; c < JOINT_COUNT; c++) {
     i2c_get(false);  // ON_L
     i2c_get(false);  // ON_H
     uint8_t lo = i2c_get(false);
