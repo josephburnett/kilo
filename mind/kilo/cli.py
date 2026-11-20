@@ -12,6 +12,8 @@
     kilo flash --host IP [--persist] | --sd MOUNT   [--image body.bin [--manifest body.json]]   (a C++ mind, P4)
     kilo reboot --host IP[:PORT]   restart a C++ mind (the Pi: back to its SD card's boot, e.g. the netboot loader)
     kilo update --host IP[:PORT] [--image kernel7.img] [--force] [--wait S]   a new kernel onto the mind's SD card
+    kilo card PATH [NAME=VALUE ...] [--no-build] | --status | --fetch   the kernel and the body firmware onto Kilo's
+                                   SD card in this laptop's reader; what the mind left there (kilo.cli_card)
     kilo runs --host IP[:PORT] [--fetch [N|all|last] [--out DIR]] [--delete BOOT|all]   the walks and tricks the
                                    mind recorded; download them (kilo walks: the same)
     kilo record status|fetch [--last 10m|--all ...]|save on|off|now --host IP   the flight recorder (kilo.cli_record)
@@ -290,6 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
     __import__("kilo.cli_walk").cli_walk.add_parser(sub, LINK_COMMANDS)  # kilo walk, kilo pose (cli_walk.py)
     add_log_parser(sub)
     __import__("kilo.cli_find").cli_find.add_parser(sub)  # kilo find (cli_find.py)
+    __import__("kilo.cli_card").cli_card.add_parser(sub)  # kilo card PATH (cli_card.py)
     seen: set[int] = set()
     for name, sp in sub.choices.items():  # `kilo status --host IP` too (`kilo log --host`: kilo.cli_host)
         if name not in ("log", "find") and id(sp) not in seen:  # an alias (walks: runs) is the same parser
@@ -1007,7 +1010,8 @@ PORT_COMMANDS = {"flash": cmd_flash, "vbody": cmd_vbody, "run": cmd_run, "daemon
                  "log": cmd_log, "reboot": cmd_reboot, "update": cmd_update, "runs": cmd_recorder,
                  "walks": cmd_recorder, "record": cmd_recorder, "bench": cmd_recorder, "metrics": cmd_recorder,
                  "key": cmd_key, "find": lambda args: __import__("kilo.cli_find").cli_find.cmd_find(args),
-                 "power": lambda args: __import__("kilo.cli_power").cli_power.offline(args)}
+                 "power": lambda args: __import__("kilo.cli_power").cli_power.offline(args),
+                 "card": lambda args: __import__("kilo.cli_card").cli_card.cmd_card(args)}
 # Link-command modes that must send nothing, so they cannot share the daemon's port.
 SILENT_MODES = {"monitor": ("passive", "--passive"), "posture": ("then_watch", "--then-watch"),
                 "trick": ("then_watch", "--then-watch")}

@@ -313,10 +313,11 @@ optiboot body reads. Without it the edges are only logged.
 ### On the Circle kernel (`kernel/src/`)
 
 Wired as above, with the GPIO4 `Gpio`, the PL011's `set_baud()` switching
-in place, the boot-time flash from SD (path B: after the first HELLO or
-3 s, `parse_manifest()`, `load_from()`, `needs_flash()`) and `--persist`
-(`body.bin`, then `body.json`; `persist_done()` even when the write
-fails): kernel/README.md "Flashing the body". `kilo flash --rollback`
+in place, the boot-time flash from SD (`flash/cardflash.h`, `CardFlash`:
+after the first HELLO and TELEMETRY or 3 s, the rules there, the outcome in
+`body-result.txt`, a failed image not retried) and `--persist` (`body.bin`,
+then `body.json`; `persist_done()` even when the write fails):
+kernel/README.md "Flashing the body" and "Three ways to install". `kilo flash --rollback`
 (keep the last good image on SD) is not designed yet.
 
 ## Updating the kernel

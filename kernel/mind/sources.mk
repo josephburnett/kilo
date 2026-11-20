@@ -32,11 +32,12 @@ MIND_SRCS += \
 	mind/net/noise.cpp
 
 # Body flashing (docs/fast-boot.md §6, P4): the image, its CRC-32 and
-# manifest, and the STK500v1 flasher.
+# manifest, the STK500v1 flasher, and the boot-time flash from the SD card.
 MIND_SRCS += \
 	mind/flash/crc32.cpp \
 	mind/flash/image.cpp \
-	mind/flash/flasher.cpp
+	mind/flash/flasher.cpp \
+	mind/flash/cardflash.cpp
 
 # The mind's own kernel onto its SD card (UPDATE_*): the image, its checks
 # and the write through the platform's KernelStore.

@@ -13,7 +13,10 @@
 // kernel/host/tests/fake_optiboot.py reads. With --card DIR it also takes
 // kernel updates (UPDATE_*, mind/update/updater.h): DIR stands for the SD
 // card's FAT partition (kernel7.img, kernel7.new, kernel7.old there, posix.h
-// DirStore); without --card UPDATE_BEGIN is refused UNSUPPORTED.
+// DirStore); without --card UPDATE_BEGIN is refused UNSUPPORTED. With --card
+// it also runs the boot-time flash check as the Pi does (mind/flash/
+// cardflash.h): DIR/body.json and DIR/body.bin flashed once if the body
+// runs another build, the outcome in DIR/body-result.txt.
 //
 // The laptop channel needs a key (kernel/README.md "Who may talk to Kilo:
 // keys"), as on the Pi: the clients' public keys come from
@@ -35,6 +38,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "link/names.h"
+#include "flash/cardflash.h"
 #include "flash/flasher.h"
 #include "flash/image.h"
 #include "link/serial_link.h"
@@ -147,13 +151,25 @@ int usage() {
           "  --rear-up[=N]  the remote's A2 starts the rear_up trick at stage N (1 rear_up, the default,\n"
           "                 2 rear_up_2, 3 rear_up_3; off: A2 does nothing; KILO_REAR_UP on the Pi)\n"
           "  --authorized-keys FILE  the laptops' public keys --listen accepts (default %s)\n"
-          "  --card DIR  take kernel updates (kilo update --host) into DIR as if it were the SD card\n"
+          "  --card DIR  take kernel updates (kilo update --host) into DIR as if it were the SD card, and\n"
+          "              flash DIR/body.bin at start if the body runs another build (DIR/body-result.txt)\n"
           "exit status: 0 done (a HELLO seen), 1 no HELLO or the port failed, 2 the body speaks another\n"
           "             protocol major, 3 REBOOT from a laptop client (kilo reboot --host) or a kernel\n"
           "             update installed in --card DIR (kilo update --host), 64 bad usage\n",
           KILO_AUTHORIZED_KEYS);
   return 64;
 }
+
+// The boot-time flash check's sounds and the walk it stops (as the Circle kernel's CCardFlashHost).
+class CardHost final : public CardFlashHost {
+ public:
+  explicit CardHost(Mind& mind) : mind_(mind) {}
+  void card_sound(const char* name, const char* why) override { mind_.say(name, why, true); }
+  void card_before_flash() override { mind_.walker().abort(); }
+
+ private:
+  Mind& mind_;
+};
 
 }  // namespace
 
@@ -267,11 +283,19 @@ int main(int argc, char** argv) {
   // --card: the kernel updater on a directory, its 4 MB buffer on the heap
   // (as on the Pi); they live until the program ends.
   KernelUpdater* updater = nullptr;
+  CardFlash* card_flash = nullptr;
   if (card != nullptr) {
     DirStore* store = new DirStore(card, log);
     updater = new KernelUpdater(new uint8_t[kKernelImageMax], kKernelImageMax, *store, clock, log);
     mind.host().attach_updater(*updater);  // polled by the Mind's poll() too
     logf(log, LogLevel::Info, "kernel updates go to %s (--card)", card);
+    // The boot-time flash check on the same store, with a 32 KB image of its own (as on the Pi).
+    static FlashImage card_image;
+    static CardHost card_host(mind);
+    card_flash = new CardFlash(*store, card_image, flasher, mind.link(), clock, log);
+    card_flash->set_ring(&mind.log());
+    card_flash->set_host(&card_host);
+    card_flash->set_mind_build((uint32_t)KILO_MIND_BUILD);
   }
   mind.set_tap(&window);
   // The flight recorder's store, on the heap, once (as on the Pi; --record-mb
@@ -300,6 +324,7 @@ int main(int argc, char** argv) {
     }
   }
   mind.start();
+  if (card_flash != nullptr) card_flash->begin();
 
   const uint64_t start = clock.now_us();
   const uint64_t end = duration_s >= 0 ? start + (uint64_t)(duration_s * 1e6) : UINT64_MAX;
@@ -310,6 +335,7 @@ int main(int argc, char** argv) {
     uint64_t t_poll = clock.now_us();
     mind.poll();
     window.add_poll(clock.now_us() - t_poll);
+    if (card_flash != nullptr) card_flash->poll(!mind.host().link_paused() && !updater->busy());
     if (!link.connected()) {
       logf(log, LogLevel::Error, "port %s failed", port);
       status = 1;

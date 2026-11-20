@@ -441,7 +441,8 @@ Copy into the results the lines starting with:
 **Optional, keep it on the card.** Run the same command with `--persist`.
 Then the log should also show `SD: --persist: wrote body.bin ...`. Power
 the Pi off and on and, after the even blink, look in the log for `boot
-flash check: the body runs build ..., the card's: no flash`: at every boot
+flash check: the body runs build X, the card has build X (... bytes): no
+flash`: at every boot
 the Pi compares the card's firmware with Kilo's and flashes only when they
 differ.
 
@@ -455,6 +456,8 @@ So far the card holds the loader, and the mind runs only after the laptop
 sends it (step 6). This step puts the mind itself on the card, over the
 network cable: after it, the Pi starts the mind at every power-on with no
 laptop and no network. Nothing needs the card reader unless it goes wrong.
+(The same can be done with the card in the laptop's reader and no cable:
+`kilo card PATH`, docs/laptop-setup.md "The card route".)
 
 **Kernel update**: the mind writes a new `kernel7.img` onto its own card.
 It writes the new one as `kernel7.new`, reads it back to check it, and

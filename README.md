@@ -28,7 +28,8 @@ that share the work:
   (`docs/fast-boot.md`, `kernel/README.md`).
 
 Where to read more: `docs/architecture.md` is the design, `docs/setup.md`
-sets up a dev host and the Pi, `mind/README.md` lists the commands, and
+sets up a dev host and the Pi, `docs/laptop-setup.md` a laptop that updates
+Kilo through his SD card, `mind/README.md` lists the commands, and
 `docs/p*-hardware-test*.md` record what has been tried on Kilo.
 
 The original OpenCat firmware (`OpenCat.ino` and `src/`) is still in the

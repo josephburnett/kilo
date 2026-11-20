@@ -203,11 +203,15 @@ and the manifest. `arduino-cli` leaves the Pi.
 2. Mind checks CRC, size and build hash; with `--persist` writes both to SD.
 3. Flash (below), report result.
 
-**Path B, SD card written on the laptop:** `kilo flash --sd <mountpoint>`
+**Path B, SD card written on the laptop:** `kilo card <mountpoint>` (with
+the kernel; `kilo flash --sd <mountpoint>` for the body alone)
 
 1. Copy `body.bin` + manifest to the FAT partition.
 2. At boot the mind compares the manifest's build hash with `HELLO.fw_build`
    and flashes only if they differ. Same image, no reflash, no boot cost.
+3. The outcome goes to `body-result.txt` on the card; a failed image is not
+   flashed again until the files change (`kernel/mind/flash/cardflash.h`;
+   kernel/README.md "Three ways to install").
 
 **Flash sequence (mind):**
 

@@ -1,11 +1,10 @@
 //
-// bootcard.h: the SD card's FAT partition. The body image (docs/fast-boot.md
-// §6, P4): body.bin and body.json next to kernel7.img, read at boot (path B,
-// `kilo flash --sd`) and written after `kilo flash --host --persist`. And the
-// mind's own kernel (`kilo update --host`): CBootCard is the core's
-// KernelStore (mind/platform.h), the files the kernel updater
-// (mind/update/updater.h) writes and renames: kernel7.new, kernel7.img,
-// kernel7.old.
+// bootcard.h: the SD card's FAT partition. The core's KernelStore
+// (mind/platform.h) for two users that never overlap: the kernel updater
+// (mind/update/updater.h, `kilo update --host`: kernel7.new, kernel7.img,
+// kernel7.old) and the boot-time flash check (mind/flash/cardflash.h, the
+// card route: body.json, body.bin, body-result.txt). And the body image
+// written after `kilo flash --host --persist` (body.bin, body.json).
 //
 // Circle's FatFs addon (addon/fatfs, ChaN's FatFs: long names, read and
 // write) over its SD driver (addon/SDCard; on the Pi 2 B the SDHOST
@@ -13,9 +12,9 @@
 // "body.json" is not one.
 //
 // Every call spins: the SD driver busy-waits (Circle's NO_BUSY_WAIT is off),
-// so the main loop stops for the duration. The body image calls log how
-// long they took; the updater logs its own steps. Not for interrupt context
-// or a second core.
+// so the main loop stops for the duration. --persist logs how long it took;
+// the updater and the boot check log their own steps. Not for interrupt
+// context or a second core.
 //
 #ifndef KILO_SRC_BOOTCARD_H
 #define KILO_SRC_BOOTCARD_H
@@ -37,11 +36,6 @@ public:
 	// one's result without touching the card again.
 	boolean Mount (void);
 
-	// body.json and body.bin into rImage (parse_manifest, load_from: size
-	// and CRC checked). FALSE if either is missing or bad, logged at Info:
-	// no image on the card is not an error.
-	boolean LoadBodyImage (kilo::FlashImage &rImage);
-
 	// rImage (ready) as body.bin and body.json: the old body.json is removed
 	// first and the new one written last (as `kilo flash --sd` does,
 	// kilo/tools/body_image.py), so a power cut never pairs a manifest with
@@ -49,10 +43,10 @@ public:
 	// failure, logged.
 	boolean PersistBodyImage (const kilo::FlashImage &rImage);
 
-	// kilo::KernelStore, for the kernel updater: its own file object, so
-	// the body image calls (one pass each) cannot disturb a file it keeps
-	// open across passes. The first call mounts the card. Failures are
-	// logged with FatFs's error.
+	// kilo::KernelStore, for the kernel updater and the boot flash check:
+	// its own file object, so --persist (one pass) cannot disturb a file the
+	// updater keeps open across passes. The first call mounts the card.
+	// Failures are logged with FatFs's error and the file's name.
 	Result create (const char *pName) override;
 	Result open (const char *pName) override;
 	Result write (const uint8_t *pData, uint32_t nLen) override;
@@ -63,13 +57,7 @@ public:
 	Result sync (void) override;
 
 private:
-	// The whole file into pBuffer: its size, or ReadMissing, ReadTooBig,
-	// ReadError.
-	int ReadFile (const char *pName, void *pBuffer, unsigned nSize);
 	boolean WriteFile (const char *pName, const void *pData, unsigned nSize);
-	static const int ReadMissing = -1;
-	static const int ReadTooBig = -2;
-	static const int ReadError = -3;
 
 	// "SD:/name"
 	void Path (char *pOut, unsigned nSize, const char *pName) const;
@@ -86,6 +74,7 @@ private:
 	FIL m_KernelFile;		// the KernelStore's open file
 	boolean m_bKernelOpen;
 	boolean m_bKernelWriting;
+	char m_OpenName[32];		// the KernelStore's open file, for the log
 
 	friend class CRecordCard;
 };
