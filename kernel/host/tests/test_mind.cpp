@@ -6,34 +6,16 @@
 #include <cstdio>
 #include <cstring>
 #include "mind.h"
-#include "tests/body_rig.h"
 #include "tests/check.h"
+#include "tests/mind_rig.h"
 #include "tricks/library.h"
 
 using namespace kilo;
 
 namespace {
 
-struct Rig {
-  FakeBody body;
-  CaptureLog log;
-  Mind mind;
-  explicit Rig(const MindConfig& cfg) : mind(body.serial, body.clock, log, nullptr, cfg) {
-    mind.start();
-    run_ms(100);
-  }
-  void pass() {
-    body.step();
-    mind.poll();
-    body.react();
-  }
-  void run_ms(uint32_t ms) {
-    for (uint32_t i = 0; i < ms; i += 4) pass();
-  }
-  int posture_goal() {
-    const Goal* g = mind.link().goal(KILO_MSG_SET_POSTURE);
-    return g == nullptr ? -1 : g->payload[1];
-  }
+struct Rig : MindRig {
+  explicit Rig(const MindConfig& cfg) : MindRig(cfg) { start(); }
 };
 
 void test_remote_through_the_mind() {

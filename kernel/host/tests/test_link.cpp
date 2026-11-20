@@ -66,33 +66,18 @@ struct Rig : LinkListener {
     }
   }
 
-  void hello(uint8_t major = 2, uint8_t cause = KILO_RESET_CAUSE_COLD, uint16_t last_alive = 0, uint8_t epoch = 0,
+  void hello(uint8_t major = KILO_PROTO_MAJOR, uint8_t cause = KILO_RESET_CAUSE_COLD, uint16_t last_alive = 0, uint8_t epoch = 0,
              uint8_t config = KILO_CONFIG_STATE_OK) {
-    kilo_hello_t h = {};
+    kilo_hello_t h = body_hello(epoch);
     h.proto_major = major;
     h.fw_build = kCoreBuild;
     h.reset_cause = cause;
     h.last_alive_tick = last_alive;
-    h.max_payload = KILO_MAX_PAYLOAD;
-    h.joint_count = KILO_JOINT_COUNT;
     h.config_state = config;
-    h.epoch = epoch;
-    serial.feed_frame(KILO_MSG_HELLO, body_seq++, &h, sizeof h);
+    serial.feed_hello(body_seq++, h);
   }
-  void telemetry(uint16_t tick, uint8_t epoch) {
-    kilo_telemetry_t t = {};
-    t.tick = tick;
-    t.mode = KILO_MODE_IDLE;
-    t.epoch = epoch;
-    serial.feed_frame(KILO_MSG_TELEMETRY, body_seq++, &t, sizeof t);
-  }
-  void event(uint8_t code, int16_t arg, uint8_t epoch) {
-    kilo_event_t e = {};
-    e.code = code;
-    e.arg = arg;
-    e.epoch = epoch;
-    serial.feed_frame(KILO_MSG_EVENT, body_seq++, &e, sizeof e);
-  }
+  void telemetry(uint16_t tick, uint8_t epoch) { serial.feed_telemetry(body_seq++, tick, epoch); }
+  void event(uint8_t code, int16_t arg, uint8_t epoch) { serial.feed_event(body_seq++, code, arg, epoch); }
   void ack(uint8_t seq, uint8_t type, uint8_t status) {
     kilo_ack_t a = {seq, type, status};
     serial.feed_frame(KILO_MSG_ACK, body_seq++, &a, sizeof a);
@@ -101,7 +86,7 @@ struct Rig : LinkListener {
   void up(uint8_t epoch, uint16_t* tick) {
     link.connect();
     step();
-    hello(2, KILO_RESET_CAUSE_COLD, 0, epoch);
+    hello(KILO_PROTO_MAJOR, KILO_RESET_CAUSE_COLD, 0, epoch);
     telemetry((*tick)++, epoch);
     step();
     serial.take_sent();
@@ -133,7 +118,7 @@ void test_hello_good() {
   // HELLO_REQ is traffic: no HEARTBEAT due yet
   CHECKF(s.size() == 1 && count_type(s, KILO_MSG_HELLO_REQ) == 1, "%zu frames", s.size());
   CHECK(r.link.stats().hello_polls == 1);
-  r.hello(2, KILO_RESET_CAUSE_COLD, 0, 3, KILO_CONFIG_STATE_DEFAULTED);
+  r.hello(KILO_PROTO_MAJOR, KILO_RESET_CAUSE_COLD, 0, 3, KILO_CONFIG_STATE_DEFAULTED);
   r.step();
   const BodyState& b = r.link.state();
   CHECK(b.has_hello && b.proto_ok == 1 && b.epoch == 3 && b.hello.fw_build == kCoreBuild);
@@ -219,7 +204,7 @@ void test_goal_waits_for_first_epoch() {
   CHECK(set_posture(r, KILO_POSTURE_REST));  // not a motion goal: no contact needed
   r.step();
   CHECK(find_sent(r.serial.take_sent(), KILO_MSG_SET_POSTURE) == nullptr);  // no epoch yet
-  r.hello(2, KILO_RESET_CAUSE_COLD, 0, 7);
+  r.hello(KILO_PROTO_MAJOR, KILO_RESET_CAUSE_COLD, 0, 7);
   r.step();
   const Sent* p = nullptr;
   std::vector<Sent> s = r.serial.take_sent();
@@ -265,7 +250,7 @@ void test_reboot_by_unsolicited_hello() {
   CHECK(set_posture(r, KILO_POSTURE_STAND));
   r.run(2000, &tick, 2);  // past the solicit window; alive, so no HELLO_REQ polls
   CHECK(r.link.goal(KILO_MSG_SET_POSTURE) != nullptr);
-  r.hello(2, KILO_RESET_CAUSE_WARM_UNEXPECTED, 1234, 0);
+  r.hello(KILO_PROTO_MAJOR, KILO_RESET_CAUSE_WARM_UNEXPECTED, 1234, 0);
   r.step();
   CHECK(r.reboots == 1 && r.reboot_had_hello && r.link.state().reboots == 1);
   CHECKF(r.reboot_why == "unsolicited HELLO (reset cause WARM_UNEXPECTED)", "%s", r.reboot_why.c_str());
@@ -284,7 +269,7 @@ void test_reboot_by_tick_and_debounce() {
   CHECK(r.reboots == 1 && !r.reboot_had_hello && r.reboot_why == "tick went backwards");
   CHECK(!r.link.state().has_tick);  // forgotten: the next TELEMETRY starts it again
   // the same reboot's HELLO (new identity, solicited or not) within 3 s: not counted again
-  r.hello(2, KILO_RESET_CAUSE_COLD, 4000, 1);
+  r.hello(KILO_PROTO_MAJOR, KILO_RESET_CAUSE_COLD, 4000, 1);
   r.step();
   CHECK(r.link.state().reboots == 1 && r.reboots == 1);
 }
@@ -303,7 +288,7 @@ void test_contact_after_reconnect_needs_telemetry() {
   CHECK(count_type(s, KILO_MSG_HELLO_REQ) == 1);
   CHECK(find_sent(s, KILO_MSG_SET_POSTURE) == nullptr);  // motion: held
   CHECK(find_sent(s, KILO_MSG_SET_BALANCE) != nullptr);  // balance off is not motion
-  r.hello(2, KILO_RESET_CAUSE_COLD, 0, 1);  // the same identity: no proof of a reboot
+  r.hello(KILO_PROTO_MAJOR, KILO_RESET_CAUSE_COLD, 0, 1);  // the same identity: no proof of a reboot
   r.step();
   CHECK(!r.link.contact() && r.reboots == 0);
   CHECK(find_sent(r.serial.take_sent(), KILO_MSG_SET_POSTURE) == nullptr);
@@ -449,7 +434,7 @@ void test_tx_deferred() {
   r.serial.free_room = 3;
   r.link.connect();
   CHECK(set_posture(r, KILO_POSTURE_REST));
-  r.hello(2, KILO_RESET_CAUSE_COLD, 0, 1);
+  r.hello(KILO_PROTO_MAJOR, KILO_RESET_CAUSE_COLD, 0, 1);
   r.step();
   r.step(150);
   CHECK(r.serial.out.empty());  // not a byte of a frame
@@ -478,7 +463,7 @@ void test_hello_lost_asked_again() {
   CHECKF(count_type(s, KILO_MSG_HELLO_REQ) == 2, "%zu HELLO_REQ in 2.5 s alive without a HELLO",
          count_type(s, KILO_MSG_HELLO_REQ));
   CHECK(r.link.state().alive(r.clock.now_us(), LinkConfig().body_lost_us) && !r.link.state().has_hello);
-  r.hello(2, KILO_RESET_CAUSE_COLD, 0, 1);
+  r.hello(KILO_PROTO_MAJOR, KILO_RESET_CAUSE_COLD, 0, 1);
   r.run(3000, &tick, 1);
   s = r.serial.take_sent();
   CHECK(r.link.state().has_hello && r.solicited && r.reboots == 0);

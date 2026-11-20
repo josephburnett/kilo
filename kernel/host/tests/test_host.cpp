@@ -18,18 +18,12 @@
 #include "tests/check.h"
 #include "tests/fake_net.h"
 #include "tests/fakes.h"
+#include "tests/host_rig.h"
 #include "util/logring.h"
 
 using namespace kilo;
 
 namespace {
-
-std::vector<uint8_t> unhex(const std::string& s) {
-  std::vector<uint8_t> out;
-  if (s == "-") return out;
-  for (size_t i = 0; i + 1 < s.size(); i += 2) out.push_back((uint8_t)std::strtoul(s.substr(i, 2).c_str(), nullptr, 16));
-  return out;
-}
 
 struct Rig {
   FakeSerial serial;
@@ -43,21 +37,10 @@ struct Rig {
 
   Rig() {
     link.connect();
-    uint32_t n;
-    const AuthorizedKey* keys = test_keys(&n);
-    server.set_keys(keys, n, random);
+    use_test_keys(server, random);
   }
-  // A connection that becomes a client: the hello, the handshake (one
-  // X25519 per pass: three passes), the client's first record.
   FakeConn& connect(int32_t slot) {
-    FakeConn& c = listener.connect(slot);
-    for (int k = 0; k < 10 && !c.established; k++) {
-      pass();
-      c.pump();
-    }
-    pass();
-    CHECKF(c.established && c.open, "slot %d: no handshake", (int)slot);
-    return c;
+    return connect_client(listener, slot, [this] { pass(); });
   }
   // One pass of the mind's loop, as kilo-mind-host does it.
   void pass() {
@@ -243,10 +226,9 @@ void test_status_and_errors() {
     CHECK(st.link.frames_tx == r.link.stats().frames_tx);
   }
   // A body HELLO and TELEMETRY show up in the next STATUS.
-  kilo_hello_t h = {};
-  h.proto_major = KILO_PROTO_MAJOR;
+  kilo_hello_t h = body_hello();
   h.fw_build = 0x45524F43u;
-  r.serial.feed_frame(KILO_MSG_HELLO, 0, &h, sizeof h);
+  r.serial.feed_hello(0, h);
   kilo_telemetry_t t = {};
   t.tick = 100;
   t.batt_mv = 7400;
@@ -1059,10 +1041,7 @@ int16_t status_offset(const HostFrame* f, int j) {
 void test_cal() {
   Rig r;
   CalBody body(r);
-  kilo_hello_t h = {};
-  h.proto_major = KILO_PROTO_MAJOR;
-  h.epoch = 1;
-  r.serial.feed_frame(KILO_MSG_HELLO, 0, &h, sizeof h);
+  r.serial.feed_hello(0, body_hello(1));
   kilo_telemetry_t t = {};
   t.epoch = 1;
   r.serial.feed_frame(KILO_MSG_TELEMETRY, 1, &t, sizeof t);
@@ -1137,7 +1116,7 @@ void test_cal() {
   CHECK(st != nullptr && st->payload[0] == KILO_CAL_OP_REVERT && body.seen.back() == KILO_MSG_CAL_GET);
   // a body that never answers: NO_BODY after the link's retries
   Rig r2;
-  r2.serial.feed_frame(KILO_MSG_HELLO, 0, &h, sizeof h);
+  r2.serial.feed_hello(0, body_hello(1));
   FakeConn& c = r2.connect(0);
   r2.run_ms(20);
   c.take();

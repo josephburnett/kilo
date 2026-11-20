@@ -27,8 +27,8 @@
 #include "planner/plan.h"
 #include "power/battery.h"
 #include "remote/client.h"
-#include "tests/body_rig.h"
 #include "tests/check.h"
+#include "tests/mind_rig.h"
 #include "tricks/model.h"
 #include "util/str.h"
 
@@ -159,10 +159,7 @@ void test_stop_way_against_the_planner() {
 
 // ---- the Mind walking at a wall ----------------------------------------------------------
 
-struct WallRig {
-  FakeBody body;
-  CaptureLog log;
-  Mind mind;
+struct WallRig : MindRig {
   double wall_mm = 2000;  // from the sensor at the start
   bool wall = true;
   double noise_mm = 0, outliers = 0, dropouts = 0;
@@ -177,15 +174,13 @@ struct WallRig {
   double fixed_mm = -1;     // every reading this (the floor, which moves with him), when >= 0
   std::vector<std::pair<uint64_t, uint8_t>> done_at;  // TRICK_DONE to send: (time, trick_id)
 
-  explicit WallRig(const MindConfig& cfg, bool eyes = true) : mind(body.serial, body.clock, log, nullptr, cfg) {
+  explicit WallRig(const MindConfig& cfg, bool eyes = true) : MindRig(cfg) {
     body.eyes = eyes;
     body.posture_pitch = true;
-    mind.start();
-    run_ms(200);
+    start(200);
   }
   static MindConfig remote_cfg() {
-    MindConfig c;
-    c.remote = true;
+    MindConfig c = MindRig::remote_cfg();
     c.seed = 7;
     return c;
   }
@@ -196,11 +191,8 @@ struct WallRig {
     return std::prev(it)->second;
   }
   double gap() const { return wall_mm - max_travel; }
-  void key(uint16_t k) {
-    body.event(KILO_EVENT_IR_KEY, (int16_t)k);
-    run_ms(60);
-  }
-  void pass() {
+  void key(uint16_t k) { MindRig::key(k, 60); }
+  void pass() override {
     // the next TELEMETRY's range
     bool fresh = body.tick % 4 == 0;
     body.flags = (uint16_t)((body.flags & ~KILO_TELEMETRY_FLAGS_DIST_FRESH) | (fresh ? KILO_TELEMETRY_FLAGS_DIST_FRESH : 0));
@@ -215,9 +207,7 @@ struct WallRig {
       }
       body.dist_mm = (uint16_t)(d < 0 ? 1 : d > 4000 ? 0 : d);
     }
-    body.step();
-    mind.poll();
-    body.react();
+    MindRig::pass();
     for (; seen < body.sent.size(); seen++) {
       const Sent& s = body.sent[seen];
       if (s.type == KILO_MSG_TRICK_PLAY && s.payload.size() >= 2) done_at.push_back({body.clock.t + 1000000, s.payload[1]});
@@ -249,9 +239,6 @@ struct WallRig {
         i++;
       }
   }
-  void run_ms(uint32_t ms) {
-    for (uint32_t i = 0; i < ms; i += 4) pass();
-  }
   // Run until the guard holds (or ms pass); true if it held.
   bool run_until_hold(uint32_t ms) {
     for (uint32_t i = 0; i < ms; i += 4) {
@@ -259,10 +246,6 @@ struct WallRig {
       if (mind.guard().action() == Action::Holding) return true;
     }
     return false;
-  }
-  int posture_goal() {
-    const Goal* g = mind.link().goal(KILO_MSG_SET_POSTURE);
-    return g == nullptr ? -1 : g->payload[1];
   }
 };
 

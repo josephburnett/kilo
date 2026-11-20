@@ -16,9 +16,9 @@
 #include "record/flight.h"
 #include "record/recorder.h"
 #include "record/saver.h"
-#include "tests/body_rig.h"
 #include "tests/check.h"
 #include "tests/fake_card.h"
+#include "tests/mind_rig.h"
 #include "tricks/library.h"
 
 using namespace kilo;
@@ -148,28 +148,10 @@ void test_flight_store() {
 
 // ---- the recorder in the Mind -----------------------------------------------------------
 
-struct Rig {
-  FakeBody body;
-  CaptureLog log;
-  Mind mind;
-  std::vector<uint8_t> mem;
-  std::vector<LogEntry> history;
-  explicit Rig(const MindConfig& cfg, uint32_t store = 4u << 20)
-      : mind(body.serial, body.clock, log, nullptr, cfg), mem(store), history(LogRing::kLines) {
-    mind.attach_log(history.data(), (uint32_t)history.size());
-    mind.attach_recorder(mem.data(), (uint32_t)mem.size());
-  }
-  void start() {
-    mind.start();
-    run_ms(100);
-  }
-  void pass() {
-    body.step();
-    mind.poll();
-    body.react();
-  }
-  void run_ms(uint32_t ms) {
-    for (uint32_t i = 0; i < ms; i += 4) pass();
+struct Rig : MindRig {
+  explicit Rig(const MindConfig& cfg, uint32_t store = 4u << 20) : MindRig(cfg) {
+    attach_history();
+    attach_recorder(store);
   }
   bool ring_has(const char* t) const {
     const LogRing& r = const_cast<Mind&>(mind).log();

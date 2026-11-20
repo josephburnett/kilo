@@ -11,10 +11,9 @@
 #include "mind.h"
 #include "power/battery.h"
 #include "power/sleep.h"
-#include "tests/body_rig.h"
 #include "tests/check.h"
 #include "tests/fake_card.h"
-#include "tests/fake_net.h"
+#include "tests/mind_rig.h"
 
 using namespace kilo;
 using power::State;
@@ -48,49 +47,19 @@ struct FakeHw final : power::Hardware {
 constexpr uint8_t kA7 = 0xA2, kB6 = 0x02, kA4 = 0x68, kA1 = 0x42, kC7 = 0xE2, kB2 = 0x38;
 
 MindConfig sleep_cfg() {
-  MindConfig c;
-  c.remote = true;
+  MindConfig c = MindRig::remote_cfg();
   c.light_sleep = true;
   return c;
 }
 
-struct Rig {
-  FakeBody body;
-  CaptureLog log;
-  FakeListener listener;
+struct Rig : MindRig {
   FakeHw hw;
-  Mind mind;
-  std::vector<uint8_t> mem;
-  std::vector<LogEntry> history;
-  explicit Rig(const MindConfig& cfg, bool with_listener = false, bool recorder = false)
-      : mind(body.serial, body.clock, log, with_listener ? &listener : nullptr, cfg) {
+  explicit Rig(const MindConfig& cfg, bool with_listener = false, bool recorder = false) : MindRig(cfg, with_listener) {
     mind.sleep().set_hardware(&hw);
     if (recorder) {
-      history.resize(LogRing::kLines);
-      mind.attach_log(history.data(), (uint32_t)history.size());
-      mem.resize(4u << 20);
-      mind.attach_recorder(mem.data(), (uint32_t)mem.size());
+      attach_history();
+      attach_recorder();
     }
-  }
-  void start() {
-    mind.start();
-    run_ms(100);
-  }
-  void pass() {
-    body.step();
-    mind.poll();
-    body.react();
-  }
-  void run_ms(uint32_t ms) {
-    for (uint32_t i = 0; i < ms; i += 4) pass();
-  }
-  void key(uint8_t cmd) {
-    body.event(KILO_EVENT_IR_KEY, cmd);
-    run_ms(40);
-  }
-  int posture_goal() {
-    const Goal* g = mind.link().goal(KILO_MSG_SET_POSTURE);
-    return g == nullptr ? -1 : g->payload[1];
   }
   // the postures sent from frame index `from` on, in order (each latch once: refreshes are the same)
   std::vector<int> postures_since(size_t from) {

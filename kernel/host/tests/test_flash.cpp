@@ -25,19 +25,13 @@
 #include "tests/fake_net.h"
 #include "tests/fake_store.h"
 #include "tests/fakes.h"
+#include "tests/host_rig.h"
 #include "update/updater.h"
 #include "util/logring.h"
 
 using namespace kilo;
 
 namespace {
-
-std::vector<uint8_t> unhex(const std::string& s) {
-  std::vector<uint8_t> out;
-  if (s == "-") return out;
-  for (size_t i = 0; i + 1 < s.size(); i += 2) out.push_back((uint8_t)std::strtoul(s.substr(i, 2).c_str(), nullptr, 16));
-  return out;
-}
 
 std::vector<uint8_t> pattern(uint32_t n, uint32_t seed) {
   std::vector<uint8_t> v(n);
@@ -583,9 +577,7 @@ struct HostRig {
     link.connect();
     server.attach_flasher(flasher, image);
     server.attach_updater(updater);
-    uint32_t n;
-    const AuthorizedKey* keys = test_keys(&n);
-    server.set_keys(keys, n, random);
+    use_test_keys(server, random);
   }
   void pass() {
     link.mark_alive();
@@ -598,16 +590,8 @@ struct HostRig {
       pass();
     }
   }
-  // A client: the hello, the handshake (a pass per X25519), its first record.
   FakeConn& connect(int32_t slot) {
-    FakeConn& c = listener.connect(slot);
-    for (int k = 0; k < 10 && !c.established; k++) {
-      pass();
-      c.pump();
-    }
-    pass();
-    CHECKF(c.established && c.open, "slot %d: no handshake", (int)slot);
-    return c;
+    return connect_client(listener, slot, [this] { pass(); });
   }
   // A command's RESULT code (-1: none).
   int command(FakeConn& c, uint8_t type, const void* p = nullptr, uint32_t len = 0) {
@@ -896,15 +880,8 @@ void test_no_flasher() {
   FakeListener listener;
   FakeRandom random;
   static HostServer server{listener, link, serial, clock, ring, ring, 1};
-  uint32_t nk;
-  const AuthorizedKey* keys = test_keys(&nk);
-  server.set_keys(keys, nk, random);
-  FakeConn& c = listener.connect(0);
-  for (int k = 0; k < 10 && !c.established; k++) {
-    server.poll();
-    c.pump();
-  }
-  server.poll();
+  use_test_keys(server, random);
+  FakeConn& c = connect_client(listener, 0, [] { server.poll(); });
   uint8_t take[2] = {1, 0};
   c.send(KILO_HOST_MSG_CONTROL, 0, take, 2);
   kilo_host_flash_begin_t b = {1, 10, 0, 0};

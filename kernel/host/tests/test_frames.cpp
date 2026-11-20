@@ -20,13 +20,6 @@ using namespace kilo;
 
 namespace {
 
-std::vector<uint8_t> unhex(const std::string& s) {
-  std::vector<uint8_t> out;
-  if (s == "-") return out;
-  for (size_t i = 0; i + 1 < s.size(); i += 2) out.push_back((uint8_t)std::strtoul(s.substr(i, 2).c_str(), nullptr, 16));
-  return out;
-}
-
 // The vectors name both length errors "bad_length"; the C codec tells a
 // trusted-header payload length apart.
 std::string vector_kind(uint8_t status) {
