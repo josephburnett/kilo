@@ -54,13 +54,12 @@ from pathlib import Path
 from typing import Any
 
 from kilo import cli_power, cli_record, cli_sound, hostkey, mdns
-from kilo.hostlink import REBOOT_CLOSE_WAIT_S, HostError, HostKeyRefused, HostLink, HostRefused, has_kernel_marker
+from kilo.hostlink import REBOOT_CLOSE_WAIT_S, HostError, HostKeyRefused, HostLink, HostRefused
+from kilo.kernel_image import DEFAULT_KERNEL, check_kernel
 from kilo.protocol import kilo_protocol as P
 
 EXIT_OK, EXIT_ERR = 0, 1
 LEVEL_TAG = "DIWE"
-# `kilo update`'s default image: the mind kernel `make -C kernel` builds in this checkout.
-DEFAULT_KERNEL_IMAGE = Path(__file__).resolve().parents[2] / "kernel" / "build" / "kernel7.img"
 # After an update: how often `kilo update` tries to reach the rebooted mind.
 UPDATE_POLL_S = 0.5
 
@@ -544,7 +543,7 @@ def _wait_for_mind(addr: str, wait_s: float, before: int, key: Any = None) -> in
 
 def _prepare_update(args: argparse.Namespace) -> int | None:
     """Read and check the image for `kilo update` (args.update_image); an exit code on failure."""
-    path = Path(args.image) if args.image is not None else DEFAULT_KERNEL_IMAGE
+    path = Path(args.image) if args.image is not None else DEFAULT_KERNEL
     args.image_path = path
     try:
         data = path.read_bytes()
@@ -552,26 +551,16 @@ def _prepare_update(args: argparse.Namespace) -> int | None:
         hint = " (build it: make -C kernel)" if args.image is None else ""
         print(f"kilo update: cannot read {path}: {e.strerror}{hint}", file=sys.stderr)
         return EXIT_ERR
-    if not 0 < len(data) <= P.HOST_UPDATE_MAX_IMAGE:
-        print(f"kilo update: {path} is {len(data)} bytes; the mind takes 1..{P.HOST_UPDATE_MAX_IMAGE}",
-              file=sys.stderr)
+    try:
+        key = hostkey.load(getattr(args, "key", None))
+    except hostkey.HostKeyError:
+        key = None  # the connection says what is wrong with it
+    errors, warnings = check_kernel(data, path, args.force, key, verb="install")
+    if errors:
+        print(f"kilo update: {errors[0]}", file=sys.stderr)
         return EXIT_ERR
-    if not args.force and not has_kernel_marker(data):
-        print(f"kilo update: {path} has no {P.HOST_UPDATE_MARKER}: it is not the mind kernel (the netboot loader "
-              "is not either). To install it anyway: --force", file=sys.stderr)
-        return EXIT_ERR
-    if not args.force:
-        # The kernel has its authorized keys in its image as raw bytes
-        # (build/gen/authorized_keys.h): one without this laptop's would lock it out.
-        try:
-            key = hostkey.load(getattr(args, "key", None))
-        except hostkey.HostKeyError:
-            key = None  # the connection says what is wrong with it
-        if key is not None and key.public not in data:
-            print(f"kilo update: {path} does not have this laptop's key ({key.fingerprint}) built in: the new "
-                  f"kernel would refuse this laptop. Add `kilo key show`'s line to {hostkey.KEYS_FILE} and rebuild "
-                  "(make -C kernel); to install it anyway: --force", file=sys.stderr)
-            return EXIT_ERR
+    for w in warnings:
+        print(f"kilo update: warning: {w}", file=sys.stderr)
     args.update_image = data
     return None
 

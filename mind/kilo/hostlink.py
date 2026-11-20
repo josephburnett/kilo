@@ -76,13 +76,6 @@ REC_IDLE_TIMEOUT_S = 30.0
 BENCH_TIMEOUT_S = 120.0
 
 
-def has_kernel_marker(image: bytes) -> bool:
-    """Whether image holds host.update_marker, the mind kernel's identity
-    (kernel/src/kernel.cpp): what the mind checks before it installs an
-    image without FORCE."""
-    return P.HOST_UPDATE_MARKER.encode("ascii") in image
-
-
 class HostError(Exception):
     """The host channel failed: no connection, the stream out of step, no reply."""
 
