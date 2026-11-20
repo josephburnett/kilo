@@ -36,8 +36,8 @@ const Personality kPersonality = {
     0.1,  // selector.margin
     6.0,  // selector.min_dwell_s
     0x18,  // selector.urgent: startle, greet
-    20.0,  // safety.low_battery_pct
-    8.0,  // safety.critical_battery_pct
+    5.0,  // safety.low_battery_pct
+    0.0,  // safety.critical_battery_pct
     5.0,  // safety.wind_down_s
     2.0,  // safety.fallen_settle_s
     250.0,  // percepts.near_mm

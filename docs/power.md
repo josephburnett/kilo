@@ -88,14 +88,14 @@ Two parts, very different in size.
    of what the Pi and boards draw.
 
 The mind's own low-battery mark (the A5 behaviour lies down in REST to
-save the battery below 20 %, 7300 mV, and the eyes turn orange:
+save the battery below 5 %, 7000 mV, and the eyes turn orange:
 docs/distance-guard.md, "Low battery: orange") is judged on the battery at
 rest: the highest reading of the last 20 seconds, so the sag of a walk does
 not trip it. The body's own trips below are on its raw reading.
 
 So, **estimate**: lying awake in REST, about 90 mV per minute; in light
-sleep, about 6 to 7 mV per minute. From 7.6 V to the low-battery trip at
-6.6 V that is about 11 minutes awake against about 2 to 3 hours asleep.
+sleep, about 6 to 7 mV per minute. From 7.6 V to the old low-battery trip at
+6.6 V (6.2 V since 2026-11-20) that is about 11 minutes awake against about 2 to 3 hours asleep.
 The voltage does not fall at an even rate (a Li-ion pack falls faster
 near empty), so take these as the size of the difference, not a forecast.
 
@@ -164,7 +164,7 @@ then A7 and 2.5 minutes lying in REST), read with `kilo power FILE`:
   trip (6.6 V) in about 16 minutes: the 15 minutes you see.
 
 **Is the low-battery reflex ending play early?** Not in this recording
-(it ended at 7.5 V, no LOW_BATTERY event). The trips (body parameters):
+(it ended at 7.5 V, no LOW_BATTERY event). The trips (body parameters at the time):
 warning 6900 mV (held 5 s), low 6600 mV (REST, then limp 2 s later),
 critical 6300 mV. Because walking sags the reading by about 0.1 to 0.25 V,
 the low trip can come while trotting when the pack at rest would still
@@ -172,6 +172,26 @@ read 6.7 to 6.85 V: about 1 to 2.5 minutes early. Separately, the
 remote's rear-up key (A2 now; B2 at the time) refuses below 7400 mV: at 90 mV per minute that is
 about 7 minutes into a full pack, so for the second half of a session the
 trick is not available.
+
+**Lowered on 2026-11-20** (the owner's call: the pack has its own
+protection cutoff, so the software need not stop him early). Every figure
+below is a choice, not a measurement; none has run on the robot yet.
+
+| Limit | Was | Now | What happens |
+|---|---|---|---|
+| Mind: tired (battery at rest) | 7300 mV (20 %) | 7000 mV (5 %) | orange eyes; the A5 behaviour lies down |
+| Mind: empty (battery at rest) | about 7090 mV (8 %) | 6600 mV (0 %) | winds down for good |
+| Body: warning | 6900 mV | 6500 mV | an event, nothing else |
+| Body: low (held 5 s) | 6600 mV | 6200 mV | lies down, then limp; clears above 6600 mV |
+| Body: critical (held 1 s) | 6300 mV | 6000 mV | limp until the next power-on |
+
+6000 mV is 3.0 V per cell under load, the usual lowest figure for Li-ion
+cells. Not lowered: the rear-up refusal (7400 mV at rest) and the card
+flash refusal (6600 mV). The mind's two limits come with the kernel; the
+body's three need the body firmware flashed (or `kilo param set NAME VALUE
+--persist`). What to watch: weak or slow legs near the end, and whether
+the pack's own cutoff comes before 6000 mV (on 2026-10-10 it cut out from
+a reading of 6.87 V, docs/p0-hardware-test-results.md).
 
 **Cheap things that would extend play time** (none needs body flash):
 

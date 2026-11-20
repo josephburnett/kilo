@@ -106,7 +106,7 @@ int main() {
   in.batt_counts = 740;  // ~7.47 V
   tick(10);
   CHECK(at_posture(POSTURE_STAND));
-  in.batt_counts = 640;  // ~6.46 V: below LOW
+  in.batt_counts = 605;  // ~6.11 V: below LOW
   int t = 0;
   uint8_t e0 = b.epoch;
   while (b.batt.level < BATT_LOW && t < 2000) {
@@ -124,7 +124,7 @@ int main() {
   tick(3);
   CHECK(all_off());  // the battery reflex's own LIMP timer fired
   // CRITICAL: LIMP immediately (already limp) and latched.
-  in.batt_counts = 600;
+  in.batt_counts = 585;  // ~5.9 V: below CRITICAL
   tick(200);
   CHECK(b.batt.level == BATT_CRITICAL && has_event(EV_LOW_BATTERY, BATT_CRITICAL) && all_off());
 

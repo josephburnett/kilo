@@ -23,26 +23,26 @@ int main() {
     feed(7400, 20);
   }
   CHECK(b.level == BATT_OK);
-  // Steady 6.8 V: WARN after ~5 s (plus the filter's settling time).
+  // Steady 6.4 V: WARN after ~5 s (plus the filter's settling time).
   int n = 0;
-  while (battery_sample(b, 6800) == BATT_OK && n < 1000) n++;
+  while (battery_sample(b, 6400) == BATT_OK && n < 1000) n++;
   CHECKF(b.level == BATT_WARN && n >= 50 && n <= 120, "warn after %d samples", n);
-  // Recovery to 7.05 V is inside the hysteresis band: stays WARN.
-  feed(7050, 300);
+  // Recovery to 6.65 V is inside the hysteresis band: stays WARN.
+  feed(6650, 300);
   CHECK(b.level == BATT_WARN);
-  // Above 7.1 V for 10 s clears.
+  // Above 6.7 V for 10 s clears.
   n = 0;
-  while (battery_sample(b, 7200) != BATT_OK && n < 1000) n++;
+  while (battery_sample(b, 6800) != BATT_OK && n < 1000) n++;
   CHECKF(n >= 100 && n <= 200, "warn cleared after %d samples", n);
-  // LOW at 6.5 V; clears only above 7.0 V for 10 s (back to WARN band first).
-  feed(6500, 200);
+  // LOW at 6.1 V; clears only above 6.6 V for 10 s (back to WARN band first).
+  feed(6100, 200);
   CHECK(b.level == BATT_LOW);
-  feed(6950, 300);
+  feed(6550, 300);
   CHECK(b.level == BATT_LOW);
-  feed(7050, 300);
-  CHECK(b.level == BATT_WARN);  // LOW cleared, WARN (< 7.1) still on
-  // CRITICAL: < 6.3 V for 1 s, latched even if the voltage recovers.
-  feed(6000, 100);
+  feed(6650, 300);
+  CHECK(b.level == BATT_WARN);  // LOW cleared, WARN (< 6.7) still on
+  // CRITICAL: < 6.0 V for 1 s, latched even if the voltage recovers.
+  feed(5800, 100);
   CHECK(b.level == BATT_CRITICAL);
   feed(8400, 1000);
   CHECK(b.level == BATT_CRITICAL);

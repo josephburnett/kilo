@@ -1213,9 +1213,9 @@ trip thresholds.
 
 | Level | Trip | Clear (hysteresis) | Action |
 |---|---|---|---|
-| WARN | < 6.9 V for 5 s | > 7.1 V for 10 s | `EVENT LOW_BATTERY(1)` |
-| LOW | < 6.6 V for 5 s | > 7.0 V for 10 s | Epoch bump. REFLEX → REST, LIMP after 2 s. Motion goals refused (`REFUSED_LOW_BATT`). Low-battery chirp. `EVENT LOW_BATTERY(2)`. |
-| CRITICAL | < 6.3 V for 1 s | (latched until reboot) | LIMP now. `EVENT LOW_BATTERY(3)`. The Pi shuts itself down. |
+| WARN | < 6.5 V for 5 s | > 6.7 V for 10 s | `EVENT LOW_BATTERY(1)` |
+| LOW | < 6.2 V for 5 s | > 6.6 V for 10 s | Epoch bump. REFLEX → REST, LIMP after 2 s. Motion goals refused (`REFUSED_LOW_BATT`). Low-battery chirp. `EVENT LOW_BATTERY(2)`. |
+| CRITICAL | < 6.0 V for 1 s | (latched until reboot) | LIMP now. `EVENT LOW_BATTERY(3)`. The Pi shuts itself down. |
 | no battery | < 3 V | > 5 V | Battery reflexes off (USB bench power), `NO_BATTERY` flag |
 
 **Joint limits** are enforced in the safety stage for every owner. Params can
@@ -2394,11 +2394,11 @@ default). The P0 body implements:
 | 3 | `XFADE_TICKS` | 10 | 0..100 | tick | Crossfade out of TRICK or REFLEX |
 | 4 | `POSTURE_TICKS` | 25 | 1..255 | tick | Default IDLE posture transition |
 | 5 | `SLEW_MAX_A16` | 160 | 16..800 | a16/tick | Safety-stage slew limit |
-| 6 | `BATT_WARN_MV` | 6900 | 5000..8400 | mV | WARN trip |
-| 7 | `BATT_WARN_CLEAR_MV` | 7100 | 5000..8400 | mV | WARN clear |
-| 8 | `BATT_LOW_MV` | 6600 | 5000..8400 | mV | LOW trip |
-| 9 | `BATT_LOW_CLEAR_MV` | 7000 | 5000..8400 | mV | LOW clear |
-| 10 | `BATT_CRIT_MV` | 6300 | 5000..8400 | mV | CRITICAL trip (latched) |
+| 6 | `BATT_WARN_MV` | 6500 | 5000..8400 | mV | WARN trip |
+| 7 | `BATT_WARN_CLEAR_MV` | 6700 | 5000..8400 | mV | WARN clear |
+| 8 | `BATT_LOW_MV` | 6200 | 5000..8400 | mV | LOW trip |
+| 9 | `BATT_LOW_CLEAR_MV` | 6600 | 5000..8400 | mV | LOW clear |
+| 10 | `BATT_CRIT_MV` | 6000 | 5000..8400 | mV | CRITICAL trip (latched) |
 | 11 | `TELEM_DIV` | 2 | 0..50 | tick | TELEMETRY divisor at boot (`SET_STREAM` overrides) |
 | 12 | `US_PERIOD_TICKS` | 4 | 3..50 | tick | Ultrasonic cadence |
 | 13 | `LEG_L1_MM` | 45 (Kilo, measured) | 20..120 | mm | Upper leg, shoulder axle to knee axle (B7) |

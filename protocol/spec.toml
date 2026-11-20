@@ -851,7 +851,7 @@ doc = "Safety-stage slew limit per joint per tick (160 = 10 deg/tick = 500 deg/s
 [[params]]
 name = "BATT_WARN_MV"
 id = 6
-default = 6900
+default = 6500
 min = 5000
 max = 8400
 unit = "mV"
@@ -860,7 +860,7 @@ doc = "Battery WARN trip (filtered, held 5 s)."
 [[params]]
 name = "BATT_WARN_CLEAR_MV"
 id = 7
-default = 7100
+default = 6700
 min = 5000
 max = 8400
 unit = "mV"
@@ -869,7 +869,7 @@ doc = "Battery WARN clear (held 10 s)."
 [[params]]
 name = "BATT_LOW_MV"
 id = 8
-default = 6600
+default = 6200
 min = 5000
 max = 8400
 unit = "mV"
@@ -878,7 +878,7 @@ doc = "Battery LOW trip: epoch bump, REST, LIMP 2 s later."
 [[params]]
 name = "BATT_LOW_CLEAR_MV"
 id = 9
-default = 7000
+default = 6600
 min = 5000
 max = 8400
 unit = "mV"
@@ -887,7 +887,7 @@ doc = "Battery LOW clear (held 10 s)."
 [[params]]
 name = "BATT_CRIT_MV"
 id = 10
-default = 6300
+default = 6000
 min = 5000
 max = 8400
 unit = "mV"

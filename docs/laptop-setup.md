@@ -12,8 +12,10 @@ put them on Kilo's SD card in its card reader, with no network cable:
   itself ("flashing"), then writes what happened to `body-result.txt` on
   the card.
 
-The steps assume Linux (Debian or Ubuntu). What differs on Windows and
-macOS is in its own section near the end. Commands go in a terminal; `$`
+The steps assume Linux (Debian or Ubuntu). The GPD Pocket 4 runs Debian
+inside WSL (Windows' built-in Linux): every step is the same there except
+where the card and the network cable are concerned, because those belong
+to Windows. Read "Windows and macOS" near the end before the card route. Commands go in a terminal; `$`
 lines are what you type, without the `$`.
 
 ## What the laptop needs
@@ -254,11 +256,14 @@ way copies no secret; the server's key keeps working as well.
 ## Windows and macOS
 
 **Windows.** Building the kernel and the firmware needs Linux tools, so
-use WSL (Windows' built-in Linux, `wsl --install` then Ubuntu) and follow
-this page inside it. The card reader belongs to Windows; inside WSL mount
+use WSL (Windows' built-in Linux, `wsl --install` then Debian or Ubuntu)
+and follow this page inside it. In step 2 of the card route there is no
+desktop inside WSL to mount the card, and `lsblk` does not show it. The card reader belongs to Windows; inside WSL mount
 its drive letter (here `E:`) with
 `sudo mkdir -p /mnt/e && sudo mount -t drvfs E: /mnt/e` and use `/mnt/e` as
-`CARD` (not checked on WSL yet). Eject the card from Windows afterwards.
+`CARD` (not checked on WSL yet). Before ejecting, release it inside WSL with `sudo umount /mnt/e`, then
+eject the card from Windows (the tray's "Safely Remove"); step 4's
+`udisksctl` line does not apply.
 For the direct cable, Windows gives the wired port a 169.254 address by
 itself when no router answers (it can take a minute); WSL reaches it
 through Windows, which may need WSL's "mirrored" networking mode (not

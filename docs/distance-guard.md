@@ -269,15 +269,15 @@ works with the old firmware. After the flash, `kilo status --host` shows
 When the battery is low the eyes are a dim orange instead of green. Blue
 and red always show over it: the way ahead matters more. Low means either:
 
-- the battery **at rest** is below 20 % (7300 mV on the resting curve; the
+- the battery **at rest** is below 5 % (7000 mV on the resting curve; the
   same mark at which the A5 behaviour lies down in REST to save the
-  battery). It is no longer low once it reads 25 % (7400 mV) again;
-- or the body itself says low battery (its LOW_BATT mode, below 6.6 V).
+  battery). It is no longer low once it reads 10 % (about 7150 mV) again;
+- or the body itself says low battery (its LOW_BATT mode, below 6.2 V).
 
 It does not need the A5 behaviour to be on. The log says when it starts
-and ends, e.g. `battery: tired (7250 mV at rest, 16 %, below 20 %): the
-eyes orange while the way is clear` and `battery: no longer tired (7400
-mV at rest, 30 %)`; `kilo guard --host` and `kilo status --host` show
+and ends, e.g. `battery: tired (6950 mV at rest, 4 %, below 5 %): the
+eyes orange while the way is clear` and `battery: no longer tired (7200
+mV at rest, 12 %)`; `kilo guard --host` and `kilo status --host` show
 `eyes  orange: low battery, Kilo is tired ...`.
 
 **At rest** matters: moving legs pull the battery's voltage down by 0.1 to

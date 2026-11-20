@@ -246,9 +246,9 @@ def main() -> int:
             snap("dist_mm", None)
             snap("approach_mm_s", None)
         if k == 300:
-            snap("battery_pct", 15.0)
+            snap("battery_pct", 4.0)
         if k == 600:
-            snap("battery_pct", 6.0)
+            snap("battery_pct", 0.0)
     scenario("fall_startle_low_battery_wind_down", day_cfg(), 1, 0.0, 6000, fall)
 
     def shutdown(k, t, h):  # test_runner_shutdown_request_and_stop

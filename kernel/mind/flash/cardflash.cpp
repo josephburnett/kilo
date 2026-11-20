@@ -317,7 +317,7 @@ void CardFlash::decide() {
       return;
     case CardAction::Refuse:
       if (why != why_)  // the battery (an image's fault is in why_ already)
-        format(why_, sizeof why_, "%s: %u mV, under %u mV (the body's LOW trip); charge it", why, (unsigned)f.batt_mv,
+        format(why_, sizeof why_, "%s: %u mV, under %u mV (too low to flash safely); charge it", why, (unsigned)f.batt_mv,
                (unsigned)kMinBatteryMv);
       logf(log_, LogLevel::Warn, "boot flash check: %s, %s: NOT flashing:", body, card);
       logf(log_, LogLevel::Warn, "boot flash check: %s", why_);

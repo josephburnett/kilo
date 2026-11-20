@@ -43,8 +43,8 @@ selector:
   urgent: [startle, greet]  # may preempt before min_dwell (still need the margin)
 
 safety:
-  low_battery_pct: 20       # below: rest (balance off) until it recovers
-  critical_battery_pct: 8   # below: wind down and shut the Pi down
+  low_battery_pct: 5        # 7000 mV at rest; below: rest (balance off) until it recovers
+  critical_battery_pct: 0   # 6600 mV at rest; at or below: wind down and shut the Pi down
   wind_down_s: 5.0          # rest this long before asking for poweroff
   fallen_settle_s: 2.0      # after a fall clears, wait this long before standing
 

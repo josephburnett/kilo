@@ -23,7 +23,7 @@
 //      CRC-32) FAILED: not retried. Only a changed image (or `kilo card`,
 //      which removes body-result.txt when it writes the image) tries again.
 //      This is what keeps a bad image from flashing at every boot.
-//   5. the battery reads under kMinBatteryMv (the body's LOW trip): REFUSED,
+//   5. the battery reads under kMinBatteryMv (6600 mV): REFUSED,
 //      checked again at the next boot (charge it first). On USB power, or
 //      with no TELEMETRY (no firmware), there is no reading and no refusal.
 //   6. otherwise FLASH: then FLASHED (the HELLO after the reset reports the
@@ -102,7 +102,7 @@ class CardFlash {
  public:
   static constexpr uint64_t kHelloWaitUs = 3000000;     // no HELLO this long after begin(): decide without one
   static constexpr uint64_t kTelemetryWaitUs = 1000000; // after the HELLO, wait this long for a TELEMETRY
-  static constexpr uint16_t kMinBatteryMv = KILO_PARAM_BATT_LOW_MV_DEFAULT;
+  static constexpr uint16_t kMinBatteryMv = 6600;  // a flash wants margin: above the body's LOW trip (6200 mV)
   static constexpr uint32_t kLogLines = 48;             // log lines kept in the result file, at most
   static constexpr uint32_t kResultMax = 9216;
   static constexpr uint32_t kManifestMax = 1024;

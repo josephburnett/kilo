@@ -878,8 +878,8 @@ decides, in this order:
    CRC-32) **failed**: not retried (`NOT flashing: a flash of this same
    image failed at an earlier boot`) until `body.bin` or `body.json`
    change; `kilo card` removes `body-result.txt` when it writes them;
-5. the battery reads under 6600 mV (the body's own LOW trip,
-   `BATT_LOW_MV`): **refused**, checked again at the next boot; on USB power
+5. the battery reads under 6600 mV (too low to flash safely; the
+   body's own LOW trip is lower, 6200 mV): **refused**, checked again at the next boot; on USB power
    or with no TELEMETRY there is no reading and no refusal;
 6. otherwise the flasher starts with the card's image (its own 32 KB
    buffer, no `--persist`): **flashed** once the HELLO after the reset

@@ -751,7 +751,7 @@ void test_hand_in_face_turning_backward_standing_sitting_lying() {
 
 // ---- the battery at rest, and the eyes' orange --------------------------------------------
 
-// The owner's wall of 2026-11-19: the legs' load sags the reading below the 20 % mark (7300 mV) while
+// The owner's wall of 2026-11-19: the legs' load sags the reading below the 5 % mark (7000 mV) while
 // he walks and for a moment after; at rest the pack holds 7450 mV. The guard stops him and starts the
 // sitting runner: it must sit, not take the low-battery REST, and the eyes stay the zone's.
 void test_sag_does_not_send_the_runner_to_rest() {
@@ -765,13 +765,13 @@ void test_sag_does_not_send_the_runner_to_rest() {
   for (int i = 0; i < 20000 / 4 && !held; i++) {
     bool loaded = r.mind.walker().active() || r.body.mode == KILO_MODE_GAIT;
     if (loaded) walked_until = r.body.clock.t;
-    r.body.batt_mv = loaded || r.body.clock.t < walked_until + 1500000 ? 7150 : 7450;  // the sag, 1.5 s after too
+    r.body.batt_mv = loaded || r.body.clock.t < walked_until + 1500000 ? 6900 : 7450;  // the sag, 1.5 s after too
     r.pass();
     held = r.mind.guard().action() == Action::Holding;
   }
   CHECK(held);
   for (int i = 0; i < 4000 / 4; i++) {
-    r.body.batt_mv = r.body.clock.t < walked_until + 1500000 ? 7150 : 7450;
+    r.body.batt_mv = r.body.clock.t < walked_until + 1500000 ? 6900 : 7450;
     r.pass();
   }
   CHECK(r.mind.behaviour_active() && r.mind.sitting_variant());
@@ -783,11 +783,11 @@ void test_sag_does_not_send_the_runner_to_rest() {
   // the raw reading is still what the metrics and kilo status show
   char line[256];
   r.mind.metric_line(13, line, 201);
-  CHECKF(std::strstr(line, "battery: mv=7450 min_mv=7150 ") == line && std::strstr(line, " rested_mv=7450") != nullptr,
+  CHECKF(std::strstr(line, "battery: mv=7450 min_mv=6900 ") == line && std::strstr(line, " rested_mv=7450") != nullptr,
          "%s", line);
 }
 
-// Genuinely low at rest (7250 mV, about 16 %): the runner rests, the eyes are orange while the way is
+// Genuinely low at rest (6950 mV, about 4 %): the runner rests, the eyes are orange while the way is
 // clear (with the runner on or off), blue and red win; +5 % clears it; the body's LOW_BATT too.
 void test_low_at_rest_rests_and_the_eyes_are_orange() {
   auto rgb = [](WallRig& r) {
@@ -800,12 +800,12 @@ void test_low_at_rest_rests_and_the_eyes_are_orange() {
     WallRig r(WallRig::remote_cfg(), true);
     r.wall = false;
     CHECK(rgb(r) == green);
-    r.body.batt_mv = 7250;
+    r.body.batt_mv = 6950;
     r.run_ms(500);  // the higher readings before still in the window: not yet
     CHECK(!r.mind.tired());
     r.run_ms(21000);
     CHECK(r.mind.tired() && r.mind.guard().eyes() == Eyes::Orange && rgb(r) == orange);
-    CHECK(r.log.has("battery: tired (7250 mV at rest, 16 %, below 20 %): the eyes orange while the way is clear"));
+    CHECK(r.log.has("battery: tired (6950 mV at rest, 4 %, below 5 %): the eyes orange while the way is clear"));
     kilo_host_guard_status_t st;
     r.mind.guard().fill(st);
     CHECK(st.eyes == KILO_GUARD_EYES_ORANGE && st.zone == KILO_GUARD_ZONE_GREEN);
@@ -818,17 +818,17 @@ void test_low_at_rest_rests_and_the_eyes_are_orange() {
     CHECK(r.mind.runner().context().data.low_battery);
     CHECKF(r.posture_goal() == KILO_POSTURE_REST, "posture %d", r.posture_goal());
     r.key(B6);
-    // 23 %: still tired (it clears at 25 %)
-    r.body.batt_mv = 7330;
+    // 8 %: still tired (it clears at 10 %)
+    r.body.batt_mv = 7100;
     r.run_ms(1000);
     CHECK(r.mind.tired());
-    r.body.batt_mv = 7400;  // 30 %
+    r.body.batt_mv = 7200;  // 12 %
     r.run_ms(1000);
-    CHECK(!r.mind.tired() && rgb(r) == green && r.log.has("battery: no longer tired (7400 mV at rest, 30 %)"));
+    CHECK(!r.mind.tired() && rgb(r) == green && r.log.has("battery: no longer tired (7200 mV at rest, 12 %)"));
   }
   {  // tired, then a wall: blue and red win over orange, and orange comes back when clear
     WallRig r(WallRig::remote_cfg(), true);
-    r.body.batt_mv = 7250;
+    r.body.batt_mv = 6950;
     r.run_ms(21000);
     CHECK(r.mind.tired() && rgb(r) == orange);
     // (a tired Kilo that stops at a wall then lies down in the runner's REST, and lying the range is the

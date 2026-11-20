@@ -720,10 +720,10 @@ def test_runner_fall_startle_low_battery_wind_down():
         body.snap.update(dist_mm=None, approach_mm_s=None)
         while clock() < 30:
             await asyncio.sleep(0)
-        body.snap.update(battery_pct=15.0)
+        body.snap.update(battery_pct=4.0)
         while clock() < 60:
             await asyncio.sleep(0)
-        body.snap.update(battery_pct=6.0)
+        body.snap.update(battery_pct=0.0)
         return await task
 
     why = asyncio.run(scenario())

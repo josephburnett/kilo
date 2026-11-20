@@ -46,7 +46,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "selector": {"noise": 0.04, "noise_period_s": 8.0, "margin": 0.1, "min_dwell_s": 6.0,
                  "urgent": ["startle", "greet"]},
-    "safety": {"low_battery_pct": 20.0, "critical_battery_pct": 8.0, "wind_down_s": 5.0,
+    "safety": {"low_battery_pct": 5.0, "critical_battery_pct": 0.0, "wind_down_s": 5.0,
                "fallen_settle_s": 2.0},
     "percepts": {"near_mm": 250.0, "approach_mm_s": 400.0},
     "behaviours": {
