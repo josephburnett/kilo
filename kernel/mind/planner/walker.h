@@ -19,6 +19,13 @@
 // 4. The planned stop: the planner steps every leg home and levels; when it
 //    is done the STANCE posture ends GAIT (EVENT GAIT_STOPPED), and the
 //    posture goal is cleared once the body has left GAIT.
+// 5. The quick stop (halt(): the remote's B6 and C7, the distance guard;
+//    plan.h): the planner's halt, from the first tick the body has not
+//    played yet: the ticks already sent ahead of it (up to kLookahead) are
+//    planned again from the planner as it was before them (a copy kept for
+//    each of the last kSnaps ticks) and sent again; the body replaces a
+//    queued tick with a newer FEET for it. So the stop starts about 40 ms
+//    after the request instead of 100 ms. Then as the planned stop.
 // The stream also ends on GAIT_STOPPED from the body, GOAL_REFUSED for FEET,
 // FELL, a reboot, an epoch change, the body leaving GAIT, GAIT not entered
 // within 0.6 s, and the mind's loop stalling (mark_alive) for 0.5 s.
@@ -51,6 +58,8 @@ constexpr uint64_t kEnterTimeoutUs = 600000;   // the body must be in GAIT this 
 constexpr uint64_t kHandoverTimeoutUs = 1000000;  // ...and out of it this soon after the STANCE posture
 constexpr uint64_t kMindStallUs = 500000;
 constexpr uint64_t kStanceWaitUs = 600000;     // POSTURE_TICKS (0.5 s) and a margin
+constexpr int kSnaps = kLookahead + 3;         // the planner as it was before each of the last ticks (halt)
+constexpr int kReplanAheadTicks = 2;           // halt: re-planned from the body's tick + this (the FEET in flight)
 
 // The body's tick, estimated from TELEMETRY arrival times (walker.py
 // BodyClock): body time = local time + the largest (tick x 20 ms - arrival)
@@ -145,6 +154,10 @@ class Walker {
   const char* start(const WalkGoal& goal);
   // The planned stop (each leg steps home, the body levels, then STANCE).
   void stop();
+  // The quick stop (5. above): also during the planned stop; nothing once
+  // the planner is done. The ticks it planned again: replanned().
+  void halt();
+  uint32_t replanned() const { return replanned_; }
   // End the stream now, without the planned stop: the body holds the last
   // pose, then settles on its own. why: the end's reason; asked: the
   // owner meant it (the remote's freeze): logged as Info, ended_ok().
@@ -260,6 +273,14 @@ class Walker {
     Attitude att;
   };
   Pred pred_[kPred] = {};  // u16 tick -> the attitude sent for it (the last 64)
+  struct Snap {
+    bool used = false;
+    uint32_t tick = 0;  // the planner's tick() then: the copy plans this tick next
+    Planner p;
+  };
+  Snap snaps_[kSnaps];
+  uint32_t replanned_ = 0;
+  uint32_t replan_from_now();
 };
 
 }  // namespace planner

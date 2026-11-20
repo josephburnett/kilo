@@ -39,7 +39,7 @@ def load(path):
         if f.msg is None:
             continue
         if f.direction == "tx" and isinstance(f.msg, P.Feet):
-            feet.setdefault(W._unwrap(f.msg.tick, last), f.msg)
+            feet[W._unwrap(f.msg.tick, last)] = f.msg  # the last for a tick: the body plays it (the quick stop's)
         elif f.direction == "rx" and isinstance(f.msg, P.Telemetry):
             last = W._unwrap(f.msg.tick, last)
             tel[last] = f.msg

@@ -1,9 +1,12 @@
 # Rear-up trick: sitting up on the hind feet and the tail (A2)
 
 Kilo's first authored trick: Kilo sits back on its two hind feet and the tip
-of its tail, front paws off the floor, holds 2 seconds, comes back down and
-ends **sitting**. One key starts it: **A2** (column A, row 2 from the
-bottom). Pressing A2 again while it plays brings Kilo down at once.
+of its tail, front paws off the floor, holds, comes back down and ends
+**sitting**. One key starts it: **A2** (column A, row 2 from the bottom).
+Since 2026-11-19 it goes up **one stage at a time**: A2 takes him to stage 1
+and he holds it; A2 again while he holds takes him on to the next stage, as
+high as the build allows (section 3). B6 or C7 bring him down from any
+stage.
 
 **This is the second design.** The first one fell over twice on
 2026-11-17; `docs/rear-up-trick-results.md` has the trials, the video and
@@ -15,14 +18,15 @@ check and Kilo sits down (the model says so; section 8).
 
 It comes in **three stages**, three heights:
 
-| Stage | Trick | Held at (TELEMETRY nose up) | Takes |
+| Stage | Trick | Held at (TELEMETRY nose up) | Takes, straight up and down |
 |---|---|---|---|
 | 1 | `rear_up` | 26 degrees: a low sit-up | 18 s |
-| 2 | `rear_up_2` | 38 degrees | 22 s |
-| 3 | `rear_up_3` | 52 degrees: the pose of your photo | 26 s |
+| 2 | `rear_up_2` | 38 degrees | 26 s |
+| 3 | `rear_up_3` | 52 degrees: the pose of your photo | 33 s |
 
 Each stage does exactly what the stage below does on the way up and then
-goes higher.
+goes higher. In `rear_up_2` and `rear_up_3` each lower stage's top is held
+for 4 seconds (it was 0.6 s): that is the time to press A2 to go on.
 
 **A2 is switched off** until you switch it on (section 3). Write what you
 see in `docs/rear-up-trick-results.md`. Nothing here is timed: every step
@@ -137,7 +141,9 @@ as they would if Kilo tipped forward there.
   else happens; he then sits down.
 - The pitch never goes past 55 degrees; the fall detector (75 degrees)
   stays armed.
-- A2 refuses to start below 7400 mV on the battery.
+- A2 refuses to start below 7400 mV on the battery at rest (the highest
+  reading of the last 20 seconds: right after a walk the reading sags by up
+  to 0.25 V for a moment, and the refusal used to read that sag).
 
 ### Your photo: Kilo standing by itself at 54 degrees (2026-11-16)
 
@@ -386,7 +392,31 @@ the other joints' numbers.
 ## 3. The A2 switch, and the stage
 
 A2 is off unless it is switched on, in both places the remote is handled.
-The switch's value is the stage: 1, 2 or 3.
+The switch's value is the **highest stage allowed**: 1, 2 or 3.
+
+**Stepping through the stages (the mind on the Pi).** With the switch at
+N, A2 from standing plays the stage-N trick, which first goes to stage 1
+and holds it 4 seconds:
+
+- A2 while he goes up to or holds stage 1 (or 2): he goes on to the next
+  stage when the hold ends (the trick's own checks of the pitch and roll at
+  each stage's top still run, and stop him if he is not where the model
+  says);
+- no A2 in that time: about 0.3 s before the hold would end, the mind stops
+  the trick and he comes down to SIT from where he is (the same straight
+  move every stop takes, checked by the model from every keyframe);
+- at the highest stage he holds 2 seconds and comes down by himself;
+- A2 at any other moment (on the way up between two stages, or at the
+  highest stage), B6 or C7: down at once.
+
+So with the switch at 3 you can do stage 1, look, and only then go on; one
+build does all three. The log says each step: `remote: rear_up: up to stage
+1 (of 3)`, `rear_up: stage 1 (of 3): A2 to go on`, `rear_up: on to stage 2
+(of 3)`, `rear_up: held stage 1 without A2: coming down`, `rear_up: coming
+down (stage 2 allowed)`; each is also a mark in the trick's flight-recorder
+run (section 6), next to the key that caused it. The laptop daemon (`kilo
+run --remote`) does not step: there the stage-N trick plays straight
+through, pausing 4 s at each lower stage.
 
 - **The mind kernel on the Pi** (what normally runs): build it with the
   switch and update the Pi. For stage 1:
@@ -410,8 +440,10 @@ The switch's value is the stage: 1, 2 or 3.
 
 With the switch off, pressing A2 logs `remote A2 (0x10, none): ignored (no
 action on this key)` and nothing moves. With it on, A2 logs `remote A2
-(0x10, rear up): trick rear_up started (18 s; ...)` at stage 1, and `rear up
-2` / `rear_up_2`, `rear up 3` / `rear_up_3` at the others.
+(0x10, rear up): trick rear_up started (18 s; ...)` at 1, and at 2 and 3
+`remote A2 (0x10, rear up 3): trick rear_up_3 started: up to stage 1 (A2
+while he holds it: on, up to 3; ...)`. (At boot the mind still logs
+`rear-up key A2 on: rear_up_3, stage 3`: read it as "up to stage 3".)
 
 Switch it on only for the trials of section 5, and leave it on afterwards
 only at a stage that has gone well.
@@ -458,9 +490,11 @@ which (the log line says "guard NAME: ...").
 Kilo should sit still at about 26 degrees for 2 s, then come back down and
 sit.
 
-**Steps 4-6: stages 2 and 3** (`KILO_REAR_UP=2`, then `3`): as step 3. The
-tail tip slides forward as Kilo rises; the top pitch should be about 38 and
-52 degrees.
+**Steps 4-6: stages 2 and 3** (`KILO_REAR_UP=3` once, for both): press
+A2; at stage 1's hold, A2 again: he goes on to stage 2 and holds it; let
+him come down (no A2), or A2 again for stage 3. The tail tip slides forward
+as Kilo rises; the top pitch should be about 38 and 52 degrees. Without
+the second press he comes down from stage 1 after its 4 s.
 
 What a recorded trial should show if the model is right (stage 1,
 TELEMETRY nose up, plus or minus about 2 degrees; roll within 2 degrees):
@@ -645,7 +679,12 @@ from the trick's own entry in the library.
 
 - **A2 does nothing, the log says "A2 (0x10, none): ignored"**: the switch
   is off (section 3).
-- **A2 says "refused: battery ... mV"**: charge the battery.
+- **A2 says "refused: battery ... mV at rest"**: charge the battery (the
+  reading at rest, not the moment after a walk, is what counts).
+- **He came down from stage 1 when you wanted stage 2**: press A2 while he
+  holds (the log says `rear_up: stage 1 (of 3): A2 to go on`); a press
+  earlier on the way up (before his last move up to the stage) brings him
+  down instead.
 - **The log says "guard gather: roll ..."**: a hind leg is not where it was
   asked. Is the right hind shoulder re-seated (`kilo cal show` joint 10
   between +7 and +25)? Did a foot land short or slide? Tell me the numbers.

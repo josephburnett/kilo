@@ -179,6 +179,36 @@ void Walker::stop() {
   }
 }
 
+void Walker::halt() {
+  queued_ = false;
+  if (phase_ == WalkPhase::Streaming) {
+    if (planner_.halting() || planner_.done() || handover_) return;
+    replanned_ = replan_from_now();
+    planner_.halt();
+    mark(WalkMark::Stop);
+  } else if (phase_ != WalkPhase::Idle) {  // not streaming yet: no walk at all
+    end("stopped before the stream started", true);
+    teardown(false);
+  }
+}
+
+// The planner put back to the first tick the body has not played yet (its
+// tick + kReplanAheadTicks: the FEET for the next one may be on the wire), so
+// the next wake plans and sends those ticks again. Returns how many.
+uint32_t Walker::replan_from_now() {
+  double body;
+  if (!clock_est_.now(clock_.now_us(), &body)) return 0;
+  int64_t cur = (int64_t)body;
+  if ((double)cur > body) cur--;
+  int64_t from = cur + kReplanAheadTicks;
+  if (from < 0 || from >= (int64_t)planner_.tick()) return 0;
+  Snap& s = snaps_[(uint32_t)from % (uint32_t)kSnaps];
+  if (!s.used || s.tick != (uint32_t)from) return 0;
+  uint32_t n = planner_.tick() - (uint32_t)from;
+  planner_ = s.p;
+  return n;
+}
+
 void Walker::abort(const char* why, bool asked) {
   queued_ = false;
   if (phase_ == WalkPhase::Idle) return;
@@ -278,6 +308,8 @@ bool Walker::begin_stream(uint64_t now) {
   stats_ = {};
   gait_seen_ = has_last_tel_ = handover_ = started_ = stalled_ = false;
   for (Pred& p : pred_) p.used = false;
+  for (Snap& s : snaps_) s.used = false;
+  replanned_ = 0;
   phase_ = WalkPhase::Streaming;
   next_wake_ = now;
   int v10 = round_i(planner_.timing().speed_mm_s * 10);
@@ -416,6 +448,12 @@ bool Walker::wake(uint64_t now) {
   int64_t target = cur + kLookahead;
   uint32_t behind = 0;
   while ((int64_t)planner_.tick() <= target && !planner_.done()) {
+    if (!planner_.halting()) {  // the planner before this tick, for a quick stop that comes later (halt())
+      Snap& s = snaps_[planner_.tick() % (uint32_t)kSnaps];
+      s.used = true;
+      s.tick = planner_.tick();
+      s.p = planner_;
+    }
     const TickPlan& tp = planner_.next();
     if ((int64_t)tp.tick <= cur) {
       stats_.skipped++;

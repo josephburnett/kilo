@@ -102,15 +102,16 @@ void test_zones() {
   CHECK(z == Zone::Blue);
   CHECK(next_zone(Zone::Red, false, 0, blue, red) == Zone::Green);  // nothing seen
   // the thresholds: never below kBlueMinMm; faster is further
-  CHECK(blue_mm("trot", 0) == kBlueMinMm && blue_mm("trot", 180) > blue_mm("trot", 144));
-  CHECK(blue_mm("walk", 97) < blue_mm("trot", 180));
+  CHECK(blue_mm("trot", 0) == kBlueMinMm && blue_mm("trot", 230.4) > blue_mm("trot", 187.2));
+  CHECK(blue_mm("walk", 97) <= blue_mm("trot", 230.4) && blue_mm("crawl", 27) == kBlueMinMm);
   std::printf("guard: BLUE at walk 97 mm/s %.0f, trot 144 %.0f, trot 180 %.0f, trot 200 %.0f, crawl 27 %.0f mm\n",
               blue_mm("walk", 97), blue_mm("trot", 144), blue_mm("trot", 180), blue_mm("trot", 200),
               blue_mm("crawl", 27));
 }
 
-// The planned stop's way in the real planner (its support feet's travel from stop() to done()),
-// against the guard's v^2 / 2a.
+// The quick stop's way in the real planner (its support feet's travel from halt() to done()),
+// against the guard's v^2 / 2a; at several moments of the cycle (the worst counts), and the
+// planned stop's for comparison (docs/walking-and-balance.md §14).
 void test_stop_way_against_the_planner() {
   for (const char* g : {"walk", "trot", "crawl"}) {
     const planner::Pattern* pat = planner::find_pattern(g);
@@ -118,29 +119,39 @@ void test_stop_way_against_the_planner() {
       if (f > 1.25 && !str_eq(g, "trot")) continue;  // the walk and the crawl top at 1.25 (their +5)
       for (double steer : {0.0, 0.25, 1.0}) {  // straight, and steered (A6 level 1 and 3) at the top speeds
         if (steer != 0 && f < 1.25) continue;
-        planner::Planner p;
-        p.start(*pat, planner::Direction::Forward, (planner::real)(planner::default_speed(*pat) * f), 0, -1,
-                (planner::real)steer);
-        planner::TickPlan prev = p.next();
-        for (int t = 0; t < 250; t++) prev = p.next();
-        double v = (double)p.timing().speed_mm_s, moved = 0;
-        p.stop();
-        for (int t = 0; t < 1000 && !p.done(); t++) {
-          planner::TickPlan cur = p.next();
-          double s = 0;
-          int n = 0;
-          for (int i = 0; i < planner::kLegs; i++)
-            if ((prev.support & cur.support) & (1 << i)) {
-              s += prev.x[i] - cur.x[i];
-              n++;
+        double v = 0, worst = 0, planned = 0, ticks = 0;
+        int period = (int)(planner::timing(*pat, (planner::real)(planner::default_speed(*pat) * f)).period_ms / 20);
+        for (int quick = 0; quick < 2; quick++)
+          for (int at = 0; at < period; at += (quick ? 2 : period)) {
+            planner::Planner p;
+            p.start(*pat, planner::Direction::Forward, (planner::real)(planner::default_speed(*pat) * f), 0, -1,
+                    (planner::real)steer);
+            planner::TickPlan prev = p.next();
+            for (int t = 0; t < 250 + at; t++) prev = p.next();
+            v = (double)p.timing().speed_mm_s;
+            double moved = 0;
+            if (quick) p.halt();
+            else p.stop();
+            int t = 0;
+            for (; t < 1000 && !p.done(); t++) {
+              planner::TickPlan cur = p.next();
+              double s = 0;
+              int n = 0;
+              for (int i = 0; i < planner::kLegs; i++)
+                if ((prev.support & cur.support) & (1 << i)) {
+                  s += prev.x[i] - cur.x[i];
+                  n++;
+                }
+              if (n) moved += s / n;
+              prev = cur;
             }
-          if (n) moved += s / n;
-          prev = cur;
-        }
-        CHECKF(stop_way_mm(g, v) >= moved, "%s %.0f mm/s steer %.2f: planner %.1f mm, guard %.1f mm", g, v, steer,
-               moved, stop_way_mm(g, v));
-        std::printf("guard: %-5s %5.1f mm/s steer %.2f: the planned stop %5.1f mm (guard allows %5.1f)\n", g, v,
-                    steer, moved, stop_way_mm(g, v));
+            if (!quick) planned = moved;
+            else if (moved > worst) worst = moved, ticks = t;
+          }
+        CHECKF(stop_way_mm(g, v) >= worst, "%s %.0f mm/s steer %.2f: planner %.1f mm, guard %.1f mm", g, v, steer,
+               worst, stop_way_mm(g, v));
+        std::printf("guard: %-5s %5.1f mm/s steer %.2f: the quick stop %4.1f mm, done in %3.0f ticks (guard allows "
+                    "%4.1f); the planned stop %5.1f mm\n", g, v, steer, worst, ticks, stop_way_mm(g, v), planned);
       }
     }
   }
@@ -163,10 +174,12 @@ struct WallRig {
   kilo_feet_t prev = {};
   double travel = 0, max_travel = 0, back_travel = 0;
   double override_mm = -1;  // a reading forced (a hand), for one fresh reading
+  double fixed_mm = -1;     // every reading this (the floor, which moves with him), when >= 0
   std::vector<std::pair<uint64_t, uint8_t>> done_at;  // TRICK_DONE to send: (time, trick_id)
 
   explicit WallRig(const MindConfig& cfg, bool eyes = true) : mind(body.serial, body.clock, log, nullptr, cfg) {
     body.eyes = eyes;
+    body.posture_pitch = true;
     mind.start();
     run_ms(200);
   }
@@ -192,7 +205,7 @@ struct WallRig {
     bool fresh = body.tick % 4 == 0;
     body.flags = (uint16_t)((body.flags & ~KILO_TELEMETRY_FLAGS_DIST_FRESH) | (fresh ? KILO_TELEMETRY_FLAGS_DIST_FRESH : 0));
     if (fresh && body.clock.t + 4000 >= body.next_tel) {
-      double d = wall ? wall_mm - body_pos() : 0;
+      double d = fixed_mm >= 0 ? fixed_mm : wall ? wall_mm - body_pos() : 0;
       if (wall && noise_mm > 0) d += (rng.u() * 2 - 1) * noise_mm;
       if (wall && outliers > 0 && rng.u() < outliers) d = rng.u() < 0.5 ? d + 600 : d * 0.4;
       if (dropouts > 0 && rng.u() < dropouts) d = 0;
@@ -284,7 +297,9 @@ Approach approach(uint16_t gait_key, double wall_mm, const Run& run = Run()) {
   }
   r.run_ms(1500);
   a.gap = r.gap();
-  a.sitting = r.posture_goal() == KILO_POSTURE_SIT && r.mind.behaviour_active() && r.mind.sitting_variant();
+  // SIT, or the alive layer's sitting move (its trick clears the posture goal while it plays)
+  a.sitting = (r.posture_goal() == KILO_POSTURE_SIT || r.mind.alive().sitting()) && r.mind.behaviour_active() &&
+              r.mind.sitting_variant();
   return a;
 }
 
@@ -339,7 +354,7 @@ void test_red_backs_off_then_sits() {
   }
   r.run_ms(1500);
   CHECK(backed && r.mind.guard().pullbacks() == 1 && r.mind.guard().action() == Action::Holding);
-  CHECK(r.posture_goal() == KILO_POSTURE_SIT && r.mind.sitting_variant());
+  CHECK((r.posture_goal() == KILO_POSTURE_SIT || r.mind.alive().sitting()) && r.mind.sitting_variant());
   CHECKF(r.back_travel > 5 && r.back_travel < 120, "backed %.0f mm", r.back_travel);
   CHECK(r.log.has("guard action=backing") && r.log.has("guard zone=red"));
   std::printf("guard: RED at trot: backed off %.0f mm, then sat (final gap %.0f mm)\n", r.back_travel,
@@ -396,7 +411,7 @@ void test_steering_while_the_guard_acts() {
       }
     }
     r.run_ms(3000);
-    CHECK(pressed && r.mind.guard().action() == Action::Holding);
+    CHECKF(pressed && r.mind.guard().action() == Action::Holding, "action %s decision %s", action_name(r.mind.guard().action()), r.mind.guard().decision());
     CHECKF(r.log.has("remote A6 (0x22, turn left): refused (distance guard"), "A6 not refused");
     CHECKF(!r.mind.walker().active() && r.gap() >= 100, "walking %d, gap %.0f mm", r.mind.walker().active(), r.gap());
     std::printf("guard: A6 (steer) during the stop at trot +5: refused, stopped %.0f mm short of the wall\n", r.gap());
@@ -494,11 +509,11 @@ void test_hand_and_floor_do_not_stop() {
   CHECK(r.mind.guard().action() == Action::Watch && r.mind.walker().active() && r.mind.guard().stops() == 0);
   // the head held tilted down 25 deg: the floor at ~230 mm, ignored
   CHECK(client_look(r.mind.link(), 0, -25));
-  r.wall_mm = r.body_pos() + 230;
-  r.wall = true;
+  r.fixed_mm = 230;  // the floor stays 230 mm ahead as he walks
   uint32_t floor_before = r.mind.guard().filter().floor_ignored();
   r.run_ms(1000);
-  CHECK(r.mind.guard().action() == Action::Watch && r.mind.guard().filter().floor_ignored() > floor_before);
+  r.fixed_mm = -1;
+  CHECKF(r.mind.guard().action() == Action::Watch && r.mind.guard().filter().floor_ignored() > floor_before, "action %s decision %s floor %u/%u", action_name(r.mind.guard().action()), r.mind.guard().decision(), (unsigned)r.mind.guard().filter().floor_ignored(), (unsigned)floor_before);
   r.wall_mm = 100000;
   // a hand held there: stops
   CHECK(client_look(r.mind.link(), 0, 0));
@@ -558,6 +573,179 @@ void test_eyes() {
     kilo_host_guard_status_t s;
     r.mind.guard().fill(s);
     CHECK(s.enabled == 1 && s.eyes_driven == 0 && s.eyes == KILO_GUARD_EYES_GREEN);
+  }
+}
+
+// ---- a hand in his face, in every state (2026-11-19: "he should always react") -------------
+
+// Run until pred (or ms pass); the time it took, or -1.
+template <typename P>
+double run_until(WallRig& r, uint32_t ms, P pred) {
+  for (uint32_t i = 0; i < ms; i += 4) {
+    if (pred()) return i / 1000.0;
+    r.pass();
+  }
+  return pred() ? ms / 1000.0 : -1;
+}
+
+void test_hand_in_face_walking_every_gait() {
+  struct G {
+    const char* name;
+    uint16_t key;
+    int steer;
+  } gaits[] = {{"trot", A4, 0}, {"walk", C4, 0}, {"crawl", B4, 0}, {"trot", A4, 2}, {"walk", C4, -1}};
+  for (const G& g : gaits) {
+    for (int red = 0; red < 2; red++) {
+      WallRig r(WallRig::remote_cfg());
+      r.wall = false;  // nothing ahead: no echo
+      r.key(g.key);
+      for (int i = 0; i < (g.steer < 0 ? -g.steer : g.steer); i++) r.key(g.steer > 0 ? A6 : C6);
+      r.run_ms(3000);
+      CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Forward);
+      r.fixed_mm = red ? 100 : 180;  // a hand put in front of his face, held there as he comes
+      uint32_t hisses = r.mind.guard().hisses();
+      double t_act = run_until(r, 3000, [&] { return r.mind.guard().action() != Action::Watch; });
+      bool crawl = std::strcmp(g.name, "crawl") == 0;  // the crawl, very close: it stops (reversing takes 4 s)
+      bool backs = red && !crawl;
+      double t_halt = run_until(r, 3000, [&] { return r.mind.walker().planner().halting() || backs; });
+      CHECKF(t_act >= 0 && t_act < 0.45, "%s steer %d %s: reacted after %.2f s", g.name, g.steer, red ? "RED" : "BLUE",
+             t_act);
+      CHECK(backs ? r.mind.guard().action() == Action::Backing : t_halt >= 0);
+      double t_held = run_until(r, 12000, [&] { return r.mind.guard().action() == Action::Holding; });
+      bool held = t_held >= 0;
+      r.run_ms(1500);
+      CHECKF(held && r.mind.sitting_variant() && r.mind.behaviour_active(), "%s steer %d: held %d (%s, %s)", g.name,
+             g.steer, held, action_name(r.mind.guard().action()), r.mind.guard().decision());
+      CHECK(!red || (r.mind.guard().hisses() == hisses + 1 && r.mind.guard().pullbacks() == (backs ? 1u : 0u)));
+      std::printf("guard: a hand in his face (%s, %3.0f mm) walking %-5s%s: acts after %.2f s, sits %.1f s later\n",
+                  red ? "RED " : "BLUE", r.fixed_mm, g.name, g.steer ? " steering" : "", t_act, t_held);
+    }
+  }
+}
+
+void test_hand_in_face_turning_backward_standing_sitting_lying() {
+  {  // turning in place: BLUE keeps turning (a wall seen as he turns), RED stops him, he sits and hisses
+    WallRig r(WallRig::remote_cfg());
+    r.wall = false;
+    r.key(A6);
+    r.run_ms(2000);
+    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Left);
+    r.fixed_mm = 180;
+    r.run_ms(1500);
+    CHECK(r.mind.walker().active() && !r.mind.walker().planner().stopping() && r.mind.guard().zone() == Zone::Blue);
+    r.fixed_mm = 90;
+    double t = run_until(r, 3000, [&] { return r.mind.walker().planner().halting(); });
+    CHECKF(t >= 0 && t < 0.45, "turning: halted after %.2f s", t);
+    CHECK(r.run_until_hold(6000) && r.mind.guard().hisses() == 1 && r.mind.guard().pullbacks() == 0);
+    std::printf("guard: a hand in his face (RED) turning in place: the quick stop after %.2f s, sits\n", t);
+  }
+  {  // walking backward: away from it already, nothing but the eyes
+    WallRig r(WallRig::remote_cfg());
+    r.wall = false;
+    r.key(A4);
+    r.key(B5);
+    r.key(B5);
+    r.key(B5);
+    r.run_ms(1500);
+    CHECK(r.mind.walker().goal().direction == planner::Direction::Back);
+    r.fixed_mm = 90;
+    r.run_ms(1500);
+    CHECK(r.mind.walker().active() && !r.mind.walker().planner().stopping() && r.mind.guard().zone() == Zone::Red &&
+          r.mind.guard().action() == Action::Watch && r.mind.guard().eyes() == Eyes::Red);
+    CHECK(r.log.has("state=walk-back: eyes only (walking away from it)"));
+  }
+  {  // standing (B6): BLUE: he looks at it and sits; then RED while sitting: he leans back and hisses
+    WallRig r(WallRig::remote_cfg());
+    r.wall = false;
+    r.key(B6);
+    r.run_ms(1500);
+    r.fixed_mm = 180;
+    double t = run_until(r, 2000, [&] { return r.mind.guard().action() == Action::Holding; });
+    CHECKF(t >= 0 && t < 0.4, "standing BLUE: %.2f s", t);
+    r.run_ms(200);
+    const Goal* h = r.mind.link().goal(KILO_MSG_SET_HEAD);
+    CHECK(h != nullptr && r.mind.sitting_variant() && r.log.has("guard: looks at it"));
+    CHECK(r.posture_goal() == KILO_POSTURE_SIT || r.mind.alive().sitting());
+    size_t tricks_before = r.body.count(KILO_MSG_TRICK_PLAY);
+    r.fixed_mm = 90;
+    t = run_until(r, 2000, [&] { return r.mind.guard().hisses() == 1; });
+    r.run_ms(1500);
+    CHECKF(t >= 0 && t < 0.4 && r.log.has("guard: leans back"), "sitting RED: %.2f s", t);
+    CHECK(r.body.count(KILO_MSG_TRICK_PLAY) > tricks_before && r.mind.alive().last_move() == behaviour::AliveMove::Flinch);
+    std::printf("guard: standing, a hand (BLUE): looks and sits after %.2f s; sitting, closer (RED): leans back\n", t);
+  }
+  {  // standing, RED at once: a short back-off, then he sits
+    WallRig r(WallRig::remote_cfg());
+    r.wall = false;
+    r.key(B6);
+    r.run_ms(1500);
+    r.fixed_mm = 100;
+    double t = run_until(r, 2000, [&] { return r.mind.guard().action() == Action::Backing; });
+    CHECKF(t >= 0 && t < 0.4, "standing RED: %.2f s", t);
+    CHECK(run_until(r, 3000, [&] { return r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Back; }) >= 0);
+    CHECK(r.run_until_hold(10000) && r.mind.guard().pullbacks() == 1 && r.mind.guard().hisses() == 1);
+    r.run_ms(1500);
+    CHECK(r.mind.sitting_variant());
+    std::printf("guard: standing, a hand very close (RED): backs off after %.2f s (%.0f mm), sits\n", t, r.back_travel);
+  }
+  {  // the release rule: a hand that comes and goes while he sits backs him off at most kMaxBacks times
+    WallRig r(WallRig::remote_cfg());
+    r.wall = false;
+    CHECK(client_posture(r.mind.link(), nullptr, "sit"));
+    r.run_ms(1500);
+    for (int i = 0; i < 5; i++) {
+      r.fixed_mm = 90;
+      r.run_ms(700);
+      r.fixed_mm = 250;  // the hand pulled back a little: blue, not green
+      r.run_ms(2500);
+    }
+    CHECKF(r.mind.guard().hisses() == (uint32_t)kMaxBacks, "%u hisses (%s)", (unsigned)r.mind.guard().hisses(),
+           r.mind.guard().decision());
+    CHECK(r.log.has("eyes only (backed off twice: clear for 1 s first)"));
+    r.fixed_mm = -1;  // gone: green for a second releases it
+    r.run_ms(2500);
+    CHECK(r.mind.guard().action() == Action::Watch && r.mind.guard().backs() == 0);
+    r.fixed_mm = 90;
+    r.run_ms(700);
+    CHECK(r.mind.guard().hisses() == (uint32_t)kMaxBacks + 1);
+  }
+  {  // lying (A7, REST): the floor under his nose and a hand alike are the floor: the eyes stay green
+    WallRig r(WallRig::remote_cfg());
+    r.wall = false;
+    r.key(0xA2);
+    r.run_ms(1500);
+    r.fixed_mm = 60;
+    r.run_ms(2000);
+    CHECKF(r.mind.guard().action() == Action::Watch && r.mind.guard().zone() == Zone::Green &&
+               r.log.has("state=lying: nothing seen (lying: every reading is the floor)"),
+           "%s %s %s", action_name(r.mind.guard().action()), zone_name(r.mind.guard().zone()), r.mind.guard().decision());
+  }
+  {  // the head held tilted down while standing: the floor (230 mm) is ignored, a hand nearer is not
+    WallRig r(WallRig::remote_cfg());
+    r.wall = false;
+    r.key(B6);
+    r.run_ms(1000);
+    CHECK(client_look(r.mind.link(), 0, -25));  // the floor from 0.75 x 80 / sin 25 = 142 mm on
+    r.fixed_mm = 230;
+    r.run_ms(2000);
+    CHECK(r.mind.guard().zone() == Zone::Green && r.mind.guard().action() == Action::Watch &&
+          r.mind.guard().filter().floor_ignored() > 10);
+    r.fixed_mm = 110;
+    CHECK(run_until(r, 1500, [&] { return r.mind.guard().action() != Action::Watch; }) >= 0);
+  }
+  {  // no echo right after very close (a hand closer than the sensor measures): still red for a second
+    WallRig r(WallRig::remote_cfg());
+    r.wall = false;
+    CHECK(client_posture(r.mind.link(), nullptr, "sit"));
+    r.run_ms(1500);
+    r.fixed_mm = 90;
+    r.run_ms(500);
+    CHECK(r.mind.guard().zone() == Zone::Red);
+    r.fixed_mm = 0;  // no echo
+    r.run_ms(700);
+    CHECK(r.mind.guard().zone() == Zone::Red && r.mind.guard().filter().close_hold());
+    r.run_ms(800);
+    CHECK(r.mind.guard().zone() == Zone::Green);
   }
 }
 
@@ -662,8 +850,8 @@ void test_low_at_rest_rests_and_the_eyes_are_orange() {
       }
     }
     CHECK(blue_seen && red_seen && ok);
-    r.wall = false;
-    r.run_ms(1500);
+    r.wall = false;  // gone: no echo (held as very close for kCloseHoldS), then green
+    r.run_ms(2000);
     CHECKF(r.mind.guard().zone() == Zone::Green && rgb(r) == orange, "zone %s", zone_name(r.mind.guard().zone()));
   }
   {  // the body's LOW_BATT mode: tired whatever the reading
@@ -802,6 +990,8 @@ int main() {
   test_light_sleep_floor();
   test_hand_and_floor_do_not_stop();
   test_backward_trick_pickup_and_off_do_not_trigger();
+  test_hand_in_face_walking_every_gait();
+  test_hand_in_face_turning_backward_standing_sitting_lying();
   test_eyes();
   test_rested_battery();
   test_sag_does_not_send_the_runner_to_rest();

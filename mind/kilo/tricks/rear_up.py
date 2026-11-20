@@ -55,9 +55,13 @@ design does about it:
    centre, one side's servos sagging, and the centre of mass to either side.
 
 THREE STAGES, one library entry each (STAGES; the remote's rear-up key
-plays the one the build selects, KILO_REAR_UP=1, 2 or 3). Each stage plays
-the one before it unchanged and then goes on: 1 rear_up holds at UP_SPECS
-"up", 2 rear_up_2 at "mid", 3 rear_up_3 at "top" (the photo's pose).
+plays the one the build allows at most, KILO_REAR_UP=1, 2 or 3). Each stage
+plays the one before it unchanged and then goes on: 1 rear_up holds at
+UP_SPECS "up", 2 rear_up_2 at "mid", 3 rear_up_3 at "top" (the photo's
+pose). In a higher stage the lower stages' tops hold STEP_HOLD (4 s): the
+mind's remote lets the trick go on to the next stage only when A2 is pressed
+again in that time, else it stops it there (TRICK_STOP: the crossfade to SIT
+that every stop takes, checked from every frame); kernel/mind/remote/remote.h.
 
 Keyframes are given as world-space intent (Spec) and solved into joint
 angles for the model's geometry. Every hold stays far under 70 deg nose
@@ -160,6 +164,7 @@ class Spec:
 # design's 60). A forward tip is caught by them (catch()).
 PAWS = (55.0, 20.0)
 HOLD = 100   # ticks at a stage's top (2 s)
+STEP_HOLD = 200  # ticks at a lower stage's top in a higher stage (4 s): the remote's A2 goes on, else down
 
 # The way onto the tripod, as places on the floor (world X, mm, + forward):
 # the hind feet end at 0, the front feet stay at FRONT_X the whole time
@@ -326,12 +331,19 @@ def solve(spec: Spec, g: S.Geometry | None = None) -> dict:
 def up_specs(st=1) -> tuple:
     """The way up for a stage: UP_SPECS to its top; the top held; the guards' holds kept."""
     st = stage(st)
+    lower = {s.top for s in STAGES if s.number < st.number}
     out = []
     for i, s in enumerate(UP_SPECS[:st.top + 1]):
-        # the top holds; a guarded frame below it holds only long enough for its guard
-        hold = s.hold if i == st.top else (GUARD_HOLD if s.guard else 0)
+        # the top holds; a lower stage's top holds STEP_HOLD (the remote's A2 goes on from it); a
+        # guarded frame below it holds only long enough for its guard
+        hold = s.hold if i == st.top else STEP_HOLD if i in lower else (GUARD_HOLD if s.guard else 0)
         out.append(replace(s, hold=hold))
     return tuple(out)
+
+
+def top_frame(trick: Trick) -> int:
+    """The frame a stage holds at its top: its last guarded frame."""
+    return trick.guards[-1].frame
 
 
 @dataclass(frozen=True)
@@ -526,7 +538,7 @@ def run_play(trick: Trick, g3: T.Geometry3, label: str = "", steps: int = 12) ->
     fr = [joints_of(f) for f in trick.frames]
     names = trick.source.get("keyframes") or [str(i) for i in range(len(fr))]
     guards = {g.frame: g for g in trick.guards}
-    hold_i = max(range(len(fr)), key=lambda i: trick.frames[i].hold)
+    hold_i = top_frame(trick)
     prev = STAND
     r = T.rest(g3, prev)
     R = r.R
@@ -749,7 +761,7 @@ def catch(trick: Trick, g3: T.Geometry3 = DESIGN):
     """A forward tip at the hold: Kilo pushed forward over its hind feet
     until something else touches. Returns (the rest at the hold, the rest
     from there): the second should be on the hind and the front feet."""
-    hold_i = max(range(len(trick.frames)), key=lambda i: trick.frames[i].hold)
+    hold_i = top_frame(trick)
     smp = play_rests(g3, [joints_of(f) for f in trick.frames[:hold_i + 1]], steps=8)
     held = smp[-1].rest
     js = joints_of(trick.frames[hold_i])

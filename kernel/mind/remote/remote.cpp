@@ -19,6 +19,23 @@ const double* speed_factors(const planner::Pattern& p) {
 
 namespace {
 constexpr uint64_t kTrickStopWaitUs = 2000000;  // TRICK_STOP's ACK and the TRICK_DONE it brings
+constexpr uint64_t kStepLeadUs = 300000;  // a lower stage's hold: down this long before it ends without A2
+const char* const kStageTop[] = {"up", "mid", "top"};  // rear_up.py: each stage's top frame (its last guard)
+
+// The rear-up stage of a trick (rear_up 1, rear_up_2 2, rear_up_3 3), 0 for another.
+int rear_up_stage_of(const char* name) {
+  if (str_eq(name, "rear_up")) return 1;
+  if (str_eq(name, "rear_up_2")) return 2;
+  if (str_eq(name, "rear_up_3")) return 3;
+  return 0;
+}
+
+// The frame of stage k's top in trick t (its guard named so), -1 if none.
+int stage_frame(const tricks::Trick& t, int k) {
+  for (uint8_t i = 0; i < t.n_guards; i++)
+    if (str_eq(t.guards[i].name, kStageTop[k - 1])) return t.guards[i].frame;
+  return -1;
+}
 
 int iabs(int v) { return v < 0 ? -v : v; }
 
@@ -124,6 +141,7 @@ bool RemoteControl::perform(const Key& key, uint16_t arg) {
 
 void RemoteControl::poll() {
   step();
+  step_gate();
   while (phase_ == Phase::Idle && n_ > 0) {
     Pending p = q_[head_];
     head_ = (head_ + 1) % kQueue;
@@ -176,9 +194,9 @@ void RemoteControl::freeze(const Key& key, uint16_t arg) {
   auto part = [&](const char* s) {
     n += format(what + n, sizeof what - n, "%s%s", n > 8 ? ", " : "", s);
   };
-  if (walker_.active()) {  // no planned stop: the body holds, settles the swing feet down, stays in STANCE
-    walker_.abort("aborted (C7 freeze)", true);
-    part("walk aborted");
+  if (walker_.active()) {  // the quick stop: the feet down where they are, the legs squared up, STANCE
+    walker_.halt();
+    part("walk: the quick stop");
   }
   if (behaviour_ != nullptr && behaviour_->active()) {  // its own trick is cancelled as it stops
     behaviour_->stop();
@@ -227,8 +245,18 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
       stop_then_act(now);
       return;
     case Kind::Trick:
-      if (mode() == KILO_MODE_TRICK || player_.busy()) {  // the toggle: a second press brings it down
-        stop_trick();
+      if (mode() == KILO_MODE_TRICK || player_.busy()) {
+        uint64_t end = 0;
+        int k = step_at(&end);
+        if (k != 0 && k == step_allowed_ && k < step_max_) {  // the rear-up: on to the next stage
+          step_allowed_ = k + 1;
+          char what[96];
+          format(what, sizeof what, "rear_up: on to stage %d (of %d)", k + 1, step_max_);
+          step_note(what);
+          done(what, false);
+          return;
+        }
+        stop_trick();  // the toggle: a second press brings it down
         done("trick stopped: coming down", false);
         return;
       }
@@ -344,11 +372,12 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
   act();
 }
 
-// The planned stop of a walk, waited for (ir.py _stop_walking), then a trick stopped, then act().
+// The quick stop of a walk (planner/plan.h halt()), waited for (ir.py _stop_walking), then a trick
+// stopped, then act().
 void RemoteControl::stop_then_act(uint64_t now) {
   reset_motion();
   if (body_walking()) {
-    walker_.stop();
+    walker_.halt();
     double period = walker_.active() ? (double)walker_.planner().timing().period_ms : 0.0;
     phase_ = Phase::StopWalk;
     deadline_ = now + (uint64_t)(stop_timeout_s(period) * 1e6);
@@ -395,6 +424,12 @@ void RemoteControl::step() {
 
 void RemoteControl::stop_trick() {
   uint8_t ticks = player_.stop_ticks();
+  if (step_trick_ != nullptr && player_.busy() && player_.trick() == step_trick_) {
+    char what[64];
+    format(what, sizeof what, "rear_up: coming down (stage %d allowed)", step_allowed_);
+    step_note(what);
+  }
+  step_trick_ = nullptr;
   player_.stop();
   settle_us_ = ticks != 0 ? (uint64_t)ticks * KILO_TICK_MS * 1000u + 100000u : 0;  // ir.py _stop_trick
 }
@@ -408,13 +443,18 @@ void RemoteControl::start_trick() {
     done(what, true);
     return;
   }
-  if (!s.has_telemetry || s.telemetry.batt_mv < kTrickMinMv) {
-    if (s.has_telemetry) format(what, sizeof what, "%s refused: battery %u mV (needs %u)", key_->name,
-                                (unsigned)s.telemetry.batt_mv, (unsigned)kTrickMinMv);
+  // the battery at rest (the highest reading of the last 20 s): right after a walk the reading sags
+  uint16_t mv = s.has_telemetry ? s.telemetry.batt_mv : 0;
+  uint16_t rested = 0;
+  bool at_rest = notes_ != nullptr && notes_->rested_mv(&rested);
+  if (at_rest) mv = rested;
+  if (!s.has_telemetry || mv < kTrickMinMv) {
+    if (s.has_telemetry) format(what, sizeof what, "%s refused: battery %u mV%s (needs %u)", key_->name, (unsigned)mv,
+                                at_rest ? " at rest" : "", (unsigned)kTrickMinMv);
     else format(what, sizeof what, "%s refused: battery None mV (needs %u)", key_->name, (unsigned)kTrickMinMv);
     if (notes_ != nullptr) {
       char why[48];
-      format(why, sizeof why, "battery %u mV (needs %u)", s.has_telemetry ? (unsigned)s.telemetry.batt_mv : 0u,
+      format(why, sizeof why, "battery %u mV%s (needs %u)", (unsigned)mv, at_rest ? " at rest" : "",
              (unsigned)kTrickMinMv);
       notes_->refused(key_->name, why);
     }
@@ -431,9 +471,85 @@ void RemoteControl::start_trick() {
   }
   uint32_t ticks = 0;
   tricks::total_ticks(*t, tricks::kSpeedUnity, &ticks);
-  format(what, sizeof what, "trick %s started (%u s; A2 again, B6 or C7 bring it down)", key_->name,
-         (unsigned)((ticks * KILO_TICK_MS + 500u) / 1000u));
+  int stages = rear_up_stage_of(t->name);
+  step_trick_ = stages > 0 ? t : nullptr;
+  step_play_ = player_.result().play;
+  step_max_ = stages;
+  step_allowed_ = 1;
+  step_held_ = 0;
+  if (stages > 1) {
+    format(what, sizeof what, "trick %s started: up to stage 1 (A2 while he holds it: on, up to %d; B6 or C7 bring "
+           "him down)", key_->name, stages);
+    char line[64];
+    format(line, sizeof line, "rear_up: up to stage 1 (of %d)", stages);
+    step_note(line);
+  } else {
+    format(what, sizeof what, "trick %s started (%u s; A2 again, B6 or C7 bring it down)", key_->name,
+           (unsigned)((ticks * KILO_TICK_MS + 500u) / 1000u));
+  }
   done(what, false);
+}
+
+void RemoteControl::step_note(const char* what) {
+  logf(log_, LogLevel::Info, "remote: %s", what);
+  if (notes_ != nullptr) notes_->trick_mark(what);
+}
+
+// The stage top (1..) the rear-up play is going up to or holding now, with when its hold ends (us on
+// the clock); 0 if none (another moment of the play, or not this play).
+int RemoteControl::step_at(uint64_t* hold_end_us) const {
+  if (step_trick_ == nullptr || !player_.playing() || player_.trick() != step_trick_ ||
+      player_.result().play != step_play_)
+    return 0;
+  const tricks::Trick& t = *step_trick_;
+  uint64_t now = clock_.now_us(), t0 = player_.played_at_us();
+  for (int k = 1; k <= step_max_; k++) {
+    int f = stage_frame(t, k);
+    if (f < 0) continue;
+    uint32_t start = 0;
+    for (int i = 0; i < f; i++) start += t.frames[i].dur + t.frames[i].hold;
+    uint64_t from = t0 + (uint64_t)start * KILO_TICK_MS * 1000u;
+    uint64_t end = from + (uint64_t)(t.frames[f].dur + t.frames[f].hold) * KILO_TICK_MS * 1000u;
+    if (now >= from && now < end) {
+      *hold_end_us = end;
+      return k;
+    }
+  }
+  return 0;
+}
+
+// Every pass: a lower stage's hold about to end without A2: down (TRICK_STOP); a stage's top reached
+// or the play over: a line and a mark.
+void RemoteControl::step_gate() {
+  if (step_trick_ == nullptr) return;
+  if (!player_.busy() || player_.trick() != step_trick_ || player_.result().play != step_play_) {
+    const tricks::PlayResult& r = player_.result();
+    if (r.play == step_play_ && r.state == tricks::PlayState::Done) {
+      char what[80];
+      format(what, sizeof what, "rear_up: down (the trick ended %s, stage %d allowed)", tricks::done_reason_name(r.reason),
+             step_allowed_);
+      step_note(what);
+    }
+    step_trick_ = nullptr;
+    return;
+  }
+  uint64_t end = 0;
+  int k = step_at(&end);
+  if (k == 0) return;
+  if (k != step_held_) {
+    step_held_ = k;
+    char what[64];
+    format(what, sizeof what, "rear_up: stage %d (of %d)%s", k, step_max_,
+           k < step_max_ && step_allowed_ == k ? ": A2 to go on" : "");
+    step_note(what);
+  }
+  if (k < step_max_ && step_allowed_ == k && clock_.now_us() + kStepLeadUs >= end) {
+    char what[72];
+    format(what, sizeof what, "rear_up: held stage %d without A2: coming down", k);
+    step_note(what);
+    step_trick_ = nullptr;  // (stop_trick's own note would repeat it)
+    player_.stop();  // over the trick's stop_ticks, to SIT
+  }
 }
 
 void RemoteControl::act() {

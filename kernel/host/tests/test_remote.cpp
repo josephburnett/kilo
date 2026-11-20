@@ -352,27 +352,16 @@ void test_steering() {
 }
 
 void test_freeze() {
-  {  // walking: the walk is aborted at once (no planned stop), then only B6 / A7 act
+  {  // walking: the quick stop (the feet down where they are, squared up, STANCE), then only B6 / A7 act
     Rig r;
     r.key("A4", 800);
     CHECK(r.walker.active() && r.body.mode == KILO_MODE_GAIT);
-    size_t postures = r.body.count(KILO_MSG_SET_POSTURE);
-    LAST_IS(r, "C7", "frozen (walk aborted): only B6 or A7 act now");
-    CHECK(!r.walker.active() && r.walker.ended_ok() && std::strcmp(r.walker.ended(), "aborted (C7 freeze)") == 0);
-    CHECK(r.remote.frozen() && r.posture_goal() == -1);  // no posture over the body's own settle, no LIMP
-    CHECK(r.body.count(KILO_MSG_SET_POSTURE) == postures);
-    // the body: the queue runs dry, it holds, settles and stays in STANCE (spec FEET, feet.h)
-    size_t lines = r.log.lines.size();
-    r.body.event(KILO_EVENT_FEET_UNDERRUN, 3);
-    r.run_ms(120);
-    r.body.mode = KILO_MODE_IDLE;
-    r.body.event(KILO_EVENT_GAIT_STOPPED, 1);
-    r.run_ms(100);
-    // only the link's two event lines: no walk ended over again, no remote line, nothing that reacts
-    CHECKF(r.log.lines.size() == lines + 2, "%zu new lines after the settle", r.log.lines.size() - lines);
-    for (size_t i = lines; i < r.log.lines.size(); i++)
-      CHECKF(r.log.lines[i].rfind("event ", 0) == 0, "%s", r.log.lines[i].c_str());
-    CHECK(!r.walker.active() && r.remote.frozen() && r.body.count(KILO_MSG_FEET) > 0);
+    LAST_IS(r, "C7", "frozen (walk: the quick stop): only B6 or A7 act now");
+    CHECK(r.walker.active() && r.walker.planner().halting() && r.remote.frozen());
+    r.run_ms(2000);
+    CHECKF(!r.walker.active() && r.walker.ended_ok() && std::strcmp(r.walker.ended(), "stopped") == 0, "ended %s",
+           r.walker.ended() ? r.walker.ended() : "-");
+    CHECK(r.remote.frozen() && r.posture_goal() == -1 && r.body.count(KILO_MSG_FEET) > 0);
     // every key but B6 and A7: ignored
     const char* others[] = {"B7", "B5", "A4", "B4", "C4", "A6", "C6", "C5", "A5", "C7"};
     for (const char* g : others) {
@@ -398,14 +387,16 @@ void test_freeze() {
     LAST_IS(r, "C7", "frozen (trick stopped): only B6 or A7 act now");
     CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1);
   }
-  {  // ahead of a planned stop under way: that key is cancelled, the ones behind it dropped
+  {  // ahead of a stop under way: that key is cancelled, the ones behind it dropped
     Rig r;
     r.key("A4", 800);
     r.key("B6", 40);
     r.key("A7", 8);
     CHECK(r.remote.busy() && r.walker.active());
-    LAST_IS(r, "C7", "frozen (walk aborted): only B6 or A7 act now");
-    CHECK(!r.remote.busy() && !r.walker.active() && r.posture_goal() == -1);
+    LAST_IS(r, "C7", "frozen (walk: the quick stop): only B6 or A7 act now");
+    CHECK(!r.remote.busy() && r.walker.planner().halting());
+    r.run_ms(2000);
+    CHECK(!r.walker.active() && r.posture_goal() == -1);
     CHECK(r.log.has("remote B6 (0x02, stand): cancelled (C7 froze Kilo)") &&
           r.log.has("remote A7 (0xA2, sleep): dropped (C7 froze Kilo)"));
     r.run_ms(500);
@@ -493,7 +484,7 @@ void test_rear_up_key() {
     CHECK(stop_ticks_sent(r) == 75);
     LAST_IS(r, "A2", "ignored (frozen: B6 or A7 to go on)");
   }
-  {  // walking: the planned stop first, then the trick
+  {  // walking: the quick stop first, then the trick
     Rig r;
     r.key("A4", 800);
     CHECK(r.walker.active());
@@ -537,7 +528,7 @@ void test_rear_up_key() {
 void test_keys_queue() {
   Rig r;
   r.key("A4", 800);
-  r.key("B6", 8);  // the planned stop takes a while: the keys behind it queue
+  r.key("B6", 8);  // the quick stop takes a moment: the keys behind it queue
   r.key("C4", 8);
   r.key("B7", 8);
   CHECK(r.remote.busy());

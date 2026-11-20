@@ -506,6 +506,10 @@ void Recorder::on_walk_mark(const planner::Walker& w, planner::WalkMark mark) {
     case WalkMark::Stop: {
       Line l("stop");
       l.unum("tick", (unsigned)w.planner().tick());
+      if (w.planner().halting()) {  // the quick stop: from this tick on, the ticks before it planned again
+        l.unum("quick", 1);
+        l.unum("replanned", w.replanned());
+      }
       mark_line(l.text(), now);
       break;
     }

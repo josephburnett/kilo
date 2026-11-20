@@ -1090,3 +1090,173 @@ Fetch the recordings (`kilo runs --host IP --fetch all`) and analyse them
 - The real speed at 230 (a tape, the time for 1 m): slip.
 - The change out of a turn: how long until the yaw rate is near zero after
   B7.
+
+## 14. The quick stop (2026-11-19)
+
+The owner, after a floor run: "can you make him stop faster. Both when I
+press stand and when I put my hand in front of his face, he slowly winds
+down. He should basically stop right away."
+
+### 14.1 What stopping did before
+
+B6 (stand), A7, C5, a trick key while walking, and the distance guard all
+used the **planned stop**: the strides (how far each foot travels per step)
+shrink by 1.5 mm a tick in the walk and the trot and 0.5 mm in the crawl,
+so Kilo keeps walking, slower and slower, for up to 0.6 s in the trot and
+2 s in the crawl; then every leg still away from under its shoulder takes
+one more step there, and the body levels. In the trot at its top speed that
+is 0.56 s and about 5 cm of travel after the request; in the crawl about
+4 s. C7 (freeze) cut the stream instead: the 100 ms of plan already queued
+on the body played on at full speed, then the body froze every foot for
+100 ms, with a diagonal pair in the air in the trot, then put the feet in
+the air down at 2 mm a tick and slid all four under the shoulders.
+
+### 14.2 What limits a stop
+
+- **Feet in the air must come down first.** In the trot two diagonal feet
+  carry Kilo for 150 ms at a time; stopping the feet on the ground while a
+  pair is in the air leaves him balanced on a line, and he tips toward a
+  raised foot. So the raised feet land at once, where they are.
+- **Momentum.** At 230 mm/s, stopping the feet on the ground in one tick
+  (20 ms) would decelerate the body at about 11 m/s², and his weight would
+  shift forward by that over gravity times the height of his centre of mass
+  (79 mm): 90 mm, past his front feet (32 to 76 mm ahead of it). The servos
+  smooth any change over about 120 ms (50 ms dead time and 70 ms to
+  follow), which alone keeps the peak near 3 m/s²; slowing the feet over
+  120 ms (six ticks) keeps it under about 2 m/s², a weight shift of about
+  15 mm, well inside four feet.
+- **The plan already sent.** The mind plans five ticks (100 ms) ahead of
+  the body, and the body queues them; a stop decided now starts 100 ms
+  later unless those ticks are planned again.
+
+### 14.3 The quick stop
+
+`Planner::halt()` (kernel/mind/planner/plan.cpp, mind/kilo/planner/plan.py,
+the two kept in step by the golden vectors):
+
+1. **Land.** Every foot in the air comes down where it is, in three ticks
+   (60 ms, the same move as a catch), and no other foot lifts.
+2. **Brake.** The strides go to zero in six ticks (`HALT_TICKS`, 120 ms):
+   the feet on the ground stop sliding back, so the body stops moving.
+3. **Hold.** All four feet stay down until ten ticks (`HALT_HOLD_TICKS`,
+   200 ms) after the request: the servos catch up and the body settles.
+4. **Square up.** Each leg more than 5 mm (`HALT_SQUARE_MM`) from under its
+   shoulder steps there, one group at a time, as the end of a planned stop
+   does: in the trot and the walk two short steps in place (about 0.35 s),
+   in the crawl up to four, one leg at a time with its lean, at the crawl's
+   fastest cadence (about 3 s; the body does not travel, it shifts its
+   weight over the three feet that stay down). A leg the body tips toward
+   while it steps is caught and stays where it landed. Then the body levels
+   and STANCE takes the legs (it sets the last few mm).
+
+The C++ mind's walker also **plans again the ticks already sent**: it keeps
+a copy of the planner from before each of the last ticks, and on a halt
+goes back to the first tick the body has not played yet (its tick + 2: the
+next FEET may be on the wire), halts from there, and sends those ticks
+again; the body replaces a queued tick with a newer FEET for it. The stop
+starts about 40 ms after the request instead of 100 ms. The Python walker
+(the laptop's daemon) has the halt but not this.
+
+**Where it is used.** Everything that asks for a stop on Kilo: B6, A7, C5,
+a trick key while walking, C7 (freeze: now the quick stop, then frozen as
+before), the distance guard's stops (docs/distance-guard.md), and its
+back-offs' ends. **The planned stop stays** where a clean, gradual finish
+matters and nobody is waiting for it: a laptop's scripted walk (`kilo walk
+... --for`, the Python daemon's walker: the recordings that tune the
+planner end the way they walked), and the legs' way home when the gait
+changes into or out of the crawl.
+
+### 14.4 The numbers
+
+`PYTHONPATH=mind python mind/tests/stopsim.py --md` walks the virtual body
+(the planner, the stream, the body's FEET player, the walking physics with
+the servo lag, and its momentum switched on: braking shifts the weight
+forward by a h / g) at each gait and speed, asks for the stop at every
+second tick of a whole cycle (every sixth in the crawl), and measures from
+the request: when the body is stopped (from then on it stays within 3 mm
+of where it ends), how far it went until then, when the walk is over (the
+legs squared up, STANCE), and how far the stop takes the pitch and roll
+outside the walk's own sway. "planned" is the old stop, "quick" the halt as
+the Python walker does it, "replan" as the C++ mind on Kilo does it (the
+ticks already sent planned again).
+
+| Gait, level | Speed | Stop | Stopped (median / worst) | Way (median / worst) | Done (median) | Pitch, roll beyond the walk's own |
+|---|---|---|---|---|---|---|
+| crawl +1 | 9 mm/s | planned | 5.19 / 5.84 s | 10 / 19 mm | 5.4 s | +0.2°, +11.6° |
+| crawl +1 | 9 mm/s | quick | 2.87 / 3.12 s | 4 / 14 mm | 3.1 s | +0.5°, +13.6° |
+| crawl +1 | 9 mm/s | replan | 2.80 / 3.04 s | 3 / 13 mm | 3.0 s | +0.6°, +12.6° |
+| crawl +3 | 22 mm/s | planned | 4.42 / 4.76 s | 27 / 37 mm | 4.6 s | +0.4°, +1.2° |
+| crawl +3 | 22 mm/s | quick | 2.88 / 3.16 s | 7 / 17 mm | 3.1 s | +0.6°, +2.5° |
+| crawl +3 | 22 mm/s | replan | 2.80 / 3.08 s | 5 / 15 mm | 3.0 s | +0.6°, +2.6° |
+| crawl +5 | 27 mm/s | planned | 4.21 / 4.54 s | 33 / 43 mm | 4.4 s | +0.4°, +1.3° |
+| crawl +5 | 27 mm/s | quick | 2.88 / 3.16 s | 10 / 19 mm | 3.1 s | +0.4°, +2.8° |
+| crawl +5 | 27 mm/s | replan | 2.80 / 3.08 s | 7 / 16 mm | 3.0 s | +0.5°, +2.8° |
+| walk +1 | 32 mm/s | planned | 0.08 / 0.10 s | 2 / 3 mm | 1.0 s | +0.2°, +0.4° |
+| walk +1 | 32 mm/s | quick | 0.10 / 0.12 s | 2 / 3 mm | 0.9 s | +0.4°, +1.5° |
+| walk +1 | 32 mm/s | replan | 0.02 / 0.04 s | 1 / 1 mm | 0.8 s | +0.4°, +1.4° |
+| walk +3 | 80 mm/s | planned | 0.30 / 0.32 s | 18 / 18 mm | 1.2 s | +0.6°, +0.8° |
+| walk +3 | 80 mm/s | quick | 0.17 / 0.26 s | 11 / 15 mm | 1.1 s | +1.2°, +2.3° |
+| walk +3 | 80 mm/s | replan | 0.09 / 0.18 s | 6 / 10 mm | 1.1 s | +1.2°, +2.3° |
+| walk +5 | 97 mm/s | planned | 0.38 / 0.38 s | 25 / 26 mm | 1.2 s | +0.7°, +1.0° |
+| walk +5 | 97 mm/s | quick | 0.19 / 0.38 s | 14 / 20 mm | 1.1 s | +1.2°, +2.4° |
+| walk +5 | 97 mm/s | replan | 0.11 / 0.30 s | 8 / 14 mm | 1.1 s | +1.2°, +2.4° |
+| trot +1 | 58 mm/s | planned | 0.14 / 0.14 s | 4 / 5 mm | 0.8 s | +0.9°, +1.9° |
+| trot +1 | 58 mm/s | quick | 0.14 / 0.16 s | 5 / 6 mm | 0.8 s | +0.6°, +1.2° |
+| trot +1 | 58 mm/s | replan | 0.06 / 0.08 s | 2 / 3 mm | 0.8 s | +0.6°, +1.2° |
+| trot +3 | 144 mm/s | planned | 0.34 / 0.34 s | 26 / 27 mm | 1.0 s | +1.3°, +2.6° |
+| trot +3 | 144 mm/s | quick | 0.20 / 0.22 s | 17 / 21 mm | 0.9 s | +1.2°, +2.6° |
+| trot +3 | 144 mm/s | replan | 0.12 / 0.14 s | 10 / 15 mm | 0.8 s | +1.2°, +2.6° |
+| trot +4 | 187 mm/s | planned | 0.44 / 0.48 s | 39 / 41 mm | 1.2 s | +1.9°, +1.6° |
+| trot +4 | 187 mm/s | quick | 0.22 / 0.56 s | 24 / 29 mm | 0.9 s | +1.6°, +1.5° |
+| trot +4 | 187 mm/s | replan | 0.14 / 0.48 s | 15 / 21 mm | 0.8 s | +1.7°, +1.8° |
+| trot +5 | 230 mm/s | planned | 0.56 / 0.58 s | 51 / 53 mm | 1.3 s | +1.6°, +0.9° |
+| trot +5 | 230 mm/s | quick | 0.22 / 0.56 s | 27 / 36 mm | 1.0 s | +1.6°, +1.2° |
+| trot +5 | 230 mm/s | replan | 0.14 / 0.48 s | 18 / 26 mm | 0.9 s | +1.6°, +1.2° |
+
+(The crawl +1 rows' roll is not the stop's: at 9 mm/s the crawl had not
+finished its first 4-second cycle in the 3 s walked before the request, so
+its own lean to the other side, up to 14 degrees, counts as "beyond".)
+
+Read: on Kilo (the "replan" rows) a trot at its top speed is stopped about
+0.15 s after the request (median; 0.5 s at the worst moment of the cycle,
+where the last few mm come from STANCE setting the legs), after 2 cm
+instead of 5; the walk after about 1 cm. Then two short steps in place
+square him up, and he stands still within a second. The crawl goes on
+for at most 1-2 cm (its weight shifting over the feet); its square-up takes
+about 3 s of steps in place, against more than 4 s of walking on before. No case fell, and the
+pitch and roll stay within about 2 degrees of the walk's own sway.
+
+The support feet's travel in the real C++ planner (kernel/host/tests/
+test_guard.cpp prints it for every gait and speed, the worst over the
+cycle): walk 97 mm/s 5 mm, trot 144 mm/s 8 mm, trot 230 mm/s 13 mm, crawl
+27 mm/s 10 mm (its lean while it squares up), against the planned stop's
+19, 26, 66 and 23 mm.
+
+### 14.5 What is computed and what is not
+
+Computed (the model and the simulators): the plan itself (the C++ and the
+Python planner agree to 0.01 degree on every tick of 20 halt scenarios:
+every gait, every phase, during the planned stop, steering, turning, the
+crawl mid-lean, with the body tipping while it squares up); the virtual
+body's attitude and travel; the momentum as a weight shift.
+
+Not verified on the floor: the virtual body is rigid, its feet never slip
+and its frame does not flex; the momentum term is a first estimate. On the
+real floor the braking may slide the feet a little (the stop then a few mm
+longer), and the squaring up drags a foot by up to 5 mm when STANCE takes
+over. The servos' real response to a quick change of direction of the feet
+was never recorded. What to watch on the floor: section 14.6.
+
+### 14.6 On the floor
+
+1. A4 (trot) at +3, 3 s, B6: he should stop within about a step, then take
+   one or two small steps in place and stand. Watch for a nose dip or a
+   rock to one side at the stop.
+2. A4, B7 twice (230 mm/s), 3 s, B6. The same; this is the hardest case.
+3. C4 (walk), 3 s, B6. B4 (crawl), 5 s, B6: he stops at once and then
+   shuffles his legs under him for about 3 s.
+4. A4, 3 s, C7 (freeze): the same quick stop, then he stays frozen until
+   B6 or A7.
+5. The recordings (`kilo runs --host IP --fetch all`): the walk run's
+   `stop tick=... quick=1 replanned=N` mark shows the quick stop and how
+   many queued ticks it planned again.

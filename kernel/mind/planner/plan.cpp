@@ -289,6 +289,10 @@ void Planner::start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tic
   held_ = 0;
   skip_ = false;
   stopping_ = finishing_ = done_ = false;
+  halting_ = halt_fast_ = false;
+  halt_t_ = 0;
+  halt_slew_ = 0;
+  for (int leg = 0; leg < kLegs; leg++) halt_kept_[leg] = false;
   err_[0] = err_[1] = 0;
   prev_att_ = {0, 0};
   hist_n_ = (int)lag_ + 3;
@@ -422,10 +426,45 @@ void Planner::stop() {
   apply_timing();
 }
 
+void Planner::halt() {
+  if (done_ || finishing_ || halting_) return;
+  stopping_ = true;
+  halting_ = true;
+  halt_t_ = 0;
+  for (int leg = 0; leg < kLegs; leg++) halt_kept_[leg] = false;
+  pending_ = nullptr;
+  real s = m_max(m_fabs(s_cur_[0]), m_fabs(s_cur_[1]));
+  halt_slew_ = m_max(pattern_->stride_slew_mm, s / (real)kHaltTicks);
+  apply_timing();
+  has_next_ = false;
+  const int W = swing_ticks();
+  if (has_job_ || skip_ || t_ < S_) {  // every foot is down (the shift, or a slot waiting for its lean): it ends now
+    has_job_ = false;
+    skip_ = true;
+    S_ = t_;
+    return;
+  }
+  for (int i = 0; i < pattern_->group_size; i++) {
+    int leg = pattern_->groups[k_][i];
+    if (caught_[leg]) continue;
+    int j = t_ - S_ - offset(leg) + 1;  // the next tick's place in its swing
+    if (j <= 1) {  // still down: it stays down
+      caught_[leg] = true;
+      caught_j_[leg] = kHaltNotLifted;
+      caught_lift_[leg] = 0;
+    } else if (j < W) {
+      caught_[leg] = true;
+      caught_j_[leg] = t_ - S_;
+      caught_lift_[leg] = swing_h_[leg] * ((real)1.0 - m_cos(2 * kPi * (real)(j - 1) / (real)W)) / 2;
+    }
+  }
+}
+
 bool Planner::home() const {
   if (!(m_fabs(s_cur_[0]) < (real)0.05 && m_fabs(s_cur_[1]) < (real)0.05)) return false;
+  real tol = recentred();
   for (int leg = 0; leg < kLegs; leg++)
-    if (!(m_fabs(xg_[leg]) < kRecentredMm)) return false;
+    if (!(m_fabs(xg_[leg]) < tol) && !halt_kept_[leg]) return false;
   return true;
 }
 
@@ -444,6 +483,29 @@ void Planner::start_slot() {
     apply_timing();
     stance_ticks_ = stance_tgt_;
   }
+  if (halting_ && halt_t_ < kHaltHoldTicks) {  // the quick stop's hold: four feet down, the strides to 0, the lean held
+    t_ = 0;
+    held_ = 0;
+    levelling_ = false;
+    for (int leg = 0; leg < kLegs; leg++) caught_[leg] = false;
+    skip_ = true;
+    has_next_ = false;
+    lean_from_ = lean_;
+    lean_to_ = lean_from_;
+    tr_ticks_ = 1;
+    S_ = kHaltHoldTicks - halt_t_;
+    return;
+  }
+  if (halting_ && !halt_fast_) {  // the square-up: the crawl steps at its fastest cadence (the strides are 0)
+    halt_fast_ = true;
+    if (leaning()) {
+      real lo, hi;
+      speed_range(*pattern_, &lo, &hi);
+      speed_mm_s_ = hi;
+      apply_timing();
+      stance_ticks_ = stance_tgt_;
+    }
+  }
   k_ = (k_ + 1 + pattern_->n_groups) % pattern_->n_groups;
   t_ = 0;
   held_ = 0;
@@ -452,9 +514,10 @@ void Planner::start_slot() {
   skip_ = false;
   if (stopping_ || (changing() && !direct_change())) {
     skip_ = true;
+    real tol = recentred();
     for (int leg = 0; leg < kLegs; leg++)
       if (pattern_->in_group(k_, leg) &&
-          !(m_fabs(s_cur_[0]) < (real)0.05 && m_fabs(s_cur_[1]) < (real)0.05 && m_fabs(xg_[leg]) < kRecentredMm))
+          !(m_fabs(s_cur_[0]) < (real)0.05 && m_fabs(s_cur_[1]) < (real)0.05 && (m_fabs(xg_[leg]) < tol || halt_kept_[leg])))
         skip_ = false;
   }
   lean_from_ = lean_;
@@ -509,7 +572,7 @@ int Planner::move_ticks(const Lean& a, const Lean& b, real height) const {
 }
 
 void Planner::slewed(real s[2], real* stance, real* h) const {
-  real d = pattern_->stride_slew_mm;
+  real d = halting_ ? halt_slew_ : pattern_->stride_slew_mm;
   bool hold = levelling_ && t_ < S_;
   for (int i = 0; i < 2; i++) s[i] = s[i] + m_max(-d, m_min(d, (hold ? (real)0 : s_tgt_[i]) - s[i]));
   *stance = m_min(*stance * ((real)1.0 + kStanceSlew), m_max(*stance / ((real)1.0 + kStanceSlew), stance_tgt_));
@@ -651,7 +714,7 @@ const TickPlan& Planner::next() {
       stats_.waits++;
     }
   }
-  if (!wait && t_ == S_ && !skip_ && !finishing_ && held_ < cfg.hold_max &&
+  if (!wait && t_ == S_ && !skip_ && !finishing_ && !halting_ && held_ < cfg.hold_max &&
       m_max(m_fabs(err_[0]), m_fabs(err_[1])) > cfg.gate_deg) {
     wait = true;
     held_++;
@@ -689,6 +752,7 @@ const TickPlan& Planner::next() {
           caught_j_[leg] = t_ - S_;
           caught_lift_[leg] = swing_h_[leg] * ((real)1.0 - m_cos(2 * kPi * (real)(j - 1) / (real)W)) / 2;
           stats_.catches++;
+          if (halting_) halt_kept_[leg] = true;
           has_next_ = false;  // it lands elsewhere: the next slot's lean is solved when it starts
         }
       }
@@ -775,6 +839,7 @@ const TickPlan& Planner::next() {
   has_last_ = true;
   tick_++;
   if (!wait) t_++;
+  if (halting_) halt_t_++;
   // The next slot's lean, solved a little every tick of this swing, from
   // where the feet will be when that slot starts; used if nothing changes.
   bool any_caught = false;

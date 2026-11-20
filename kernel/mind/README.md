@@ -194,6 +194,7 @@ WalkGoal g;                           // pattern (find_pattern), direction, spee
 const char* why = walker.start(g);    // null: accepted; while walking it changes the walk
 for (;;) { link.mark_alive(); link.poll(); walker.poll(); }   // every few ms
 walker.stop();                        // the planned stop; abort() ends at once
+walker.halt();                        // the quick stop (feet down where they are, then squared up)
 ```
 
 `poll()` does what Python's walk thread does: SET_STREAM telem_div 1, the
@@ -603,15 +604,15 @@ each key does):
 
 | Key | Does |
 |---|---|
-| B6 | stand and stop: the planned stop of a walk, then STAND |
-| A7 | sleep: the planned stop, then REST; 30 s later, if nothing else happened, light sleep (servos off, the Pi idles; any key or the laptop wakes him: `power/sleep.h`, docs/power.md) |
-| C5 | the planned stop, then the calibration posture (CALIB) |
+| B6 | stand and stop: the quick stop of a walk (the feet in the air put down where they are, the body stopped in about 0.2 s, the legs squared up under the shoulders; docs/walking-and-balance.md §14), then STAND |
+| A7 | sleep: the quick stop, then REST; 30 s later, if nothing else happened, light sleep (servos off, the Pi idles; any key or the laptop wakes him: `power/sleep.h`, docs/power.md) |
+| C5 | the quick stop, then the calibration posture (CALIB) |
 | A4, B4, C4 | trot, crawl, walk: walk forward in that gait from standing; change the gait while walking; the gait in use: straight forward again |
 | B7, B5 | faster, slower by one speed level (the trot 0.4, 0.7, 1, 1.3, 1.6 × its speed: 58 to 230 mm/s; the walk and the crawl 0.4, 0.7, 1, 1.15, 1.25); past the slowest B5 goes backward; only while walking. Turning in place: stop turning and walk straight forward (B7) or backward (B5) at once |
 | A6, C6 | from standing: turn left, right in place; walking forward or backward: steer one level left or right (0.25, 0.5, 1 of the stride off the inner side, at most 3 each way), without stopping (docs/walking-and-balance.md §13) |
-| C7 | freeze: the walk aborted at once (the body settles in STANCE, powered), a trick and the behaviour runner stopped; then only B6 and A7 act |
+| C7 | freeze: the quick stop of the walk (as B6, ending in STANCE, powered), a trick and the behaviour runner stopped; then only B6 and A7 act |
 | A5 | start the behaviour runner |
-| A2 | off unless built with `KILO_REAR_UP=1`, `2` or `3`: rear up (the trick `rear_up`, `rear_up_2` or `rear_up_3` by that stage, docs/rear-up-trick.md): sit up on the hind feet and the tail at 28, 40 or 54 degrees, hold 2 s, come down to SIT (12 to 18 s); pressed again while it plays, it comes down at once (1.5 to 2.5 s); refused below 7400 mV. B2 until 2026-11-17 |
+| A2 | off unless built with `KILO_REAR_UP=1`, `2` or `3` (the highest stage allowed): rear up (docs/rear-up-trick.md): up to stage 1 (28 degrees nose up) and hold; A2 again while he holds a stage (4 s) takes him on to the next (40, then 54 degrees), up to the build's; without it he comes down to SIT from there; the top stage holds 2 s and comes down. A2 at another moment, B6 or C7: down at once (1.5 to 2.5 s); refused below 7400 mV at rest (the highest reading of the last 20 s). B2 until 2026-11-17 |
 | B2 | a meow: one of the meow family, picked at random (`sound/`, docs/sound.md); it moves nothing, so it plays at once, also while a walk or the behaviour runs |
 | rows 1-3 but A2 and B2 | nothing (logged as ignored) |
 
@@ -626,8 +627,8 @@ Integration (`kernel/host/test.sh`): `python -m kilo.vbody.core --control
 FIFO` takes `ir CODE`, `att P R`, `batt MV` and `imu ...` lines
 (`CoreBody.serve_control`; the harness has no IR decoder, so IR_KEY frames
 are made in Python), and the script by IR keys stands, trots, speeds up
-and slows down, steers, stands after the planned stop, freezes a trot (the
-walk aborted, the virtual body settling in STANCE), rests, takes the
+and slows down, steers, stands after the quick stop, freezes a trot (the
+quick stop, the virtual body in STANCE), rests, takes the
 calibration posture and starts and stops the behaviour runner, idles the behaviour
 runner 5 s at 10 Hz, and tilts and drops the virtual body for perception
 and the fallen branch.

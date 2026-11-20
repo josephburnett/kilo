@@ -162,12 +162,17 @@ class Mind final : public LinkListener,
   void on_refused(uint8_t goal_type, uint8_t reason) override;
   // remote::TrickNotes
   void refused(const char* trick, const char* why) override { recorder_.trick_refused(trick, why); }
+  void trick_mark(const char* line) override { recorder_.note(line); }
+  bool rested_mv(uint16_t* mv) override;
   // record::MetricsSource
   uint32_t metric_lines() override;
   void metric_line(uint32_t i, char* out, uint32_t n) override;
   // guard::GuardHost
   void sit_and_behave() override;
-  bool may_act() override;
+  const char* not_now() override;
+  guard::Still still() override;
+  void notice() override;
+  bool flinch() override;
   // CalGate: no calibration change over the host channel while a walk or trick runs.
   const char* cal_refusal() override;
   void mark(const char* line) override { recorder_.note(line); }  // guard::GuardHost, sound::SoundHost
@@ -254,7 +259,12 @@ class Mind final : public LinkListener,
   sound::Chatter chatter_;        // the behaviour's own sounds (A5)
   bool was_asleep_ = false;       // light sleep, the last pass
   bool hello_said_ = false;       // the first HELLO's mew
-  uint32_t pullbacks_said_ = 0;   // the guard's pullbacks hissed at
+  uint32_t hisses_said_ = 0;      // the guard's RED reactions hissed at
+  bool head_centred_ = false;     // the head held straight ahead for a walk (head_for_walk)
+  bool flinch_pending_ = false;   // the guard's lean back, once the sitting move it stopped has ended
+  void head_for_walk();
+  uint16_t posture_seen_ = 0xFFFFu;  // the SET_POSTURE goal last seen (code, flags): a change moves the body
+  void posture_moves();
   void sound_events();
   // Low battery, judged at rest (power/battery.h RestedBattery): the eyes' orange.
   bool tired_ = false;

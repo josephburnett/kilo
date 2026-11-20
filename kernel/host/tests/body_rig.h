@@ -25,6 +25,7 @@ struct FakeBody {
   uint16_t batt_mv = 8000;
   bool telemetry_on = true;
   bool eyes = false;  // HELLO caps EYES (the body firmware of 2026-11-17 on)
+  bool posture_pitch = false;  // SET_POSTURE SIT tips the nose up (TELEMETRY pitch -26 deg), the others level
   int drop_hellos = 0;
   int16_t cal[16] = {};  // the calibration offsets (a16): CAL_SET changes, CAL_GET answers (CAL_VALUES)  // this many HELLO_REQ go unanswered (the answer lost in a stalled loop)
   uint64_t next_tel = 0;
@@ -68,6 +69,9 @@ struct FakeBody {
     for (const Sent& s : serial.take_sent()) {
       sent.push_back(s);
       if (s.type == KILO_MSG_FEET && mode == KILO_MODE_IDLE) mode = KILO_MODE_GAIT;
+      if (s.type == KILO_MSG_FEET && posture_pitch) pitch = 0;
+      if (s.type == KILO_MSG_SET_POSTURE && s.payload.size() == 4 && posture_pitch)
+        pitch = s.payload[1] == KILO_POSTURE_SIT ? (int16_t)(-26 * 16) : (int16_t)0;
       if (s.type == KILO_MSG_SET_POSTURE && s.payload.size() == 4 && s.payload[1] == KILO_POSTURE_STANCE &&
           mode == KILO_MODE_GAIT) {
         mode = KILO_MODE_IDLE;
