@@ -120,15 +120,14 @@ include $(CIRCLEHOME)/Rules.mk
 
 INCLUDE += -I mind
 
-# The planner, perception and behaviour as on the host (kernel/host/Makefile
-# FPFLAGS): no fused multiply-add (the planner's slot-end prediction must
-# equal what it then computes; perception and behaviour compute in double
-# as Python does, and their golden tests compare against Python's rounding),
-# sqrt as an instruction.
+# The whole mind core as on the host (kernel/host/Makefile FPFLAGS), so the
+# maths the host tests check is the maths that runs here: no fused
+# multiply-add (the planner's slot-end prediction must equal what it then
+# computes; perception and behaviour compute in double as Python does, and
+# their golden tests compare against Python's rounding), sqrt as an
+# instruction.
 FPFLAGS := -ffp-contract=off -fno-math-errno
-$(BUILD)/mind/planner/%.o: CPPFLAGS += $(FPFLAGS)
-$(BUILD)/mind/perception/%.o: CPPFLAGS += $(FPFLAGS)
-$(BUILD)/mind/behaviour/%.o: CPPFLAGS += $(FPFLAGS)
+$(BUILD)/mind/%.o: CPPFLAGS += $(FPFLAGS)
 
 # Build id: the first 8 hex digits of the commit, as for the body
 # (-DKILO_BUILD=0x<hash>, mind/kilo/tools/flash.py); the kernel logs it and
