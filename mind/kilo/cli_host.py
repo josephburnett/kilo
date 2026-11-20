@@ -574,15 +574,14 @@ def _release(hl: HostLink) -> None:
 
 def _prepare_flash(args: argparse.Namespace) -> int | None:
     """Build or read the image for `kilo flash --host` (args.flash_image); an exit code on failure."""
-    from kilo.cli import flash_image_options
-    from kilo.tools.flash import FlashError, prepare_image
+    from kilo.tools.flash import FlashError, image_options, prepare_image
 
     if args.legacy or args.hex or args.sd is not None or args.rollback:
         print("kilo flash --host: not with --legacy, --hex, --sd or --rollback (use --image/--manifest)",
               file=sys.stderr)
         return EXIT_ERR
     try:
-        args.flash_image = prepare_image(flash_image_options(args))
+        args.flash_image = prepare_image(image_options(args))
     except FlashError as e:
         print(f"kilo flash: {e}", file=sys.stderr)
         return EXIT_ERR

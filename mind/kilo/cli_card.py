@@ -47,7 +47,7 @@ import time
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable
 
 from kilo import kernel_image as KI
 from kilo.kernel_image import DEFAULT_KERNEL, KERNEL_DIR, KERNEL_FILE, KERNEL_NEW, KERNEL_OLD, has_marker
@@ -264,16 +264,6 @@ class Plan:
     warnings: list[str] = field(default_factory=list)
 
 
-def _sh(cmd: Sequence[str], what: str, run: Callable[..., Any], say: Callable[[str], None]) -> None:
-    say("$ " + " ".join(cmd))
-    try:
-        run(list(cmd), check=True)
-    except subprocess.CalledProcessError as e:
-        raise CardError(f"{what} failed (exit {e.returncode})") from None
-    except OSError as e:
-        raise CardError(f"{what}: {e}") from None
-
-
 def check_kernel(data: bytes, path: Path, force: bool, key_path: str | None, say: Callable[[str], None]) -> list[str]:
     """The checks `kilo update` makes (kilo.kernel_image.check_kernel). CardError, or the warnings."""
     from kilo import hostkey
@@ -316,8 +306,8 @@ def prepare(args: argparse.Namespace, run: Callable[..., Any] = subprocess.run,
         else:
             path = DEFAULT_KERNEL
             if not args.no_build:
-                _sh(["make", "-C", str(KERNEL_DIR), f"-j{os.cpu_count() or 2}", *args.make_vars], "make -C kernel",
-                    run, say)
+                F.run_command(["make", "-C", str(KERNEL_DIR), f"-j{os.cpu_count() or 2}", *args.make_vars],
+                              "make -C kernel", run, say, error=CardError)
         try:
             data = path.read_bytes()
         except OSError as e:
@@ -331,10 +321,8 @@ def prepare(args: argparse.Namespace, run: Callable[..., Any] = subprocess.run,
             image = (args.build_dir or F.DEFAULT_BUILD_DIR) / IMAGE_FILE
             if not image.exists():
                 raise CardError(f"no earlier body build at {image}: drop --no-build (or give --image)")
-        opts = F.ImageOptions(image=image, manifest=args.manifest, sketch=args.sketch or F.DEFAULT_SKETCH,
-                              build_dir=args.build_dir or F.DEFAULT_BUILD_DIR)
         try:
-            plan.body = F.prepare_image(opts, say=say, run=run)
+            plan.body = F.prepare_image(F.image_options(args, image), say=say, run=run)
         except F.FlashError as e:
             raise CardError(f"body: {e}") from None
     return plan

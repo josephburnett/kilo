@@ -63,8 +63,10 @@ Through a C++ mind (docs/fast-boot.md §6, phase P4), where no avrdude runs:
 
 from __future__ import annotations
 
+import functools
 import glob
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -124,29 +126,56 @@ class FlashResult:
     expected_build: int | None = None  # HELLO.fw_build to expect, if this run built it
 
 
-def git_hash(repo: Path = REPO_DIR) -> str | None:
+def git_commit(repo: Path = REPO_DIR) -> str | None:
+    """The checkout's commit (40 hex digits), None when git cannot say."""
     try:
         out = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
                              capture_output=True, text=True, check=True, timeout=10)
-        return out.stdout.strip()[:8] or None  # 8 hex digits = HELLO.fw_build u32
+        return out.stdout.strip() or None
     except (OSError, subprocess.SubprocessError):
         return None
 
 
-# Size flags for the body build (doc §3h): -mcall-prologues shares the
-# register save/restore code between functions, --relax turns call/jmp into
-# rcall/rjmp where they reach (≈420 B of flash, RAM unchanged). The same
-# flags are in body/tools/size_check.sh.
-CFLAGS = "-mcall-prologues"
-LDFLAGS = "-Wl,--relax"
+def git_hash(repo: Path = REPO_DIR) -> str | None:
+    """The build hash: the commit's first 8 hex digits = HELLO.fw_build u32."""
+    commit = git_commit(repo)
+    return commit[:8] if commit else None
+
+
+def run_command(cmd: Sequence[str], what: str, run: Callable[..., Any] = subprocess.run,
+                say: Callable[[str], None] = print, error: type[Exception] = FlashError,
+                dry_run: bool = False) -> None:
+    """Print and run cmd (unless dry_run); error(...) if it fails, naming it what."""
+    say("$ " + " ".join(cmd))
+    if dry_run:
+        return
+    try:
+        run(list(cmd), check=True)
+    except subprocess.CalledProcessError as e:
+        raise error(f"{what} failed (exit {e.returncode})") from None
+    except OSError as e:
+        raise error(f"{what}: {e}") from None
+
+
+# The size flags for the body build (doc §3h), defined once for this and
+# body/tools/size_check.sh and stack_check.sh, which source it.
+BUILD_FLAGS_FILE = REPO_DIR / "body" / "tools" / "build_flags.sh"
+
+
+@functools.cache
+def build_flags() -> tuple[str, str]:
+    """(CFLAGS, LDFLAGS) from BUILD_FLAGS_FILE."""
+    flags = dict(re.findall(r'^([A-Z]+)="([^"]*)"$', BUILD_FLAGS_FILE.read_text(), re.M))
+    return flags["CFLAGS"], flags["LDFLAGS"]
 
 
 def compile_cmd(sketch: Path, out_dir: Path, build_hash: str | None) -> list[str]:
-    cpp = CFLAGS + (f" -DKILO_BUILD=0x{build_hash}" if build_hash else "")
+    cflags, ldflags = build_flags()
+    cpp = cflags + (f" -DKILO_BUILD=0x{build_hash}" if build_hash else "")
     return ["arduino-cli", "compile", "--fqbn", FQBN, "--output-dir", str(out_dir),
             "--build-property", f"compiler.cpp.extra_flags={cpp}",
-            "--build-property", f"compiler.c.extra_flags={CFLAGS}",
-            "--build-property", f"compiler.c.elf.extra_flags={LDFLAGS}",
+            "--build-property", f"compiler.c.extra_flags={cflags}",
+            "--build-property", f"compiler.c.elf.extra_flags={ldflags}",
             str(sketch)]
 
 
@@ -269,15 +298,7 @@ def flash(
 
     def sh(cmd: Sequence[str], what: str) -> None:
         res.commands.append(list(cmd))
-        say("$ " + " ".join(cmd))
-        if opts.dry_run:
-            return
-        try:
-            run(list(cmd), check=True)
-        except subprocess.CalledProcessError as e:
-            raise FlashError(f"{what} failed (exit {e.returncode})") from None
-        except OSError as e:
-            raise FlashError(f"{what}: {e}") from None
+        run_command(cmd, what, run, say, dry_run=opts.dry_run)
 
     # 1. build + size harness (link still running)
     if build:
@@ -446,6 +467,13 @@ class ImageOptions:
     size_check: bool = True
 
 
+def image_options(args: Any, image: Path | None = None) -> ImageOptions:
+    """ImageOptions from `kilo flash --host|--sd` or `kilo card` arguments (image: instead of args.image)."""
+    return ImageOptions(image=image if image is not None else args.image, manifest=args.manifest,
+                        sketch=args.sketch or DEFAULT_SKETCH, build_dir=args.build_dir or DEFAULT_BUILD_DIR,
+                        size_check=not getattr(args, "no_size_check", False))
+
+
 def prepare_image(opts: ImageOptions, say: Callable[[str], None] = print,
                   run: Callable[..., Any] = subprocess.run) -> tuple[bytes, Any]:
     """body.bin and its manifest, checked: the given files, or a fresh build
@@ -457,38 +485,20 @@ def prepare_image(opts: ImageOptions, say: Callable[[str], None] = print,
             data, m = BI.read_image(opts.image, opts.manifest)
             say(f"image {opts.image}: {m.size} bytes, build {m.build:08x}, crc32 {m.crc32:08x}")
             return data, m
-
-        def sh(cmd: Sequence[str], what: str) -> None:
-            say("$ " + " ".join(cmd))
-            try:
-                run(list(cmd), check=True)
-            except subprocess.CalledProcessError as e:
-                raise FlashError(f"{what} failed (exit {e.returncode})") from None
-            except OSError as e:
-                raise FlashError(f"{what}: {e}") from None
-
-        build = build_body(opts.sketch, opts.build_dir, opts.size_check, sh, say)
+        build = build_body(opts.sketch, opts.build_dir, opts.size_check,
+                           lambda cmd, what: run_command(cmd, what, run, say), say)
         if build is None:
             raise FlashError("no build hash (git rev-parse failed): the mind could not check the HELLO; "
                              "use --image/--manifest")
         hex_path = opts.build_dir / f"{opts.sketch.name}.ino.hex"
         data = BI.hex_to_bin(hex_path.read_text())
-        m = BI.make_manifest(data, build, commit=_git_full())
+        m = BI.make_manifest(data, build, commit=git_commit())
         BI.check_image(data, m)
         bin_path, man_path = BI.write_image(opts.build_dir, data, m)
         say(f"image {bin_path}: {m.size} bytes, build {m.build:08x}, crc32 {m.crc32:08x} ({man_path.name})")
         return data, m
     except (BI.ImageError, OSError) as e:
         raise FlashError(str(e)) from None
-
-
-def _git_full(repo: Path = REPO_DIR) -> str | None:
-    try:
-        out = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
-                             capture_output=True, text=True, check=True, timeout=10)
-        return out.stdout.strip() or None
-    except (OSError, subprocess.SubprocessError):
-        return None
 
 
 def describe_flash_status(st: Any) -> str:

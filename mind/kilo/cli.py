@@ -844,18 +844,11 @@ def cmd_update(args: argparse.Namespace) -> int:
     return EXIT_ERR
 
 
-def flash_image_options(args: argparse.Namespace) -> Any:
-    from kilo.tools.flash import DEFAULT_BUILD_DIR, DEFAULT_SKETCH, ImageOptions
-
-    return ImageOptions(image=args.image, manifest=args.manifest, sketch=args.sketch or DEFAULT_SKETCH,
-                        build_dir=args.build_dir or DEFAULT_BUILD_DIR, size_check=not args.no_size_check)
-
-
 def cmd_flash_sd(args: argparse.Namespace) -> int:
     """`kilo flash --sd MOUNT`: body.bin + body.json onto the mind's boot card, checked and written as
     `kilo card MOUNT --no-kernel` does (kilo.cli_card)."""
     from kilo.cli_card import CardError, Plan, check_card, write_card
-    from kilo.tools.flash import FlashError, prepare_image
+    from kilo.tools.flash import FlashError, image_options, prepare_image
 
     if args.legacy or args.hex or getattr(args, "host", None):
         print("kilo flash --sd: not with --legacy, --hex or --host", file=sys.stderr)
@@ -863,7 +856,7 @@ def cmd_flash_sd(args: argparse.Namespace) -> int:
     try:
         for w in check_card(args.sd, args.force, args.force_dir):
             print(f"kilo flash: warning: {w} (--force)", file=sys.stderr)
-        data, m = prepare_image(flash_image_options(args))
+        data, m = prepare_image(image_options(args))
         write_card(args.sd, Plan(body=(data, m)))
     except (CardError, FlashError) as e:
         print(f"kilo flash: {e}", file=sys.stderr)

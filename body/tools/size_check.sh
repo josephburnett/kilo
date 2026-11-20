@@ -28,8 +28,7 @@ set -u
 BODY="$(cd "$(dirname "$0")/.." && pwd)"
 CLI="${ARDUINO_CLI:-$HOME/.local/bin/arduino-cli}"
 FLASH_MAX="${FLASH_MAX:-30720}"
-CFLAGS="-mcall-prologues"  # the same as mind/kilo/tools/flash.py
-LDFLAGS="-Wl,--relax"
+. "$BODY/tools/build_flags.sh"  # CFLAGS, LDFLAGS: the same as kilo flash
 GLOBALS_MAX="${GLOBALS_MAX:-1540}"
 
 if [ "${1:-}" = "--elf" ]; then
