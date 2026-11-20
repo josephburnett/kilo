@@ -15,6 +15,9 @@
 //                with storage from attach_recorder() (record/)
 //   Saver        the recorder onto the SD card at safe moments (attach_saver())
 //   Metrics      the session's counters (METRICS, kilo metrics --host)
+//   SoundPlayer  what Kilo says and when (sound/): B2, waking, the
+//                behaviour's purrs, the guard's hiss; the output from the
+//                platform (MindConfig.sound_output), the sounds the build packed
 //
 //   static Mind mind(serial, clock, platform_log, &listener, cfg);  // ~150 KB: static
 //   mind.attach_log(new LogEntry[LogRing::kLines], LogRing::kLines);  // the log's history, once
@@ -63,6 +66,7 @@
 #include "record/recorder.h"
 #include "record/saver.h"
 #include "remote/remote.h"
+#include "sound/player.h"
 #include "tricks/player.h"
 #include "util/logring.h"
 
@@ -80,6 +84,13 @@ struct MindConfig {
   bool record_save = false;     // the card saver on from the start (KILO_RECORD_SAVE; the card's SAVE_ON also turns it on)
   bool light_sleep = false;     // A7, then 30 s of nothing: light sleep (power/sleep.h; KILO_LIGHT_SLEEP)
   bool guard = guard::kDefaultOn;  // the distance guard (guard/guard.h; kilo guard on|off --host at run time)
+  // Kilo's sounds (sound/player.h, docs/sound.md): the table the build packed (sound::kSounds) and the
+  // platform's output; without either every play request is a counted no-op.
+  const sound::Sound* sounds = nullptr;
+  uint32_t sound_count = 0;
+  sound::SoundOutput* sound_output = nullptr;
+  bool sound = sound::kDefaultOn;              // kilo sound on|off --host at run time
+  uint8_t sound_volume = sound::kDefaultVolume;
   // The laptop interface's keys (net/host_server.h set_keys(); they outlive
   // the Mind) and the source of its ephemeral keys. Without a Random every
   // connection is refused.
@@ -92,6 +103,7 @@ class Mind final : public LinkListener,
                    public remote::TrickNotes,
                    public record::MetricsSource,
                    public guard::GuardHost,
+                   public sound::SoundHost,
                    public CalGate {
  public:
   static constexpr uint64_t kRunnerStallUs = 1000000;       // daemon/behaviour.py RUNNER_STALL_S
@@ -158,9 +170,13 @@ class Mind final : public LinkListener,
   bool may_act() override;
   // CalGate: no calibration change over the host channel while a walk or trick runs.
   const char* cal_refusal() override;
-  void mark(const char* line) override { recorder_.note(line); }
+  void mark(const char* line) override { recorder_.note(line); }  // guard::GuardHost, sound::SoundHost
 
   guard::DistanceGuard& guard() { return guard_; }
+  sound::SoundPlayer& sound() { return sound_; }
+  // Ask for a sound (the events' hooks): not while a trick plays (but the alive layer's small sitting moves) or a
+  // laptop holds the body, unless always. why: for the log ("wake", "guard red").
+  uint8_t say(const char* name, const char* why, bool always = false);
   behaviour::Alive& alive() { return alive_; }
   // The behaviour runner's sitting variant (the guard started it): every stand the tree asks for is a sit.
   bool sitting_variant() const { return sitting_variant_; }
@@ -234,6 +250,21 @@ class Mind final : public LinkListener,
   behaviour::Alive alive_;
   bool sitting_variant_ = false;  // the runner's sitting variant (the guard's)
   bool runner_by_guard_ = false;  // the guard started the runner: the remote's walking keys stop it
+  sound::SoundPlayer sound_;
+  sound::Chatter chatter_;        // the behaviour's own sounds (A5)
+  bool was_asleep_ = false;       // light sleep, the last pass
+  bool hello_said_ = false;       // the first HELLO's mew
+  uint32_t pullbacks_said_ = 0;   // the guard's pullbacks hissed at
+  void sound_events();
+  // Low battery, judged at rest (power/battery.h RestedBattery): the eyes' orange.
+  bool tired_ = false;
+  void battery_step();
+ public:
+  bool tired() const { return tired_; }
+  // The battery at rest in percent (what the behaviour runner and the eyes judge by); false if none.
+  bool rested_pct(double* pct) const;
+ private:
+  bool trick_playing() const;     // a trick other than the alive layer's sitting moves
   record::Recorder recorder_;
   record::Metrics metrics_;
   record::Saver* saver_ = nullptr;

@@ -23,6 +23,8 @@ in protocol/spec.toml ``[host]`` and ``[[host_messages]]``; the dataclasses
     hl.rec_fetch(0, 0xFFFFFFFF, boot=6, what=P.RecFetchWhat.LOG)   # boot 6's saved log, text bytes
     hl.metrics()                                # [str]: the session metrics lines (METRICS_REQ)
     hl.guard(mode)                              # the distance guard: 0 off, 1 on, 2 ask (GUARD_STATUS)
+    hl.sound(P.SoundOp.PLAY, name="meow")       # Kilo's sounds: ask, play, on, off, volume (SOUND_STATUS)
+    hl.sound_list()                             # [P.HostSoundInfo]: the sounds in the image (SOUND_LIST)
     hl.bench(count=32)                          # [P.HostBenchResult]: the SD card's write times (controller)
     hl.rec_save(1); hl.rec_delete(boot)         # the card saver on; earlier boots' recordings off the card
     hl.close()                                  # the mind latches REST if this was the controller
@@ -386,6 +388,28 @@ class HostLink:
         if not isinstance(r, P.HostGuardStatus):
             raise HostError(f"GUARD: unexpected reply {type(r).__name__}")
         return r
+
+    def sound(self, op: int = 0, volume: int = 0, name: str = "") -> Any:
+        """SOUND (P.SoundOp STATUS, PLAY name, ON, OFF, VOLUME volume): P.HostSoundStatus, whose result
+        says what a PLAY did (HostRefused UNKNOWN_TYPE from a mind without sounds)."""
+        r = self.command(P.HostSound(op=int(op), volume=int(volume), name=name.encode("ascii", "replace")))
+        if not isinstance(r, P.HostSoundStatus):
+            raise HostError(f"SOUND: unexpected reply {type(r).__name__}")
+        return r
+
+    def sound_list(self) -> list[Any]:
+        """The sounds built into the image, one SOUND_LIST each: [P.HostSoundInfo]."""
+        out: list[Any] = []
+        i = 0
+        while i < 256:
+            r = self.command(P.HostSoundList(index=i))
+            if not isinstance(r, P.HostSoundInfo):
+                raise HostError(f"SOUND_LIST: unexpected reply {type(r).__name__}")
+            if i >= r.count:
+                break
+            out.append(r)
+            i += 1
+        return out
 
     def cal(self, op: int = 0, joint: int = 0, offset_a16: int = 0) -> Any:
         """CAL (P.CalOp GET, SET, SAVE, REVERT), relayed to the body: P.HostCalStatus with

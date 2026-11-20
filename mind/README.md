@@ -533,7 +533,8 @@ turn and A2 since 2026-11-17):
 | B4 | 0x98 | crawl: likewise |
 | C4 | 0xB0 | walk: likewise |
 | A2 | 0x10 | off unless `KILO_REAR_UP=1`, `2` or `3`: rear up (the trick `rear_up`, `rear_up_2` or `rear_up_3` by that stage, docs/rear-up-trick.md); pressed again while it plays, it comes down (TRICK_STOP over 1.5 to 2.5 s to SIT); refused below 7400 mV. It was B2 until 2026-11-17 |
-| rows 1-3 but A2 | | nothing (logged as ignored), B2 too |
+| B2 | 0x38 | the C++ mind only: a meow (docs/sound.md); the daemon has no speaker, so here it does nothing |
+| rows 1-3 but A2 and B2 | | nothing (logged as ignored) |
 
 **The gait and turn keys make Kilo walk: use the remote with Kilo on the
 floor only, never on a desk.** The remote keeps a gait (trot at start), a

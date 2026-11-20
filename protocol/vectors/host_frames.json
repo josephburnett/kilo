@@ -1058,6 +1058,33 @@
    "note": "holding after a stop at BLUE"
   },
   {
+   "name": "guard_status_tired",
+   "msg": "GUARD_STATUS",
+   "type": 138,
+   "dir": "mind_to_client",
+   "kind": "event",
+   "seq": 28,
+   "fields": {
+    "enabled": 1,
+    "zone": 0,
+    "action": 0,
+    "eyes": 3,
+    "eyes_driven": 1,
+    "dist_mm": 0,
+    "raw_mm": 0,
+    "blue_mm": 200,
+    "red_mm": 150,
+    "speed_mm_s": 0,
+    "zone_changes": 6,
+    "stops": 1,
+    "pullbacks": 1,
+    "refused": 0
+   },
+   "payload": "010000030100000000c8009600000006000000010000000100000000000000",
+   "wire": "23008a1c010000030100000000c8009600000006000000010000000100000000000000cff4",
+   "note": "clear, the eyes orange: low battery"
+  },
+  {
    "name": "cal_set",
    "msg": "CAL",
    "type": 89,
@@ -1105,6 +1132,79 @@
    "payload": "0100000000000000000000000000000000002000d0ff8800200010000000f0ff0800",
    "wire": "26008b1d0100000000000000000000000000000000002000d0ff8800200010000000f0ff0800b9ba",
    "note": "the offsets after the SET"
+  },
+  {
+   "name": "sound_play",
+   "msg": "SOUND",
+   "type": 90,
+   "dir": "client_to_mind",
+   "kind": "command",
+   "seq": 30,
+   "fields": {
+    "op": 1,
+    "volume": 0,
+    "name": "6d656f77"
+   },
+   "payload": "01006d656f77",
+   "wire": "0a005a1e01006d656f77de2e",
+   "note": "play a meow (one of the family)"
+  },
+  {
+   "name": "sound_status",
+   "msg": "SOUND_STATUS",
+   "type": 140,
+   "dir": "mind_to_client",
+   "kind": "event",
+   "seq": 30,
+   "fields": {
+    "result": 1,
+    "enabled": 1,
+    "volume": 70,
+    "sounds": 7,
+    "state": 2,
+    "played": 12,
+    "requests": 15,
+    "unknown": 1,
+    "dropped": 2,
+    "late": 0,
+    "callback_max_us": 38,
+    "last": "6d656f7732"
+   },
+   "payload": "01014607020c0000000f000000010000000200000000000000260000006d656f7732",
+   "wire": "26008c1e01014607020c0000000f000000010000000200000000000000260000006d656f7732478c",
+   "note": "queued while meow2 plays"
+  },
+  {
+   "name": "sound_list",
+   "msg": "SOUND_LIST",
+   "type": 91,
+   "dir": "client_to_mind",
+   "kind": "command",
+   "seq": 31,
+   "fields": {
+    "index": 0
+   },
+   "payload": "00",
+   "wire": "05005b1f00ee71",
+   "note": "the first sound in the image"
+  },
+  {
+   "name": "sound_info",
+   "msg": "SOUND_INFO",
+   "type": 141,
+   "dir": "mind_to_client",
+   "kind": "event",
+   "seq": 31,
+   "fields": {
+    "index": 0,
+    "count": 7,
+    "rate": 22050,
+    "samples": 20948,
+    "name": "68697373"
+   },
+   "payload": "00072256d451000068697373",
+   "wire": "10008d1f00072256d451000068697373a37d",
+   "note": "hiss, 0.95 s"
   }
  ],
  "errors": [

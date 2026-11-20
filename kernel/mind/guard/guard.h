@@ -30,6 +30,10 @@
 //    stop, then as BLUE. RED during BLUE's stop backs off too.
 //    Then HOLDING: forward keys are refused (refuses()); turning, backward
 //    and the posture keys work. It releases after kClearS of green.
+// The eyes show the zone; while the zone is green and Kilo is tired (the
+// battery at rest below the personality's low mark, or the body's LOW_BATT:
+// the Mind decides, set_tired()), they are a dim orange instead. Blue and
+// red always win.
 // Every zone change and action is a log line and a MARK record in the
 // flight recorder ("guard zone=blue mm=287 blue=316 red=150 v=180 ...",
 // "guard stop ..."), and counted (metrics line "guard:").
@@ -67,6 +71,8 @@ constexpr double kBackMm = 50;
 constexpr double kClearS = 1.0;           // green this long releases the hold
 // The eyes (SET_EYES all six LEDs; the legacy firmware's dim 0x22 levels, a little brighter).
 constexpr uint8_t kEyeLevel = 0x30;
+// Orange (low battery): red at kEyeLevel, green a third of it, no blue.
+constexpr uint8_t kOrangeGreen = kEyeLevel / 3;
 
 enum class Zone : uint8_t { Green = KILO_GUARD_ZONE_GREEN, Blue = KILO_GUARD_ZONE_BLUE, Red = KILO_GUARD_ZONE_RED };
 enum class Action : uint8_t {
@@ -75,7 +81,14 @@ enum class Action : uint8_t {
   Backing = KILO_GUARD_ACTION_BACKING,
   Holding = KILO_GUARD_ACTION_HOLDING,
 };
+enum class Eyes : uint8_t {
+  Green = KILO_GUARD_EYES_GREEN,
+  Blue = KILO_GUARD_EYES_BLUE,
+  Red = KILO_GUARD_EYES_RED,
+  Orange = KILO_GUARD_EYES_ORANGE,
+};
 const char* zone_name(Zone z);
+const char* eyes_name(Eyes e);
 const char* action_name(Action a);
 
 // The planned stop's way at v mm/s in this gait (v^2 / 2a).
@@ -150,8 +163,11 @@ class DistanceGuard {
   const DistanceFilter& filter() const { return filter_; }
   double blue_now() const { return blue_; }
   double speed_now() const { return v_; }
+  // Low battery (the Mind's rule): orange eyes while the zone is green.
+  void set_tired(bool tired) { tired_ = tired; }
+  bool tired() const { return tired_; }
   // The eyes: the colour asked for, and whether the body takes SET_EYES.
-  Zone eyes() const { return eyes_; }
+  Eyes eyes() const { return eyes_; }
   bool eyes_driven() const;
   void fill(kilo_host_guard_status_t& s) const;
   // One metrics line ("guard: on=1 zone=green ...").
@@ -188,7 +204,8 @@ class DistanceGuard {
   bool back_started_ = false;  // Backing: the walk goes backward now (kBackS runs from then)
   uint64_t green_since_ = 0;
   bool green_ = true;
-  Zone eyes_ = Zone::Green;
+  Eyes eyes_ = Eyes::Green;
+  bool tired_ = false;
   bool eyes_sent_ = false;
   uint32_t zone_changes_ = 0, stops_ = 0, pullbacks_ = 0, refused_ = 0, releases_ = 0;
   double min_mm_ = 0;  // the closest filtered range while walking forward

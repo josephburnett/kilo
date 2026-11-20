@@ -10,6 +10,7 @@ and the eyes show what it sees:
 | green | clear (or nothing seen) | walks on |
 | blue | too close | stops (the normal, planned stop), sits, and starts the A5 behaviour in its sitting form |
 | red | very close | backs off a short way (about 4-5 cm, slowly), then stops and sits as for blue |
+| dim orange | clear, but the battery is low ("Low battery: orange" below) | walks on; blue and red still show over it |
 
 Only walking **forward** sets the guard off. Walking backward, turning on the
 spot, a trick (the rear-up), being picked up, and a laptop holding the body
@@ -192,7 +193,8 @@ for the range finder on D6, and the six WS2812 lights' data on D7 (Grove
 socket G4; the legacy firmware's `RgbUltrasonic(6, 7)` in
 `src/ultrasonic.h`, which lit them white, yellow, blue and red by distance).
 The new body firmware drives them from the mind's `SET_EYES`
-(`body/src/hal/eyes.cpp`): green 0x30, blue 0x30 or red 0x30 on all six.
+(`body/src/hal/eyes.cpp`): green 0x30, blue 0x30 or red 0x30 on all six,
+or for orange red 0x30 with green 0x10.
 
 What it costs the body: 124 bytes of program memory, no RAM (the body has
 3 bytes of RAM left, so it stores nothing: every 5 Hz refresh of the colour
@@ -207,6 +209,35 @@ body says (in its HELLO) that it has no eyes, and the mind does not send
 the colour. Everything else (the guard, the zones, the log, `kilo status`)
 works with the old firmware. After the flash, `kilo status --host` shows
 `eyes ... (on the eyes)`.
+
+## Low battery: orange
+
+When the battery is low the eyes are a dim orange instead of green. Blue
+and red always show over it: the way ahead matters more. Low means either:
+
+- the battery **at rest** is below 20 % (7300 mV on the resting curve; the
+  same mark at which the A5 behaviour lies down in REST to save the
+  battery). It is no longer low once it reads 25 % (7400 mV) again;
+- or the body itself says low battery (its LOW_BATT mode, below 6.6 V).
+
+It does not need the A5 behaviour to be on. The log says when it starts
+and ends, e.g. `battery: tired (7250 mV at rest, 16 %, below 20 %): the
+eyes orange while the way is clear` and `battery: no longer tired (7400
+mV at rest, 30 %)`; `kilo guard --host` and `kilo status --host` show
+`eyes  orange: low battery, Kilo is tired ...`.
+
+**At rest** matters: moving legs pull the battery's voltage down by 0.1 to
+0.25 V for as long as they move (the "sag"), and it comes back within a
+second of them stopping. On 2026-11-19 at a wall Kilo read 7408 mV lying
+still, above the mark, but the guard's sitting behaviour lay him down in
+REST instead of sitting: most likely the reading while his legs were still
+moving was below it. So the mind now judges the battery by the highest
+reading of the last 20 seconds (`kernel/mind/power/battery.h`
+`RestedBattery`): a moment of rest, or the lightest moment of a walk, in
+that time is enough to see the real level. A walk that never pauses for
+20 seconds still reads a little low. `kilo status` and the metrics' `mv=`
+show the reading as it is; the metrics' `battery:` line also has
+`rested_mv=`.
 
 ## The sitting behaviour
 

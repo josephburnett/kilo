@@ -381,6 +381,13 @@ enum kilo_guard_zone {
     KILO_GUARD_ZONE_RED = 2,
 };
 
+enum kilo_guard_eyes {
+    KILO_GUARD_EYES_GREEN = 0,
+    KILO_GUARD_EYES_BLUE = 1,
+    KILO_GUARD_EYES_RED = 2,
+    KILO_GUARD_EYES_ORANGE = 3,
+};
+
 enum kilo_guard_action {
     KILO_GUARD_ACTION_WATCH = 0,
     KILO_GUARD_ACTION_STOPPING = 1,
@@ -393,6 +400,31 @@ enum kilo_cal_op {
     KILO_CAL_OP_SET = 1,
     KILO_CAL_OP_SAVE = 2,
     KILO_CAL_OP_REVERT = 3,
+};
+
+enum kilo_sound_op {
+    KILO_SOUND_OP_STATUS = 0,
+    KILO_SOUND_OP_PLAY = 1,
+    KILO_SOUND_OP_ON = 2,
+    KILO_SOUND_OP_OFF = 3,
+    KILO_SOUND_OP_VOLUME = 4,
+};
+
+enum kilo_sound_result {
+    KILO_SOUND_RESULT_OK = 0,
+    KILO_SOUND_RESULT_QUEUED = 1,
+    KILO_SOUND_RESULT_UNKNOWN = 2,
+    KILO_SOUND_RESULT_OFF = 3,
+    KILO_SOUND_RESULT_NO_SOUNDS = 4,
+    KILO_SOUND_RESULT_ASLEEP = 5,
+};
+
+enum kilo_sound_state {
+    KILO_SOUND_STATE_NONE = 0,
+    KILO_SOUND_STATE_IDLE = 1,
+    KILO_SOUND_STATE_PLAYING = 2,
+    KILO_SOUND_STATE_ASLEEP = 3,
+    KILO_SOUND_STATE_FAILED = 4,
 };
 
 enum kilo_rec_fetch_what {
@@ -1542,7 +1574,11 @@ enum kilo_host_msg_id {
     KILO_HOST_MSG_METRICS = 0x88,
     KILO_HOST_MSG_BENCH_RESULT = 0x89,
     KILO_HOST_MSG_GUARD_STATUS = 0x8A,
+    KILO_HOST_MSG_SOUND = 0x5A,
+    KILO_HOST_MSG_SOUND_LIST = 0x5B,
     KILO_HOST_MSG_CAL_STATUS = 0x8B,
+    KILO_HOST_MSG_SOUND_STATUS = 0x8C,
+    KILO_HOST_MSG_SOUND_INFO = 0x8D,
     KILO_HOST_MSG_FLASH_STATUS = 0xC0,
     KILO_HOST_MSG_UPDATE_STATUS = 0xC1,
 };
@@ -2020,7 +2056,7 @@ typedef struct KILO_PACKED kilo_host_guard_status_s {
     uint8_t enabled; /* 1 on (the kernel's default), 0 off */
     uint8_t zone; /* enum guard_zone */
     uint8_t action; /* enum guard_action */
-    uint8_t eyes; /* enum guard_zone; the eye colour the mind asks for (green, blue, red) */
+    uint8_t eyes; /* enum guard_eyes; the eye colour the mind asks for: the zone's, or orange for low battery while green */
     uint8_t eyes_driven; /* 1: SET_EYES goes to the body (HELLO caps EYES); 0: the firmware has no eyes */
     uint16_t dist_mm; /* mm; filtered range; 0 = none (no echo, or the readings ignored) */
     uint16_t raw_mm; /* mm; the last fresh reading as the body sent it (0 = no echo) */
@@ -2048,6 +2084,27 @@ KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, stops) == 19, kilo_sa_host
 KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, pullbacks) == 23, kilo_sa_host_guard_status_pullbacks);
 KILO_STATIC_ASSERT(offsetof(kilo_host_guard_status_t, refused) == 27, kilo_sa_host_guard_status_refused);
 
+/* host 0x5A SOUND: command. Kilo's sounds (docs/sound.md): ask, play a sound or a family by name, on, off, or set the volume. Answered by SOUND_STATUS (result says what a PLAY did); BAD_ARG for an unknown op or a volume over 100. Any client (kilo sound ... --host). Neither on/off nor the volume survives a reboot. */
+#define KILO_HOST_SOUND_MIN_LEN 2u
+#define KILO_HOST_SOUND_MAX_LEN 17u
+typedef struct KILO_PACKED kilo_host_sound_s {
+    uint8_t op; /* enum sound_op */
+    uint8_t volume; /* VOLUME: 0..100; else 0 */
+    uint8_t name[15]; /* PLAY: the sound or family (ASCII, no null); else empty */ /* 0..15 B, length implied */
+} kilo_host_sound_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_sound_t) == 17, kilo_sa_host_sound_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_t, op) == 0, kilo_sa_host_sound_op);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_t, volume) == 1, kilo_sa_host_sound_volume);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_t, name) == 2, kilo_sa_host_sound_name);
+
+/* host 0x5B SOUND_LIST: command. Answered by SOUND_INFO: entry `index` of the sounds built into the image. A client asks for 0, 1, ... until index >= count. Any client. */
+#define KILO_HOST_SOUND_LIST_LEN 1u
+typedef struct KILO_PACKED kilo_host_sound_list_s {
+    uint8_t index;
+} kilo_host_sound_list_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_sound_list_t) == 1, kilo_sa_host_sound_list_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_list_t, index) == 0, kilo_sa_host_sound_list_index);
+
 /* host 0x8B CAL_STATUS: event, reply to CAL. The body's 16 calibration offsets after the CAL (as CAL_VALUES), the op it answers, and for SAVE whether EEPROM_SAVED came within host.cal_save_wait_ms. */
 #define KILO_HOST_CAL_STATUS_LEN 34u
 typedef struct KILO_PACKED kilo_host_cal_status_s {
@@ -2059,6 +2116,54 @@ KILO_STATIC_ASSERT(sizeof(kilo_host_cal_status_t) == 34, kilo_sa_host_cal_status
 KILO_STATIC_ASSERT(offsetof(kilo_host_cal_status_t, op) == 0, kilo_sa_host_cal_status_op);
 KILO_STATIC_ASSERT(offsetof(kilo_host_cal_status_t, saved) == 1, kilo_sa_host_cal_status_saved);
 KILO_STATIC_ASSERT(offsetof(kilo_host_cal_status_t, offset) == 2, kilo_sa_host_cal_status_offset);
+
+/* host 0x8C SOUND_STATUS: event, reply to SOUND. Kilo's sounds after the SOUND: what it did, on or off, the volume, how many sounds the image has, the output's state, the counters since boot, and the sound playing now or played last. */
+#define KILO_HOST_SOUND_STATUS_MIN_LEN 29u
+#define KILO_HOST_SOUND_STATUS_MAX_LEN 44u
+typedef struct KILO_PACKED kilo_host_sound_status_s {
+    uint8_t result; /* enum sound_result */
+    uint8_t enabled; /* 1 on (the kernel's default), 0 off */
+    uint8_t volume; /* 0..100 (default 70) */
+    uint8_t sounds; /* sounds in the image */
+    uint8_t state; /* enum sound_state */
+    uint32_t played; /* sounds started */
+    uint32_t requests; /* play requests (events, keys, the host) */
+    uint32_t unknown; /* requests for a name the image does not have */
+    uint32_t dropped; /* requests not played: replaced by a newer one, waited too long, off, asleep or no sounds */
+    uint32_t late; /* audio chunks refilled late (more than 1.5 chunk periods after the one before): a click is likely */
+    uint32_t callback_max_us; /* us; the longest the audio interrupt took to fill a chunk (0: no output) */
+    uint8_t last[15]; /* the sound playing now, or played last (empty: none yet) */ /* 0..15 B, length implied */
+} kilo_host_sound_status_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_sound_status_t) == 44, kilo_sa_host_sound_status_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_status_t, result) == 0, kilo_sa_host_sound_status_result);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_status_t, enabled) == 1, kilo_sa_host_sound_status_enabled);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_status_t, volume) == 2, kilo_sa_host_sound_status_volume);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_status_t, sounds) == 3, kilo_sa_host_sound_status_sounds);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_status_t, state) == 4, kilo_sa_host_sound_status_state);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_status_t, played) == 5, kilo_sa_host_sound_status_played);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_status_t, requests) == 9, kilo_sa_host_sound_status_requests);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_status_t, unknown) == 13, kilo_sa_host_sound_status_unknown);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_status_t, dropped) == 17, kilo_sa_host_sound_status_dropped);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_status_t, late) == 21, kilo_sa_host_sound_status_late);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_status_t, callback_max_us) == 25, kilo_sa_host_sound_status_callback_max_us);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_status_t, last) == 29, kilo_sa_host_sound_status_last);
+
+/* host 0x8D SOUND_INFO: event, reply to SOUND_LIST. One sound built into the image: its name, sample rate and length. index >= count: past the end (name empty). */
+#define KILO_HOST_SOUND_INFO_MIN_LEN 8u
+#define KILO_HOST_SOUND_INFO_MAX_LEN 23u
+typedef struct KILO_PACKED kilo_host_sound_info_s {
+    uint8_t index;
+    uint8_t count; /* sounds in the image */
+    uint16_t rate; /* Hz; the stored sample rate */
+    uint32_t samples; /* its length in samples (seconds = samples / rate) */
+    uint8_t name[15]; /* 0..15 B, length implied */
+} kilo_host_sound_info_t;
+KILO_STATIC_ASSERT(sizeof(kilo_host_sound_info_t) == 23, kilo_sa_host_sound_info_size);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_info_t, index) == 0, kilo_sa_host_sound_info_index);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_info_t, count) == 1, kilo_sa_host_sound_info_count);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_info_t, rate) == 2, kilo_sa_host_sound_info_rate);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_info_t, samples) == 4, kilo_sa_host_sound_info_samples);
+KILO_STATIC_ASSERT(offsetof(kilo_host_sound_info_t, name) == 8, kilo_sa_host_sound_info_name);
 
 /* host 0xC0 FLASH_STATUS: stream. Progress of a flash, to the client that committed it: on every phase change and page, last DONE or FAILED. */
 #define KILO_HOST_FLASH_STATUS_LEN 21u
@@ -2188,8 +2293,16 @@ static inline uint8_t kilo_host_payload_len_check(uint8_t type, uint16_t len)
         return len == 31u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_GUARD_STATUS:
         return len == 31u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_SOUND:
+        return (len >= 2u && len <= 17u) ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_SOUND_LIST:
+        return len == 1u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_CAL_STATUS:
         return len == 34u ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_SOUND_STATUS:
+        return (len >= 29u && len <= 44u) ? KILO_LEN_OK : KILO_LEN_BAD;
+    case KILO_HOST_MSG_SOUND_INFO:
+        return (len >= 8u && len <= 23u) ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_FLASH_STATUS:
         return len == 21u ? KILO_LEN_OK : KILO_LEN_BAD;
     case KILO_HOST_MSG_UPDATE_STATUS:
@@ -2227,6 +2340,8 @@ static inline uint8_t kilo_host_msg_kind(uint8_t type)
     case KILO_HOST_MSG_REC_DELETE:
     case KILO_HOST_MSG_GUARD:
     case KILO_HOST_MSG_CAL:
+    case KILO_HOST_MSG_SOUND:
+    case KILO_HOST_MSG_SOUND_LIST:
         return KILO_KIND_COMMAND;
     case KILO_HOST_MSG_KEEPALIVE:
     case KILO_HOST_MSG_BRIDGE_TX:
@@ -2247,6 +2362,8 @@ static inline uint8_t kilo_host_msg_kind(uint8_t type)
     case KILO_HOST_MSG_METRICS:
     case KILO_HOST_MSG_GUARD_STATUS:
     case KILO_HOST_MSG_CAL_STATUS:
+    case KILO_HOST_MSG_SOUND_STATUS:
+    case KILO_HOST_MSG_SOUND_INFO:
         return KILO_KIND_EVENT;
     default:
         return KILO_KIND_UNKNOWN;
@@ -2269,6 +2386,10 @@ static inline uint8_t kilo_host_query_reply(uint8_t type)
         return KILO_HOST_MSG_GUARD_STATUS;
     case KILO_HOST_MSG_CAL:
         return KILO_HOST_MSG_CAL_STATUS;
+    case KILO_HOST_MSG_SOUND:
+        return KILO_HOST_MSG_SOUND_STATUS;
+    case KILO_HOST_MSG_SOUND_LIST:
+        return KILO_HOST_MSG_SOUND_INFO;
     default:
         return 0u;
     }

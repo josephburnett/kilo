@@ -252,7 +252,7 @@ void test_wake_by_key() {
     r.run_ms(31000);
     CHECK(r.state() == State::Asleep && r.posture_goal() == KILO_POSTURE_LIMP);
   }
-  {  // B2 with the rear-up key off is a row-1 key: wakes the Pi only
+  {  // B2 (the meow: it moves nothing, like a row-1 key): wakes the Pi only
     Rig r(sleep_cfg());
     r.start();
     r.key(kA7);
@@ -443,7 +443,7 @@ void test_metric_lines() {
   r.run_ms(120000);
   r.key(kB6);
   uint32_t n = r.mind.metric_lines();
-  CHECK(n == 11 + power::Sleep::kMetricLines);
+  CHECK(n == 11 + power::Sleep::kMetricLines + 1);  // then the sound line (test_sound)
   std::vector<std::string> got;
   for (uint32_t i = 0; i < n; i++) {
     char line[256];
@@ -451,6 +451,7 @@ void test_metric_lines() {
     CHECKF(std::strlen(line) <= 200 && std::strlen(line) > 0, "line %u: %zu bytes", (unsigned)i, std::strlen(line));
     got.push_back(line);
   }
+  CHECKF(got[15].find("sound: on=1 ") == 0, "%s", got[15].c_str());
   const std::string& p = got[11];
   CHECKF(p.find("power: state=awake ") == 0 && p.find(" sleeps=1 wakes=1 last_wake=key:B6 ") != std::string::npos &&
              p.find(" asleep_s=12") != std::string::npos && p.find("light_sleep=on") != std::string::npos,

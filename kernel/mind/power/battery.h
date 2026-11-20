@@ -20,6 +20,37 @@
 namespace kilo {
 namespace power {
 
+// The battery as it would read at rest (2026-11-19: at a wall the guard
+// backed Kilo off, then the behaviour runner's low-battery branch laid him
+// down in REST: lying still he read 7408 mV, above the 20 % mark of
+// 7300 mV, so the reading that tripped it was most likely the sag while
+// the legs moved). Moving legs only pull the pack's voltage down, and it
+// comes back within about a second once they stop or between steps, so
+// the highest reading of the last kWindowS is what the pack holds at rest,
+// give or take its drain over those seconds (about 30 mV at docs/power.md's
+// 90 mV a minute). Kept as the highest reading of each second, for the last
+// kWindowS seconds. A body on USB power (NO_BATTERY) or no reading for
+// kWindowS: none. During a walk that never pauses for kWindowS the
+// estimate is the walk's lightest moment, still a little low.
+//
+// What judges the battery uses it: the behaviour runner's low and critical
+// battery (Mind::Body::snapshot), the eyes' orange (Mind, the guard). What
+// shows the reading (kilo status, the metrics' mv=, the trend) and the
+// rear-up's 7400 mV refusal keep the raw reading.
+class RestedBattery {
+ public:
+  static constexpr uint32_t kWindowS = 20;
+
+  // A TELEMETRY at now_us: its reading (0: none), or USB power (none at all: everything forgotten).
+  void add(uint64_t now_us, uint16_t mv, bool no_battery);
+  // The highest reading of the last kWindowS seconds; false if none.
+  bool mv(uint64_t now_us, uint16_t* out) const;
+
+ private:
+  uint16_t max_[kWindowS] = {};   // by second (now_s % kWindowS), 0: none
+  uint32_t sec_[kWindowS] = {};   // ... which second it holds
+};
+
 class BatteryTrend {
  public:
   static constexpr uint64_t kBucketUs = 10000000;   // one sample: the mean of 10 s of TELEMETRY

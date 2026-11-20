@@ -174,6 +174,37 @@ expect "$OUT/cli_guard_off.txt" "^guard +OFF" "kilo guard off --host"
 expect "$OUT/cli_guard.json" '"enabled": 0' "kilo guard --json: still off"
 expect "$OUT/cli_guard_on.txt" "^guard +on" "kilo guard on --host"
 expect "$OUT/host_listen.log" "distance guard off" "the mind logs the guard switched"
+# Kilo's sounds (docs/sound.md): kilo-mind-host has kernel/sounds/*.wav packed as the kernel has
+# (none is fine: every play request is then a counted no-op), "played" into a buffer by the clock.
+# KILO_SOUNDS_DIR=DIR kernel/host/test.sh: another directory (the Makefile packs the same).
+NSOUNDS="$( (find "${KILO_SOUNDS_DIR:-$REPO/kernel/sounds}" -maxdepth 1 -iname '*.wav' 2>/dev/null || true) | wc -l)"
+expect "$OUT/cli_status.txt" "^sound +on +volume 70 +$NSOUNDS sounds in the image" "status: the sound line"
+expect "$OUT/host_listen.log" "sound: (no sounds in this image|$NSOUNDS sounds \([0-9.]+ s\) in the image, on, volume 70)" \
+    "the mind's sound line at start"
+KPY -m kilo.cli sound list --host "$H" --json > "$OUT/cli_sound_list.json"
+"$PYTHON" -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if len(d) == int(sys.argv[2]) else 1)" \
+    "$OUT/cli_sound_list.json" "$NSOUNDS" || { echo "FAILED: kilo sound list: not $NSOUNDS sounds"; cat "$OUT/cli_sound_list.json"; exit 1; }
+KPY -m kilo.cli sound volume 40 --host "$H" > "$OUT/cli_sound_volume.txt"
+KPY -m kilo.cli sound off --host "$H" > "$OUT/cli_sound_off.txt"
+KPY -m kilo.cli sound play meow --host "$H" > "$OUT/cli_sound_play_off.txt" && { echo "FAILED: a play while off is no success"; exit 1; } || true
+KPY -m kilo.cli sound on --host "$H" > "$OUT/cli_sound_on.txt"
+KPY -m kilo.cli sound play no_such_sound --host "$H" > "$OUT/cli_sound_play_bad.txt" && { echo "FAILED: an unknown sound is no success"; exit 1; } || true
+KPY -m kilo.cli sound --host "$H" --json > "$OUT/cli_sound.json"
+expect "$OUT/cli_sound_volume.txt" "^sound +on +volume 40 " "kilo sound volume 40"
+expect "$OUT/cli_sound_off.txt" "^sound +OFF +volume 40 " "kilo sound off"
+expect "$OUT/cli_sound_play_off.txt" "meow: (sounds are off|this image has no sounds)" "kilo sound play while off"
+expect "$OUT/cli_sound_play_bad.txt" "no_such_sound: (no such sound in the image|this image has no sounds)" \
+    "kilo sound play an unknown name"
+expect "$OUT/cli_sound.json" '"volume": 40' "kilo sound --json: the volume kept"
+expect "$OUT/host_listen.log" "host: client [0-9]+: sound off" "the mind logs sound switched off"
+if [ "$NSOUNDS" -gt 0 ]; then
+    FIRST="$("$PYTHON" -c "import json,sys; print(json.load(open(sys.argv[1]))[0]['name'])" "$OUT/cli_sound_list.json")"
+    KPY -m kilo.cli sound play "$FIRST" --host "$H" > "$OUT/cli_sound_play.txt"
+    expect "$OUT/cli_sound_play.txt" "$FIRST: queued" "kilo sound play $FIRST"
+    sleep 0.3
+    expect "$OUT/host_listen.log" "sound play name=$FIRST asked=$FIRST why=host:[0-9]+ volume=40" "the mind played $FIRST"
+fi
+KPY -m kilo.cli sound volume 70 --host "$H" > /dev/null
 expect "$OUT/host_listen.log" "noise: client [0-9]+: handshake with key [0-9a-f]{16} \(test@kernel-host\) in [0-9]+\.[0-9] ms, slowest step [0-9]+ us" \
     "the mind's handshake line"
 grep -o "noise: client [0-9]*: handshake .*" "$OUT/host_listen.log" | head -1 | sed 's/^/   /'

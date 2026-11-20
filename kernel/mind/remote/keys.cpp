@@ -21,7 +21,7 @@ const Key kKeyTable[kKeys] = {
     {0x18, "B3", "sit", Kind::Ignore, "", "none"},
     {0x7A, "C3", "stretch", Kind::Ignore, "", "none"},
     {0x10, "A2", "hi", Kind::Trick, "rear_up", "rear up"},  // B2 until 2026-11-17
-    {0x38, "B2", "push-up", Kind::Ignore, "", "none"},
+    {0x38, "B2", "push-up", Kind::Sound, "meow", "meow"},  // a meow (docs/sound.md); nothing before 2026-11-19
     {0x5A, "C2", "pee", Kind::Ignore, "", "none"},
     {0x42, "A1", "wash face", Kind::Ignore, "", "none"},
     {0x4A, "B1", "butt-up", Kind::Ignore, "", "none"},

@@ -53,6 +53,10 @@
 // makes more than kMaxClients open, the oldest one that is not yet a client
 // is closed (the new one itself if every other is a client).
 //
+// - Kilo's sounds (sound/player.h, docs/sound.md): SOUND asks, plays a
+//   sound or family by name, switches them on or off or sets the volume,
+//   answered by SOUND_STATUS; SOUND_LIST by SOUND_INFO, one sound each.
+//   Any client: a sound moves nothing.
 // - calibration (net/host_cal.cpp): CAL relays the body's CAL_GET, CAL_SET,
 //   CAL_SAVE and CAL_REVERT through the link's command slot, one CAL at a
 //   time, and answers CAL_STATUS with the offsets read back afterwards (for
@@ -87,6 +91,7 @@
 #include "platform_net.h"
 #include "record/recorder.h"
 #include "record/saver.h"
+#include "sound/player.h"
 #include "update/updater.h"
 #include "util/logring.h"
 
@@ -168,6 +173,8 @@ class HostServer final : public record::BenchSink {
   void attach_metrics(record::MetricsSource& m) { metrics_ = &m; }
   // GUARD -> GUARD_STATUS: the distance guard (any client).
   void attach_guard(guard::DistanceGuard& g) { guard_ = &g; }
+  // SOUND -> SOUND_STATUS, SOUND_LIST -> SOUND_INFO: Kilo's sounds (any client).
+  void attach_sound(sound::SoundPlayer& s) { sound_ = &s; }
   // CAL's gate (the mind: no calibration change while a walk or trick runs).
   void attach_cal_gate(CalGate& g) { cal_gate_ = &g; }
   // Right after link.poll(), before anyone else uses the command slot: a
@@ -281,6 +288,8 @@ class HostServer final : public record::BenchSink {
   void pump_bridge();
   void streams(uint64_t now);
   void reboot(uint32_t i, uint8_t seq);
+  void sound_request(uint32_t i, const HostFrame& f);
+  void sound_list(uint32_t i, uint8_t seq, uint8_t index);
   // Calibration (net/host_cal.cpp).
   void cal_request(uint32_t i, uint8_t seq, const uint8_t* p);
   void cal_step(uint64_t now);
@@ -360,6 +369,7 @@ class HostServer final : public record::BenchSink {
   record::Saver* saver_ = nullptr;         // attach_saver()
   record::MetricsSource* metrics_ = nullptr;
   guard::DistanceGuard* guard_ = nullptr;
+  sound::SoundPlayer* sound_ = nullptr;
   int32_t bench_client_ = -1;
 
   // The CAL in flight (one at a time).

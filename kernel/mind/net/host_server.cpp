@@ -15,6 +15,8 @@ const char* name_of(uint8_t type) {
   switch (type) {
     case KILO_HOST_MSG_STATUS_REQ: return "STATUS_REQ";
     case KILO_HOST_MSG_GUARD: return "GUARD";
+    case KILO_HOST_MSG_SOUND: return "SOUND";
+    case KILO_HOST_MSG_SOUND_LIST: return "SOUND_LIST";
     case KILO_HOST_MSG_CAL: return "CAL";
     case KILO_HOST_MSG_CONTROL: return "CONTROL";
     case KILO_HOST_MSG_POSTURE: return "POSTURE";
@@ -405,9 +407,74 @@ void HostServer::handle(uint32_t i, const HostFrame& f, uint64_t now) {
       reply(i, f.seq, &st, sizeof st, KILO_HOST_MSG_GUARD_STATUS);
       return;
     }
+    case KILO_HOST_MSG_SOUND:
+      return sound_request(i, f);
+    case KILO_HOST_MSG_SOUND_LIST:
+      return sound_list(i, f.seq, p[0]);
     default:
       return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UNSUPPORTED, name_of(f.type));
   }
+}
+
+// ---- Kilo's sounds --------------------------------------------------------------------------
+
+void HostServer::sound_request(uint32_t i, const HostFrame& f) {
+  if (sound_ == nullptr) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no sound player");
+  const uint8_t* p = f.payload;
+  uint8_t op = p[0], volume = p[1];
+  if (op > KILO_SOUND_OP_VOLUME) return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_BAD_ARG, "op: 0..4");
+  if (op == KILO_SOUND_OP_VOLUME && volume > 100)
+    return result(i, f.seq, f.type, KILO_HOST_RESULT_CODE_BAD_ARG, "volume: 0..100");
+  uint8_t r = KILO_SOUND_RESULT_OK;
+  switch (op) {
+    case KILO_SOUND_OP_PLAY: {
+      char name[sound::kNameMax + 1];
+      uint32_t n = f.len > 2 ? f.len - 2u : 0u;
+      if (n > sound::kNameMax) n = sound::kNameMax;
+      mem_copy(name, p + 2, n);
+      name[n] = '\0';
+      char why[16];
+      format(why, sizeof why, "host:%d", (int)i);
+      r = sound_->request(name, why);
+      break;
+    }
+    case KILO_SOUND_OP_ON:
+    case KILO_SOUND_OP_OFF:
+      if ((op == KILO_SOUND_OP_ON) != sound_->enabled())
+        logf(log_, LogLevel::Info, "host: client %d: sound %s", (int)i, op == KILO_SOUND_OP_ON ? "on" : "off");
+      sound_->set_enabled(op == KILO_SOUND_OP_ON);
+      break;
+    case KILO_SOUND_OP_VOLUME:
+      if (volume != sound_->volume())
+        logf(log_, LogLevel::Info, "host: client %d: sound volume %u", (int)i, (unsigned)volume);
+      sound_->set_volume(volume);
+      break;
+    default:
+      break;
+  }
+  kilo_host_sound_status_t st;
+  sound_->fill(st, r);
+  uint32_t len = KILO_HOST_SOUND_STATUS_MIN_LEN;
+  const sound::Sound* last = sound_->last();
+  for (uint32_t k = 0; last != nullptr && last->name[k] != '\0' && k < sizeof st.last; k++, len++) st.last[k] = (uint8_t)last->name[k];
+  reply(i, f.seq, &st, len, KILO_HOST_MSG_SOUND_STATUS);
+}
+
+void HostServer::sound_list(uint32_t i, uint8_t seq, uint8_t index) {
+  if (sound_ == nullptr) return result(i, seq, KILO_HOST_MSG_SOUND_LIST, KILO_HOST_RESULT_CODE_UNSUPPORTED, "no sound player");
+  kilo_host_sound_info_t s;
+  mem_zero(&s, sizeof s);
+  uint32_t n = sound_->count();
+  s.index = index;
+  s.count = (uint8_t)(n > 255 ? 255 : n);
+  uint32_t len = KILO_HOST_SOUND_INFO_MIN_LEN;
+  if (index < n) {
+    const sound::Sound& d = sound_->sound(index);
+    s.rate = (uint16_t)d.rate;
+    s.samples = d.samples;
+    for (uint32_t k = 0; d.name[k] != '\0' && k < sizeof s.name; k++, len++) s.name[k] = (uint8_t)d.name[k];
+  }
+  reply(i, seq, &s, len, KILO_HOST_MSG_SOUND_INFO);
 }
 
 // ---- reboot -------------------------------------------------------------------------

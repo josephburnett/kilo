@@ -391,10 +391,22 @@ def host_frame_cases():
          {"enabled": 1, "zone": 1, "action": 3, "eyes": 1, "eyes_driven": 1, "dist_mm": 287, "raw_mm": 291,
           "blue_mm": 316, "red_mm": 150, "speed_mm_s": 180, "zone_changes": 4, "stops": 1, "pullbacks": 0,
           "refused": 2}, "holding after a stop at BLUE"),
+        ("guard_status_tired", "GUARD_STATUS", 28,
+         {"enabled": 1, "zone": 0, "action": 0, "eyes": 3, "eyes_driven": 1, "dist_mm": 0, "raw_mm": 0,
+          "blue_mm": 200, "red_mm": 150, "speed_mm_s": 0, "zone_changes": 6, "stops": 1, "pullbacks": 1,
+          "refused": 0}, "clear, the eyes orange: low battery"),
         ("cal_set", "CAL", 29, {"op": 1, "joint": 10, "offset_a16": 136}, "joint 10 (right hind shoulder) to +8.5 deg"),
         ("cal_status", "CAL_STATUS", 29,
          {"op": 1, "saved": 0, "offset": [0, 0, 0, 0, 0, 0, 0, 0, 32, -48, 136, 32, 16, 0, -16, 8]},
          "the offsets after the SET"),
+        ("sound_play", "SOUND", 30, {"op": 1, "volume": 0, "name": b"meow".hex()}, "play a meow (one of the family)"),
+        ("sound_status", "SOUND_STATUS", 30,
+         {"result": 1, "enabled": 1, "volume": 70, "sounds": 7, "state": 2, "played": 12, "requests": 15,
+          "unknown": 1, "dropped": 2, "late": 0, "callback_max_us": 38, "last": b"meow2".hex()},
+         "queued while meow2 plays"),
+        ("sound_list", "SOUND_LIST", 31, {"index": 0}, "the first sound in the image"),
+        ("sound_info", "SOUND_INFO", 31, {"index": 0, "count": 7, "rate": 22050, "samples": 20948,
+                                          "name": b"hiss".hex()}, "hiss, 0.95 s"),
     ]
 
 

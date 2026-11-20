@@ -25,6 +25,7 @@
 #include "guard/guard.h"
 #include "mind.h"
 #include "planner/plan.h"
+#include "power/battery.h"
 #include "remote/client.h"
 #include "tests/body_rig.h"
 #include "tests/check.h"
@@ -544,11 +545,11 @@ void test_eyes() {
     r.key(A4);
     CHECK(r.run_until_hold(20000));
     g = r.mind.link().goal(KILO_MSG_SET_EYES);
-    CHECK(g != nullptr && g->payload[3] == kEyeLevel && r.mind.guard().eyes() == Zone::Blue);
+    CHECK(g != nullptr && g->payload[3] == kEyeLevel && r.mind.guard().eyes() == Eyes::Blue);
     r.wall_mm = r.travel + 100;  // closer: red
     r.run_ms(600);
     g = r.mind.link().goal(KILO_MSG_SET_EYES);
-    CHECK(g != nullptr && g->payload[1] == kEyeLevel && r.mind.guard().eyes() == Zone::Red);
+    CHECK(g != nullptr && g->payload[1] == kEyeLevel && r.mind.guard().eyes() == Eyes::Red);
   }
   {  // the old firmware (no EYES in HELLO caps): no SET_EYES, the colour kept in the mind only
     WallRig r(WallRig::remote_cfg(), false);
@@ -556,8 +557,149 @@ void test_eyes() {
     CHECK(r.body.count(KILO_MSG_SET_EYES) == 0 && !r.mind.guard().eyes_driven());
     kilo_host_guard_status_t s;
     r.mind.guard().fill(s);
-    CHECK(s.enabled == 1 && s.eyes_driven == 0 && s.eyes == KILO_GUARD_ZONE_GREEN);
+    CHECK(s.enabled == 1 && s.eyes_driven == 0 && s.eyes == KILO_GUARD_EYES_GREEN);
   }
+}
+
+// ---- the battery at rest, and the eyes' orange --------------------------------------------
+
+// The owner's wall of 2026-11-19: the legs' load sags the reading below the 20 % mark (7300 mV) while
+// he walks and for a moment after; at rest the pack holds 7450 mV. The guard stops him and starts the
+// sitting runner: it must sit, not take the low-battery REST, and the eyes stay the zone's.
+void test_sag_does_not_send_the_runner_to_rest() {
+  WallRig r(WallRig::remote_cfg(), true);
+  r.body.batt_mv = 7450;
+  r.run_ms(21000);  // the rig's first 8000 mV out of the window
+  r.wall_mm = r.travel + 1000;
+  r.key(A4);
+  uint64_t walked_until = 0;
+  bool held = false;
+  for (int i = 0; i < 20000 / 4 && !held; i++) {
+    bool loaded = r.mind.walker().active() || r.body.mode == KILO_MODE_GAIT;
+    if (loaded) walked_until = r.body.clock.t;
+    r.body.batt_mv = loaded || r.body.clock.t < walked_until + 1500000 ? 7150 : 7450;  // the sag, 1.5 s after too
+    r.pass();
+    held = r.mind.guard().action() == Action::Holding;
+  }
+  CHECK(held);
+  for (int i = 0; i < 4000 / 4; i++) {
+    r.body.batt_mv = r.body.clock.t < walked_until + 1500000 ? 7150 : 7450;
+    r.pass();
+  }
+  CHECK(r.mind.behaviour_active() && r.mind.sitting_variant());
+  CHECKF(r.posture_goal() != KILO_POSTURE_REST, "posture %d", r.posture_goal());  // SIT (or an alive move's trick)
+  CHECK(!r.mind.runner().context().data.low_battery && !r.mind.tired());
+  double pct = 0;
+  CHECK(r.mind.rested_pct(&pct) && pct > 30);
+  CHECK(!r.log.has("battery: tired"));
+  // the raw reading is still what the metrics and kilo status show
+  char line[256];
+  r.mind.metric_line(13, line, 201);
+  CHECKF(std::strstr(line, "battery: mv=7450 min_mv=7150 ") == line && std::strstr(line, " rested_mv=7450") != nullptr,
+         "%s", line);
+}
+
+// Genuinely low at rest (7250 mV, about 16 %): the runner rests, the eyes are orange while the way is
+// clear (with the runner on or off), blue and red win; +5 % clears it; the body's LOW_BATT too.
+void test_low_at_rest_rests_and_the_eyes_are_orange() {
+  auto rgb = [](WallRig& r) {
+    const Goal* g = r.mind.link().goal(KILO_MSG_SET_EYES);
+    return g == nullptr ? -1 : (g->payload[1] << 16) | (g->payload[2] << 8) | g->payload[3];
+  };
+  const int green = kEyeLevel << 8, orange = (kEyeLevel << 16) | (kOrangeGreen << 8), blue = kEyeLevel,
+            red = kEyeLevel << 16;
+  {
+    WallRig r(WallRig::remote_cfg(), true);
+    r.wall = false;
+    CHECK(rgb(r) == green);
+    r.body.batt_mv = 7250;
+    r.run_ms(500);  // the higher readings before still in the window: not yet
+    CHECK(!r.mind.tired());
+    r.run_ms(21000);
+    CHECK(r.mind.tired() && r.mind.guard().eyes() == Eyes::Orange && rgb(r) == orange);
+    CHECK(r.log.has("battery: tired (7250 mV at rest, 16 %, below 20 %): the eyes orange while the way is clear"));
+    kilo_host_guard_status_t st;
+    r.mind.guard().fill(st);
+    CHECK(st.eyes == KILO_GUARD_EYES_ORANGE && st.zone == KILO_GUARD_ZONE_GREEN);
+    char line[256];
+    r.mind.metric_line(9, line, 201);
+    CHECKF(std::strstr(line, " zone=green ") != nullptr && std::strstr(line, " eyes=orange ") != nullptr, "%s", line);
+    // the runner: the low-battery branch, REST
+    r.key(A5);
+    r.run_ms(3000);
+    CHECK(r.mind.runner().context().data.low_battery);
+    CHECKF(r.posture_goal() == KILO_POSTURE_REST, "posture %d", r.posture_goal());
+    r.key(B6);
+    // 23 %: still tired (it clears at 25 %)
+    r.body.batt_mv = 7330;
+    r.run_ms(1000);
+    CHECK(r.mind.tired());
+    r.body.batt_mv = 7400;  // 30 %
+    r.run_ms(1000);
+    CHECK(!r.mind.tired() && rgb(r) == green && r.log.has("battery: no longer tired (7400 mV at rest, 30 %)"));
+  }
+  {  // tired, then a wall: blue and red win over orange, and orange comes back when clear
+    WallRig r(WallRig::remote_cfg(), true);
+    r.body.batt_mv = 7250;
+    r.run_ms(21000);
+    CHECK(r.mind.tired() && rgb(r) == orange);
+    // (a tired Kilo that stops at a wall then lies down in the runner's REST, and lying the range is the
+    // floor's: so blue and red are checked while he walks)
+    r.wall_mm = r.travel + 900;
+    r.key(A4);
+    bool blue_seen = false, red_seen = false, ok = true;
+    for (int i = 0; i < 20000 / 4 && !red_seen; i++) {
+      r.pass();
+      Zone z = r.mind.guard().zone();
+      if (z == Zone::Blue && !blue_seen) {
+        blue_seen = true;
+        ok = ok && rgb(r) == blue && r.mind.guard().eyes() == Eyes::Blue;
+        r.wall_mm = r.travel + 100;  // then very close
+      }
+      if (z == Zone::Red) {
+        red_seen = true;
+        ok = ok && rgb(r) == red && r.mind.guard().eyes() == Eyes::Red;
+      }
+    }
+    CHECK(blue_seen && red_seen && ok);
+    r.wall = false;
+    r.run_ms(1500);
+    CHECKF(r.mind.guard().zone() == Zone::Green && rgb(r) == orange, "zone %s", zone_name(r.mind.guard().zone()));
+  }
+  {  // the body's LOW_BATT mode: tired whatever the reading
+    WallRig r(WallRig::remote_cfg(), true);
+    r.wall = false;
+    r.body.mode = KILO_MODE_LOW_BATT;
+    r.run_ms(200);
+    CHECK(r.mind.tired() && rgb(r) == orange && r.log.has("battery: tired (the body's LOW_BATT mode)"));
+    r.body.mode = KILO_MODE_IDLE;
+    r.run_ms(200);
+    CHECK(!r.mind.tired() && rgb(r) == green);
+  }
+  {  // USB power: no reading, never tired
+    WallRig r(WallRig::remote_cfg(), true);
+    r.wall = false;
+    r.body.flags |= KILO_TELEMETRY_FLAGS_NO_BATTERY;
+    r.body.batt_mv = 5000;
+    r.run_ms(2000);
+    double pct;
+    CHECK(!r.mind.tired() && !r.mind.rested_pct(&pct));
+  }
+}
+
+void test_rested_battery() {
+  power::RestedBattery b;
+  uint16_t mv = 0;
+  CHECK(!b.mv(0, &mv));
+  uint64_t t = 1000000;
+  for (int i = 0; i < 100; i++, t += 40000) b.add(t, i % 10 == 0 ? 7450 : 7150, false);  // a reading high every 0.4 s
+  CHECK(b.mv(t, &mv) && mv == 7450);
+  for (int i = 0; i < 600; i++, t += 40000) b.add(t, 7150, false);  // 24 s of sag only: the window forgets the high
+  CHECK(b.mv(t, &mv) && mv == 7150);
+  CHECK(!b.mv(t + 21000000, &mv));  // nothing for 21 s: none
+  b.add(t, 7300, false);
+  b.add(t + 40000, 0, true);  // USB power: forgotten
+  CHECK(!b.mv(t + 40000, &mv));
 }
 
 // ---- the alive layer ---------------------------------------------------------------------
@@ -661,6 +803,9 @@ int main() {
   test_hand_and_floor_do_not_stop();
   test_backward_trick_pickup_and_off_do_not_trigger();
   test_eyes();
+  test_rested_battery();
+  test_sag_does_not_send_the_runner_to_rest();
+  test_low_at_rest_rests_and_the_eyes_are_orange();
   test_alive_moves();
   test_alive_through_the_mind();
   return report("guard");

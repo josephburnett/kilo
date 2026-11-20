@@ -14,7 +14,9 @@
 //   A2 0x10 rear up (trick rear_up, rear_up_2 or rear_up_3 by the stage;
 //           again: down), only with the rear-up key on (below); B2 until
 //           2026-11-17 (the owner: A2 matches the picture better)
-//   A3 0x30, B3 0x18, C3 0x7A, B2 0x38, C2 0x5A, A1 0x42, B1 0x4A,
+//   B2 0x38 meow (Kind::Sound: one of the meow family, docs/sound.md;
+//           the Mind plays it at once, past the remote's queue: it moves nothing)
+//   A3 0x30, B3 0x18, C3 0x7A, C2 0x5A, A1 0x42, B1 0x4A,
 //   C1 0x52: nothing (logged as ignored)
 //
 // The rear-up key is OFF unless switched on (docs/rear-up-trick.md, the
@@ -37,7 +39,7 @@ namespace remote {
 
 constexpr uint16_t kRepeat = 0x100;
 
-enum class Kind : uint8_t { Ignore, Posture, Gait, Speed, Turn, Freeze, Behaviour, Trick };
+enum class Kind : uint8_t { Ignore, Posture, Gait, Speed, Turn, Freeze, Behaviour, Trick, Sound };
 
 struct Key {
   uint8_t command;     // NEC command byte
@@ -55,7 +57,7 @@ const Key* key_for(uint8_t command);
 // ir.py split(): the command byte and whether it is a held-key repeat.
 inline uint8_t key_command(uint16_t arg) { return (uint8_t)(arg & 0xFF); }
 inline bool key_repeat(uint16_t arg) { return (arg & kRepeat) != 0; }
-// ir.py action_for(): the key's entry (rows 1-3 too, Kind::Ignore but A2), or null
+// ir.py action_for(): the key's entry (rows 1-3 too, Kind::Ignore but A2 and B2), or null
 // for a held-key repeat or a key of another remote. With the rear-up key
 // off, A2's entry is a Kind::Ignore one ("none").
 const Key* action_for(uint16_t arg);
