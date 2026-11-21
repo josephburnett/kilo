@@ -1302,9 +1302,10 @@ body]** the simulators, **[assumed]** what nobody has measured.
   steps (a 480 ms cycle instead of 360) at the same pace. Faster than about
   230 mm/s needs faster joints: a firmware slew above 500°/s and servos
   that can do it (never measured).
-- **It is a prototype** (`kilo.planner.longtrot`), tested in the virtual
-  body only, not in the C++ mind and not on the remote: the owner decides
-  whether it goes further. The existing gaits are unchanged.
+- **It is built (2026-11-21, 15.8)**: remote key A1, three stages of 160,
+  180 and 200 mm/s on B7 / B5, in the C++ mind and checked tick for tick
+  against the Python reference. It has not been tried on the floor yet
+  (docs/long-trot-trial.md). The existing gaits are unchanged.
 
 ### 15.2 What limits the stride, in numbers
 
@@ -1498,8 +1499,9 @@ tick), inside the walker's 4.2 s limit.
 
 **The one measurement that settles the most** is the long trot's own rock
 at one speed with a 10-tick swing: run it at 180 mm/s forward for 10 s and
-fold the recording as 15.3 does (`stridesim.py fit` reads it). It needs the
-long trot on Kilo (the C++ port and a key), which is the owner's call.
+fold the recording as 15.3 does (`stridesim.py fit` reads it, long trots
+too since 2026-11-21). On Kilo that is A1 then B7 (stage 2: 180 mm/s, a
+10-tick swing); the first floor try is docs/long-trot-trial.md.
 **With today's tools**, the measurement worth taking first is a
 slow-motion phone video (240 fps if the phone has it) from the side, at
 floor level, of the trot at level 5 (A4, then B7 four times: 230 mm/s),
@@ -1514,8 +1516,9 @@ is the only way to a longer stride.
 
 - `mind/kilo/planner/longtrot.py`: `LongTrotPlanner`, `LONG_TROT` (its own
   pattern object, not in `patterns.PATTERNS`), `TrotFit` (the fitted
-  pendulum, `TROT_FIT`), the schedule (`swing_for`, `timing`). The
-  existing planner, patterns, golden vectors and C++ mind are unchanged.
+  pendulum, `TROT_FIT`), the schedule (`swing_for`, `timing`). (The
+  existing planner, patterns, golden vectors and C++ mind were unchanged
+  then; 15.8 is what was built on it.)
 - `mind/kilo/vbody/rocking.py`: `RockingPhysics`; `FeetPlayer.PHYSICS`
   chooses the physics new FEET players use (Physics by default).
 - `mind/tests/stridesim.py`: the study (`limits`, `fit`, `schedule`,
@@ -1523,3 +1526,123 @@ is the only way to a longer stride.
   joints, the build-up, the placement, the fit against the recorded
   numbers, walks in both physics, both stops); `WalkSim` takes a
   `planner_factory`.
+
+### 15.8 Built: the long trot on Kilo's remote (2026-11-21)
+
+The owner: "Build the long trot. Put it on A1." What is on the robot now
+(in the mind's build from this date on; nothing changed in the body's
+firmware or the wire protocol: the mind streams FEET to the body as for
+every gait).
+
+**The keys** (kernel/README.md "The remote" has the whole key map):
+
+| Key | What happens |
+|---|---|
+| A1 | from standing or from any gait: walk straight forward in the long trot at stage 1 |
+| B7 | a stage up (at stage 3: "already the top stage") |
+| B5 | a stage down; at stage 1: into the ordinary trot at 144 mm/s, from where B5 goes on as in the trot |
+| A6 / C6 | steer one step left / right (the inner side's stride a quarter shorter), not further |
+| A4, B4, C4 | into the trot, crawl or walk at its 1x (level +3) |
+| B6, A7, C5, C7 | the quick stop (14), as for the trot |
+
+| Stage | Speed | Swing | Stride | Cycle | Lands ahead of the shoulder | Fastest joint, planned |
+|---|---|---|---|---|---|---|
+| 1 | 160 mm/s | 9 ticks (180 ms) | 33.6 mm | 400 ms | 14.9 mm (half a stride: 16.8) | 369°/s |
+| 2 | 180 mm/s | 10 ticks (200 ms) | 41.4 mm | 440 ms | 16.7 mm (20.7) | 380°/s |
+| 3 | 200 mm/s | 11 ticks (220 ms) | 50.0 mm | 480 ms | 18.7 mm (25.0) | 451°/s |
+
+The study's top, 207 mm/s, is where the planner clamps any faster speed;
+the remote stops at 200 (the same 11-tick swing, 1.8 mm shorter). The
+remote never walks the long trot backward or turns in place in it.
+
+**The build-up.** The swing is never more than one tick longer than the
+step before, and the strides grow at most 0.75 mm a tick (the trot's 1.5).
+From standing: the first step's swing is 9 ticks while the stride is still
+a few mm; the stride reaches stage 1's 33.6 mm after 0.9 s. From the trot
+at any level: the trot's 8-tick swing, then 9 at the first long-trot step
+(the change happens at the next step, 0.14 s; the stride then reaches
+33.6 mm within 0.5 s). A stage up or down: the swing changes by its tick at
+the next step, the stride in about 0.2 s. Out of the long trot directly
+(B5 at stage 1, A4, C4) the swing shortens a tick a step back to 8 and the
+stride shrinks first: 0.2 s from stage 1, 1.4 s from stage 3 (1.7 s into
+the walk); into the crawl the legs step home first (1.4 s).
+
+**Stopping.** The quick stop (B6, A7, C5, C7, the distance guard): the
+feet in the air come down where they are, the strides go to 0 in 6 ticks,
+all four feet stay down for 0.2 s, then each leg steps under its shoulder.
+In the planner the body moves at most 10 mm after the stop is asked, at
+every stage and phase (kernel/host test_guard); the whole stop, legs
+squared and the body level, takes 0.8 to 1.1 s. In the virtual body
+(RockingPhysics, momentum on, from every second tick of a cycle) he is
+still after 0.59 s (median; worst 0.64) at 207 mm/s and 0.36 s (0.62) at
+180, having moved 9 mm (worst 16), peak tilt 4.8°, no fall. The planned
+stop (strides to 0 at 0.75 mm a tick) takes 1.9 s from stage 3; the remote
+uses the quick stop for every key.
+
+**A rule added while porting it: every swing long enough for its joints.**
+After a quick stop from 200 mm/s a hind foot can be 45 mm behind its
+shoulder, 3 mm from the leg's reach, where the knee turns fast for a small
+move: the prototype's square-up step from there asked up to 620°/s (the
+body's slew limit is 500). Now a swing that is not the steady long trot's
+(a square-up, the way home into the crawl, the swing shortening out of the
+long trot) is as long as the path needs for no joint to turn more than 8°
+a tick, checked through the leg's geometry along the planned path (with
+whole-mm rounding on the wire that is at most 9.7° a tick, 485°/s). A
+slowing swing also sizes itself for the stride it still carries (the
+stride shrinks more slowly than the swing). The steady long trot and the
+study's tables are unchanged by these; the stop study (15.5) run again
+gives the same numbers within 0.06 s and 2 mm. Every planned tick of the long trot,
+its stages, stops from every phase and changes to and from every gait is
+in reach and under 485°/s (mind/tests/test_long_trot.py).
+
+**Steering: one step only.** The fitted pendulum, which places the feet,
+was fitted to straight trots; how a bent path changes the sway was never
+measured. So the long trot steers at the first steer step only (0.25: the
+outer side's stride at most 4.75 mm a tick of the swing, the inner a
+quarter shorter); a sharper turn means going down to the trot (B5 at stage
+1, or A4) and steering there. In the virtual body every steer step (up to
+1) walked at all three stages in both physics without a fall or a catch
+(largest error 4.7°), so the limit is caution, not a known failure.
+
+**The distance guard** treats it as the trot: BLUE at 200 mm at stages 1
+and 2 and 214 mm at stage 3 (the trot's formula; the planner's way of 10
+mm against the 23 to 34 the formula allows). Something very close (RED)
+while long-trotting forward: the quick stop only, no backing off (as the
+crawl): its strides turn round at 0.75 mm a tick, 1.5 s from a 50 mm
+stride, while the quick stop has him still in about 0.6 s. A forward key,
+A1 among them, is refused while the guard holds, as for every gait.
+
+**Recordings.** A walk that went into the long trot at any time is
+`gait=longtrot` in the run list (`kilo runs`), so its runs are told apart
+from the trot's; its marks (`stream`, `timing`) say `pattern=longtrot` and
+the swing's ticks; the log line is "walk longtrot forward at 160.0 mm/s".
+`stridesim.py fit` folds long-trot recordings as it folds the trot's
+(pattern, direction, speed, stride) and prints the fitted pendulum's
+prediction for its swing and landing. `kilo cal show` includes it: its
+stage 3, ended by the quick stop, asks the hind shoulders up to -3° and the
+hind knees down to -36°, inside Kilo's reach with today's offsets.
+
+**How the C++ is tied to the Python.** `kilo.planner.longtrot.
+LongTrotPlanner` is the reference: in the walk, the trot and the crawl it
+plans exactly what `Planner` plans (a test checks it), and in the long
+trot it is the study's prototype with the changes above. The C++ mind's
+one `Planner` (kernel/mind/planner/plan.cpp, longtrot.cpp) does both. The
+golden vectors (kernel/host/tests/gen_planner_vectors.py) gained the long
+trot's timing, its landing and 26 scenarios (the stages, quick and planned
+stops at many phases, steering, every change into and out of it, backward,
+turning, the gate and the catch): 7581 more planned ticks. Every foot
+position is identical in the double-precision build; in the float build
+(the one on the Pi) 10 of them are 1 mm off where the exact value is a .5
+mm tie (rounding noise, as in the other gaits); the attitudes agree within
+0.0001°. The 41 older scenarios' lines are unchanged.
+
+**Not measured (all of it is model or virtual body until the floor
+says):** whether the servos follow a 9 to 11-tick swing with its 8 mm lift
+(their speed under load is assumed); whether the falling side's foot still
+touches early and catches him (2.3° in today's trot) with a longer swing;
+the fitted pendulum's 120 ms of extra rocking, fitted on 8-tick swings and
+used for 9 to 11; that the feet do not slip on a longer stride; how much
+the stride shortens through the servos' lag (the plan's 50 mm is what is
+asked); the battery's sag at the longer strides; how a bent path changes
+the sway. The first floor try and the one measurement that settles most:
+docs/long-trot-trial.md.

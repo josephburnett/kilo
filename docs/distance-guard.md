@@ -17,7 +17,7 @@ holding him (the owner: "he should always react, unless sleeping"):
 
 | Kilo is | Blue (too close) | Red (very close) |
 |---|---|---|
-| walking forward, any gait, also steering | below 20 cm (more when faster, up to 23.5 cm at the trot's top speed): the quick stop (below), then he sits and starts the A5 behaviour in its sitting form | below 15 cm: backs off a short way (4-8 cm, slowly), the quick stop, sits; hisses. In the crawl he only stops and sits (the crawl takes 4 s to turn round) |
+| walking forward, any gait, also steering | below 20 cm (more when faster, up to 23.5 cm at the trot's top speed): the quick stop (below), then he sits and starts the A5 behaviour in its sitting form | below 15 cm: backs off a short way (4-8 cm, slowly), the quick stop, sits; hisses. In the crawl and the long trot (A1) he only stops and sits (they take 4 s and 1.5 s to turn round) |
 | turning in place (A6, C6) | below 12 cm: nothing; a wall seen as he turns is no reason to stop turning | below 8 cm: the quick stop, then he sits; hisses |
 | walking backward | below 12 cm: nothing; he is going away from it | below 8 cm: nothing (the eyes go red) |
 | standing still | below 12 cm: he looks at it (the head straight ahead) and sits | below 8 cm: backs off a short way and sits; hisses |
@@ -134,7 +134,7 @@ speed, because a faster walk needs more room to stop:
 
     blue = 100 mm gap left after the stop
          + speed x 0.40 s   (the readings come in, the stop reaches the body, the servos follow)
-         + 5 mm + the quick stop's own way (speed^2 / 2a; a: walk 400, trot 700 mm/s^2; the crawl 20 mm)
+         + 5 mm + the quick stop's own way (speed^2 / 2a; a: walk 400, trot and long trot 700 mm/s^2; the crawl 20 mm)
     never below 200 mm
     left again 80 mm above it
 
@@ -164,6 +164,8 @@ reading, not a missed echo. And no echo right after something closer than
 | trot +4 | 187.2 mm/s | 205 mm (330) | 10 / 30 mm | 142 / 142 mm |
 | trot +5 | 230.4 mm/s | 235 mm (425) | 13 / 43 mm | 162 / 180 mm |
 | crawl +5 | 26.9 mm/s | 200 mm (200) | 10 / 20 mm | 196 / 196 mm |
+| long trot stage 2 | 180 mm/s | 200 mm (since 2026-11-21) | 10 / 28 mm | 150 / 136 mm |
+| long trot stage 3 | 200 mm/s | 214 mm | 10 / 34 mm | 155 / 155 mm |
 
 Steering (A6 / C6 while walking forward) is still walking forward: the
 same thresholds at the same speed; the steered walk goes a little slower,

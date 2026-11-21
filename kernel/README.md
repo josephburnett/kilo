@@ -812,7 +812,8 @@ floor only, never on a desk.**
 | C4 | 0xB0 | walk |
 | A2 | 0x10 | rear up, only when switched on (below); otherwise nothing |
 | B2 | 0x38 | a meow (docs/sound.md). It moves nothing, so it works at any time, also while Kilo walks |
-| A3, B3, C3, C2, A1, B1, C1 | | nothing (logged as ignored) |
+| A1 | 0x42 | the long trot (below): a trot with a longer stride, built up a step at a time |
+| A3, B3, C3, C2, B1, C1 | | nothing (logged as ignored) |
 
 **Gait keys** (A4, B4, C4). Standing: walk forward in that gait at level
 +3. Walking in another gait: change to it and keep the speed level, the
@@ -821,6 +822,31 @@ into or out of the crawl once every leg has stepped home, up to about 5 s).
 The gait already in use: walk straight forward again at the same speed
 (from a turn, a steer or from backward); already straight forward, nothing
 changes.
+
+**The long trot** (A1; docs/walking-and-balance.md section 15, the first
+floor try: docs/long-trot-trial.md). A trot whose stride (how far a foot
+travels in one step) is longer: its foot stays in the air longer (the
+"swing": 9 to 11 ticks of 20 ms instead of the trot's 8), so the servos can
+carry it further without turning faster, and each pair of feet lands where
+the body's sideways sway ends upright. From standing or from any gait, A1
+walks straight forward at its first stage. It starts with the trot's swing
+and makes it one tick longer each step. It has three stages, forward only:
+
+| Stage | Speed | Swing | Stride | Cycle (each pair once) |
+|---|---|---|---|---|
+| 1 (A1) | 160 mm/s | 9 ticks (180 ms) | 33.6 mm | 400 ms |
+| 2 (B7) | 180 mm/s | 10 ticks (200 ms) | 41.4 mm | 440 ms |
+| 3 (B7 again) | 200 mm/s | 11 ticks (220 ms) | 50 mm | 480 ms |
+
+The trot at the same speed takes 30 to 38 mm strides. B5 goes a stage down;
+at stage 1 it goes into the trot at 144 mm/s (the swing shortens a tick a
+step first), and from there B5 works as in the trot. A6 and C6 steer it one
+step only (the inner stride a quarter shorter): its balance was worked out
+for straight walking. A4, B4 or C4 change to that gait at its level +3. B6,
+A7, C5 and C7 stop it with the quick stop, as the trot; the distance guard
+stops it as the trot, and for something very close it only stops (no
+backing off: it turns round slowly). Standing after a long trot, A6 and C6
+turn in place in the trot.
 
 **Speed levels.** Levels +1 to +5 walk forward at 0.4, 0.7, 1, 1.3 and 1.6
 times the trot's default speed (the walk's and the crawl's: 0.4, 0.7, 1,
