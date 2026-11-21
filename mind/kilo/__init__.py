@@ -1,4 +1,5 @@
-"""Kilo mind: the Python side of the Kilo body/mind split (docs/architecture.md §5)."""
+"""Kilo's Python package: the laptop's kilo command, the reference implementations
+the C++ mind is tested against, the virtual bodies and the log tools (mind/README.md)."""
 
 __version__ = "0.0.1"
 

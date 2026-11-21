@@ -318,7 +318,7 @@ def test_a_long_stall_underruns_then_settles_and_the_stream_ends():
 @pytest.mark.parametrize("pattern", ("crawl", "walk", "trot"))
 def test_the_planned_stop_hands_over_to_stance(pattern):
     """The stop at each gait's top speed, inside stop_timeout (which the
-    remote and `kilo walk` wait for)."""
+    C++ mind's remote and distance guard wait for, remote::stop_timeout_s)."""
     from kilo.planner.walker import stop_timeout
     sim = WalkSim(pattern, speed=speed_range(pattern)[1])
     sim.run(200)

@@ -1,4 +1,5 @@
-"""SerialLink: the mind's end of the body link (docs/architecture.md §4, §5).
+"""SerialLink: the Python end of the body link (docs/architecture.md §4), the one
+BodyClient drives the virtual bodies with (the C++ mind's is kernel/mind/link/).
 
 Threads:
 

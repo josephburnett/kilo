@@ -317,7 +317,7 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
         level_ = up ? iabs(level_) : -iabs(level_);
         steer_ = 0;
         const char* why = walker_.start(walk_goal());
-        if (why != nullptr) {  // ir.py _go: the walk's state starts over
+        if (why != nullptr) {  // refused: the walk's state starts over
           reset_motion();
           char what[96];
           format(what, sizeof what, "turn ended: walk failed: %s", why);
@@ -352,7 +352,7 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
       done("ignored (no action on this key)", false);
       return;
   }
-  // A walk from standing: a playing trick is stopped first (ir.py _walk)
+  // A walk from standing: a playing trick is stopped first
   if (mode() == KILO_MODE_TRICK) {
     stop_trick();
     phase_ = Phase::StopTrick;
@@ -362,7 +362,7 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
   act();
 }
 
-// The quick stop of a walk (planner/plan.h halt()), waited for (ir.py _stop_walking), then a trick
+// The quick stop of a walk (planner/plan.h halt()), waited for, then a trick
 // stopped, then act().
 void RemoteControl::stop_then_act(uint64_t now) {
   reset_motion();
@@ -421,7 +421,7 @@ void RemoteControl::stop_trick() {
   }
   step_trick_ = nullptr;
   player_.stop();
-  settle_us_ = ticks != 0 ? ticks_to_us(ticks) + 100000u : 0;  // ir.py _stop_trick
+  settle_us_ = ticks != 0 ? ticks_to_us(ticks) + 100000u : 0;  // the crossfade + 0.1 s
 }
 
 void RemoteControl::start_trick() {

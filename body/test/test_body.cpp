@@ -239,7 +239,7 @@ int main() {
   }
 
   // ---- epoch bump clears the SET_BALANCE enable (P1 hardware finding B1):
-  // a dead `kilo balance on` client must not leave later STANDs balancing.
+  // a dead client that set balance on must not leave later STANDs balancing.
   // The gains survive (they are not a motion goal).
   reset();
   {

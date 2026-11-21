@@ -9,8 +9,8 @@
 
 namespace kilo {
 
-// A tty or pty, raw 8N1, non-blocking. Python counterpart: FdTransport and
-// SerialTransport in kilo/link/transport.py.
+// A tty or pty, raw 8N1, non-blocking. Python counterpart: FdTransport in
+// kilo/link/transport.py.
 class PosixSerial final : public Serial {
  public:
   // Open path. A real tty also gets HUPCL cleared (closing must not drop

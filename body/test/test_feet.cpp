@@ -245,7 +245,7 @@ static double run_board(double slope_p, double slope_r, double k, int ticks, boo
   return in.att.pitch / 16.0;
 }
 
-static const uint8_t BAL_KP99[5] = {1, 253, 30, 2, 15};  // Kp 0.99 (the daemon's default), Kd 30 ms
+static const uint8_t BAL_KP99[5] = {1, 253, 30, 2, 15};  // Kp 0.99 (the mind's default on Kilo, kernel/src/kernel.cpp), Kd 30 ms
 
 static void test_stance_balance() {
   // (At 0.5x the 10 deg slope would need 20 deg of correction, past the

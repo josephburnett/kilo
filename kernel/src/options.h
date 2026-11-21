@@ -5,7 +5,7 @@
 // stops the build instead of reading as 0 in an #if.
 //
 //   KILO_PLANNER_BENCH  time the walking planner once at boot
-//   KILO_BEHAVIOUR      the behaviour runner (kilo run --behaviour)
+//   KILO_BEHAVIOUR      the behaviour runner from boot
 //   KILO_REAR_UP        the remote's A2 rear-up key and its stage, 0 off
 //                       (docs/rear-up-trick.md, the switch)
 //   KILO_RECORD_SAVE    the flight recorder's card saver from the start

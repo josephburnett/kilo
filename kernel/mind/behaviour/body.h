@@ -1,7 +1,6 @@
 // body: what the behaviours call on the body, and where the runner gets
 // its snapshot. Python counterpart: the duck-typed body of
-// kilo/behaviour/library.py, implemented over the real link by
-// kilo/behaviour/adapter.py (BodyAdapter); the Mind implements it over its
+// kilo/behaviour/library.py and kilo/behaviour/runner.py; the Mind implements it over its
 // SerialLink and TrickPlayer (mind.cpp), the tests with a recording fake.
 //
 // The defaults refuse (no pure virtuals: the freestanding core does not
@@ -16,7 +15,7 @@ namespace behaviour {
 
 class BodyIface {
  public:
-  // runner hooks (adapter.snapshot(), on_tick())
+  // runner hooks (runner.py's body.snapshot(), on_tick())
   virtual void snapshot(Snapshot& out) { out = Snapshot(); }
   virtual void on_tick() {}
   // Latch a posture (rest, sit, stand, balance = stand with the flag);

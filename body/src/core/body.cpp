@@ -67,7 +67,7 @@ void body_epoch_bump(Body& b, uint8_t trick_reason) {
   f.dh_g = f.xs_g = 0;
   b.balance_req = 0;
   // SET_BALANCE's enable is a goal too (spec: goals go stale at a bump); a
-  // `kilo balance on` client that died must not leave every later STAND
+  // client that set balance on and died must not leave every later STAND
   // balancing (P1 hardware finding B1). The gains stay: not motion.
   b.bal.enable = 0;
   arbiter_head_release(b.arb);

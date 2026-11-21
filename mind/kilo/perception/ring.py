@@ -1,7 +1,7 @@
 """A fixed-capacity ring buffer of telemetry rows for detectors (§5 "Body state").
 
 Columns are floats; missing values are NaN. Uses numpy when it is importable
-(an apt dependency on the Pi, ``python3-numpy``), else ``array('d')`` columns,
+(optional), else ``array('d')`` columns,
 with the same API. ``window(seconds)`` returns the rows of the last
 ``seconds`` (by the ``t`` column), oldest first, as a dict of column ->
 sequence (numpy arrays or lists).

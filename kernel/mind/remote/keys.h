@@ -1,5 +1,4 @@
-// keys: the Petoi IR remote's key table and the key map. A port of the
-// table and ACTIONS of mind/kilo/ir.py. The body decodes the remote (NEC,
+// keys: the Petoi IR remote's key table and the key map. The body decodes the remote (NEC,
 // address 0x00) and relays each key as EVENT IR_KEY, arg = the command byte
 // | 0x100 for a held-key repeat.
 //
@@ -25,11 +24,10 @@
 // KILO_REAR_UP, which is also the stage (1, 2 or 3: how high Kilo goes;
 // the owner tries them in order): make -C kernel KILO_REAR_UP=2
 // (MindConfig::rear_up_key, which the Mind passes to set_rear_up_key());
-// kilo-mind-host --rear-up[=N]; for the Python daemon KILO_REAR_UP=N in
-// its environment (ir.py).
+// kilo-mind-host --rear-up[=N].
 //
-// The legacy meaning (legacy/infrared.h) is kept for reference. There is no
-// shutdown key (Python has none either).
+// Each key's legacy meaning (the original firmware's remote table) is kept
+// for reference. There is no shutdown key.
 #ifndef KILO_MIND_REMOTE_KEYS_H
 #define KILO_MIND_REMOTE_KEYS_H
 #include <stdint.h>
@@ -45,7 +43,7 @@ struct Key {
   uint8_t command;     // NEC command byte
   const char* grid;    // "B7"
   const char* legacy;  // what the legacy firmware did with it
-  Kind kind;           // what the mind does (ir.py ACTIONS)
+  Kind kind;           // what the mind does
   const char* name;    // the posture, the gait pattern, the turn ("left"), "faster" / "slower", or the trick
   const char* label;   // what the key does, for the log ("stand", "faster", "none")
 };
@@ -54,20 +52,20 @@ constexpr int kKeys = 21;
 extern const Key kKeyTable[kKeys];  // row by row from the top, as on the remote
 
 const Key* key_for(uint8_t command);
-// ir.py split(): the command byte and whether it is a held-key repeat.
+// The command byte and whether it is a held-key repeat.
 inline uint8_t key_command(uint16_t arg) { return (uint8_t)(arg & 0xFF); }
 inline bool key_repeat(uint16_t arg) { return (arg & kRepeat) != 0; }
-// ir.py action_for(): the key's entry (rows 1-3 too, Kind::Ignore but A2 and B2), or null
+// The key's entry (rows 1-3 too, Kind::Ignore but A2 and B2), or null
 // for a held-key repeat or a key of another remote. With the rear-up key
 // off, A2's entry is a Kind::Ignore one ("none").
 const Key* action_for(uint16_t arg);
-// ir.py set_rear_up_key() / REAR_UP_KEY: the stage A2 starts, 1 rear_up
+// The stage A2 starts, 1 rear_up
 // (28 deg), 2 rear_up_2 (40 deg), 3 rear_up_3 (54 deg), or 0: A2 does
 // nothing (the default). Anything above 3 is 0.
 constexpr uint8_t kRearUpStages = 3;
 void set_rear_up_key(uint8_t stage);
 uint8_t rear_up_key();
-// "B6 (0x02, stand)", "B6 (0x02, stand) repeat", "? (0x45)" (ir.py describe()).
+// "B6 (0x02, stand)", "B6 (0x02, stand) repeat", "? (0x45)": a key for the log.
 void describe(uint16_t arg, char* buf, uint32_t cap);
 
 }  // namespace remote

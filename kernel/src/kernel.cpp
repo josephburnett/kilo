@@ -75,9 +75,8 @@ extern "C" const char KiloMindKernelMarker[] __attribute__ ((used)) = KILO_HOST_
 // buffer, on the heap): about 8 times this kernel.
 static const uint32_t KernelImageMax = KILO_HOST_UPDATE_MAX_IMAGE;
 
-// The Pi's daemon ran `kilo run --remote --balance 0.99` (the retired Pi
-// setup's ~/.config/kilo/env KILO_RUN_ARGS, mind/systemd/env.example): the IR remote live, and balance on
-// from the start with this Kp.
+// How Kilo runs: the IR remote live, and balance on from the start with
+// this Kp.
 static const bool RemoteOn = true;
 static const double BalanceKp = 0.99;
 
@@ -189,8 +188,7 @@ boolean CKernel::Initialize (void)
 		return FALSE;
 	}
 
-	// The mind core, as `kilo run --remote --balance 0.99` ran it on the
-	// Pi. The laptop interface's network seams first: the Mind's host
+	// The mind core: the remote on, balance on at Kp 0.99 (above). The laptop interface's network seams first: the Mind's host
 	// server serves them, the net task (last, below) fills them. Nothing
 	// on the network is up yet: the net task brings it up once the main
 	// loop runs (docs/fast-boot.md §3 rule 1).
@@ -457,8 +455,8 @@ TShutdownMode CKernel::Run (void)
 			}
 		}
 
-		// The behaviour runner's wind-down ends in a poweroff the daemon
-		// would run; the kernel cannot switch the Pi off.
+		// The behaviour runner's wind-down ends in a poweroff request; the
+		// kernel cannot switch the Pi off, so it only logs it.
 		if (m_pMind->poweroff_requested () && !m_bPoweroffLogged)
 		{
 			m_bPoweroffLogged = TRUE;

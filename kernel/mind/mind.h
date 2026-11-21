@@ -1,7 +1,5 @@
 // mind: the whole mind core in one object, so a platform's main loop is a
-// dozen lines. Python counterpart: the daemon (kilo/daemon/core.py) with
-// its BodyClient, walker, trick player, SharedPercepts, behaviour runner
-// (--behaviour) and IR remote (--remote), and its socket server.
+// dozen lines.
 //
 //   LogRing      the RAM log (every line also goes to the platform's Log)
 //   SerialLink   the body link (link/)
@@ -39,16 +37,14 @@
 // watchdog needs. The one thing a pass cannot prove is that the behaviour
 // runner keeps ticking (its 10 Hz grid could stall with the loop alive), so
 // with a runner the stamp also needs a tick within kRunnerStallUs (10 s of
-// grace before the first), as the daemon's pump checks (daemon/behaviour.py
-// _stamp_liveness).
+// grace before the first).
 //
 // Who drives the body: the laptop's controller (CONTROL take=1) owns it;
-// the remote is ignored and the behaviour runner paused meanwhile (Python
-// refuses client goals while the runner is active unless --override pauses
-// it: a host controller is that override). The runner runs from the start
-// with MindConfig.behaviour, and the remote's A5 starts it at run time;
-// while it runs, the remote's B6, A7 and C7 stop it (then do their own
-// action) and its other keys are ignored (remote/remote.h, remote_ir.py).
+// the remote is ignored and the behaviour runner paused meanwhile. The
+// runner runs from the start with MindConfig.behaviour, and the remote's A5
+// starts it at run time; while it runs, the remote's B6, A7 and C7 stop it
+// (then do their own action) and its other keys are ignored
+// (remote/remote.h).
 #ifndef KILO_MIND_MIND_H
 #define KILO_MIND_MIND_H
 #include <stdint.h>
@@ -74,10 +70,10 @@ namespace kilo {
 
 struct MindConfig {
   uint32_t mind_build = 0;      // STATUS.mind_build (the git hash's first 8 hex digits)
-  bool remote = false;          // kilo run --remote (the Pi's KILO_RUN_ARGS turns it on)
-  bool behaviour = false;       // kilo run --behaviour (the remote's A5 starts the runner too)
+  bool remote = false;          // the IR remote's keys act (the kernel turns it on)
+  bool behaviour = false;       // the behaviour runner from the start (the remote's A5 starts it too)
   uint8_t rear_up_key = 0;      // the stage the remote's A2 starts, 1-3, 0 off (KILO_REAR_UP; remote/keys.h): off until the trials
-  double balance_kp = -1;       // >= 0: SET_BALANCE on with this Kp from the start (kilo run --balance KP)
+  double balance_kp = -1;       // >= 0: SET_BALANCE on with this Kp from the start
   uint64_t seed = 0;            // the behaviour RNG's seed (logged)
   const behaviour::Personality* personality = nullptr;  // null: behaviour::kPersonality
   uint32_t stats_period_ms = 0;  // > 0: STATS_REQ this often, the answer logged ("body STATS: ...")
@@ -106,8 +102,8 @@ class Mind final : public LinkListener,
                    public sound::SoundHost,
                    public CalGate {
  public:
-  static constexpr uint64_t kRunnerStallUs = 1000000;       // daemon/behaviour.py RUNNER_STALL_S
-  static constexpr uint64_t kRunnerStartGraceUs = 10000000;  // RUNNER_START_GRACE_S
+  static constexpr uint64_t kRunnerStallUs = 1000000;       // the runner's last tick at most this old
+  static constexpr uint64_t kRunnerStartGraceUs = 10000000;  // the grace before its first tick
 
   // listener: the laptop interface's socket, or null for none.
   Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, const MindConfig& cfg = MindConfig());
@@ -187,7 +183,7 @@ class Mind final : public LinkListener,
   bool sitting_variant() const { return sitting_variant_; }
 
  private:
-  // the behaviour layer's body (behaviour/adapter.py BodyAdapter) and percepts (runner.py PerceptFeed)
+  // the behaviour layer's body (behaviour/body.h BodyIface) and percepts (behaviour/runner.h PerceptSource)
   class Body final : public behaviour::BodyIface, public behaviour::PerceptSource {
    public:
     explicit Body(Mind& m) : m_(m) {}

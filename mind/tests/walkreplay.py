@@ -27,7 +27,7 @@ from kilo.planner.model import BodyModel
 from kilo.protocol import kilo_protocol as P
 from kilo.vbody.feet import FeetPlayer
 
-BALANCE = {"kp_q8": 253, "kd_ms": 30, "deadband_deg": 2, "max_corr_deg": 15}  # the daemon's, as recorded
+BALANCE = {"kp_q8": 253, "kd_ms": 30, "deadband_deg": 2, "max_corr_deg": 15}  # the gains the recorded walks ran with
 
 
 def load(path):

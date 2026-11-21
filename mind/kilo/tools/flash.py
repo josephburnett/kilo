@@ -108,7 +108,7 @@ def build_body(sketch: Path, build_dir: Path, size_check: bool, sh: Callable[[Se
     size_sh = REPO_DIR / "body" / "tools" / "size_check.sh"
     if size_check:
         if size_sh.exists():
-            # Check the ELF that was just built (no second compile on the Pi).
+            # Check the ELF that was just built (no second compile).
             sh([str(size_sh), "--elf", str(build_dir / f"{sketch.name}.ino.elf")], "size/symbol harness")
         else:
             say(f"warning: {size_sh} not found, size/symbol harness skipped")
