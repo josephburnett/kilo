@@ -1,6 +1,6 @@
 #!/bin/sh
 # Safe mode: the Pi's system files read-only, so a power cut cannot damage them
-# (docs/setup.md "Power: safe mode"). Run on the Pi.
+# (retired; docs/setup.md "Power: safe mode", in git history). Run on the Pi.
 #
 #   mind/systemd/safe-mode.sh status
 #   sudo mind/systemd/safe-mode.sh on|off [--dry-run]
@@ -11,7 +11,7 @@
 #      and the bind mounts on it (/home/joe, /var/lib/tailscale,
 #      /var/log/journal, /var/lib/systemd/timesync) stay writable. Refused
 #      unless /data and every bind mount are in place, now and in /etc/fstab.
-# off: the reverse (for apt, unit files, Wi-Fi profiles; see docs/setup.md).
+# off: the reverse (for apt, unit files, Wi-Fi profiles).
 # Both take effect at the next reboot, and print every change.
 #
 # How: `raspi-config nonint enable_bootro|disable_bootro|enable_overlayfs`
@@ -151,7 +151,7 @@ if [ "$cmd" = on ]; then
     done
     if [ -n "$missing" ]; then
         echo "REFUSED: safe mode would freeze these at their state on the root filesystem:$missing" >&2
-        echo "Set up the data partition first (docs/setup.md \"Power: safe mode\": mind/systemd/data-partition.sh)." >&2
+        echo "Set up the data partition first (mind/systemd/data-partition.sh)." >&2
         exit 1
     fi
     command -v raspi-config >/dev/null || { echo "REFUSED: raspi-config is not installed" >&2; exit 1; }

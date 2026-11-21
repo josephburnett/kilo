@@ -7,7 +7,7 @@ when they drift from protocol/spec.toml ([[joints]], [balance], [head],
 
   docs/architecture.md  §3b joint table (limits), §3f balance defaults and limit,
                         §3g battery table (the BATT_* params) and watchdog table (WD_*)
-  mind/README.md        the default Kp and look() speed
+  mind/README.md        the look() speed
 
 (The Appendix E params table is not checked here: gen.py writes it.)
 
@@ -119,9 +119,6 @@ def check_arch(c: Checker, spec: dict, text: str) -> None:
 
 def check_readme(c: Checker, spec: dict, text: str) -> None:
     f = flat(text)
-    m = c.find("README default Kp", r"with the given Kp \(default ([\d.]+), the firmware's", f)
-    if m:
-        c.eq("README default Kp", float(m[1]), spec["balance"]["kp_q8"] / 256)
     m = c.find("README look() speed", r"tail_deg=None, speed_dps=(\d+)\)", f)
     if m:
         c.eq("README look() speed_dps", int(m[1]), spec["head"]["speed_dps"])

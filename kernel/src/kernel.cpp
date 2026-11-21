@@ -75,8 +75,8 @@ extern "C" const char KiloMindKernelMarker[] __attribute__ ((used)) = KILO_HOST_
 // buffer, on the heap): about 8 times this kernel.
 static const uint32_t KernelImageMax = KILO_HOST_UPDATE_MAX_IMAGE;
 
-// The Pi's daemon ran `kilo run --remote --balance 0.99` (docs/setup.md,
-// ~/.config/kilo/env KILO_RUN_ARGS): the IR remote live, and balance on
+// The Pi's daemon ran `kilo run --remote --balance 0.99` (the retired Pi
+// setup's ~/.config/kilo/env KILO_RUN_ARGS, mind/systemd/env.example): the IR remote live, and balance on
 // from the start with this Kp.
 static const bool RemoteOn = true;
 static const double BalanceKp = 0.99;

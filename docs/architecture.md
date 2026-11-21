@@ -2570,7 +2570,8 @@ mind/                     the Python mind (pip install -e mind): the laptop's `k
   tests/                  pytest: codec, link rules, state, CLI, daemon, flash, vbody, the cross-check
                           against the body's C dispatch, planner, walks, tricks, behaviour, perception,
                           logs, IR, the host channel; fixtures/
-docs/                     the design (architecture.md), setup (setup.md, laptop-setup.md, raspberry-pi.md),
+docs/                     the design (architecture.md), setup (setup.md the dev host, laptop-setup.md),
+                          the Pi on the NyBoard (raspberry-pi.md, research notes),
                           the kernel route (fast-boot.md, fast-boot-first-boot.md), topic notes (walking-and-balance,
                           calibration, power, sound, distance-guard, rear-up-trick, timing-vs-legacy,
                           kilo-eeprom-legacy, firmware-size-report), hardware test procedures and their
@@ -2590,7 +2591,8 @@ opens the port directly if no daemon is running (`--direct` forces that). As
 built (`kilo/daemon/`, `kilo/remote.py`; ops in `kilo/daemon/ops.py`): the socket is `--socket`, else
 `$KILO_SOCKET`, else `$XDG_RUNTIME_DIR/kilo/kilo.sock` (the systemd user
 service), `/run/kilo/kilo.sock` as root, else `~/.kilo/kilo.sock`; protocol
-and ops in mind/README.md "Daemon and systemd". `kilo COMMAND --help` is the
+and ops in the docstrings of `kilo/daemon/` (map in `__init__.py`, ops in
+`ops.py`) and `kilo/remote.py`. `kilo COMMAND --help` is the
 reference; this table is the overview.
 
 | Command | Purpose |
