@@ -8,8 +8,8 @@ result as the const table
 kPersonality (behaviour/personality.h). Doubles are written with repr(), so
 the C++ has Python's values bit for bit.
 
-    ~/OpenCat/.venv/bin/python kernel/mind/behaviour/gen_personality.py [PERSONALITY.yaml]
-    ~/OpenCat/.venv/bin/python kernel/mind/behaviour/gen_personality.py --check   (kernel/host/test.sh)
+    .venv/bin/python kernel/mind/behaviour/gen_personality.py [PERSONALITY.yaml]
+    .venv/bin/python kernel/mind/behaviour/gen_personality.py --check   (kernel/host/test.sh)
 
 Without a path it reads mind/kilo/behaviour/personality.yaml (the packaged
 one, $KILO_PERSONALITY's default). `personality_struct(cfg)` is also used by

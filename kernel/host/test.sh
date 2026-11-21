@@ -22,12 +22,19 @@
 #      behaviour runner and perception against the virtual body (vbody.core --control).
 #
 #   kernel/host/test.sh
-#   PYTHON=/path/to/python   interpreter with the mind's kilo package (default ~/OpenCat/.venv/bin/python)
+#   PYTHON=/path/to/python   interpreter with the mind's dependencies (default: this checkout's
+#                            .venv/bin/python, else ~/OpenCat/.venv/bin/python). The kilo package is
+#                            always this checkout's mind/ (PYTHONPATH), also in a git worktree, whose
+#                            interpreter is another checkout's.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-PYTHON="${PYTHON:-$HOME/OpenCat/.venv/bin/python}"
+if [ -z "${PYTHON:-}" ]; then
+    PYTHON="$REPO/.venv/bin/python"
+    [ -x "$PYTHON" ] || PYTHON="$HOME/OpenCat/.venv/bin/python"
+fi
+export PYTHONPATH="$REPO/mind${PYTHONPATH:+:$PYTHONPATH}"
 HOST="$HERE/build/kilo-mind-host"
 OUT="$HERE/build/integration"
 mkdir -p "$OUT"

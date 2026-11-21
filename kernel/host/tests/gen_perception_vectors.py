@@ -5,7 +5,7 @@ kernel/host/tests/test_perception.cpp replays them: the inputs are written
 with repr(), so the C++ sees the same doubles, and every event must come out
 on the same sample with the same values.
 
-    ~/OpenCat/.venv/bin/python kernel/host/tests/gen_perception_vectors.py > kernel/host/tests/perception_vectors.txt
+    .venv/bin/python kernel/host/tests/gen_perception_vectors.py > kernel/host/tests/perception_vectors.txt
 
 Lines (space separated; "-" is None):
 

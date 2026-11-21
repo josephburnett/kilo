@@ -5,7 +5,7 @@ hmac/hashlib for HMAC-BLAKE2b and HKDF, and the published cacophony and snow
 vectors (noise_published_vectors.json, checked here against noiseprotocol
 too). kernel/host/tests/test_noise.cpp replays them byte for byte.
 
-    ~/OpenCat/.venv/bin/python kernel/host/tests/gen_noise_vectors.py > kernel/host/tests/noise_vectors.txt
+    .venv/bin/python kernel/host/tests/gen_noise_vectors.py > kernel/host/tests/noise_vectors.txt
 
 Line format (space separated, hex; "-" is empty):
 

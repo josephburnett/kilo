@@ -2,7 +2,7 @@
 planner (mind/kilo/planner): every scenario's commands and every tick it
 plans, as lines that kernel/host/tests/test_planner_vectors.cpp replays.
 
-    ~/OpenCat/.venv/bin/python kernel/host/tests/gen_planner_vectors.py > kernel/host/tests/planner_vectors.txt
+    .venv/bin/python kernel/host/tests/gen_planner_vectors.py > kernel/host/tests/planner_vectors.txt
 
 Line format (space separated; SPEED -1 is the pattern's default speed):
 

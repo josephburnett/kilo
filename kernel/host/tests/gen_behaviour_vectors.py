@@ -7,7 +7,7 @@ replays them with the same seed and must make the same choice, reason and
 active path on every tick, the same drives and scores, and the same calls
 on the body. Also the RNG: the first draws of random.Random(seed).
 
-    ~/OpenCat/.venv/bin/python kernel/host/tests/gen_behaviour_vectors.py > kernel/host/tests/behaviour_vectors.txt
+    .venv/bin/python kernel/host/tests/gen_behaviour_vectors.py > kernel/host/tests/behaviour_vectors.txt
 
 The runner is stepped directly (runner.step()) with the clock at exactly
 T0 + k x 0.1 s, and the asyncio loop runs between ticks (so a trick's

@@ -12,8 +12,8 @@ computes, which kernel/host/tests/test_tricks.cpp checks the C++ against.
 It lives next to its output, as protocol/vendor.py does, because it is
 part of the build's sources, not a test.
 
-    ~/OpenCat/.venv/bin/python kernel/mind/tricks/gen_library.py           write the files
-    ~/OpenCat/.venv/bin/python kernel/mind/tricks/gen_library.py --check   exit 1 if stale (kernel/host/test.sh)
+    .venv/bin/python kernel/mind/tricks/gen_library.py           write the files
+    .venv/bin/python kernel/mind/tricks/gen_library.py --check   exit 1 if stale (kernel/host/test.sh)
 """
 
 from __future__ import annotations

@@ -2,7 +2,7 @@
 from the Python one (mind/kilo/measure/script.py script 2, statics.rigid_rest):
 every tick of two runs, as lines that kernel/host/tests/test_measure.cpp replays.
 
-    ~/OpenCat/.venv/bin/python kernel/host/tests/gen_measure_vectors.py > kernel/host/tests/measure_vectors.txt
+    .venv/bin/python kernel/host/tests/gen_measure_vectors.py > kernel/host/tests/measure_vectors.txt
 
 Line format (space separated):
 
