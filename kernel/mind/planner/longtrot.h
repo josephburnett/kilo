@@ -17,6 +17,7 @@
 #define KILO_MIND_PLANNER_LONGTROT_H
 #include "planner/fmath.h"
 #include "planner/patterns.h"
+#include "proto/kilo_protocol.h"
 
 namespace kilo {
 namespace planner {
@@ -33,10 +34,14 @@ constexpr real kLtStridePerTick = (real)4.75;  // a side's stride at most this x
 constexpr real kLtJointDegPerTick = 8;     // a swing that is not the steady long trot's: no joint faster
 constexpr real kLtStancePlus = (real)1.5;  // a foot's ground time: the swing + this many ticks
 
-// TrotFit (TROT_FIT): the trot's rock fitted to the floor recordings
-constexpr real kFitComXMm = (real)3.5;  // the centre of mass's effective position ahead of the shoulders' middle
-constexpr real kFitExtraMs = 120;       // the diagonal rocks as if it lasted this much longer
-constexpr real kFitComHMm = 79;         // the centre of mass's height
+// TrotFit (TROT_FIT): the trot's rock fitted to the floor recordings. Its numbers are the "longtrot"
+// view of the body model (protocol/spec.toml [model.views.longtrot]): they disagree with the model's
+// own centre of mass and stay the long trot's until a self-measurement settles it (kilo model show).
+constexpr real kFitComXMm = (real)KILO_MODEL_VIEW_LONGTROT_COM_X_MM;  // the centre of mass's effective position
+                                                                      //   ahead of the shoulders' middle
+constexpr real kFitExtraMs = (real)KILO_MODEL_VIEW_LONGTROT_EXTRA_MS;  // the diagonal rocks as if it lasted this
+                                                                       //   much longer
+constexpr real kFitComHMm = (real)KILO_MODEL_VIEW_LONGTROT_COM_H_MM;  // the centre of mass's height
 
 // The swing's ticks at |speed| (the build-up's target).
 int long_swing_for(real speed_mm_s);

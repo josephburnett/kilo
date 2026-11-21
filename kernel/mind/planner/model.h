@@ -67,6 +67,12 @@ struct BodyModel {
   real slew_deg_per_tick = (real)KILO_PARAM_SLEW_MAX_A16_DEFAULT / 16;
   real reach_frac = (real)KILO_MODEL_REACH_FRAC;
   real knee_max_deg = KILO_MODEL_KNEE_MAX_DEG;
+  // corrections for this robot (spec [model.correction]): what a self-measurement finds, all
+  // zero until one is applied (kilo model apply); com() adds them. model.py has the others
+  // (the legs' give, the IMU's offsets, the tail, the outline), which nothing here uses.
+  real com_dx_mm = (real)KILO_MODEL_CORRECTION_COM_DX_MM;  // the whole robot's centre of mass, forward
+  real com_dy_mm = (real)KILO_MODEL_CORRECTION_COM_DY_MM;  // ...to the left
+  real com_dz_mm = (real)KILO_MODEL_CORRECTION_COM_DZ_MM;  // ...up
 
   real total_g() const;
   V2 hip(int leg) const;  // shoulder axle (x, y) in the body frame

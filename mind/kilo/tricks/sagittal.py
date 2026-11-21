@@ -52,7 +52,10 @@ import math
 from dataclasses import dataclass, field, replace
 from typing import Sequence
 
-from kilo.planner.model import BodyModel
+from kilo.planner.model import BodyModel, Outline, Tail
+
+_BODY = BodyModel()  # the model (protocol/spec.toml [model]): its tail, outline and centre-of-mass correction
+_TAIL, _OUT = _BODY.tail, _BODY.outline
 
 # Forces are in grams-force and torques in g mm; 1 kg cm = 1000 g x 10 mm.
 G_MM_PER_KG_CM = 10000.0
@@ -82,26 +85,40 @@ class Geometry:
     # frame), to cover the uncertainty of the measurement and of the split
     # into parts (the planner's model puts it 54 mm behind the front axles
     # and 3 mm below them; the walks read +1.7..2.0 deg nose down, which is
-    # what a centre of mass a little forward of the model would do).
-    com_dx: float = 0.0
-    com_dz: float = 0.0
+    # what a centre of mass a little forward of the model would do). The
+    # default is the model's own correction ([model.correction]: zero until
+    # a self-measurement is applied); ``masses`` uses these, not ``body``'s.
+    com_dx: float = _BODY.com_dx_mm
+    com_dz: float = _BODY.com_dz_mm
     # ---- the tail: MEASURED 2026-11-16 (the owner, a ruler; docs/rear-up-trick.md §2) ----
-    tail_pivot_x: float = -70.5   # the tail servo's axis meets the mid-plane 9 mm behind the back shoulder axles
-    tail_pivot_z: float = 24.0    # ...and 24 mm above them
-    tail_len: float = 94.0        # pivot to the tip, straight line
-    tail_droop_deg: float = 18.0  # at servo 0 the tail points this far below straight back
-    tail_axis_deg: float = 50.0   # the servo's axis: tipped 40 deg back from vertical, 50 up from straight back
-    tail_sign: float = 1.0        # +1: a positive servo angle swings the tip LEFT (+y). NOT KNOWN
-    tail_g: float = 6.0           # the moving part (taken out of the frame's lump): ESTIMATE
-    tail_com_frac: float = 0.5
+    tail_pivot_x: float = _TAIL.pivot_x_mm   # the tail servo's axis meets the mid-plane 9 mm behind the back shoulder axles
+    tail_pivot_z: float = _TAIL.pivot_z_mm    # ...and 24 mm above them
+    tail_len: float = _TAIL.len_mm        # pivot to the tip, straight line
+    tail_droop_deg: float = _TAIL.droop_deg  # at servo 0 the tail points this far below straight back
+    tail_axis_deg: float = _TAIL.axis_deg   # the servo's axis: tipped 40 deg back from vertical, 50 up from straight back
+    tail_sign: float = _TAIL.sign        # +1: a positive servo angle swings the tip LEFT (+y). NOT KNOWN
+    tail_g: float = _TAIL.g           # the moving part (taken out of the frame's lump): ESTIMATE
+    tail_com_frac: float = _TAIL.com_frac
     # ---- the outline: ESTIMATES (docs/rear-up-trick.md T3, T4) ----
-    rear_x: float = -88.0         # the back end of the frame
-    belly_z: float = -24.0        # the underside (battery pack)
-    back_z: float = 34.0          # the top of the frame at the rear (the tail servo, its axis 24 mm up)
-    pi_rear_x: float = -55.0      # the Pi's rear edge (board, connectors)
-    pi_top_z: float = 36.0        # the Pi's highest point (header pins, USB/Ethernet)
-    nose_x: float = 110.0
-    nose_z: float = -5.0
+    rear_x: float = _OUT.rear_x_mm         # the back end of the frame
+    belly_z: float = _OUT.belly_z_mm        # the underside (battery pack)
+    back_z: float = _OUT.back_z_mm          # the top of the frame at the rear (the tail servo, its axis 24 mm up)
+    pi_rear_x: float = _OUT.pi_rear_x_mm      # the Pi's rear edge (board, connectors)
+    pi_top_z: float = _OUT.pi_top_z_mm        # the Pi's highest point (header pins, USB/Ethernet)
+    nose_x: float = _OUT.nose_x_mm
+    nose_z: float = _OUT.nose_z_mm
+
+    @classmethod
+    def of(cls, body: BodyModel, **kw) -> "Geometry":
+        """The side view of ``body`` (a BodyModel, or one of its views): its
+        tail, outline and centre-of-mass correction."""
+        t, o = body.tail, body.outline
+        d = dict(body=body, com_dx=body.com_dx_mm, com_dz=body.com_dz_mm, tail_pivot_x=t.pivot_x_mm, tail_pivot_z=t.pivot_z_mm, tail_len=t.len_mm,
+                 tail_droop_deg=t.droop_deg, tail_axis_deg=t.axis_deg, tail_sign=t.sign, tail_g=t.g,
+                 tail_com_frac=t.com_frac, rear_x=o.rear_x_mm, belly_z=o.belly_z_mm, back_z=o.back_z_mm,
+                 pi_rear_x=o.pi_rear_x_mm, pi_top_z=o.pi_top_z_mm, nose_x=o.nose_x_mm, nose_z=o.nose_z_mm)
+        d.update(kw)
+        return cls(**d)
 
     def with_(self, **kw) -> "Geometry":
         return replace(self, **kw)

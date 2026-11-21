@@ -58,6 +58,8 @@ kilo log --host kilo.local   # the mind's log: all it keeps, then live (--lines 
 kilo runs                    # the walks and tricks it recorded (kilo walks too); --fetch N|all|last downloads (see Logs)
 kilo record status|fetch|save|decode ...   # the flight recorder (see Logs)
 kilo bench sd | kilo metrics # the SD card's write times; the session's counters since boot
+kilo model show [--fit FILE.fit.json]   # Kilo's one body model in plain words: each number, where it came from, what disagrees
+kilo model apply FILE.fit.json --dry-run   # what a self-measurement would change (without --dry-run: writes protocol/spec.toml and regenerates; never commits)
 kilo log summary|replay|plot|walk|trick|run FILE ...   # offline log tools (python -m kilo.logs)
 kilo key init | key show     # this laptop's key for the mind
 kilo find [--json]           # Kilo's address and build, found by name (mDNS)

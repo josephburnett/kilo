@@ -1,7 +1,13 @@
 """The body model: Kilo's geometry and masses, in one place.
 
-Everything the planner (kilo.planner.plan) and the virtual body's physics
-(kilo.vbody.physics) know about Kilo's body is a field of ``BodyModel``.
+Everything the mind knows about Kilo's body is a field of ``BodyModel``: the
+planner (kilo.planner.plan), the virtual body's physics (kilo.vbody.physics),
+the self-measurement (kilo.measure) and the tricks' models (kilo.tricks:
+sagittal, stance, dynamics, rear_up) read it and keep no body number of
+their own (mind/tests/test_one_model.py). Where a part of the mind fitted a
+number for itself that disagrees with the model, it is a named VIEW in the
+same place (spec [model.views]; ``BodyModel.view``, ``view_numbers``,
+``disagreements``), until a self-measurement settles it (``kilo model``).
 The lengths are measured (2026-10-11), the total mass and the centre of
 gravity too (2026-11-14, with the Pi mounted; the split into parts is a
 fit, see below). The servo lag is an ESTIMATE until a servo step test with
@@ -39,7 +45,7 @@ previous attitude fills in).
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from kilo.protocol import kilo_protocol as P
 
@@ -69,6 +75,44 @@ def _mass(v: tuple) -> Mass:
 
 
 @dataclass(frozen=True)
+class Tail:
+    """The tail (spec [model.tail]; kilo.tricks.sagittal.tail_point has the
+    geometry): a straight lever on a servo whose axis is tipped back, mm and
+    degrees in the body frame."""
+    pivot_x_mm: float = float(P.MODEL_TAIL_PIVOT_X_MM)   # where the servo's axis meets the mid-plane
+    pivot_z_mm: float = float(P.MODEL_TAIL_PIVOT_Z_MM)
+    len_mm: float = float(P.MODEL_TAIL_LEN_MM)           # pivot to the tip
+    droop_deg: float = float(P.MODEL_TAIL_DROOP_DEG)     # below straight back at servo 0
+    axis_deg: float = float(P.MODEL_TAIL_AXIS_DEG)       # the servo's axis above straight back
+    sign: float = float(P.MODEL_TAIL_SIGN)               # +1: a positive servo angle swings the tip LEFT. NOT KNOWN
+    g: float = float(P.MODEL_TAIL_G)                     # the moving part (ESTIMATE)
+    com_frac: float = float(P.MODEL_TAIL_COM_FRAC)
+
+
+@dataclass(frozen=True)
+class Outline:
+    """The frame's outline (spec [model.outline]): what may touch the floor. ESTIMATES."""
+    rear_x_mm: float = float(P.MODEL_OUTLINE_REAR_X_MM)        # the back end of the frame
+    belly_z_mm: float = float(P.MODEL_OUTLINE_BELLY_Z_MM)      # the underside (battery pack)
+    back_z_mm: float = float(P.MODEL_OUTLINE_BACK_Z_MM)        # the top of the frame at the rear
+    pi_rear_x_mm: float = float(P.MODEL_OUTLINE_PI_REAR_X_MM)  # the Pi's rear edge
+    pi_top_z_mm: float = float(P.MODEL_OUTLINE_PI_TOP_Z_MM)    # the Pi's highest point
+    nose_x_mm: float = float(P.MODEL_OUTLINE_NOSE_X_MM)
+    nose_z_mm: float = float(P.MODEL_OUTLINE_NOSE_Z_MM)
+    half_width_mm: float = float(P.MODEL_OUTLINE_HALF_WIDTH_MM)  # half the frame's width
+
+
+# A view's keys that are BodyModel fields (the others are the view's own: view_numbers).
+_VIEW_FIELDS = ("com_dx_mm", "com_dy_mm", "com_dz_mm", "sag_deg_per_kg_cm", "imu_pitch_deg", "imu_roll_deg")
+VIEWS = tuple(P.MODEL_VIEWS)
+
+
+def view_numbers(name: str) -> dict[str, float]:
+    """The numbers of view ``name`` (spec [model.views.<name>]) as floats."""
+    return {k: float(v) for k, v in P.MODEL_VIEWS[name].items()}
+
+
+@dataclass(frozen=True)
 class BodyModel:
     # The defaults are protocol/spec.toml's: the LEG_* and SLEW_MAX_A16 params
     # and [model], where their provenance is (measured, fitted or estimated).
@@ -93,6 +137,24 @@ class BodyModel:
     slew_deg_per_tick: float = _param("SLEW_MAX_A16") / 16  # the body's safety slew
     reach_frac: float = float(P.MODEL_REACH_FRAC)      # the IK keeps d <= reach_frac (L1 + L2) (core/ik.h)
     knee_max_deg: float = float(P.MODEL_KNEE_MAX_DEG)  # ...and the knee bend <= this
+    # ---- corrections for this robot (spec [model.correction]): what a self-measurement finds;
+    # all zero until one is applied (kilo model apply). com() adds com_d*; the rest is read by
+    # the models that have legs that give and an IMU (kilo.tricks) ----
+    com_dx_mm: float = float(P.MODEL_CORRECTION_COM_DX_MM)  # the whole robot's centre of mass, forward
+    com_dy_mm: float = float(P.MODEL_CORRECTION_COM_DY_MM)  # ...to the left
+    com_dz_mm: float = float(P.MODEL_CORRECTION_COM_DZ_MM)  # ...up
+    sag_deg_per_kg_cm: float = float(P.MODEL_CORRECTION_SAG_DEG_PER_KG_CM)  # every leg servo's give under load
+    leg_dz_mm: tuple = tuple(float(v) for v in P.MODEL_CORRECTION_LEG_DZ_MM)  # each leg longer than commanded
+    imu_pitch_deg: float = float(P.MODEL_CORRECTION_IMU_PITCH_DEG)  # TELEMETRY standing level (nose down +)
+    imu_roll_deg: float = float(P.MODEL_CORRECTION_IMU_ROLL_DEG)    # ...(right side up +)
+    # ---- the rest of the body (spec [model.servo], .tail, .outline, .inertia, .sensor) ----
+    czp: tuple = tuple(P.MODEL_SERVO_CZP)  # Kilo's servo zeros by legacy joint id (EEPROM, 2026-10-10)
+    reseated_rb_shoulder_czp: int = P.MODEL_SERVO_RESEATED_RB_SHOULDER_CZP  # ...the right hind shoulder's, re-seated
+    tail: Tail = Tail()
+    outline: Outline = Outline()
+    frame_box_mm: tuple = tuple(float(v) for v in P.MODEL_INERTIA_FRAME_BOX_MM)  # the frame lump's inertia box
+    ultrasonic_height_mm: float = float(P.MODEL_SENSOR_ULTRASONIC_HEIGHT_MM)
+    ultrasonic_floor_tilt_deg: float = float(P.MODEL_SENSOR_ULTRASONIC_FLOOR_TILT_DEG)
 
     # ---- derived -------------------------------------------------------------------
     @property
@@ -117,6 +179,41 @@ class BodyModel:
     def stance_height(self, h_256: int) -> float:
         """A body height given as /256 of L1 + L2 (spec [gait] stance_h_256)."""
         return h_256 / 256.0 * (self.l1_mm + self.l2_mm)
+
+    def stance_z_mm(self, h_256: int = P.GAIT_STANCE_H_256) -> int:
+        """STANCE's leg length in the whole mm FEET carries (76: kilo.measure's HOME_Z)."""
+        return int(round(self.stance_height(h_256)))
+
+    def stance_com(self, h_256: int = P.GAIT_STANCE_H_256) -> tuple[float, float, float]:
+        """The centre of mass standing in STANCE (feet under the shoulders): (mm ahead of the
+        shoulders' middle, mm to the left, mm above the FLOOR)."""
+        z = self.stance_height(h_256)
+        cx, cy, cz = self.com([0.0] * 4, [z] * 4)
+        return cx, cy, z + self.foot_r_mm + cz
+
+    @property
+    def czp_reseated(self) -> tuple:
+        """The servo zeros with the right hind shoulder's as re-seated (legacy joint id 10)."""
+        return tuple(self.reseated_rb_shoulder_czp if j == 10 else v for j, v in enumerate(self.czp))
+
+    # ---- views (spec [model.views]) ----------------------------------------------------
+    def view(self, name: str) -> "BodyModel":
+        """The model as view ``name`` sees it: this model with the view's
+        numbers in place of its own (the corrections and the tail's droop;
+        a view's other numbers are its user's own: ``view_numbers``)."""
+        v = view_numbers(name)
+        kw: dict = {k: v[k] for k in _VIEW_FIELDS if k in v}
+        if "tail_droop_deg" in v:
+            kw["tail"] = replace(self.tail, droop_deg=v["tail_droop_deg"])
+        return replace(self, **kw)
+
+    def disagreements(self, name: str) -> list[tuple[str, float, float | None]]:
+        """(key, the view's number, this model's or None where it has no
+        counterpart) for every number of view ``name``."""
+        cx, _, ch = self.stance_com()
+        mine = {"com_x_mm": cx, "com_h_mm": ch, "tail_droop_deg": self.tail.droop_deg}
+        mine.update({k: getattr(self, k) for k in _VIEW_FIELDS})
+        return [(k, v, mine.get(k)) for k, v in view_numbers(name).items()]
 
     def drop_accel(self, lever_mm: float, com_height_mm: float) -> float:
         """rad/s^2 a side (or an end) of the body can drop at under gravity
@@ -151,12 +248,15 @@ class BodyModel:
         d = math.hypot(x, z)
         return self.min_reach_mm - 1e-6 <= d <= self.reach_mm + 1e-6 and z > 0
 
-    def ik(self, leg: int, x: float, z: float) -> tuple[float, float]:
+    def ik(self, leg: int, x: float, z: float, reach_mm: float | None = None) -> tuple[float, float]:
         """Foot (x, z) -> (theta1, theta2) in radians, the distance clamped to
-        the workspace like the body's IK."""
+        the workspace like the body's IK. ``reach_mm``: the longest the leg
+        may be instead of the body's reach_frac (L1 + L2): a trick's frames
+        are joint angles, which the body's IK and its cap never see
+        (kilo.tricks.rear_up stretches the leg further than a walk may)."""
         l1, l2 = self.l1_mm, self.l2_mm
         d = math.hypot(x, z)
-        d = min(max(d, self.min_reach_mm), self.reach_mm)
+        d = min(max(d, self.min_reach_mm), self.reach_mm if reach_mm is None else reach_mm)
         c = (d * d - l1 * l1 - l2 * l2) / (2 * l1 * l2)
         c = min(1.0, max(-1.0, c))
         s = math.sqrt(1.0 - c * c) * (1.0 if FRONT[leg] else -1.0)
@@ -188,7 +288,7 @@ class BodyModel:
             sy += (mu + ml) * hy
             sz -= mu * uz + ml * lz
             m += mu + ml
-        return sx / m, sy / m, sz / m
+        return sx / m + self.com_dx_mm, sy / m + self.com_dy_mm, sz / m + self.com_dz_mm
 
 
 # ---- attitude and leg lengths -------------------------------------------------------------

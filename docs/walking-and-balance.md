@@ -392,6 +392,11 @@ plausible model error, below), shift at most 18 mm, roll 14°, pitch 6°, lift g
 patterns and swing times as in mind/README.md. Replace the masses with the
 per-foot scale readings and the lag with the servo step test.
 
+*(Note, 2026-11-21: the estimates in this paragraph are those of
+2026-10-14. The model's numbers today are in `protocol/spec.toml` `[model]`
+(358 g, servo 50 + 70 ms); `kilo model show` prints them with where each
+came from. docs/architecture.md "One model".)*
+
 **The stream's timing.** The walker (in the C++ mind `Walker::poll()` on a
 20 ms deadline grid, `kernel/mind/planner/walker.h`; in the Python reference
 a thread) wakes every 20 ms. The body's clock is estimated from the

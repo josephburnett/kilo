@@ -3052,6 +3052,99 @@ MODEL_LOWER_LEG_G = 4
 MODEL_LOWER_LEG_AT = 0.5
 MODEL_SERVO_LAG_MS = 50
 MODEL_SERVO_TAU_MS = 70
+# One model: the corrections a self-measurement finds, Kilo's servo zeros, tail, outline, inertia box
+# and sensor; MODEL_VIEW_<NAME>_*: numbers a part of the mind fitted for itself that disagree with the
+# model (spec [model.views]), also as MODEL_VIEWS; MODEL_ABOUT: key -> (what, unit, source).
+MODEL_CORRECTION_COM_DX_MM = 0.0
+MODEL_CORRECTION_COM_DY_MM = 0.0
+MODEL_CORRECTION_COM_DZ_MM = 0.0
+MODEL_CORRECTION_SAG_DEG_PER_KG_CM = 0.0
+MODEL_CORRECTION_LEG_DZ_MM = (0.0, 0.0, 0.0, 0.0)
+MODEL_CORRECTION_IMU_PITCH_DEG = 0.0
+MODEL_CORRECTION_IMU_ROLL_DEG = 0.0
+MODEL_SERVO_CZP = (73, 69, 85, 90, 45, 135, 45, 135, 111, 83, 116, 82, 141, 67, 127, 59)
+MODEL_SERVO_RESEATED_RB_SHOULDER_CZP = 88
+MODEL_TAIL_PIVOT_X_MM = -70.5
+MODEL_TAIL_PIVOT_Z_MM = 24.0
+MODEL_TAIL_LEN_MM = 94.0
+MODEL_TAIL_DROOP_DEG = 18.0
+MODEL_TAIL_AXIS_DEG = 50.0
+MODEL_TAIL_SIGN = 1.0
+MODEL_TAIL_G = 6.0
+MODEL_TAIL_COM_FRAC = 0.5
+MODEL_OUTLINE_REAR_X_MM = -88.0
+MODEL_OUTLINE_BELLY_Z_MM = -24.0
+MODEL_OUTLINE_BACK_Z_MM = 34.0
+MODEL_OUTLINE_PI_REAR_X_MM = -55.0
+MODEL_OUTLINE_PI_TOP_Z_MM = 36.0
+MODEL_OUTLINE_NOSE_X_MM = 110.0
+MODEL_OUTLINE_NOSE_Z_MM = -5.0
+MODEL_OUTLINE_HALF_WIDTH_MM = 30.0
+MODEL_INERTIA_FRAME_BOX_MM = (130, 60, 45)
+MODEL_SENSOR_ULTRASONIC_HEIGHT_MM = 80
+MODEL_SENSOR_ULTRASONIC_FLOOR_TILT_DEG = 12
+MODEL_VIEW_LONGTROT_COM_X_MM = 3.5
+MODEL_VIEW_LONGTROT_COM_H_MM = 79.0
+MODEL_VIEW_LONGTROT_EXTRA_MS = 120.0
+MODEL_VIEW_LONGTROT_CLAMP_DEG = 2.3
+MODEL_VIEW_TRICKS_COM_DX_MM = -5.5
+MODEL_VIEW_TRICKS_COM_DY_MM = -5.0
+MODEL_VIEW_TRICKS_SAG_DEG_PER_KG_CM = 4.0
+MODEL_VIEW_TRICKS_TAIL_DROOP_DEG = 16.0
+MODEL_VIEW_TRICKS_IMU_PITCH_DEG = 1.9
+MODEL_VIEW_TRICKS_IMU_ROLL_DEG = 2.0
+MODEL_VIEW_TRICKS_RIGID_COM_DY_MM = -2.0
+MODEL_VIEWS: dict[str, dict[str, float]] = {
+    'longtrot': {'com_x_mm': 3.5, 'com_h_mm': 79.0, 'extra_ms': 120.0, 'clamp_deg': 2.3},
+    'tricks': {'com_dx_mm': -5.5, 'com_dy_mm': -5.0, 'sag_deg_per_kg_cm': 4.0, 'tail_droop_deg': 16.0, 'imu_pitch_deg': 1.9, 'imu_roll_deg': 2.0},
+    'tricks_rigid': {'com_dy_mm': -2.0},
+}
+MODEL_ABOUT: dict[str, tuple[str, str, str]] = {
+    'foot_r_mm': ("the floor is this far below the centre of a foot's disc", 'mm', 'measured 2026-10-11'),
+    'reach_frac': ('a leg stretches to at most this share of its full length', '', "the body's limit (core/ik.h)"),
+    'knee_max_deg': ('a knee bends at most this far', 'deg', "the body's limit (core/ik.h)"),
+    'stand_com_x_mm': ("centre of mass ahead of the shoulders' middle, standing", 'mm', 'measured 2026-11-14 (the owner, Pi mounted)'),
+    'body_mass': ('frame, head and tail servos: grams at x, y, z', 'g, mm', 'fitted so the whole gives the measured centre of mass (2026-11-14)'),
+    'battery_mass': ('the battery pack', 'g, mm', "weighed 2026-10-15; its place the owner's 2026-11-14"),
+    'pi_mass': ('the Raspberry Pi on the back', 'g, mm', 'catalogue weight; its place estimated'),
+    'upper_leg_g': ('one upper leg with its knee servo', 'g', 'estimate'),
+    'upper_leg_at': ('...its centre this share of the way from shoulder to knee', '', 'estimate'),
+    'lower_leg_g': ('one lower leg and foot', 'g', 'estimate'),
+    'lower_leg_at': ('...its centre this share of the way from knee to foot', '', 'estimate'),
+    'servo_lag_ms': ('a leg starts moving this long after it is told', 'ms', 'fitted to the floor recordings of 2026-11-15'),
+    'servo_tau_ms': ('...and then closes 63 % of the gap in this time', 'ms', 'fitted to the floor recordings of 2026-11-15'),
+    'correction.com_dx_mm': ('centre of mass further forward than the model above', 'mm', 'nothing applied yet'),
+    'correction.com_dy_mm': ('centre of mass further to the left', 'mm', 'nothing applied yet'),
+    'correction.com_dz_mm': ('centre of mass higher', 'mm', 'nothing applied yet'),
+    'correction.sag_deg_per_kg_cm': ('how much the leg servos give under load', 'deg per kg cm', 'nothing applied yet'),
+    'correction.leg_dz_mm': ('each leg longer than commanded (left front, right front, right back, left back)', 'mm', 'nothing applied yet'),
+    'correction.imu_pitch_deg': ('what the tilt sensor reads nose-down when he stands level', 'deg', 'nothing applied yet'),
+    'correction.imu_roll_deg': ('...and rolled (right side up +)', 'deg', 'nothing applied yet'),
+    'servo.czp': ("each servo's zero, by joint id 0..15", 'servo deg', "Kilo's EEPROM, read 2026-10-10"),
+    'servo.reseated_rb_shoulder_czp': ("the right hind shoulder's zero after it was re-seated", 'servo deg', 'read from the plays since 2026-11-19, not confirmed'),
+    'tail.pivot_x_mm': ("the tail's pivot, forward of the shoulders' middle", 'mm', "the owner's ruler, 2026-11-16"),
+    'tail.pivot_z_mm': ('...and above the shoulder axles', 'mm', "the owner's ruler, 2026-11-16"),
+    'tail.len_mm': ('the tail, pivot to tip', 'mm', "the owner's ruler, 2026-11-16"),
+    'tail.droop_deg': ('the tail points this far below straight back at rest', 'deg', "the owner's ruler, 2026-11-16"),
+    'tail.axis_deg': ("the tail servo's axis above straight back", 'deg', "the owner's description, 2026-11-16"),
+    'tail.sign': ('+1: a positive tail angle swings the tip left', '', 'NOT KNOWN'),
+    'tail.g': ("the tail's moving part", 'g', 'estimate'),
+    'tail.com_frac': ('...its centre this share of the way along', '', 'estimate'),
+    'outline.rear_x_mm': ("the frame's back end", 'mm', 'estimate'),
+    'outline.belly_z_mm': ('the underside (battery)', 'mm', 'estimate'),
+    'outline.back_z_mm': ('the top of the frame at the rear', 'mm', 'estimate'),
+    'outline.pi_rear_x_mm': ("the Pi's rear edge", 'mm', 'estimate'),
+    'outline.pi_top_z_mm': ("the Pi's highest point", 'mm', 'estimate'),
+    'outline.nose_x_mm': ('the nose, forward', 'mm', 'estimate'),
+    'outline.nose_z_mm': ('the nose, height', 'mm', 'estimate'),
+    'outline.half_width_mm': ("half the frame's width", 'mm', 'estimate'),
+    'inertia.frame_box_mm': ("the frame's mass spread as a box this size", 'mm', 'estimate'),
+    'sensor.ultrasonic_height_mm': ('the distance sensor above the floor, standing', 'mm', 'estimate (taken a little low)'),
+    'sensor.ultrasonic_floor_tilt_deg': ('looking down more than this, the sensor sees the floor', 'deg', 'estimate'),
+    'views.longtrot': ("the long trot's own fit of how he rocks on a diagonal", '', 'floor recordings of 2026-11-15..17'),
+    'views.tricks': ("the tricks' own fit (the rear-up is designed on it)", '', 'rear-up plays of 2026-11-19..21'),
+    'views.tricks_rigid': ("the rear-up's first, rigid fit, before the right hind shoulder was re-seated", '', 'the two falls of 2026-11-17'),
+}
 
 
 def payload_len_status(msg_type: int, payload: bytes) -> int:
