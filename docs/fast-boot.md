@@ -225,6 +225,6 @@ image on SD for a `kilo flash --rollback`.
 
 ## 8. What is retired
 
-On the Pi: Raspberry Pi OS, systemd units in `mind/systemd/`, the venv,
-`arduino-cli`, ssh/Tailscale on the robot, `update.sh`. On the laptop nothing
-is retired; the CLI gains `--host` and `--sd`.
+On the Pi: Raspberry Pi OS, its systemd units, the venv, `arduino-cli`,
+ssh/Tailscale on the robot, `update.sh`. On the laptop the CLI's serial-port
+and daemon commands are gone; it gains `--host` and `--sd`.

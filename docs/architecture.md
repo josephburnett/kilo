@@ -46,7 +46,7 @@ operations notes and test tables. The main body links to them.
 | Head | `SET_HEAD` holds pan/tilt/tail slew-limited over IDLE/GAIT, without balance corrections; released by mode 0, 2 s without a refresh or an epoch bump. Implemented in P1. | 3c |
 | Watchdog | Armed by the first valid frame from the Pi. Two stages: stop motion at 0.5 s, REST at 1.5 s, LIMP 10 s later. | 3g |
 | Protocol | COBS + CRC-16/CCITT-FALSE at 250000 baud. Goals unacked and refreshed at 5 Hz; queries answered by their data reply; other commands acked and de-duplicated. | 4 |
-| IR remote | **Relayed** (owner's request, 2026-10-11; was dropped). Received on the body: NEC decoded on D4 from a pin-change interrupt shared with the ultrasonic, no library (≈450 B flash, 17 B RAM); relayed as `EVENT IR_KEY`; mapped to actions on the mind (`kilo run --remote`, `kilo.ir`). | 3a, 4, 5 |
+| IR remote | **Relayed** (owner's request, 2026-10-11; was dropped). Received on the body: NEC decoded on D4 from a pin-change interrupt shared with the ultrasonic, no library (≈450 B flash, 17 B RAM); relayed as `EVENT IR_KEY`; mapped to actions on the mind (kernel/mind/remote). | 3a, 4, 5 |
 | Buzzer | **Kept, Pi-driven.** A `BEEP` note queue plus built-in reflex chirps. ISR-toggled on D5. | 3a, 4 |
 | First tricks | Basics: sit, rest, stand, stretch, balance. Social: hi, wash face, check around, sniff, scratch, pee, push-up, butt-up. Athletic tricks (backflip, roll, jump) are not ported. Fall recovery stays a body reflex. | 5 |
 | Behaviour | An in-house behaviour tree under a utility selector over drives, ticked at 10 Hz. | 5 |
@@ -898,8 +898,7 @@ corr  = clamp(slew(lowpass(corr, α=1/4), 1°/tick), ±15°)
 - Where it runs, and when it is off, is in 3c (layer 2).
 - Tuning is live through `SET_BALANCE` (enable, Kp, Kd, dead band, clamp;
   not persisted; dead band and clamp ≤ 30°, else `GOAL_REFUSED BAD_ARG`).
-  `kilo balance on|off [--kp X] [--kd S] [--deadband D] [--clamp C]` sends it
-  and holds the posture. There are no balance `PARAM_SET` ids yet (3 param
+  There are no balance `PARAM_SET` ids yet (3 param
   slots are free if persisted defaults are wanted). Telemetry streams pitch,
   roll and rates at 25 Hz by default (`TELEM_DIV`) for step responses.
 
@@ -1751,16 +1750,17 @@ the body: it boots at a new epoch (§3c "Boot epoch").
   gentle tracking, not snapping.
 - **Microphone (later):** loudness and onset detection only.
 
-**Logging.** Frames go to `~/kilo-logs/*.kilolog.gz` (≈1 MB/h at 25 Hz;
-`kilo --kilolog`, `kilo run --kilolog`), replayable through the codec. A JSONL
-behaviour log records drives and the active path; the daemon also keeps
-`~/kilo-logs/daemon.log`. `kilo log summary|replay|plot` analyses offline. Together these close the loop for
+**Logging.** The C++ mind's flight recorder keeps every frame
+(`kilo record`, `kilo runs --fetch`, which also writes a `.kilolog` per
+walk), replayable through the codec. `kilo log summary|replay|plot`
+analyses offline. Together these close the loop for
 learning control: change a gain, walk, plot.
 
 **Flashing tool.** `kilo flash` builds with arduino-cli, runs the size/symbol
-harness and refuses to flash if it fails, embeds the git hash, releases the
-port, resets the body over GPIO4, runs avrdude, and verifies by HELLO. Details
-are in Appendix F.
+harness and refuses to flash if it fails, embeds the git hash, and sends the
+image to the C++ mind, which resets the body over GPIO4, programs it over
+STK500v1 and verifies by HELLO (docs/fast-boot.md §6). The retired Pi
+daemon's sequence is in Appendix F.
 
 **Mind integration backlog (BodyClient).** What the behaviour layer needs from
 `BodyClient` that it works around today (2026-10-10):
@@ -1882,7 +1882,7 @@ and the results go in the merge commit message. Highlights:
 ## 7. Phased plan
 
 Order: talking and standing under Pi control (P0), today's chosen tricks (P1),
-walking (P2). `kilo flash --legacy` stays available throughout. `OpenCat.ino`
+walking (P2). `OpenCat.ino`
 and `src/` are deleted after P2 is accepted.
 
 **P0: protocol + skeleton body.**
@@ -2444,7 +2444,7 @@ SET_POSTURE seq=1     decoded: 10 01 00 03 00 01 b4 f7      wire: 03 10 01 02 03
 RESET (the falling edge resets) or wired directly (the low level holds reset).
 It never drives the line high against the NyBoard's own reset circuit.
 
-**Flash sequence (`kilo flash`):**
+**Flash sequence (the retired Pi daemon's `kilo flash`; today the C++ mind flashes, docs/fast-boot.md §6):**
 1. Ask the daemon to release `/dev/ttyAMA0` (the socket's `release_port` op,
    with a lease; the daemon takes the port back on `reacquire_port`, when the
    lease runs out, or when the flashing client disconnects). The port's
@@ -2476,8 +2476,8 @@ It never drives the line high against the NyBoard's own reset circuit.
    and the first HELLO take ≈2.2 s on Kilo). Print the HELLO seen either way.
    Retry once.
 
-`kilo flash --legacy` writes `mind/firmware/opencat-legacy.hex`, which talks
-the token protocol at 115200 and finds its EEPROM intact.
+`mind/firmware/opencat-legacy.hex` (flashed with avrdude by hand) talks the
+token protocol at 115200 and finds its EEPROM intact.
 
 **Development over the CH343 USB adapter.**
 - The Petoi uploader enumerates as `/dev/ttyACM0` or `/dev/ttyUSB0` on Linux
@@ -2490,7 +2490,6 @@ the token protocol at 115200 and finds its EEPROM intact.
 - On a Pi with the adapter plugged in, the mind's port auto-detection picks the
   adapter over the header UART (whose device node always exists) and warns;
   `KILO_PORT` or `--port` selects the header UART.
-- The same `kilo` tools work with `--port`.
 - The adapter and the Pi header share the 328P's single UART. **Unplug the
   adapter whenever the Pi drives the UART**, and vice versa.
 
@@ -2537,36 +2536,34 @@ kernel/                   the mind as a bare-metal C++ kernel for the Pi 2 B (Ci
   src/ netboot/ host/     the kernel on Circle, the network loader, the core on Linux against the virtual body
   boot/ keys/ sounds/ tools/  config.txt, the laptop keys, the sound files, make-sd.sh and friends
   circle/                 Circle, a git submodule
-mind/                     the Python mind (pip install -e mind): the laptop's `kilo` command, and the
-                          retired Pi daemon (docs/fast-boot.md section 8)
-  pyproject.toml  README.md  firmware/ (opencat-legacy.hex)  systemd/ (the retired Pi units, install.sh)
+mind/                     the Python side (pip install -e mind): the laptop's `kilo` command, and the
+                          reference the C++ mind's golden vectors come from
+  pyproject.toml  README.md  firmware/ (opencat-legacy.hex)
   kilo/
     protocol/             VENDORED by protocol/vendor.py: kilo_protocol.py, kilo_link_codec.py
     link/                 codec.py (Codec / Decoder, COBS + CRC)  messages.py (pack/unpack by name)
-                          consts.py (type codes, statuses, events, params)  transport.py (pyserial,
-                          raw fd, loopback)  ports.py (auto-detect)  serial_link.py (reader/writer
-                          threads, goals, commands)
+                          consts.py (type codes, statuses, events, params)  transport.py (raw fd,
+                          loopback)  serial_link.py (reader/writer threads, goals, commands)
     body/                 state.py (BodyState)  client.py (BodyClient: postures, balance, head,
-                          walking, pose, tricks, calibration, params, stats)  timeline.py (passive watch)
+                          tricks, calibration, params, stats; for the virtual bodies and the raw bridge)
     planner/              walking: body model, patterns and speed, the step planner, error
                           estimates, the FEET stream
     tricks/               trick model, legacy importer, library/*.json (generated), player timing, rear_up
     behaviour/            behaviour tree, drives, utility selector, personality.yaml, runner
-    perception/           ultrasonic + IMU detectors, Percepts aggregator, SharedPercepts, ring buffer
+    perception/           ultrasonic + IMU detectors, Percepts aggregator, ring buffer
     logs/                 log reader (JSONL, .kilolog, .kwalk), summary/replay/plot/walk (python -m kilo.logs)
-    daemon/               `kilo run`: owns the port, serves the socket, holds, port release (map in __init__.py)
-    vbody/                virtual body on a pty (sim.py; feet.py plays FEET, physics.py walks)
-    tools/                flash.py (build + flash)  body_image.py  gpio.py (GPIO4 reset)
-    cli.py                the `kilo` command; cli_*.py add one command family each (head, trick,
-                          walk, cal, card, find, host, power, record, sound, tools)
+    vbody/                virtual body on a pty (sim.py; feet.py plays FEET, physics.py walks; core.py:
+                          the body's C core)
+    tools/                flash.py (build, flash through the mind)  body_image.py
+    cli.py                the `kilo` command; cli_*.py add one command family each (cal, card, find,
+                          host, power, record, sound)
     hostlink.py hostsecure.py hostkey.py   `kilo --host`: the TCP channel to the C++ mind, its
                           Noise KN secure layer, this laptop's key file
-    remote.py             socket path resolver, JSON-lines client, RemoteBody (BodyClient over the socket)
-    ir.py log.py mdns.py calibration.py stepclock.py   the remote's key table, the logger thread,
-                          mDNS lookup, calibration maths, the test clock (StepClock)
-  tests/                  pytest: codec, link rules, state, CLI, daemon, flash, vbody, the cross-check
-                          against the body's C dispatch, planner, walks, tricks, behaviour, perception,
-                          logs, IR, the host channel; fixtures/
+    log.py mdns.py calibration.py stepclock.py   the logger thread, mDNS lookup, calibration maths,
+                          the test clock (StepClock)
+  tests/                  pytest: codec, link rules, state, flash, vbody, the cross-check against the
+                          body's C dispatch, planner, walks, tricks, behaviour, perception, logs, the
+                          host channel; fixtures/
 docs/                     the design (architecture.md), setup (setup.md, laptop-setup.md, raspberry-pi.md),
                           the kernel route (fast-boot.md, fast-boot-first-boot.md), topic notes (walking-and-balance,
                           calibration, power, sound, distance-guard, rear-up-trick, timing-vs-legacy,
@@ -2580,30 +2577,18 @@ OpenCat.ino, src/         the legacy firmware: kept as a reference (headers read
 arduino-cli compiles `src/` recursively, which is why the logic lives under
 `body/src/`.
 
-**CLI.** `kilo` talks to the daemon over a Unix socket (JSON lines), or
-opens the port directly if no daemon is running (`--direct` forces that). As
-built (`kilo/daemon/`, `kilo/remote.py`; ops in `kilo/daemon/ops.py`): the socket is `--socket`, else
-`$KILO_SOCKET`, else `$XDG_RUNTIME_DIR/kilo/kilo.sock` (the systemd user
-service), `/run/kilo/kilo.sock` as root, else `~/.kilo/kilo.sock`; protocol
-and ops in mind/README.md "Daemon and systemd". `kilo COMMAND --help` is the
+**CLI.** `kilo` talks to the C++ mind over its host channel (`--host IP`, or
+kilo.local found by mDNS; `kilo/cli_host.py`). `kilo COMMAND --help` is the
 reference; this table is the overview.
 
 | Command | Purpose |
 |---|---|
-| `kilo status [--json]`, `kilo monitor [--passive] [--percepts]` | HELLO, state, link and body stats; live telemetry table (`--passive`: sends nothing, prints what the body does on its own) |
-| `kilo posture limp\|rest\|stand\|sit\|balance\|stance\|calib\|zero [--for S] [--pca] [--then-watch T]` | Hold a posture (`balance` = STAND + flag; `stance` = the IK standing posture) |
-| `kilo balance on\|off [--kp X] [--kd S] [--deadband D] [--clamp C] [--posture stand\|sit] [--for S]` | `SET_BALANCE` + hold the posture, a pitch/roll line per second |
-| `kilo walk [forward\|back\|left\|right\|march\|stop] [--pattern walk\|trot\|crawl] [--speed MM_S] [--no-balance] [--for S] [--wait S]` | Walking (`mind/kilo/cli_walk.py`, `mind/kilo/planner/`): the mind plans the steps and streams `FEET` (§3d) until Ctrl-C/SIGTERM/`--for`, then the planned stop (each leg home, STANCE); `walk stop` stops any walk. `--speed` sets stride and shift with the pattern's fixed swing (docs/walking-and-balance.md §3, §10); `--no-balance` turns the balance off for the walk. Prints the error the body reports and the model's error estimates. On the floor only, never on a desk (printed before every walk). Keyboard driving: the IR remote (`kilo run --remote`) |
-| `kilo pose [set\|release] [--pitch DEG] [--roll DEG] [--height MM] [--xshift MM] [--posture stance] [--for S]` | Body pose over STANCE (and the walk's reference, §3f; `SET_BODY_POSE`) |
-| `kilo look PAN TILT [--tail T] [--speed DPS] [--for S] [--posture P]` | Head (P1, `mind/kilo/cli_head.py`: `SET_HEAD` hold, released on exit). *`kilo eyes`, `kilo beep`*: not yet as commands (the messages exist). Since 2026-11-17 the body drives the six WS2812 eyes from `SET_EYES` (`body/src/hal/eyes.cpp`, HELLO caps EYES) and the C++ mind sets them by the distance guard's zone (`docs/distance-guard.md`) |
-| `kilo trick list\|show NAME\|upload NAME [--force]\|play NAME [--mirror] [--speed X] [--repeats N] [--for S] [--posture P] [--then-watch T]\|stop` | Tricks (P1, `mind/kilo/cli_trick.py`); *`import-legacy FILE` and `edit NAME`* later (the library itself is regenerated from the legacy skills by `python -m kilo.tricks.import_legacy`) |
+| `kilo status [--json]`, `kilo monitor` | The mind, HELLO, state, link counters; live telemetry table |
+| `kilo posture limp\|rest\|sit\|stand\|stance\|calib\|zero [--for S]` | Hold a posture (`stance` = the IK standing posture); the mind latches REST after |
 | `kilo cal show\|set JOINT DEG\|nudge JOINT DEG\|save\|revert` | Joint calibration, also over `--host` (the mind relays CAL; docs/calibration.md). *`kilo cal imu`* (IMU offset iteration on the Pi from IMU_RAW) not yet |
-| `kilo param list\|get ID\|set ID VALUE [--persist]` | Live tuning (names or ids from the spec's param table) |
-| `kilo pca`, `kilo eeprom dump START END` | PCA9685 OFF counts read back; EEPROM hex dump (`eeprom dump 0 283` was the P0 legacy dump) |
-| `kilo flash [--legacy] [--no-build] [--hex HEX] [--reset auto\|gpio\|dtr\|none] [--dry-run] [--force] ...` | Appendix F |
+| `kilo flash [--persist] [--image BIN] \| --sd MOUNT` | Build the body firmware and flash it through the mind, or onto its boot card (docs/fast-boot.md §6) |
 | `kilo log summary\|replay\|plot FILE ...` (`plot --fields pitch,roll`) | Offline log tools (`kilo.logs`) |
-| `kilo vbody [--fall-after S]` | A virtual body on a pty |
-| `kilo run [--behaviour] [--remote] [--balance [KP]] [--idle-posture rest\|limp\|none] ...`, `kilo daemon [status\|stop]` | Start the mind's daemon (normally via systemd); its status, or stop it |
+| `kilo guard`, `sound`, `power`, `reboot`, `update`, `runs`, `record`, `bench`, `metrics`, `key`, `find`, `card` | The mind's other services, this laptop's key, finding Kilo, its SD card (`kilo --help`) |
 
 ---
 

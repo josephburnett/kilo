@@ -8,9 +8,7 @@ green clear (or nothing seen), blue too close, red very close, dim orange
 clear but the battery is low ("Low battery: orange" below).
 
 The code is `kernel/mind/guard/guard.h` (the thresholds are all at its top)
-and `guard.cpp`; the mind wires it in (`kernel/mind/mind.cpp`). The Python
-daemon (`kilo run --remote`) does not have the guard: it is in the C++ mind
-that runs on Kilo.
+and `guard.cpp`; the mind wires it in (`kernel/mind/mind.cpp`).
 
 ## What he does
 
