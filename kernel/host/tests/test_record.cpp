@@ -298,7 +298,7 @@ void test_trick_runs() {
   r.run_ms(200);
   CHECK(r.mind.player().playing() && rec.in_run());
   r.body.mode = KILO_MODE_TRICK;
-  r.body.pitch = -20 * 16;
+  r.body.pitch = -7 * 16;  // nose up 7: on his rear, inside the guards at back and paws (the next decides at 5 s)
   r.run_ms(3000);
   r.body.mode = KILO_MODE_IDLE;
   r.body.pitch = 0;
@@ -556,7 +556,11 @@ void test_play_session_log() {
   }
   hold(0x10, 1);  // A2: rear_up
   r.body.mode = KILO_MODE_TRICK;
-  run_s(10);
+  r.body.pitch = -7 * 16;  // the pitch its guards expect: on his rear (back, paws), then on the tripod (up)
+  run_s(3);
+  r.body.pitch = -23 * 16;
+  run_s(3.5);  // the trick takes 6.3 s: done before the mind's 7.3 s wait for TRICK_DONE runs out
+  r.body.pitch = 0;
   r.body.mode = KILO_MODE_IDLE;
   r.body.event(KILO_EVENT_TRICK_DONE, (int16_t)trick_done_arg("rear_up", KILO_TRICK_DONE_REASON_DONE));
   run_s(60);

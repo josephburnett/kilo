@@ -53,7 +53,8 @@ void test_library_matches_python() {
                st->end_posture == KILO_POSTURE_SIT && st->flags == 0 && st->n_frames > ru->n_frames,
            "%s", stage_name[i]);
   }
-  CHECK(ru->n_guards >= 5 && ru->guards != nullptr && std::strcmp(ru->guards[0].name, "gather") == 0 &&
+  CHECK(ru->n_guards == 3 && ru->guards != nullptr && std::strcmp(ru->guards[0].name, "back") == 0 &&
+        std::strcmp(ru->guards[2].name, "up") == 0 &&
         ru->roll_max_a16 == 8 * 16 && find_trick("stand")->n_guards == 0);
   const Trick* s = find_trick("stretch");  // test_trick_id_and_header_carry_expected_attitude
   kilo_trick_begin_t b;

@@ -97,7 +97,7 @@ def event(t_us: int, code: int, arg: int = 0) -> tuple[int, int, bytes]:
 # ---- a trick run: rear_up_2, tipping over backwards at "rise" --------------------------
 
 def trick_records(name: str = "rear_up_2", run_id: int = 3, tip_at: str | None = "rise", end: str = "FELL",
-                  key: str | None = None) -> tuple[list, float]:
+                  key: str | None = None, crc: str | None = None) -> tuple[list, float]:
     t = library.load(name)
     src = t.source
     durs = [f.dur for f in t.frames]
@@ -109,7 +109,8 @@ def trick_records(name: str = "rear_up_2", run_id: int = 3, tip_at: str | None =
     out.append(log(T0 + 1_000_000, "remote B2 (0x0E, rear_up_2): trick rear_up_2 started"))
     out.append(event(begin - 50_000, P.EventCode.IR_KEY, 0x0E))
     out.append(run_mark(begin, run_id, P.RunKind.TRICK, P.RunEvent.BEGIN))
-    out.append(mark(begin, f"trick id={run_id} format=2 trick={name} stage=2 tid=77 crc=1234 frames={len(durs)} "
+    crc = f"{t.crc16():04x}" if crc is None else crc
+    out.append(mark(begin, f"trick id={run_id} format=2 trick={name} stage=2 tid=77 crc={crc} frames={len(durs)} "
                            f"speed=64 mirror=0 mind_build=12345678 body_build=45524f43 battery_mv=7900 mode=IDLE "
                            f"by=remote"))
     out.append(mark(begin + 10, "frames dur=" + ",".join(map(str, durs)) + " hold=" + ",".join(map(str, holds))
@@ -228,10 +229,10 @@ def test_trick_tip_over_is_found_at_its_keyframe():
     assert a["has_prediction"] and a["played"]
     kf = {k["name"]: k for k in a["keyframes"]}
     # before the tip the measurement follows the design: the errors are small
-    for n in ("lean", "lift_l", "place_l", "lean_r", "lift_r", "place_r", "gather", "sit_back", "low", "onto",
-              "paws", "up"):
+    for n in ("look", "crouch", "back", "paw_l", "paws", "up"):
         assert kf[n]["reached"] and abs(kf[n]["max_err_deg"]) < 0.5, (n, kf[n])
-    assert kf["up"]["pred_end_deg"] == pytest.approx(26.0)
+    src = library.load("rear_up_2").source
+    assert kf["up"]["pred_end_deg"] == src["predicted_pitch_deg"][src["keyframes"].index("up")]
     tip = a["tip_over"]
     assert tip is not None and tip["keyframe_name"] == "rise" and tip["axis"] == "pitch"
     assert tip["direction"].startswith("back")
@@ -258,6 +259,18 @@ def test_trick_without_a_tip_and_stopped_by_a_key(tmp_path):
     p = trickrec.write_csv(trickrec.rows(trickrec.trick_run(s)), tmp_path / "t.csv")
     hdr = next(csv.reader(open(p)))
     assert tuple(hdr) == trickrec.CSV_FIELDS
+
+
+def test_an_old_recording_is_not_read_against_a_new_design():
+    """A run of a trick whose library entry has changed since (its CRC in
+    the run's `trick` MARK is not the library's: a new design): the
+    keyframes are numbered, nothing is predicted, and the analysis says why."""
+    recs, _ = trick_records(name="rear_up", run_id=5, tip_at=None, end="STOPPED", crc="beef")
+    s = flight.parse_blocks(blocks(recs))
+    a = trickrec.analyze(trickrec.trick_run(s, s.run(5)))
+    assert not a["has_prediction"] and "not the trick this run played (CRC beef" in a["source_note"]
+    assert [k["name"] for k in a["keyframes"]][:2] == ["frame 0", "frame 1"]
+    assert "changed since" in trickrec.format_analysis(a)
 
 
 def test_a_refused_trick():

@@ -13,15 +13,61 @@ Floor: ...   Foam or cardboard over the Pi: yes / no   Tail straight back in sta
 
 | Keyframe | Pitch from `kilo log trick` (model) | What you saw |
 |---|---|---|
-| lean, lift_l, place_l | (-1.9) | left hind foot stepped forward? Kilo leaned? |
-| lean_r, lift_r, place_r | (-1.9) | right hind foot stepped forward? |
-| gather (guard) | (4.3) | all four feet bunched under the body, level? |
-| sit_back, low (guard) | (11.4, 22.5) | rear down, tail tip touching at the end? |
-| onto (guard) | (21.9) | body back over the hind feet, tail carrying? |
-| paws (guard), up | (21.9, 26.0) | paws up, sitting on hind feet and tail? |
+| look, crouch | (-1.9, -1.8) | head up first? hind knees folded, a short pause? |
+| back (guard) | (+7) | rocked back onto his rear? hind feet stayed put? |
+| paw_l, paws (guard) | (+7, +6) | left paw first, then the right? |
+| up (guard) | (+23) | hips up, sitting on the hind feet and the tail tip, still? leaning to a side? |
+| settle, drop, sit | (+11, +6, +27) | sat back, paws down, sat? |
 | stopped by a guard? which, and the log line | | |
 
 Anything else:
+
+## 2026-11-21, tries 1-3: the second design, stopped by its own checks every time
+
+Build: mind and body f3020d5e, `KILO_REAR_UP=3` (A2 played `rear_up_3`, which
+goes to stage 1 first). Battery 7988 mV at the start of try 1. Wood floor.
+Recordings: `~/kilo-logs/2026-11-21-f3020d5e/run-20261121-071301-trick-1.krec`,
+`run-20261121-071325-trick-2.krec`, `run-20261121-071335-trick-3.krec`, the
+session `rec-20261121-071923.krec`, and the earlier tries of 2026-11-19/20
+in the same folder (`run-b8-*`, `run-b9-*`). Your video of try 1 or 3, 10
+frames a second. The numbers the tests use are in
+`mind/tests/fixtures/rear_up_2026_11_21.json`.
+
+| Try | Started from | How it ended | Where |
+|---|---|---|---|
+| 1 | standing | stopped by the check at "gather": nose up 22.9, the window was 1.8 to 6.8 | 7.8 s in |
+| 2 | standing | stopped: roll -12.3 past the 8 degree limit, while the right hind foot was in the air ("lift_r") | 5.4 s in |
+| 3 | sitting (where try 2 left him) | stopped by the check at "gather": nose up 22.5 | 7.8 s in |
+
+Nothing fell; each time he sat down. (`kilo log run` names the last key
+pressed before the stop as what stopped it: that was an A2 repeat the
+remote ignored; the stop was the check's.)
+
+**What the video shows** (tries 1 or 3): the hind feet stepped forward one at
+a time as designed (frames 1-70); then, at "gather", he rocked back onto his
+tail with the tail tip planted on the floor (frames 70-80), one or two
+keyframes before the design meant him to be on it; then the stop and the
+sit (86-100).
+
+**The timing check**: the recording's clock and the video agree to 0.1 s
+over 7 s, so the model's timing is right. He was slow because the design
+was slow (12.5 s to the first hold), not because the servos lagged.
+
+**Why** (`kilo.tricks.dynamics`, fitted to these plays and to those of
+2026-11-19/20): Kilo's leg servos give under load, about 4 degrees per kg
+cm. The second design's checks used a model with rigid legs. At "gather" the
+weight moves onto the hind legs; they give, which tips him nose up, which
+moves the weight further back onto them, which makes them give more: he
+rocks back onto the tail by himself, 0.55-0.59 s into the 0.6 s move, every
+time (4 of 4 plays that got there). The rigid model had him 15 mm away from
+that. The fit also puts his centre of mass about 5.5 mm further back and 5
+mm further to the right than the planner's model: that is why try 2 (and 2
+of the 4 tries before) went over the diagonal at "lift_r", where the other 4
+did not; the centre of mass sits on that line, a coin flip.
+
+**What changed**: the third design (docs/rear-up-trick.md): no stepping, a
+deliberate rock back onto the rear, 2.5 s to the tripod instead of 12.5,
+checked in the compliant model.
 
 ## 2026-11-17, runs 1 and 2: the first design fell twice the same way
 

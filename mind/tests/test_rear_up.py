@@ -1,21 +1,24 @@
 """The rear_up trick (docs/rear-up-trick.md): the side-view static model
 (kilo.tricks.sagittal) with the measured tail and the owner's photo; the
-3-D model with the servos' real reach (kilo.tricks.stance) held to the two
-falls of 2026-11-17 (fixtures/rear_up_2026_11_17.json); the second design
-(kilo.tricks.rear_up), its checks and its guards; the library entries; the
-mind's guard watch (kilo.tricks.player.GuardWatch); and the tricks on the
-real body core (kilo.vbody.core)."""
+3-D static model with the servos' real reach (kilo.tricks.stance) held to
+the two falls of 2026-11-17 (fixtures/rear_up_2026_11_17.json); the
+compliant dynamic model (kilo.tricks.dynamics) held to the plays of
+2026-11-19..21 (fixtures/rear_up_2026_11_21.json); the third design
+(kilo.tricks.rear_up), its checks in that model and its guards; the
+library entries; the mind's guard watch (kilo.tricks.player.GuardWatch);
+and the tricks on the real body core (kilo.vbody.core)."""
 
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 import math
 from pathlib import Path
 
 import pytest
 
 from kilo.planner.model import BodyModel
-from kilo.tricks import library, rear_up as RU, sagittal as S, stance as T
+from kilo.tricks import dynamics as D, library, rear_up as RU, sagittal as S, stance as T
 from kilo.tricks.model import JOINT_LIMITS, MAX_FRAMES, Guard, Keyframe, Posture, Trick
 from kilo.tricks.player import GuardWatch
 
@@ -105,11 +108,11 @@ def test_tail_servo_holds_nothing_at_centre():
     the servo holds no torque, the load goes into its bearing. Turned aside
     under load the push turns it further out (0 is the bottom of its circle)."""
     for st in RU.STAGES:
-        spec = RU.UP_SPECS[st.top]
+        spec = replace(RU.UP[st.top].spec, left=None, right=None)  # both sides alike for the side view
         p = pose(RU.solve(spec))
         r = S.rest(G, p, spec.phi)
         assert S.TAIL in r.contacts and S.load(G, p, r).tail == pytest.approx(0.0, abs=1e-9)
-    p = pose(RU.solve(RU.UP_SPECS[RU.stage(1).top]))
+    p = pose(RU.solve(replace(RU.UP[RU.stage(1).top].spec, left=None, right=None)))
     side = S.Pose(*(p.astuple()[:4]), 20, p.head_pan, p.head_tilt)
     assert 0.05 < abs(S._tail_torque(G, side, 36.0, 28.0)) / S.G_MM_PER_KG_CM < 0.15
 
@@ -117,7 +120,7 @@ def test_tail_servo_holds_nothing_at_centre():
 def test_feet_rest_under_their_centre():
     """A round foot supports at the point under its centre: the margins are
     measured there, not at a corner of the polygon drawn for the hull."""
-    p = pose(RU.solve(RU.UP_SPECS[RU.stage(3).top]))
+    p = pose(RU.solve(replace(RU.UP[RU.stage(3).top].spec, left=None, right=None)))
     r = S.rest(G, p, 54)
     _, _, (fx, fz) = S.leg_points(G, False, p.back_shoulder, p.back_knee)
     assert r.contacts[S.HIND_FOOT] == pytest.approx(S.to_world(fx, fz, r.phi)[0], abs=1e-6)
@@ -159,9 +162,9 @@ def test_photo_rules_out_forward_and_low():
     m2 = S.photo_check(G.with_(com_dz=5)).margin
     assert m0 - m1 == pytest.approx(5 * math.cos(math.radians(54)), abs=0.5)
     assert m2 - m0 == pytest.approx(5 * math.sin(math.radians(54)), abs=0.5)
-    # the gate checks only the corners the photo allows (not forward and low)
-    labels = [g for g, _ in RU.geometries()]
-    assert "com_dx=10,com_dz=-10" not in labels and "com_dx=10,com_dz=10" in labels
+    # the fitted centre of mass of 2026-11-21 (back, right) is one the photo allows, and so is every band
+    for _, p in D.bands():
+        assert S.photo_check(p.g3().g).ok
 
 
 def test_leg_gap():
@@ -272,7 +275,56 @@ def test_the_3d_model_with_the_clamp_reproduces_both_trials():
     assert set(end.edge) == {T.FOOT["lf"], T.FOOT["rb"]} and end.margin < 6
 
 
-# ---- the second design ------------------------------------------------------------------------------
+# ---- the compliant model, held to the plays of 2026-11-19..21 ------------------------------------------
+
+def test_the_fast_kinematics_are_stances():
+    frames = [RU.joints_of(f) for f in RU.build(None, 3).frames]
+    assert D.check_kinematics(D.NOMINAL, frames) < 0.01
+    assert D.check_kinematics(D.FITTED, frames) < 0.01
+
+
+@pytest.mark.slow
+def test_the_compliant_model_reproduces_the_rock_back_and_the_coin_flip():
+    """Every play of the second design that reached "gather" rocked back
+    onto the tail: the nose up passed +5 deg 0.55-0.59 s into the 0.6 s
+    move and settled at +22.6..+23.1, roll -0.9..-2.1. The fitted model does
+    the same (a rigid model held it on four feet, 15 mm inside). At
+    "lift_r" 3 of 7 plays went over the diagonal: the fitted centre of mass
+    sits on that knife edge (over; 0.5 mm further forward, not)."""
+    v = D.validate()
+    rec = [r for r in v["recorded"].values() if "gather_t5" in r]
+    assert len(rec) == 3 and all(0.5 <= r["gather_t5"] <= 0.6 and 22.5 <= r["gather_nose_up"] <= 23.2 for r in rec)
+    assert sum(r["lift_r_over"] for r in v["recorded"].values()) == 2  # b8a, t2 of the five in the fixture
+    g = v["model_gather"]
+    assert 0.5 <= g["gather_t5"] <= 0.62
+    assert g["gather_nose_up"] == pytest.approx(22.8, abs=1.2) and g["gather_roll"] == pytest.approx(-1.5, abs=1.5)
+    assert v["model_lift_r_over"] == (True, False)
+    # rigid, the same gather stays on its four feet
+    run = D.fixture()["runs"][2]
+    assert D.replay_gather(run, D.FITTED.with_(sag=0.0))["gather_nose_up"] < 10
+
+
+@pytest.mark.slow
+def test_the_compliance_does_not_ring_on_three_points():
+    """On the tripod the loads add up to the weight and the attitude does
+    not depend on the time step (until 2026-11-21 the compliance's own
+    motion fed the contact dampers and rang: the loads summed to 1.6 times
+    the weight and the roll moved with the step)."""
+    t = RU.build(None, 1)
+    fr = [(RU.joints_of(f), f.dur, f.hold) for f in t.frames[:RU.top_frame(t) + 1]]
+    end = sum(d + h for _, d, h in fr) * 0.02
+    out = []
+    for dt in (1e-3, 4e-4):
+        pr = D.simulate(fr, D.FITTED, dt=dt, t_end=end)
+        m = pr.window(end - 0.5, end)
+        total = sum(v[m].mean() for v in pr.load.values())
+        assert total == pytest.approx(D.Kin(D.FITTED).total, rel=0.03)
+        assert max(v[m].std() for v in pr.load.values()) < 3.0
+        out.append((pr.nose_up[m].mean(), pr.roll[m].mean()))
+    assert out[0] == pytest.approx(out[1], abs=0.5)
+
+
+# ---- the third design ------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("st", RU.STAGES, ids=lambda s: s.name)
 def test_trick_is_built_and_up_to_date(st):
@@ -290,17 +342,18 @@ def test_trick_is_built_and_up_to_date(st):
                 assert lo <= v <= hi and float(v).is_integer()
         if i < len(t.frames) - 1:  # every frame but SIT inside what the servos reach (DESIGN), with a margin
             assert RU.reach_problems(RU.joints_of(f)) == [], i
-    # the mind's guards: the gather, the low point (the tail just down), onto the tail, paws up, each hold
+    # the mind's guards: on the rear, paws up, each stage's top (the remote finds the tops by name)
     names = t.source["keyframes"]
-    assert [names[g.frame] for g in t.guards][:5] == ["gather", "low", "onto", "paws", "up"]
+    assert [g.name for g in t.guards] == ["back", "paws", "up", "mid", "top"][:2 + st.number]
+    assert [names[g.frame] for g in t.guards] == [g.name for g in t.guards]
     assert all(t.frames[g.frame].hold >= 20 for g in t.guards) and t.roll_max == RU.PLAY_ROLL_MAX
     top = RU.top_frame(t)
-    assert top == st.top and t.frames[top].hold == RU.HOLD and names[-1] == "sit"
+    assert top == st.top and t.frames[top].hold == RU.HOLD and names[-3:] == ["settle", "drop", "sit"]
     # the lower stages' tops hold STEP_HOLD: the remote's A2 goes on from there (or he comes down)
     lower = [s.top for s in RU.STAGES if s.number < st.number]
     assert [i for i, f in enumerate(t.frames) if f.hold == RU.STEP_HOLD] == lower
     assert [names[i] for i in lower] == ["up", "mid"][:len(lower)]
-    assert all(any(g.frame == i for g in t.guards) for i in lower)  # each one guarded
+    assert len(t.source["predicted_pitch_deg"]) == len(t.frames)
 
 
 def test_each_stage_goes_the_same_way_up_as_the_one_below():
@@ -308,54 +361,69 @@ def test_each_stage_goes_the_same_way_up_as_the_one_below():
     for lower, higher in zip(ups, ups[1:]):
         assert len(higher) > len(lower)
         assert higher[:len(lower) - 1] == lower[:-1]  # the lower stage's top is passed through, not held
-    assert [RU.UP_SPECS[st.top].phi for st in RU.STAGES] == [28, 40, 54]
+    assert [RU.UP[st.top].spec.phi for st in RU.STAGES] == [28, 40, 54]
 
 
-def test_the_hind_feet_never_swing_under_the_hips_on_the_tail():
-    """Why the second design gathers the feet standing high and then sits
-    back over them: from under the hip to 80 mm in front, a hind foot needs
-    the hips this high to clear the floor, and on the tail at 24 deg they
-    are 45 mm up. Even at the -78 deg the re-seated shoulder allows, the
-    swing would scrape; at today's -54 it needs 69 mm."""
-    touch = S.tail_touch_height(G, 24)
-    assert RU.swing_hip_needed(24, -54) > touch + 20
-    assert RU.swing_hip_needed(24, -78) > touch + 3
-    # the design steps each hind foot standing 80 mm high, one at a time, the other three feet down
-    t = RU.build()
+def test_fast_and_cat_like():
+    """Paws up within about 2 s and the stage-1 hold by about 3 s (the
+    second design: 12.5 s); the head comes up first; a pause before the
+    rock back; one paw before the other; the left hind leg 2.5 mm shorter
+    on the tripod (the centre of mass is right of centre)."""
+    t = RU.build(None, 1)
     names = t.source["keyframes"]
-    for name, leg, other in (("lift_l", "lb", "rb"), ("lift_r", "rb", "lb")):
-        js = RU.joints_of(t.frames[names.index(name)])
-        assert (js[f"{leg}_shoulder"], js[f"{leg}_knee"]) != (js[f"{other}_shoulder"], js[f"{other}_knee"])
+    fr = {n: RU.joints_of(f) for n, f in zip(names, t.frames)}
+    st = dict(zip(names, RU.frame_starts(t.frames)))
+    assert names[:6] == ["look", "crouch", "back", "paw_l", "paws", "up"]
+    assert st["up"] + t.frames[names.index("up")].dur * 0.02 <= 3.0
+    assert st["paws"] + t.frames[names.index("paws")].dur * 0.02 <= 2.1
+    assert {k for k in RU.JOINTS if fr["look"][k] != RU.STAND[k]} == {"head_tilt"} and fr["look"]["head_tilt"] > 0
+    assert t.frames[names.index("crouch")].hold > 0
+    assert (fr["paw_l"]["lf_knee"], fr["paw_l"]["rf_knee"]) == (fr["paws"]["lf_knee"], fr["back"]["rf_knee"])
+    # the hind feet stay where STAND put them on the way to the rear (they never leave the floor: check())
+    up = RU.UP[RU.stage(1).top].spec
+    assert up.left[1] - up.right[1] == RU.RIGHT_DROP == 2.5
 
 
-@pytest.mark.parametrize("st", RU.STAGES, ids=lambda s: s.name)
-def test_design_check(st):
-    """The gate, in 3-D, over the geometries (the centre of mass 5 mm back
-    to 10 mm forward and +-10 mm up or down and +-3 mm sideways, the tail
-    +-3 mm and +-5 deg, a tail 5 deg off centre, one side's servos 3 deg
-    off): playing from STAND, never both hind feet off the floor unless the
-    tail is on it, every sample's support margin and roll, no topple
-    dropping more than 8 mm, the tripod held with the stage's margin; or a
-    guard stops it, and that stop and every cut-short comes down on the
-    feet. On Kilo as recorded (the right hind shoulder short) a guard stops
-    it at the gather, before anything leans."""
+def _check(st, bands, stops):
     t = RU.build(None, st)
-    rep = RU.check(t)
+    return t, RU.check(t, bands=[(b, p) for b, p in D.bands() if b in bands] if bands else None, stops=stops)
+
+
+@pytest.mark.slow
+def test_stage_1_in_every_band_and_every_stop():
+    """The gate for the first floor trial, in the compliant model: in every
+    band corner (dynamics.bands: the centre of mass, the legs' give, the
+    tail, the friction, slow servos, the frame's rear corner) the play from
+    STAND reaches the tripod with the mind's guards on, every guard at
+    least a degree inside its window, the roll within 7 deg, the hind feet
+    never leaving the floor and sliding under 25 mm, back down sitting on
+    its feet; cut short half way into and at the end of every keyframe
+    (fitted), it comes down sitting; on Kilo before the right hind
+    shoulder's re-seat a guard stops it and he sits."""
+    t, rep = _check(1, None, ("fitted",))
     assert rep.problems == []
-    nom = [r for g, m, r in rep.results if g == "nominal" and m == "play"][0]
-    assert not nom.aborted and nom.hold_margin > {1: 10, 2: 12, 3: 9}[st.number]
-    assert set(nom.hold_on) == {T.FOOT["lb"], T.FOOT["rb"], T.TAIL} and nom.margin_min > 6
-    assert rep.today.aborted == "gather"
-    assert nom.hold_pitch == pytest.approx(t.source["predicted_pitch_deg"][st.top], abs=0.2)
+    plays = [r for r in rep.runs if r.kind == "play"]
+    assert len(plays) == len(D.bands()) + 1 and not any(r.stopped for r in plays)  # and the fitted one from SIT
+    for r in plays:
+        assert r.paws_at is not None and r.paws_at < 2.7 and r.tripod_at is not None and r.tripod_at < 3.0, r.band
+    fit = plays[0]
+    pred = t.source["predicted_pitch_deg"][RU.top_frame(t)]
+    assert fit.band == "fitted" and fit.hold["nose_up"] == pytest.approx(pred, abs=1.0)
+    assert len([r for r in rep.runs if r.kind != "play"]) == 2 * (len(t.frames) - 1)
+    assert rep.recorded.stopped and not rep.recorded.fell
 
 
-def test_the_guards_see_what_went_wrong_on_2026_11_17():
-    """The first guard of the second design is at the gather; played on
-    Kilo as recorded the model's roll there is past its limit: stopped."""
-    t = RU.build()
-    g = t.guards[0]
-    r = RU.run_play(t, RU.AS_RECORDED)
-    assert r.aborted == g.name and abs(r.guard_seen[g.name][1]) > g.roll_max
+@pytest.mark.slow
+@pytest.mark.parametrize("st", RU.STAGES[1:], ids=lambda s: s.name)
+def test_higher_stages_reach_the_top_or_stop_safely(st):
+    """Stages 2 and 3, in the fitted model and the corners that test them
+    most: the fitted model holds the top; in a corner a guard may stop it,
+    and then he comes down sitting (python -m kilo.tricks.rear_up --check
+    runs every band and the cut-shorts)."""
+    t, rep = _check(st, ("fitted", "softer, further right", "com_dy+3", "sag+1.5", "stiffer, further back"), None)
+    assert rep.problems == []
+    fit = [r for r in rep.runs if r.band == "fitted"][0]
+    assert not fit.stopped and set(fit.guards) == {g.name for g in t.guards}
 
 
 # ---- the mind's guard watch -------------------------------------------------------------------------
@@ -471,9 +539,9 @@ def test_rear_up_on_the_body_core(rig, name):
         prev = out
         seen[k] = out
     for i, e in enumerate(ends):
-        if e + 1 in seen:
+        if e in seen:  # the frame's last tick (the next one is already the next move's first)
             want = [round(v * 16) for v in RU.keyframe(RU.joints_of(t.frames[i]), 1).to_wire().ang]
-            got = seen[e + 1]
+            got = seen[e]
             assert max(abs(a - b) for a, b in zip(got, want)) <= 16, (i, got, want)
 
 

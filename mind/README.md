@@ -333,7 +333,8 @@ flags, `end_posture` and one line per frame with joints by name
 `rb_shoulder`, `lb_shoulder`, `lf_knee`, ...). `library.load()` accepts the
 Kilo name or the legacy token. The authored tricks (`rear_up` and its
 stages) are written by their design module (`python -m kilo.tricks.rear_up`,
-docs/rear-up-trick.md).
+docs/rear-up-trick.md), which judges them in the compliant dynamic model
+`kilo.tricks.dynamics` (fitted to the recorded plays).
 
 | Kilo name | legacy | kind | frames | loop (start, end, repeats) | end posture |
 |---|---|---|---|---|---|

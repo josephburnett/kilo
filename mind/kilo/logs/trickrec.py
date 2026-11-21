@@ -157,20 +157,29 @@ def _ints(v: str | None) -> list[int]:
     return [int(x) for x in v.split(",") if x.strip().lstrip("-").isdigit()]
 
 
-def library_source(name: str) -> dict[str, Any]:
+def library_source(name: str, crc: str | None = None) -> dict[str, Any]:
+    """The library entry's ``source`` (its keyframe names and predicted
+    pitch), if it is the trick the run played: with the run's ``crc`` (its
+    `trick` MARK) a library entry that has changed since (a new design of
+    the trick) gives nothing but a ``stale`` note, so an old recording is
+    not read against a new design's keyframes."""
     try:
         from kilo.tricks import library
 
-        return dict(library.load(name).source)
+        t = library.load(name)
     except Exception:  # noqa: BLE001 - an unknown trick: no prediction
         return {}
+    if crc and f"{t.crc16():04x}" != crc.lower():
+        return {"stale": f"the library's {name} is not the trick this run played (CRC {crc.lower()}, the library's "
+                         f"{t.crc16():04x}: changed since): keyframes by number, no prediction"}
+    return dict(t.source)
 
 
 def keyframes(tr: TrickRun, source: dict[str, Any] | None = None) -> list[Keyframe]:
     """The keyframes in play order with their times from the play (the body's
     keyframe player: a move of phase_ticks(dur) then a hold of
     phase_ticks(hold), at the run's speed)."""
-    src = library_source(tr.name) if source is None else source
+    src = library_source(tr.name, tr.start.get("crc")) if source is None else source
     durs, holds = _ints(tr.frames_mark.get("dur")), _ints(tr.frames_mark.get("hold"))
     if not durs:
         return []
@@ -267,7 +276,7 @@ def _onset(rs: list[dict[str, Any]], threshold: float, hold_s: float) -> dict[st
 
 def analyze(tr: TrickRun, source: dict[str, Any] | None = None, threshold_deg: float = THRESHOLD_DEG,
             onset_s: float = ONSET_S) -> dict[str, Any]:
-    src = library_source(tr.name) if source is None else source
+    src = library_source(tr.name, tr.start.get("crc")) if source is None else source
     kfs = keyframes(tr, src)
     rs = rows(tr, src)
     out: dict[str, Any] = {
@@ -279,6 +288,8 @@ def analyze(tr: TrickRun, source: dict[str, Any] | None = None, threshold_deg: f
         "played": tr.play_us is not None, "has_prediction": bool(kfs and kfs[0].pred_end is not None),
         "telemetry": len(rs), "threshold_deg": threshold_deg, "onset_s": onset_s,
     }
+    if src.get("stale"):
+        out["source_note"] = src["stale"]
     if tr.play_us is not None:
         out["play_t_s"] = round((tr.play_us - tr.lo_us) / 1e6, 3)
     if tr.end_us is not None:
@@ -351,7 +362,9 @@ def format_analysis(a: dict[str, Any]) -> str:
         return "\n".join(L)
     if a.get("start_note"):
         L.append(f"  note    {a['start_note']}")
-    if not a.get("has_prediction"):
+    if a.get("source_note"):
+        L.append(f"  note    {a['source_note']}")
+    if not a.get("has_prediction") and not a.get("source_note"):
         L.append("  no prediction for this trick (its library entry has no predicted_pitch_deg)")
     L.append("  keyframes (nose up, deg; error = measured - predicted over the move and hold)")
     L.append("     #  name          start    end   predicted measured   mean err  max err")

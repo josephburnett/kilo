@@ -3,30 +3,40 @@
 Kilo's first authored trick: Kilo sits back on its two hind feet and the tip
 of its tail, front paws off the floor, holds, comes back down and ends
 **sitting**. One key starts it: **A2** (column A, row 2 from the bottom).
-Since 2026-11-19 it goes up **one stage at a time**: A2 takes him to stage 1
-and he holds it; A2 again while he holds takes him on to the next stage, as
-high as the build allows (section 3). B6 or C7 bring him down from any
-stage.
+It goes up **one stage at a time**: A2 takes him to stage 1 and he holds it;
+A2 again while he holds takes him on to the next stage, as high as the build
+allows (section 3). B6 or C7 bring him down from any stage.
 
-**This is the second design.** The first one fell over twice on
-2026-11-17; `docs/rear-up-trick-results.md` has the trials, the video and
-the cause: the right hind shoulder servo stops at -57 degrees, where the
-left one goes to -80, so the right hind leg never got where the trick
-asked. **The second design needs that fixed first** (section 2, "The right
-hind shoulder"). Played before the fix, the trick stops itself at its first
-check and Kilo sits down (the model says so; section 8).
+**This is the third design (2026-11-21).** The second design took 12.5 s to
+its first hold, stepping the hind feet forward one at a time, and on
+2026-11-21 its own checks stopped it three times out of three
+(`docs/rear-up-trick-results.md`). The third design gets onto the tripod in
+under 3 s by crouching and pushing itself back with the front legs, your
+idea. Section 1 says what he does and why it is fast now.
+
+**It still needs the right hind shoulder re-seated** (section 2, "The right
+hind shoulder"). The plays since 2026-11-19 look as if that was done (the
+model reads it from how he sat and rolled), but nobody wrote it down: please
+check `kilo cal show --host kilo.local` (joint 10 between +7 and +25) before
+the first try. Played before the fix, the trick stops itself in the crouch
+and Kilo sits down (section 8).
 
 It comes in **three stages**, three heights:
 
-| Stage | Trick | Held at (TELEMETRY nose up) | Takes, straight up and down |
-|---|---|---|---|
-| 1 | `rear_up` | 26 degrees: a low sit-up | 18 s |
-| 2 | `rear_up_2` | 38 degrees | 26 s |
-| 3 | `rear_up_3` | 52 degrees: the pose of your photo | 33 s |
+| Stage | Trick | Held at (TELEMETRY nose up, model) | Paws up | Holding by | Takes, straight up and down |
+|---|---|---|---|---|---|
+| 1 | `rear_up` | 23 degrees: a low sit-up | 1.9 s | 3.0 s | 6.3 s |
+| 2 | `rear_up_2` | 36 degrees | 1.9 s | 7.9 s | 12.1 s |
+| 3 | `rear_up_3` | 50 degrees: the pose of your photo | 1.9 s | 13.0 s | 18.3 s |
 
 Each stage does exactly what the stage below does on the way up and then
 goes higher. In `rear_up_2` and `rear_up_3` each lower stage's top is held
-for 4 seconds (it was 0.6 s): that is the time to press A2 to go on.
+for 4 seconds: that is the time to press A2 to go on.
+
+**Try stage 1 first.** It is the one the checks hold to every case they know
+(section 7). Stages 2 and 3 reach their tops in the model's fitted case and
+in most of its other cases, and in the rest a check stops them and he sits
+down.
 
 **A2 is switched off** until you switch it on (section 3). Write what you
 see in `docs/rear-up-trick-results.md`. Nothing here is timed: every step
@@ -38,112 +48,112 @@ Words used below:
   The numbers here are what `kilo log trick` and TELEMETRY show (nose up),
   which reads 1.9 degrees nose down when Kilo stands level.
 - **Roll**: how far Kilo leans to one side. Positive: the left side down.
+  TELEMETRY reads about +2 degrees where the model has Kilo level (an offset
+  in the IMU, or a left leg 2 mm short: the recordings cannot tell which).
 - **Centre of mass**: the point where Kilo's weight balances.
 - **Support**: the area on the floor between the things touching it, seen
   from above. Kilo stays up while its centre of mass is over that area; past
   its edge it tips over that edge.
-- **Margin**: how far the centre of mass is inside the support's edge, mm.
 - **Tripod**: the two hind feet and the tail tip on the floor.
 - **Servo**: the motor in each joint. Its **pulse** is the signal that sets
   its angle; the body sends between 500 and 2500 microseconds, and the
   **calibration** says which pulse is which angle for each joint.
+- **Give** (compliance): a servo holds its angle only so stiffly; under load
+  it gives a little. Kilo's leg servos give about 4 degrees for every kg cm
+  of load (measured from the recordings, section 7).
 - **Keyframe**: one pose in the trick; the body moves smoothly between them.
 - **Guard**: a check the Pi makes while the trick plays: at a keyframe
-  where Kilo holds still for 0.6 s, the measured pitch must be near what the
-  model predicts and the roll small; if not, the Pi stops the trick and Kilo
-  sits down (section 8).
-- **The model**: the program that works out, for any pose, what Kilo stands
-  on, at what pitch and roll, and how far it is from tipping
-  (`kilo.tricks.stance`, section 7). Numbers marked "model" come from it,
+  where Kilo holds still, the measured pitch must be inside a window and the
+  roll small; if not, the Pi stops the trick and Kilo sits down (section 8).
+- **The model**: the program that plays the trick on a simulated Kilo, with
+  his weights, his leg lengths, the give of his servos and their delay, and
+  tells what he stands on, at what pitch and roll, at every moment
+  (`kilo.tricks.dynamics`, section 7). Numbers marked "model" come from it,
   not from Kilo.
+- **Case** (band): one way the real Kilo may differ from the model's best
+  fit (the centre of mass a few mm off, the servos softer, the floor more
+  slippery, ...). The checks play the trick in each case.
 
-## 1. How the second design gets up
+## 1. How the third design gets up
 
-**Why a tripod.** Kilo cannot balance on its round hind feet alone, and its
-servos answer too slowly to balance it actively. So the trick rests on
-three points at every hold, and moves slowly enough that every moment on
-the way is stable by itself.
+**Why a tripod.** Kilo cannot balance on his round hind feet alone, and his
+servos answer too slowly to balance him actively. So he sits on three
+points, the two hind feet and the tail tip, with his weight between them.
+The tail swings left and right around a tilted axis (section 2) and is
+lowest when it points straight back (servo angle 0); the trick keeps it
+there as a stiff prop.
 
-**How the tail is used.** The tail swings left and right around a tilted
-axis (section 2) and is lowest when it points straight back (servo angle
-0). It cannot be pushed down further, so the trick keeps it at 0 as a stiff
-prop and tilts the body nose up until its tip meets the floor.
+**What he does** (stage 1; the times are when each step ends; "model" pitch
+in the fitted case; a guard is a check, section 8):
 
-**What the first design got wrong**, and what this one does about it:
-
-1. It asked the hind shoulders for -80 degrees; the right one stops at -57.
-   This design needs the right one re-seated (section 2) and is checked
-   against what each servo really reaches.
-2. It lowered the rear onto the tail and then swung both hind feet forward
-   under the belly at once, trusting the tail to hold the rear. On Kilo the
-   tail never reached the floor. And the model now shows that even with
-   full reach a hind foot cannot swing under the hips while the rear sits on
-   the tail: the hips are 45 mm up and the swing needs 47 to 50 (69 at -54
-   degrees). So this design moves the hind feet forward while Kilo is still
-   standing high, **one foot at a time with the other three down**, and
-   never lifts a hind foot once the rear is low.
-3. The side-view model took the two legs of a pair as one and could not see
-   a lean to one side. The model is now 3-D, and every step is checked for
-   sideways tipping too, including a tail a few degrees off centre and one
-   side's servos 3 degrees off.
-4. Nothing checked that the tail was down. Now the Pi checks the pitch and
-   roll at five holds and brings Kilo down if they are off.
-
-**The motion** (stage 1; times when each keyframe ends; "model" pitch):
-
-| # | Keyframe | What you see | Pitch (model) | ends at |
+| # | Keyframe | What you see | Pitch (model) | Ends at |
 |---|---|---|---|---|
-| 0 | lean | Kilo lowers a little and leans forward over its feet | -1.9 | 0.7 s |
-| 1 | lift_l | the left hind foot lifts 16 mm and moves forward | -1.9 | 1.8 s |
-| 2 | place_l | it comes down under the belly, 68 mm ahead of where it was | -1.9 | 3.0 s |
-| 3 | lean_r | Kilo leans further forward | -1.9 | 3.6 s |
-| 4 | lift_r | the right hind foot lifts 28 mm and moves forward | -1.9 | 5.3 s |
-| 5 | place_r | it comes down beside the left one | -1.9 | 6.6 s |
-| 6 | gather | the feet stay put, the body moves back over them, 4 deg nose up; **holds 0.6 s: guard** | 4.3 | 7.8 s |
-| 7 | sit_back | the rear goes down, nose up | 11.4 | 8.4 s |
-| 8 | low | the rear lower still: the tail tip just touches the floor; **guard** | 22.5 | 9.8 s |
-| 9 | onto | the body moves back over the hind feet onto the tail; the front feet carry nothing; **guard** | 21.9 | 11.1 s |
-| 10 | paws | the front paws come up: on the tripod; **guard** | 21.9 | 12.5 s |
-| 11 | up | the hind legs lift the hips: 26 degrees, held 2 s; **guard** | 26.0 | 15.1 s |
-| 12-13 | down | paws down again, back to "onto" | 21.9 | 16.6 s |
-| 14 | sit | straight to SIT from there | 26.5 | 18.4 s |
+| 0 | look | the head comes up; nothing else moves | -1.9 | 0.3 s |
+| 1 | crouch | the hind knees fold, the body goes down and a little back; a short pause | -1.8 | 0.8 s |
+| 2 | back | the front legs push the body back over the hind feet: he rocks back onto his rear (the back corners of the frame under the battery; the tail tip close above the floor or touching) and the front feet go light; **holds 0.4 s: guard** | +7 (it rocks to +11 and settles) | 1.6 s |
+| 3 | paw_l | the left paw folds up in front of the chest | +7 | 1.8 s |
+| 4 | paws | the right paw folds up too; **holds 0.4 s: guard** | +6 | 2.5 s |
+| 5 | up | the hind legs lengthen: the hips rise until the tail tip carries the rear; on the tripod, held still 2 s; **guard** | +23 | 5.0 s |
+| 6 | settle | the hind legs fold and he sits back on his rear, paws still up | +11 | 5.5 s |
+| 7 | drop | the paws come down to the floor in front of him | +6 | 5.8 s |
+| 8 | sit | SIT | +27 | 6.3 s |
 
-The four feet never move on the floor after step 5: from "gather" to
-"onto" the body moves over them. The front feet stay where they started
-the whole time. Stages 2 and 3 go on from "up" to "rise", "mid" (38
-degrees, stage 2 holds) and "climb", "top" (52 degrees, stage 3 holds), at
-half the speed, and come back the same way.
+From "paws" on, the front paws are off the floor (1.9 s in the model) and he
+is on the tripod by 2.8 s; the hold starts at 3.0 s. The hind feet never
+leave the floor, and they slide less than a centimetre.
 
-**The stages, held** (model, nominal):
+Like a cat: the head comes up first, a short stillness before the push, one
+paw folds before the other, he holds still on the tripod, and on the way
+down the paws come down to the floor quickly in front of him.
 
-| | Stage 1 | Stage 2 | Stage 3 |
-|---|---|---|---|
-| Pitch (TELEMETRY nose up) | 26.0 | 38.0 | 52.0 |
-| Margin: centre of mass behind the hind feet, mm | 12.3 | 14.4 | 11.3 |
-| ... worst over the geometries checked | 7.6 | 8.0 | 3.2 |
-| Hind shoulder / knee torque, kg cm (stall about 3, an estimate) | 1.16 / 0.48, worst on the way (onto, up) | | |
-| Front paws above the floor | 25 mm | 68 mm | 113 mm |
+**Why it is fast now.** The second design moved the hind feet forward one
+at a time while standing (6.6 s), because a rigid model said he would tip
+over any other way, and then lowered him slowly onto the tail. The third
+design leaves the hind feet where they stand and moves the body instead:
+the hind knees fold, and the front legs push the body back over the hind
+feet until it rocks back onto its rear. That rock is the thing that went
+"wrong" on 2026-11-21; it is now used on purpose, where the checks expect
+it.
 
-**How it comes down when cut short.** A2 again, B6, A7, C7, or the body
-losing the Pi make the body move every joint in a straight line to SIT over
-1.5 s (stage 1), 2 s (stage 2) or 2.5 s (stage 3). The model checks that
-from half way to and at every keyframe it ends sitting on its feet, never
-touching the floor with the back, the Pi or the nose. Cut short while a hind
-foot is in the air, Kilo rocks onto that side by up to 16 degrees in the
-model (it ends on its feet; the rigid model rocks further than Kilo does).
-Cut short at the top of stages 2 and 3, the paws come down from up to 9 cm,
-as they would if Kilo tipped forward there.
+**What 2026-11-21 taught** (section 7 has the numbers):
+
+1. **Kilo's legs give.** Under load each leg servo gives about 4 degrees
+   per kg cm. When his weight moves onto the hind legs they give, he tips
+   nose up, which moves more weight onto them, which makes them give more:
+   he rocks back by himself. A model with rigid legs cannot see this; it had
+   him 15 mm away from rocking at "gather", where he rocked every time. So
+   every check now runs in a model with the give in it, fitted to the
+   recordings.
+2. **His centre of mass is about 5.5 mm further back and 5 mm further to
+   the right** than the planner's model. That made "lift_r" (the right hind
+   foot in the air) a coin flip: 3 of 7 plays went over. On the tripod it
+   rolls him to the right, more the softer his legs and the higher he sits.
+   So on the tripod the left hind leg is 2.5 mm shorter than the right: he
+   leans left by that much, which in the fitted case puts him level. (The
+   tail could move its tip under the centre of mass, but which way a
+   positive tail angle swings the tip is not known; see the end of section
+   2.)
+3. The walking planner keeps its own centre of mass: the fitted one lives
+   only in the trick's model (`kilo.tricks.dynamics.FITTED`), so the walks
+   you tuned do not change.
+
+**How it comes down.** At the end of the hold, the way up backwards: the
+hind legs fold and he sits back on his rear ("settle"), the paws come down
+to the floor in front of him ("drop"), and he sits (SIT). A2 again, B6, A7,
+C7, or the body losing the Pi make the body move every joint in a straight
+line to SIT instead, over 1.5 s (stage 1), 2 s (stage 2) or 2.5 s (stage 3).
+The model checks that line from half way into and the end of every
+keyframe: he ends sitting on his feet every time (section 7).
 
 **What protects Kilo.**
 
-- The guards (section 8). On Kilo as calibrated today the model has him
-  stopped at "gather", leaning 5 degrees on three feet, before anything
-  else happens; he then sits down.
+- The guards (section 8). With the right hind shoulder not re-seated, the
+  model has him leaning left 9 degrees in the crouch: the Pi stops him, he
+  rolls up to 17 degrees while he comes down, and ends sitting.
 - The pitch never goes past 55 degrees; the fall detector (75 degrees)
   stays armed.
 - A2 refuses to start below 7400 mV on the battery at rest (the highest
-  reading of the last 20 seconds: right after a walk the reading sags by up
-  to 0.25 V for a moment, and the refusal used to read that sag).
+  reading of the last 20 seconds).
 
 ### Your photo: Kilo standing by itself at 54 degrees (2026-11-16)
 
@@ -215,24 +225,11 @@ shorter than you measured (the photographed pose would then stand at a pitch
 the photo does not show). The check is `kilo.tricks.sagittal.photo_check`;
 the design is tested only over the cases the photo allows (section 7).
 
-**What the photo changes about the pose.** At the top of stage 3 the trick
-holds your photo's pose with two changes, both to gain margin:
-
-- the hind feet 2 mm further forward (52 mm in front of the hips, the knee
-  bent 26 degrees instead of 33);
-- the front paws tucked back near the shoulders instead of reaching forward.
-  Reaching forward, as in the photo, the front legs' weight is further
-  forward. Tucked, the centre of mass is 4 mm further back. I did not fold
-  them right back, which would gain 2 mm more: then a forward tip would go
-  on over the paws onto the nose. Tucked as they are, a forward tip lands
-  on the paws (section 7, "catch").
-
-Together these put the centre of mass 6.5 mm further behind the hind feet
-than in the pose Kilo stood in by itself.
-
-The second design's top (stage 3) is the photo's pose with the front paws
-tucked (55, 20) and the hind feet 52 mm ahead of the hips; the model holds
-it at 52 degrees on TELEMETRY (54 by the model's own pitch).
+**What the photo gives the design.** Stage 3's top is close to the photo's
+pose: 54 degrees by the model's own pitch, the hind feet 51 mm ahead of the
+hips (the photo: 50), the paws folded up in front instead of reaching
+forward. The photo also bounds the centre of mass: every case the checks
+use is one the photo allows.
 
 ## 2. The tail, and the right hind shoulder
 
@@ -435,7 +432,7 @@ the build with an error.
 
 With the switch off, pressing A2 logs `remote A2 (0x10, none): ignored (no
 action on this key)` and nothing moves. With it on, A2 logs `remote A2
-(0x10, rear up): trick rear_up started (18 s; ...)` at 1, and at 2 and 3
+(0x10, rear up): trick rear_up started (6 s; ...)` at 1, and at 2 and 3
 `remote A2 (0x10, rear up 3): trick rear_up_3 started: up to stage 1 (A2
 while he holds it: on, up to 3; ...)`. (At boot the mind still logs
 `rear-up key A2 on: rear_up_3, stage 3`: read it as "up to stage 3".)
@@ -451,14 +448,15 @@ only at a stage that has gone well.
   Kilo goes over backwards.
 - **The tail** firmly on its servo, straight back in stand. It carries
   about a tenth of Kilo's weight on the tripod.
-- **The floor.** Hard, flat, not slippery for the feet: the trick plants
-  the four feet in step 5 and then moves the body over them; feet that slide
-  change everything. The tail tip slides forward on the tripod at stages 2
-  and 3 (its wheel helps).
+- **The floor.** Hard, flat, not slippery for the feet: the hind feet stay
+  put while the front legs push the body back over them; feet that slide
+  change that. The back corners of the frame (under the battery) touch the
+  floor when he rocks back, and the tail tip slides forward as the hips rise
+  (its wheel helps).
 - **The battery** at least 7.8 V (`kilo --host kilo.local status`).
-- **Your hands.** Kneel beside Kilo, one open hand a few cm to his left and
-  one to his right side at hip height: the first design fell sideways, and
-  the steps of this one stand on three feet. Behind him for stages 2 and 3.
+- **Your hands.** Kneel beside Kilo, one open hand a few cm to his right
+  side at hip height (the model's way to tip, if any, is to his right) and
+  one behind him.
   If he starts to go, catch him; do not push.
 - **The way out.** C7 stops at once (Kilo sits down over 1.5-2.5 s).
 
@@ -469,34 +467,30 @@ Do each step until it looks the same twice. After every press of A2:
 shows the measured pitch against the model's at each keyframe, and the log
 shows any guard that stopped the trick.
 
-**Step 1: the two steps (stage 1, keyframes 0-5).** Press A2, and press it
-again when both hind feet have stepped forward (about 6.6 s).
-Watch: does each hind foot lift clear and land under the belly? Does Kilo
-lean to a side while a foot is up? The recorded roll should stay within 2
-degrees.
+**Step 1: onto the rear (stage 1, keyframes 0-4).** Build with
+`KILO_REAR_UP=1`. Press A2, and press it again (or C7) once both paws are
+folded (about 2 s). Watch: does the head come up first, the body crouch,
+then rock back onto its rear without the hind feet moving? Do the paws fold
+one after the other? The recorded roll should stay within 2 degrees of what
+it reads standing.
 
-**Step 2: down onto the tail (keyframes 6-9).** Press A2 and let it run to
-"onto" (11 s), then A2. Watch: the feet stay where they landed; at "low"
-the tail tip just touches; at "onto" the front feet carry almost nothing
-(a sheet of paper under a front foot pulls out). If a guard stops it, note
-which (the log line says "guard NAME: ...").
+**Step 2: all of stage 1.** Press A2 once and let it play (6.3 s). At about
+2.5 s the hips rise and he sits on the hind feet and the tail tip; he should
+hold still for 2 s at about 23 degrees nose up, then sit back, put the paws
+down and sit.
 
-**Step 3: all the way.** Press A2 once and let it play (18 s). At the top
-Kilo should sit still at about 26 degrees for 2 s, then come back down and
-sit.
+**Steps 3-4: stages 2 and 3** (`KILO_REAR_UP=3` once, for both), only after
+stage 1 has gone well twice: press A2; at stage 1's hold, A2 again: he goes
+on to stage 2 and holds it; let him come down (no A2), or A2 again for stage
+3. The tail tip slides forward as he rises. Without the second press he
+comes down from stage 1 after its 4 s. Kneel close behind and to his right
+for these: in the model it is the higher stages that can roll to his right.
 
-**Steps 4-6: stages 2 and 3** (`KILO_REAR_UP=3` once, for both): press
-A2; at stage 1's hold, A2 again: he goes on to stage 2 and holds it; let
-him come down (no A2), or A2 again for stage 3. The tail tip slides forward
-as Kilo rises; the top pitch should be about 38 and 52 degrees. Without
-the second press he comes down from stage 1 after its 4 s.
-
-What a recorded trial should show if the model is right (stage 1,
-TELEMETRY nose up, plus or minus about 2 degrees; roll within 2 degrees):
-lean to place_r -1.9; gather 4.3; sit_back 11.4; low 22.5; onto 21.9; paws
-21.9; up 26.0; back to onto 21.9; sit 26.5. The guards stop the trick when
-the average over a hold is more than 2.5 degrees off (3 degrees of roll at
-gather, 6 at the others).
+What a recorded stage-1 play should show if the model is right (TELEMETRY
+nose up, within about 2 degrees; roll about +2 throughout): look and crouch
+-2; back +7 (a peak near +11 as he rocks); paws +6; up +23; settle +11;
+drop +6; sit +27. The guards stop the trick when the average over a hold
+is outside its window or the roll passes 6 degrees (section 8).
 
 ## 6. Recording: fetch a trial and read it
 
@@ -563,9 +557,11 @@ convention; TELEMETRY's own pitch has the opposite sign):
 
 The prediction for each keyframe comes from the design's model
 (`python -m kilo.tricks.rear_up` writes it into the library's JSON as
-`predicted_pitch_deg`, since the second design TELEMETRY's own nose-up
-pitch, IMU offset included), and between keyframes it follows the same cosine
-easing the board plays. The CSV's columns are `t_s, uptime_s,
+`predicted_pitch_deg`: TELEMETRY's nose-up pitch at the end of the keyframe,
+IMU offset included, in the fitted compliant model), and between keyframes it
+follows the same cosine easing the board plays. A recording of an older design
+(its CRC is not the library's) is shown with numbered keyframes and no
+prediction, and says so. The CSV's columns are `t_s, uptime_s,
 since_play_s, mode, flags, keyframe, keyframe_name, body_keyframe,
 nose_up_deg, pred_nose_up_deg, err_deg, pitch_deg, roll_deg,
 rate_pitch_dps, rate_roll_dps, batt_mv, dist_mm` (`mind/README.md` "The
@@ -576,71 +572,89 @@ kilo.local --last 10m`, then `kilo record decode FILE --csv out.csv`.
 ## 7. The mechanics (reference)
 
 Everything in this section is from the model (simulated), not from Kilo.
-The numbers come from `python -m kilo.tricks.rear_up`; the 3-D model is
-`mind/kilo/tricks/stance.py`, the side view (the tail, the photo, the
-torques) `mind/kilo/tricks/sagittal.py`, the design
+The numbers come from `python -m kilo.tricks.rear_up` (it prints every
+case); the model is `mind/kilo/tricks/dynamics.py`, the design
 `mind/kilo/tricks/rear_up.py`, the tests `mind/tests/test_rear_up.py`.
 
-**The 3-D model.** Each leg on its own, at its own side (the feet 65 mm
-apart), with the angle the servo really reaches: the body's joint limits,
-then the pulse range with Kilo's calibration (`stance.reach`; the design
-uses the calibration after the re-seat, `rear_up.DESIGN`; Kilo as recorded
-is `rear_up.AS_RECORDED`). The masses are the planner's (358 g); the tail
-is the cone of section 2, its tip's height and sideways place from the
-servo angle; the frame is a box of corners that must never touch the floor
-(the Pi, the back, the nose, the shoulder servos' sides). For each pose it
-finds how the rigid body rests: it sets it down on its lowest point and
-tips it about the edge of the support the centre of mass is outside of,
-until the centre of mass is over the support. It reports the pitch and roll
-(as the IMU reads them), what touches, and the margin to the nearest edge
-in any direction. It is rigid, static, with no sliding: on four feet with
-one leg a little long it stands on three, where Kilo's legs give a little.
+**The model.** One rigid body in 3-D with Kilo's masses and leg and tail
+geometry (`kilo.tricks.stance`), on a flat floor, played tick by tick as the
+body plays the keyframes: every contact (the four feet, the knees, the tail
+tip, the frame's corners) is a stiff spring with friction that sticks or
+slides; each servo follows its command 50 ms late and over 70 ms (the
+planner's measurement of 2026-11-15), within its pulse range, and **gives**
+under the load its leg carries (4 degrees per kg cm, fitted). The IMU reads
+the body's pitch less 1.9 degrees and its roll plus 2. It does not model the
+tail servo giving, a soft floor, a servo running out of strength, or
+backlash.
 
-**Held against the trials of 2026-11-17** (results file): STAND within 0.2
-degrees, the tuck within 0.5, the sink within 1.4, the left hind foot in the
-air and the tail off the floor as in the video, the falling pitch during the
-step, and the end of the step a few mm from tipping over the edge Kilo
-fell over. Not explained: the step's pitch falls 12 degrees in the model
-and 9 on Kilo, and SIT is a near tie between two diagonals.
+**Held against the plays of 2026-11-19/21** (the fixture
+`mind/tests/fixtures/rear_up_2026_11_21.json`; `python -m
+kilo.tricks.dynamics` prints it): at "gather" the recorded plays passed
++5 degrees 0.55-0.59 s into the move and settled at +22.6 to +23.1, roll
+-0.9 to -2.1; the model passes +5 at 0.56 s and settles at +22.1, roll
+-2.7. At "lift_r" 3 of 7 plays went over the diagonal; with the fitted
+centre of mass the model goes over, with it 0.5 mm further forward it does
+not: the centre of mass sits on that line. With rigid legs the same model
+keeps him on his four feet at "gather", which is how the second design's
+checks passed it.
 
-**What is checked** for each stage, playing from STAND, and cut short half
-way to and at every keyframe, over: the nominal geometry; the centre of
-mass 5 mm back, 10 mm forward, 10 mm up or down, 3 mm to either side; the
-tail 3 mm longer or shorter, drooping 5 degrees more or less, 5 degrees off
-centre either way; one side's four leg servos 3 degrees off either way; and
-the corners of the centre of mass the photo allows (20 geometries, 580 to
-900 runs per stage):
+**Fitted** (what the recordings say about Kilo): the centre of mass 5.5 mm
+further back and 5 mm further right than `kilo.planner.model`; the legs give
+4 degrees per kg cm (3.5 to 4.5 fit); the tail droops 16 degrees, not 18.
+Not separated by the data: further back and softer look alike at "gather";
+right of centre and a left/right difference in the legs look alike; the
+friction (nothing slid in the recordings). These stay the trick's own
+numbers: the walking planner keeps its model, so the walks do not change.
 
-- never both hind feet off the floor unless the tail is on it, and in the
-  steps the lifted foot clear of the floor;
-- the margin in every direction at least 3.5 mm at every moment (3 at stage
-  3), except while the load moves between the feet and the tail ("low",
-  "onto", "paws" and down), where no tip may drop anything more than 8 mm;
-  with one side's servos off the rigid model stands on three feet across a
-  diagonal, so there only the roll and the drops count;
-- the roll within 7 degrees while playing;
-- on the tripod at the hold with at least 5 mm of margin (3 at stage 3);
-- or a guard stops it (with the centre of mass 10 mm forward the paws stay
-  down and "paws" stops it; with one side's servos 3 degrees short of their
-  angle "gather" stops it), and then it comes down on its feet;
-- cut short anywhere: down on its feet, the Pi, back and nose never touch,
-  the roll within 20 degrees, any drop onto something other than a foot
-  within 15 mm;
-- Kilo as recorded is stopped by a guard (at "gather").
+**A bug found on the way** (2026-11-21): in the first version of this
+model, the legs' give moved the contact points and that motion was fed into
+the contacts' dampers; on three points of support that rang at the
+simulation's step, the loads added up to 1.6 times Kilo's weight and the
+roll depended on the step size. Fixed (and tested): the give moves the
+points, only the commanded motion is damped. The fit above is the fixed
+model's.
 
-**The limit the design cannot meet.** With the centre of mass 6 or more mm
-further back than the model, the body tips back onto the tail before the
-tail is down (up to 20 mm at 10 mm back). A search over every way of
-sitting back with the four feet planted (`--search` shows the swing part)
-finds none that keeps the centre of mass more than about 10 mm ahead of the
-hind feet until the tail touches; so the design takes 5 mm. The photo does
-not bound "further back". If the trials show Kilo rocking back at "low" or
-"onto", that is this.
+**The cases** (`kilo.tricks.dynamics.bands`), each one thing off the fit:
+the centre of mass 4 mm forward or back, 3 mm left or right, 10 mm up or
+down; the legs 1 degree per kg cm stiffer or 1.5 softer; the tail drooping
+4 degrees more or less, 3 mm longer or shorter; the friction 0.3 and 1.0
+(the fit takes 0.5; hardwood is not measured); the servos slower (70 + 100
+ms); the frame's rear corner 10 mm higher; and three corners where two go
+wrong together: stiffer and further back, softer and further forward,
+softer and further right. 22 cases.
 
-**Servo torque** (nominal, side view, against an ESTIMATED 3 kg cm stall):
-hind shoulder 1.16 kg cm at "onto", hind knee 0.48 at "up", front shoulder
-0.47, front knee 0.31, the tail servo nothing (at 0 the floor's push goes
-through its bearing).
+**What is checked** for each stage, playing from STAND in every case, from
+SIT in the fitted one, with the Pi's guards running on the model's own
+pitch and roll:
+
+- stage 1 reaches the tripod in every case: each hind foot carries at
+  least 20 g, the tail at least 15, the front paws nothing, every guard
+  reads at least a degree inside its window, the roll stays under 7;
+- stages 2 and 3 reach their top in the fitted case; in the other cases a
+  guard may stop them, and then they must come down safely;
+- never over 65 degrees nose up; nothing but the feet, the knees, the tail
+  tip and the frame's rear corners touches the floor; the hind feet slide
+  less than 25 mm; no leg servo carries more than 2.4 kg cm for a tenth of a
+  second (the stall is about 3, an estimate);
+- cut short half way into and at the end of every keyframe (the fitted case
+  and the three worst corners): down on its feet, sitting, the roll within
+  20 degrees;
+- he ends sitting on his feet every time;
+- with the right hind shoulder not re-seated, a guard stops him and he sits.
+
+**What the checks found** (stage 1): in every one of the 22 cases, and from SIT, he is on the tripod by 2.8 s (the paws are off the floor by 1.9 s; by 2.6 s in the softest cases, where a front knee brushes the floor as the paws fold) and holds at +21.7 to +24.9 degrees nose up. The roll at the hold reads -2.9 to +4.6 (the IMU's +2 included; the worst are the soft-and-right corner and the centre of mass only 2 mm right). The hind feet slide 3 to 19 mm (19 on the slippery floor), the tail tip 20 to 100 mm as the hips rise. The most a leg servo carries is 2.0 kg cm (the right hind shoulder, the rear-corner case, as he settles back down). Cut short at any of the 64 points checked, he sits; the largest roll on the way down is 9.4 degrees (soft-and-right, stopped on the tripod). Before the re-seat the roll limit stops him in the crouch; he rolls to 17 degrees coming down and sits.
+
+**Stages 2 and 3**: stage 2 holds at +34.2 to +37.2 in 21 of the 22 cases; in the soft-and-right corner he holds it, then rolls past 8 degrees on the way down and the roll limit stops him: he sits. Stage 3 holds at +48.6 to +51.3 in 20 of 22; with the centre of mass only 2 mm right the top's guard sees him leaning left 6.4 degrees and stops him, and soft-and-right is stopped by the roll limit on the way down; he sits both times. With the centre of mass 10 mm lower the tail carries only 10 g at the top: he is close to tipping forward, onto the folded paws. Cut short anywhere (96 and 128 points): he sits; the largest roll on the way down 13 degrees (soft-and-right).
+
+**The roll, and the lean.** On the tripod his weight is on the hind feet
+and the tail tip, and the hind legs give under it. The centre of mass 5 mm
+right of centre loads the right hind leg more; it gives more; he rolls
+right, which loads it more again. Without the lean (the left hind leg 2.5
+mm shorter on the tripod) the model rolls him 2 degrees right in the fitted
+case and up to 18 in the soft-and-right corner at stage 1. The higher he
+sits, the softer this gets: at stages 2 and 3 a millimetre of lean or of
+centre of mass moves the roll by about 2.5 degrees, which is why those
+stages are the ones a guard may stop.
 
 **The tail** (unchanged, section 2): it stays at 0; turned aside under load
 the floor's push would turn it further out.
@@ -648,27 +662,29 @@ the floor's push would turn it further out.
 ## 8. The guards: the Pi checks the trick while it plays
 
 The body plays the keyframes by itself; the Pi watches the pitch and roll
-it reports 25 times a second. The trick carries five checks (six at stage
-2, seven at stage 3), each at a keyframe where Kilo holds still for 0.6 s
-(the top's 2 s hold too): over the second half of the hold the pitch must
-average within 2.5 degrees of the model's prediction, and the roll must
-stay within 6 degrees (3 at "gather"). And over the whole play, a roll past
-8 degrees twice in a row. When a check fails, the Pi sends the same stop as
-C7 (Kilo sits down over the trick's stop time) and logs `trick rear_up:
-guard NAME: nose up X deg outside LO..HI: stopping` (or the roll); the
-recording keeps it.
+it reports 25 times a second. Each guard is at a keyframe where Kilo holds
+still: over the second half of the hold the pitch must average inside the
+guard's window, and the roll must stay within 6 degrees. And over the whole
+play, a roll past 8 degrees twice in a row. When a check fails, the Pi sends
+the same stop as C7 (Kilo sits down over the trick's stop time) and logs
+`trick rear_up: guard NAME: nose up X deg outside LO..HI: stopping` (or the
+roll); the recording keeps it.
 
-| Guard | What it catches |
-|---|---|
-| gather (4.3 +- 2.5, roll <= 3) | a hind leg not where it was asked (today's right hind shoulder: the model leans 5 degrees here), a foot that landed short |
-| low (22.5) | the rear not down: the tail not touching, or a leg short |
-| onto (21.9) | the rear not on the tail, the body not back over the feet |
-| paws (21.9) | the paws did not come up (the centre of mass too far forward) or Kilo rocked back |
-| up, mid, top | the hold where the model says |
+Each window holds every case the model knows, with at least a degree to
+spare at stage 1:
+
+| Guard | Window (nose up) | The cases read | What it catches |
+|---|---|---|---|
+| back | +3.5 to +12.5 | +6.8 to +9.6 | he did not rock back (centre of mass further forward, front feet slid), or went further back than modelled |
+| paws | +2.5 to +12 | +5.0 to +9.5 | the paws did not come up, or he rocked on |
+| up (stage 1's top) | +19.5 to +27 | +21.7 to +24.9 | not on the tripod: the tail not down, or a leg short; a roll at the hold |
+| mid (stage 2's top) | +33 to +41 | +34.2 to +37.2 | the same, higher |
+| top (stage 3's top) | +46 to +55 | +48.6 to +51.3 | the same, at the top |
 
 The C++ mind on the Pi does this (`kernel/mind/tricks/player.cpp`), from the
 trick's own entry in the library; `kilo.tricks.player.GuardWatch` is the
-Python reference the C++ is checked against.
+Python reference the C++ is checked against. The remote finds each stage's
+top by its guard's name (`up`, `mid`, `top`).
 
 ## When it goes wrong
 
@@ -680,15 +696,19 @@ Python reference the C++ is checked against.
   holds (the log says `rear_up: stage 1 (of 3): A2 to go on`); a press
   earlier on the way up (before his last move up to the stage) brings him
   down instead.
-- **The log says "guard gather: roll ..."**: a hind leg is not where it was
-  asked. Is the right hind shoulder re-seated (`kilo cal show` joint 10
-  between +7 and +25)? Did a foot land short or slide? Tell me the numbers.
-- **"guard low: nose up ... outside ..."**: lower than the window: the tail
-  is not down; higher: the rear went further down than the model says.
-- **"guard paws: ..."**: the paws stayed down or came back down: the centre
-  of mass is further forward than the model.
-- **Kilo rocks back at "low" or "onto"**: the centre of mass is further
-  back than the model (section 7, the limit). Catch him, C7, stop the trials.
-- **A foot slides during the steps**: a less slippery floor.
+- **"roll ... past 8" in the crouch, or "guard back: roll ..."**: a hind
+  leg is not where it was asked. Is the right hind shoulder re-seated
+  (`kilo cal show` joint 10 between +7 and +25)? Tell me the numbers.
+- **"guard back: nose up ... outside ..."**: lower than the window: he did
+  not rock back (his centre of mass is further forward than the model's, or
+  the front feet slid back); higher: he went further back than the model
+  says (the tail or the rear corner lower than modelled). Tell me which.
+- **"guard paws: ..."**: the paws did not come up or he rocked further.
+- **"guard up: roll ..."** (or mid, top): he rolled on the tripod: which
+  side (the sign: + is his left side down)? That is the lean (section 7)
+  telling us about his centre of mass; the numbers let me correct it.
+- **He rocks right over the tail** (catch him): C7, stop the trials, tell
+  me the stage.
+- **A foot slides during the push**: a less slippery floor.
 - **The body says FELL**: Kilo went past 75 degrees. It holds still, then
   lies down and goes limp after 2 s. Set it upright by hand and press B6.
