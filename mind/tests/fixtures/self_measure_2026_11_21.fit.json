@@ -1,0 +1,288 @@
+{
+ "format": 1,
+ "inputs": [
+  "/home/joe/kilo-logs/run-b13-145s-trick-4.krec"
+ ],
+ "parameters": {
+  "imu_pitch": {
+   "value": 2.4019,
+   "sd": 0.0779,
+   "model": 0.0,
+   "unit": "deg",
+   "what": "IMU pitch offset (+ floor slope, + front/back legs)",
+   "fitted": true,
+   "significant": true
+  },
+  "imu_roll": {
+   "value": 0.5231,
+   "sd": 0.0772,
+   "model": 0.0,
+   "unit": "deg",
+   "what": "IMU roll offset (+ floor slope, + left/right legs)",
+   "fitted": true,
+   "significant": true
+  },
+  "com_x": {
+   "value": 4.3465,
+   "sd": 0.3098,
+   "model": 7.433,
+   "unit": "mm",
+   "what": "centre of mass, ahead of the shoulders' middle",
+   "fitted": true,
+   "significant": true
+  },
+  "com_y": {
+   "value": -0.7274,
+   "sd": 0.3023,
+   "model": 0.0,
+   "unit": "mm",
+   "what": "centre of mass, to the left",
+   "fitted": true,
+   "significant": true
+  },
+  "com_z": {
+   "value": -40.0,
+   "sd": 7.4533,
+   "model": -2.8307,
+   "unit": "mm",
+   "what": "centre of mass, above the shoulder axles",
+   "fitted": true,
+   "significant": true
+  },
+  "sag": {
+   "value": 1.112,
+   "sd": 0.6953,
+   "model": 0.0,
+   "unit": "deg/kg cm",
+   "what": "leg servos' give under load",
+   "fitted": true,
+   "significant": false
+  },
+  "twist": {
+   "value": -0.1022,
+   "sd": 0.0384,
+   "model": 0.0,
+   "unit": "mm",
+   "what": "LF+RB legs longer than RF+LB (each pair by half)",
+   "fitted": true,
+   "significant": true
+  },
+  "lag_ms": {
+   "value": 70.5521,
+   "sd": 11.5933,
+   "model": 50.0,
+   "unit": "ms",
+   "what": "servo dead time (with the IMU's own delay)",
+   "fitted": true,
+   "significant": false
+  },
+  "tau_ms": {
+   "value": 68.5665,
+   "sd": 15.2007,
+   "model": 70.0,
+   "unit": "ms",
+   "what": "servo time constant",
+   "fitted": true,
+   "significant": false
+  },
+  "tip_ms": {
+   "value": 508.0821,
+   "sd": 112.8125,
+   "model": 85.7578,
+   "unit": "ms",
+   "what": "a tip's delay: the step over the edge to 40 % of the tip",
+   "fitted": true,
+   "significant": true
+  }
+ },
+ "rms_tick_deg": 0.4055,
+ "rms_model_deg": 1.9929,
+ "inflation": 27.06,
+ "ticks": 1283,
+ "crossings": [
+  {
+   "run": "run-b13-145s-trick-4.krec#4",
+   "experiment": "edge_lf",
+   "measured_x": null,
+   "note": "a slow lean, not a tip (the legs give, or the lifted foot did not clear): no crossing",
+   "model_x": 8.06
+  },
+  {
+   "run": "run-b13-145s-trick-4.krec#4",
+   "experiment": "edge_rf",
+   "measured_x": 6.89,
+   "note": "",
+   "model_x": 8.06,
+   "fitted_x": 6.78
+  },
+  {
+   "run": "run-b13-145s-trick-4.krec#4",
+   "experiment": "edge_lb",
+   "measured_x": 5.13,
+   "note": "",
+   "model_x": 8.27,
+   "fitted_x": 5.68
+  },
+  {
+   "run": "run-b13-145s-trick-4.krec#4",
+   "experiment": "edge_rb",
+   "measured_x": null,
+   "note": "a slow lean, not a tip (the legs give, or the lifted foot did not clear): no crossing",
+   "model_x": 8.27
+  },
+  {
+   "run": "run-b13-145s-trick-4.krec#4",
+   "experiment": "edge_rf_roll",
+   "measured_x": -3.03,
+   "note": "",
+   "model_x": -11.95,
+   "fitted_x": -3.89
+  },
+  {
+   "run": "run-b13-145s-trick-4.krec#4",
+   "experiment": "edge_rb_roll",
+   "measured_x": null,
+   "note": "a slow lean, not a tip (the legs give, or the lifted foot did not clear): no crossing",
+   "model_x": -6.83
+  }
+ ],
+ "tip_rate": {
+  "events": 1,
+  "model_ms": 65.5,
+  "median_ms": 112.0,
+  "spread_ms": null,
+  "pendulum_mm": 123.0,
+  "each_ms": [
+   112.0
+  ]
+ },
+ "walks": [],
+ "notes": [],
+ "iterations": 12,
+ "battery_mv": [
+  7436.0,
+  7525.0
+ ],
+ "correlation": {
+  "imu_pitch": {
+   "imu_pitch": 1.0,
+   "imu_roll": -0.013,
+   "com_x": -0.026,
+   "com_y": 0.016,
+   "com_z": -0.004,
+   "sag": -0.175,
+   "twist": 0.008,
+   "lag_ms": 0.001,
+   "tau_ms": -0.02,
+   "tip_ms": -0.06
+  },
+  "imu_roll": {
+   "imu_pitch": -0.013,
+   "imu_roll": 1.0,
+   "com_x": 0.024,
+   "com_y": -0.046,
+   "com_z": 0.013,
+   "sag": 0.09,
+   "twist": 0.013,
+   "lag_ms": -0.004,
+   "tau_ms": 0.024,
+   "tip_ms": 0.033
+  },
+  "com_x": {
+   "imu_pitch": -0.026,
+   "imu_roll": 0.024,
+   "com_x": 1.0,
+   "com_y": -0.922,
+   "com_z": 0.483,
+   "sag": 0.041,
+   "twist": 0.164,
+   "lag_ms": 0.013,
+   "tau_ms": -0.009,
+   "tip_ms": 0.065
+  },
+  "com_y": {
+   "imu_pitch": 0.016,
+   "imu_roll": -0.046,
+   "com_x": -0.922,
+   "com_y": 1.0,
+   "com_z": -0.496,
+   "sag": -0.023,
+   "twist": 0.087,
+   "lag_ms": 0.014,
+   "tau_ms": -0.016,
+   "tip_ms": -0.077
+  },
+  "com_z": {
+   "imu_pitch": -0.004,
+   "imu_roll": 0.013,
+   "com_x": 0.483,
+   "com_y": -0.496,
+   "com_z": 1.0,
+   "sag": -0.01,
+   "twist": -0.006,
+   "lag_ms": -0.008,
+   "tau_ms": 0.008,
+   "tip_ms": -0.375
+  },
+  "sag": {
+   "imu_pitch": -0.175,
+   "imu_roll": 0.09,
+   "com_x": 0.041,
+   "com_y": -0.023,
+   "com_z": -0.01,
+   "sag": 1.0,
+   "twist": 0.079,
+   "lag_ms": -0.01,
+   "tau_ms": 0.086,
+   "tip_ms": 0.324
+  },
+  "twist": {
+   "imu_pitch": 0.008,
+   "imu_roll": 0.013,
+   "com_x": 0.164,
+   "com_y": 0.087,
+   "com_z": -0.006,
+   "sag": 0.079,
+   "twist": 1.0,
+   "lag_ms": 0.058,
+   "tau_ms": -0.043,
+   "tip_ms": -0.042
+  },
+  "lag_ms": {
+   "imu_pitch": 0.001,
+   "imu_roll": -0.004,
+   "com_x": 0.013,
+   "com_y": 0.014,
+   "com_z": -0.008,
+   "sag": -0.01,
+   "twist": 0.058,
+   "lag_ms": 1.0,
+   "tau_ms": -0.765,
+   "tip_ms": -0.004
+  },
+  "tau_ms": {
+   "imu_pitch": -0.02,
+   "imu_roll": 0.024,
+   "com_x": -0.009,
+   "com_y": -0.016,
+   "com_z": 0.008,
+   "sag": 0.086,
+   "twist": -0.043,
+   "lag_ms": -0.765,
+   "tau_ms": 1.0,
+   "tip_ms": 0.028
+  },
+  "tip_ms": {
+   "imu_pitch": -0.06,
+   "imu_roll": 0.033,
+   "com_x": 0.065,
+   "com_y": -0.077,
+   "com_z": -0.375,
+   "sag": 0.324,
+   "twist": -0.042,
+   "lag_ms": -0.004,
+   "tau_ms": 0.028,
+   "tip_ms": 1.0
+  }
+ }
+}

@@ -56,8 +56,16 @@ import math
 from dataclasses import dataclass
 
 from kilo.planner import patterns as pat
-from kilo.planner.model import LB, LEFT, LF, RB, RF, BodyModel, G_MM_S2
+from kilo.planner.model import LB, LEFT, LF, RB, RF, BodyModel, G_MM_S2, view_numbers
 from kilo.planner.plan import HALT_HOLD_TICKS, HEIGHT_SLEW_MM, SWITCH_SLACK_MM, Planner, PlannerConfig, smooth
+
+
+# The fit's numbers are the "longtrot" view of the body model (protocol/spec.toml
+# [model.views.longtrot]): its centre of mass disagrees with the model's own, and stays the long
+# trot's until a self-measurement settles it (kilo model show). The diagonal's direction is the
+# model's foot rectangle.
+_FIT = view_numbers("longtrot")
+_TRACK, _LENGTH = BodyModel().track_mm, BodyModel().length_mm
 
 
 @dataclass(frozen=True)
@@ -69,10 +77,10 @@ class TrotFit:
     rotation is not stopped at each touchdown), its mass ``com_x_mm`` ahead
     of the shoulders' middle, the tip clamped at ``clamp_deg`` (the falling
     side's foot reaching the ground early)."""
-    com_x_mm: float = 3.5
-    extra_ms: float = 120.0
-    clamp_deg: float = 2.3
-    com_h_mm: float = 79.0
+    com_x_mm: float = _FIT["com_x_mm"]
+    extra_ms: float = _FIT["extra_ms"]
+    clamp_deg: float = _FIT["clamp_deg"]
+    com_h_mm: float = _FIT["com_h_mm"]
 
     @property
     def tau_s(self) -> float:
@@ -90,14 +98,14 @@ class TrotFit:
     def gain_deg_per_mm(self, swing_ticks: int) -> float:
         """Tip (deg of roll) at a diagonal's end per mm the pair lands off the balanced point."""
         x = self.two_foot_s(swing_ticks) / self.tau_s
-        line, roll = 65 / math.hypot(65, 123), 123 / math.hypot(65, 123)
+        line, roll = _TRACK / math.hypot(_TRACK, _LENGTH), _LENGTH / math.hypot(_TRACK, _LENGTH)
         return math.degrees(line * (math.cosh(x) - 1.0) * roll / self.com_h_mm)
 
     def tip_deg(self, swing_ticks: int, speed_mm_s: float, land_mm: float, clamp: bool = True) -> float:
         """The tip at a diagonal's end (deg; + toward the front foot in the air) for a pair landing
         ``land_mm`` ahead of its shoulders, walking at ``speed_mm_s`` (+ forward)."""
         x = self.two_foot_s(swing_ticks) / self.tau_s
-        line, roll = 65 / math.hypot(65, 123), 123 / math.hypot(65, 123)
+        line, roll = _TRACK / math.hypot(_TRACK, _LENGTH), _LENGTH / math.hypot(_TRACK, _LENGTH)
         # the mass starts the diagonal (com_x - land) x 0.467 from its line toward the front foot in
         # the air and crosses it at 0.467 x the speed (both signed: + forward)
         hphi = line * ((self.com_x_mm - land_mm) * (math.cosh(x) - 1.0)

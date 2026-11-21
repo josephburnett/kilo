@@ -1205,6 +1205,179 @@ lower_leg_at = 0.5
 servo_lag_ms = 50
 servo_tau_ms = 70
 
+# ---- One model (docs/architecture.md "One model") ---------------------------
+# Everything below is also Kilo's body, and until 2026-11-21 was typed by hand
+# in the code that used it. It reaches code only through the generated
+# bindings (MODEL_* / KILO_MODEL_*) and BodyModel. The numbers are the ones
+# the code had: moving them here changed nothing Kilo does.
+#
+# The foot rectangle. The model takes the feet at x 0 to stand LEG_LB_MM x
+# LEG_W_MM apart (123 x 65: the shoulder axles' spacing and the track). The
+# first self-measurement run (2026-11-21, docs/self-measurement-results.md)
+# tilts as if they stood about 133 x 69 mm apart, and the owner's tape on
+# 2026-10-15 said 133 x 70 (feet, standing). NOT changed here: the values
+# wait for the second measurement (`kilo model apply`).
+
+# Corrections to the model above for this robot: what a self-measurement
+# finds (`kilo model apply FIT.json` writes them). All zero today: nothing has
+# been applied yet. BodyModel adds them (com() moves by com_d*).
+#   com_d*_mm          the whole robot's centre of mass, moved forward / to the
+#                      left / up (body frame)
+#   sag_deg_per_kg_cm  how much every leg servo gives under load
+#   leg_dz_mm          each leg longer than commanded, LF RF RB LB (a twist t
+#                      is +t/2 on LF and RB, -t/2 on RF and LB)
+#   imu_*_deg          what TELEMETRY reads standing level (pitch nose down +,
+#                      roll right side up +)
+[model.correction]
+com_dx_mm = 0.0
+com_dy_mm = 0.0
+com_dz_mm = 0.0
+sag_deg_per_kg_cm = 0.0
+leg_dz_mm = [0.0, 0.0, 0.0, 0.0]
+imu_pitch_deg = 0.0
+imu_roll_deg = 0.0
+
+# The servo zeros of Kilo's calibration, by legacy joint id 0..15 (the EEPROM
+# dump of 2026-10-10, docs/kilo-eeprom-legacy.md; body/test/test_kilo_eeprom.cpp
+# has the same bytes): servo angle at joint angle 0. They decide where each
+# servo's pulse is clamped (the right hind shoulder stops at -57 degrees).
+#   reseated_rb_shoulder_czp  the right hind shoulder's zero after its upper
+#                      leg was re-seated (docs/rear-up-trick.md section 2:
+#                      offset +12, may end +7..+25): what the rear-up is
+#                      designed for; read from the plays since 2026-11-19, not
+#                      confirmed with `kilo cal show`
+[model.servo]
+czp = [73, 69, 85, 90, 45, 135, 45, 135, 111, 83, 116, 82, 141, 67, 127, 59]
+reseated_rb_shoulder_czp = 88
+
+# The tail: the owner's ruler, 2026-11-16 (docs/rear-up-trick.md section 2).
+# A straight lever whose servo turns it left and right about an axis tipped
+# back; lowest at servo 0.
+#   pivot_*_mm  where the servo's axis meets the mid-plane (9 mm behind the back
+#               shoulder axles, 24 mm above them)
+#   len_mm      pivot to tip        droop_deg  below straight back at servo 0
+#   axis_deg    the axis above straight back
+#   sign        +1: a positive servo angle swings the tip LEFT. NOT KNOWN
+#   g, com_frac the moving part's mass and where along it (ESTIMATES)
+[model.tail]
+pivot_x_mm = -70.5
+pivot_z_mm = 24.0
+len_mm = 94.0
+droop_deg = 18.0
+axis_deg = 50.0
+sign = 1.0
+g = 6.0
+com_frac = 0.5
+
+# The frame's outline, for what may touch the floor in a trick. ESTIMATES
+# (docs/rear-up-trick.md T3, T4): rear end, underside (battery), top at the
+# rear, the Pi's rear edge and highest point, the nose, half the frame's width.
+[model.outline]
+rear_x_mm = -88.0
+belly_z_mm = -24.0
+back_z_mm = 34.0
+pi_rear_x_mm = -55.0
+pi_top_z_mm = 36.0
+nose_x_mm = 110.0
+nose_z_mm = -5.0
+half_width_mm = 30.0
+
+# The frame lump's moment of inertia, as a box of this size (x, y, z mm). ESTIMATE.
+[model.inertia]
+frame_box_mm = [130, 60, 45]
+
+# The ultrasonic sensor in the head (the distance guard, kernel/mind/guard):
+# its height above the floor standing (taken a little low), and the beam's
+# downward tilt past which the floor is in view.
+[model.sensor]
+ultrasonic_height_mm = 80
+ultrasonic_floor_tilt_deg = 12
+
+# VIEWS: numbers a part of Kilo's software fitted for itself that DISAGREE with
+# the model above, kept as they are until a self-measurement settles them
+# (`kilo model show` lists each against the model; mind/tests/test_one_model.py
+# fails if a view is added or changed without this file). Removing a view makes
+# its user read the model.
+#
+# The long trot's rock (kilo.planner.longtrot TrotFit, kernel/mind/planner/longtrot.h):
+# an inverted pendulum about the diagonal, fitted to the floor recordings of
+# 2026-11-15..17 (mind/tests/stridesim.py).
+#   com_x_mm   the centre of mass ahead of the shoulders' middle (the model: 7.4 at STANCE)
+#   com_h_mm   its height above the floor (the model: 79.2 at STANCE)
+#   extra_ms, clamp_deg   the pendulum's own: the diagonal rocks as if it lasted
+#              this much longer; the tip's clamp. No counterpart in the model.
+[model.views.longtrot]
+com_x_mm = 3.5
+com_h_mm = 79.0
+extra_ms = 120.0
+clamp_deg = 2.3
+
+# The tricks' dynamics (kilo.tricks.dynamics FITTED; the rear-up is designed
+# and checked on it): fitted to the recorded rear-up plays of 2026-11-19..21
+# (mind/tests/fixtures/rear_up_2026_11_21.json; docs/rear-up-trick.md).
+# imu_pitch_deg in TELEMETRY's sense (nose down +): STAND reads 1.9 nose down
+# (2026-11-17 and the walks); it is the tricks' default too, not only the fit's.
+[model.views.tricks]
+com_dx_mm = -5.5
+com_dy_mm = -5.0
+sag_deg_per_kg_cm = 4.0
+tail_droop_deg = 16.0
+imu_pitch_deg = 1.9
+imu_roll_deg = 2.0
+
+# The rigid 3-D model's fit of the two falls of 2026-11-17, before the right
+# hind shoulder was re-seated (kilo.tricks.rear_up AS_RECORDED, with [model.servo] czp).
+[model.views.tricks_rigid]
+com_dy_mm = -2.0
+
+# What each number is, for `kilo model show`: [what, unit, where it comes from].
+# Python only (MODEL_ABOUT); keys are "name" for [model] and "table.name" below it.
+[model.about]
+foot_r_mm = ["the floor is this far below the centre of a foot's disc", "mm", "measured 2026-10-11"]
+reach_frac = ["a leg stretches to at most this share of its full length", "", "the body's limit (core/ik.h)"]
+knee_max_deg = ["a knee bends at most this far", "deg", "the body's limit (core/ik.h)"]
+stand_com_x_mm = ["centre of mass ahead of the shoulders' middle, standing", "mm", "measured 2026-11-14 (the owner, Pi mounted)"]
+body_mass = ["frame, head and tail servos: grams at x, y, z", "g, mm", "fitted so the whole gives the measured centre of mass (2026-11-14)"]
+battery_mass = ["the battery pack", "g, mm", "weighed 2026-10-15; its place the owner's 2026-11-14"]
+pi_mass = ["the Raspberry Pi on the back", "g, mm", "catalogue weight; its place estimated"]
+upper_leg_g = ["one upper leg with its knee servo", "g", "estimate"]
+upper_leg_at = ["...its centre this share of the way from shoulder to knee", "", "estimate"]
+lower_leg_g = ["one lower leg and foot", "g", "estimate"]
+lower_leg_at = ["...its centre this share of the way from knee to foot", "", "estimate"]
+servo_lag_ms = ["a leg starts moving this long after it is told", "ms", "fitted to the floor recordings of 2026-11-15"]
+servo_tau_ms = ["...and then closes 63 % of the gap in this time", "ms", "fitted to the floor recordings of 2026-11-15"]
+"correction.com_dx_mm" = ["centre of mass further forward than the model above", "mm", "nothing applied yet"]
+"correction.com_dy_mm" = ["centre of mass further to the left", "mm", "nothing applied yet"]
+"correction.com_dz_mm" = ["centre of mass higher", "mm", "nothing applied yet"]
+"correction.sag_deg_per_kg_cm" = ["how much the leg servos give under load", "deg per kg cm", "nothing applied yet"]
+"correction.leg_dz_mm" = ["each leg longer than commanded (left front, right front, right back, left back)", "mm", "nothing applied yet"]
+"correction.imu_pitch_deg" = ["what the tilt sensor reads nose-down when he stands level", "deg", "nothing applied yet"]
+"correction.imu_roll_deg" = ["...and rolled (right side up +)", "deg", "nothing applied yet"]
+"servo.czp" = ["each servo's zero, by joint id 0..15", "servo deg", "Kilo's EEPROM, read 2026-10-10"]
+"servo.reseated_rb_shoulder_czp" = ["the right hind shoulder's zero after it was re-seated", "servo deg", "read from the plays since 2026-11-19, not confirmed"]
+"tail.pivot_x_mm" = ["the tail's pivot, forward of the shoulders' middle", "mm", "the owner's ruler, 2026-11-16"]
+"tail.pivot_z_mm" = ["...and above the shoulder axles", "mm", "the owner's ruler, 2026-11-16"]
+"tail.len_mm" = ["the tail, pivot to tip", "mm", "the owner's ruler, 2026-11-16"]
+"tail.droop_deg" = ["the tail points this far below straight back at rest", "deg", "the owner's ruler, 2026-11-16"]
+"tail.axis_deg" = ["the tail servo's axis above straight back", "deg", "the owner's description, 2026-11-16"]
+"tail.sign" = ["+1: a positive tail angle swings the tip left", "", "NOT KNOWN"]
+"tail.g" = ["the tail's moving part", "g", "estimate"]
+"tail.com_frac" = ["...its centre this share of the way along", "", "estimate"]
+"outline.rear_x_mm" = ["the frame's back end", "mm", "estimate"]
+"outline.belly_z_mm" = ["the underside (battery)", "mm", "estimate"]
+"outline.back_z_mm" = ["the top of the frame at the rear", "mm", "estimate"]
+"outline.pi_rear_x_mm" = ["the Pi's rear edge", "mm", "estimate"]
+"outline.pi_top_z_mm" = ["the Pi's highest point", "mm", "estimate"]
+"outline.nose_x_mm" = ["the nose, forward", "mm", "estimate"]
+"outline.nose_z_mm" = ["the nose, height", "mm", "estimate"]
+"outline.half_width_mm" = ["half the frame's width", "mm", "estimate"]
+"inertia.frame_box_mm" = ["the frame's mass spread as a box this size", "mm", "estimate"]
+"sensor.ultrasonic_height_mm" = ["the distance sensor above the floor, standing", "mm", "estimate (taken a little low)"]
+"sensor.ultrasonic_floor_tilt_deg" = ["looking down more than this, the sensor sees the floor", "deg", "estimate"]
+"views.longtrot" = ["the long trot's own fit of how he rocks on a diagonal", "", "floor recordings of 2026-11-15..17"]
+"views.tricks" = ["the tricks' own fit (the rear-up is designed on it)", "", "rear-up plays of 2026-11-19..21"]
+"views.tricks_rigid" = ["the rear-up's first, rigid fit, before the right hind shoulder was re-seated", "", "the two falls of 2026-11-17"]
+
 # ---------------------------------------------------------------------------
 # Laptop interface: the host channel (docs/fast-boot.md §5, phase P2).
 #

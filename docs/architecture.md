@@ -1766,6 +1766,66 @@ image to the C++ mind, which resets the body over GPIO4, programs it over
 STK500v1 and verifies by HELLO (docs/fast-boot.md §6; the sequence is in
 Appendix F).
 
+### One model
+
+Everything the software knows about Kilo's body is written in one file,
+`protocol/spec.toml`: the `LEG_*` parameters (leg lengths, the feet's
+spacing) and the `[model]` section. Since 2026-11-21 no other file may type
+such a number again (`mind/tests/test_one_model.py` fails if one does).
+
+**What is in it.** The masses and where they sit, the legs' reach, how late
+the servos follow (`servo_lag_ms`, `servo_tau_ms`); Kilo's servo zeros
+(`[model.servo]`), his tail (`[model.tail]`), the outline of his frame
+(`[model.outline]`), the frame's inertia, where the distance sensor sits; and
+`[model.correction]`: the corrections a self-measurement finds (centre of
+mass, how much the legs give, legs a little long or short, what the tilt
+sensor reads when he stands level). The corrections are all zero until a
+measurement is applied. `[model.about]` says for every number what it is and
+where it came from; `kilo model show` prints it in plain words.
+
+**Who reads it.** The generator (`protocol/gen.py`) turns the file into
+constants for C and Python; `BodyModel` (`mind/kilo/planner/model.py`, and
+`kernel/mind/planner/model.h` for the Pi) is the model built from them. The
+walk planner, the self-measurement, the virtual body, the tricks' models
+(`mind/kilo/tricks/`: sagittal, stance, dynamics, rear_up), the long trot and
+the distance guard all take their body numbers from there. The body firmware
+reads the same leg parameters for its own leg arithmetic, and a test checks
+that it and the mind compute the same leg (within 0.15 degrees; measured
+0.07).
+
+**The views that remain.** Three parts of the mind had fitted numbers for
+themselves that disagree with the model. They keep them for now, because
+nothing may change what Kilo does before the next measurement on Kilo, but
+they now live in the same file as named views (`[model.views]`), so the
+disagreement is visible in one place:
+
+| View | Used by | What disagrees |
+|---|---|---|
+| `longtrot` | the long trot's foot placement | centre of mass 3.5 mm ahead of the shoulders' middle (the model: 7.4) |
+| `tricks` | the rear-up's design and checks | centre of mass 5.5 mm further back and 5 mm to the right, legs that give (4 degrees per kg cm), the tail drooping 16 degrees (18), the tilt sensor reading 1.9 degrees nose down and 2 degrees of roll |
+| `tricks_rigid` | the rear-up's check against the falls of 2026-11-17 | centre of mass 2 mm to the right |
+
+Deleting a view's table makes its user read the model. That is a decision
+for after a measurement, one view at a time, with the walk or trick tried
+again on Kilo.
+
+**What is not on the model yet.** The postures (stand, sit, rest), the 13
+stock tricks, the sitting fidgets and getting up after a fall are still
+tables of joint angles (`body/src/core/posture.cpp`, the trick library).
+
+**How a measurement gets in.** Remote key B1 (Kilo measures himself,
+`docs/self-measurement.md`) → `kilo measure fetch` or `kilo measure fit`
+writes a `.fit.json` → `kilo model show --fit FILE` compares it with the
+model and the views → `kilo model apply FILE --dry-run` shows what would be
+written and what it changes for Kilo (where his centre of mass is, each
+walk's margins and leans, whether the rear-up's checks still pass, which
+views the measurement now agrees with) → `kilo model apply FILE` writes
+`protocol/spec.toml` and regenerates everything made from it. It never
+commits and never touches Kilo: the suites are run and the card written
+afterwards, as for any change. A fitted number is left out when the fit
+marks it as not significant or at the fit's limit, or when it is outside
+what is plausible for Kilo.
+
 ---
 
 ## 6. Testing and verification strategy

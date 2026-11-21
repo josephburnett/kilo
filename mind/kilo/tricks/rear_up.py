@@ -74,6 +74,8 @@ from typing import Sequence
 
 import numpy as np
 
+from kilo.planner import model as PM
+
 from . import dynamics as D
 from . import sagittal as S
 from . import stance as T
@@ -108,7 +110,7 @@ DESIGN_CZP = D.DESIGN_CZP
 DESIGN = T.Geometry3(czp=DESIGN_CZP)
 # Kilo before the re-seat (the EEPROM dump of 2026-10-10: the right hind shoulder stops at -57):
 # the rigid model's fit of 2026-11-17, and the trick must stop itself safely on it.
-AS_RECORDED = T.Geometry3(czp=T.KILO_CZP, com_dy=-2.0)
+AS_RECORDED = T.Geometry3(czp=T.KILO_CZP, com_dy=PM.view_numbers("tricks_rigid")["com_dy_mm"])
 REACH_MARGIN = 2.0  # deg: every angle at least this far inside what the servo reaches (DESIGN)
 MIN_KNEE_BEND = 25.0  # the hind knee stays bent at least this much (the leg at most 98 % of its length)
 
@@ -141,9 +143,10 @@ class DesignError(ValueError):
 
 def _leg(g: S.Geometry, front: bool, dxw: float, dzw: float, phi: float) -> tuple[float, float]:
     """The foot's disc centre at world offset (dxw, dzw) from its shoulder
-    axle -> OpenCat (shoulder, knee): the planner's IK (core/ik.h) without
-    its 0.95 reach cap (trick frames are joint angles), the knee bent at
-    least MIN_KNEE_BEND."""
+    axle -> OpenCat (shoulder, knee): the body model's IK (BodyModel.ik, as
+    core/ik.h) with the leg allowed past its 0.95 reach cap (trick frames
+    are joint angles), up to the knee bent at least MIN_KNEE_BEND; a foot
+    out of that reach is an error here, not clamped."""
     xb, zb = S.to_world(dxw, dzw, -phi)
     b = g.body
     l1, l2 = b.l1_mm, b.l2_mm
@@ -151,9 +154,7 @@ def _leg(g: S.Geometry, front: bool, dxw: float, dzw: float, phi: float) -> tupl
     d_max = math.sqrt(l1 * l1 + l2 * l2 + 2 * l1 * l2 * math.cos(math.radians(MIN_KNEE_BEND)))
     if not (b.min_reach_mm - 1e-6 <= d <= d_max + 1e-6 and zb < 0):
         raise DesignError(f"foot ({xb:.0f}, {zb:.0f}) mm out of reach")
-    c = min(1.0, max(-1.0, (d * d - l1 * l1 - l2 * l2) / (2 * l1 * l2)))
-    t2 = math.atan2(math.sqrt(1.0 - c * c) * (1.0 if front else -1.0), c)
-    t1 = math.atan2(xb, -zb) - math.atan2(l2 * math.sin(t2), l1 + l2 * math.cos(t2))
+    t1, t2 = b.ik(PM.LF if front else PM.RB, xb, -zb, reach_mm=d_max + 1e-6)
     sh = -math.degrees(t1)
     kn = 90.0 - math.degrees(t2) if front else -(math.degrees(t2) + 90.0)
     return sh, kn
@@ -221,7 +222,7 @@ def on_feet(name: str, ahead: float, h: float, phi: float, gap: float = FRONT_GA
     axles, the axles ``h`` up, pitch ``phi``; the front feet ``gap`` mm in
     front of the hind feet."""
     X = HIND_X0 - ahead
-    fx = X + S.to_world(123.0, 0.0, phi)[0]
+    fx = X + S.to_world(D.BODY.length_mm, 0.0, phi)[0]  # the front axles, the body's length ahead
     return Spec(name, phi=phi, h=h, hind_dx=ahead, front=HIND_X0 + gap - fx, head=head)
 
 

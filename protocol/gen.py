@@ -370,9 +370,36 @@ def validate_shared(spec: dict) -> None:
     if not (low < bt["flash_min_mv"] <= 0xFFFF and 0 < bt["trick_min_mv"] <= 0xFFFF):
         raise SpecError("battery: flash_min_mv above BATT_LOW_MV's default; both u16")
     md = spec["model"]
-    if set(md) != MODEL_KEYS:
+    if set(md) != MODEL_KEYS | set(MODEL_TABLES) | {"views", "about"}:
         raise SpecError("model: unexpected or missing keys")
+    for t, keys in MODEL_TABLES.items():
+        if set(md[t]) != set(keys):
+            raise SpecError(f"model.{t}: unexpected or missing keys")
+        for k, n in keys.items():
+            v = md[t][k]
+            vals = v if n else [v]
+            if (n and (not isinstance(v, list) or len(v) != n)) or \
+                    any(not isinstance(x, (int, float)) or isinstance(x, bool) for x in vals):
+                raise SpecError(f"model.{t}.{k}: " + (f"{n} numbers" if n else "a number"))
+    if any(not isinstance(x, int) or not 0 <= x <= 180 for x in md["servo"]["czp"]):
+        raise SpecError("model.servo.czp: servo degrees 0..180, integers")
+    for name, view in md["views"].items():
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", name) or not isinstance(view, dict) or not view:
+            raise SpecError(f"model.views.{name}: a table of numbers")
+        for k, v in view.items():
+            if not isinstance(v, (int, float)) or isinstance(v, bool):
+                raise SpecError(f"model.views.{name}.{k}: a number")
+    known = set(MODEL_KEYS) | {f"{t}.{k}" for t, keys in MODEL_TABLES.items() for k in keys} \
+        | {f"views.{n}" for n in md["views"]}
+    if set(md["about"]) != known:
+        raise SpecError("model.about: one entry per model number and per view; off: "
+                        + ", ".join(sorted(set(md["about"]) ^ known)))
+    for k, v in md["about"].items():
+        if not isinstance(v, list) or len(v) != 3 or not all(isinstance(x, str) for x in v):
+            raise SpecError(f"model.about.{k}: [what, unit, where it comes from]")
     for k, v in md.items():
+        if k in MODEL_TABLES or k in ("views", "about"):
+            continue
         if k.endswith("_mass"):
             if len(v) != 4 or not v[0] > 0:
                 raise SpecError(f"model.{k}: [grams > 0, x, y, z]")
@@ -384,6 +411,30 @@ def validate_shared(spec: dict) -> None:
 
 MODEL_KEYS = {"foot_r_mm", "reach_frac", "knee_max_deg", "stand_com_x_mm", "body_mass", "battery_mass", "pi_mass",
               "upper_leg_g", "upper_leg_at", "lower_leg_g", "lower_leg_at", "servo_lag_ms", "servo_tau_ms"}
+# [model.<table>]: key -> 0 for a number, n for a list of n numbers. [model.views.<name>] are free tables of
+# numbers; [model.about] has [what, unit, source] for every number and view (Python only).
+MODEL_TABLES = {
+    "correction": {"com_dx_mm": 0, "com_dy_mm": 0, "com_dz_mm": 0, "sag_deg_per_kg_cm": 0, "leg_dz_mm": 4,
+                   "imu_pitch_deg": 0, "imu_roll_deg": 0},
+    "servo": {"czp": 16, "reseated_rb_shoulder_czp": 0},
+    "tail": {"pivot_x_mm": 0, "pivot_z_mm": 0, "len_mm": 0, "droop_deg": 0, "axis_deg": 0, "sign": 0, "g": 0,
+             "com_frac": 0},
+    "outline": {"rear_x_mm": 0, "belly_z_mm": 0, "back_z_mm": 0, "pi_rear_x_mm": 0, "pi_top_z_mm": 0,
+                "nose_x_mm": 0, "nose_z_mm": 0, "half_width_mm": 0},
+    "inertia": {"frame_box_mm": 3},
+    "sensor": {"ultrasonic_height_mm": 0, "ultrasonic_floor_tilt_deg": 0},
+}
+
+
+def model_flat(md: dict) -> list[tuple[str, object]]:
+    """[model]'s numbers as (NAME, value) in the spec's order: the top-level keys, then TABLE_KEY for
+    each table of MODEL_TABLES, then VIEW_<NAME>_KEY for each view."""
+    out = [(k.upper(), v) for k, v in md.items() if k in MODEL_KEYS]
+    for t in MODEL_TABLES:
+        out += [(f"{t}_{k}".upper(), v) for k, v in md[t].items()]
+    for name, view in md["views"].items():
+        out += [(f"view_{name}_{k}".upper(), v) for k, v in view.items()]
+    return out
 
 
 def model_fixed(md: dict) -> tuple[int, int]:
@@ -747,11 +798,16 @@ def gen_c_shared(spec: dict, w) -> None:
     md = spec["model"]
     w("/* The body model (spec [model]; the leg lengths are the LEG_* params' defaults): the mind's planner")
     w("   (planner/model.h), a mass as a {grams, x, y, z} initializer. The only floats in this header. */")
-    for k, v in md.items():
+    top = len(MODEL_KEYS)
+    for i, (k, v) in enumerate(model_flat(md)):
+        if i == top:
+            w("/* One model: the corrections a self-measurement finds (CORRECTION_*), Kilo's servo zeros, tail,")
+            w("   outline, inertia box and sensor, and the VIEW_<name>_* numbers a part of the mind fitted for")
+            w("   itself that disagree with the model (spec [model.views]). Used by the mind only. */")
         if isinstance(v, list):
-            w(f"#define KILO_MODEL_{k.upper()}_INIT {{{', '.join(num(x) for x in v)}}}")
+            w(f"#define KILO_MODEL_{k}_INIT {{{', '.join(num(x) for x in v)}}}")
         else:
-            w(f"#define KILO_MODEL_{k.upper()} {v!r}")
+            w(f"#define KILO_MODEL_{k} {num(v) if i >= top else repr(v)}")
     reach_256, knee_q12 = model_fixed(md)
     w("/* The body's IK limits in integers: d <= REACH_256 / 256 (L1 + L2); d^2 >= L1^2 + L2^2 - L1 L2 KNEE_2COS_Q12")
     w("   / 4096, the knee bend <= KNEE_MAX_DEG. */")
@@ -1408,8 +1464,21 @@ def gen_py_shared(spec: dict, w) -> None:
       + ", ".join(f"({v}, {p})" for v, p in zip(bt["curve_mv"], bt["curve_pct"])) + ")")
     w("# The body model (spec [model]; the leg lengths are the LEG_* params' defaults): kilo.planner.model.BodyModel;")
     w("# a mass is (grams, x, y, z).")
-    for k, v in spec["model"].items():
-        w(f"MODEL_{k.upper()} = {tuple(v)!r}" if isinstance(v, list) else f"MODEL_{k.upper()} = {v!r}")
+    md = spec["model"]
+    for i, (k, v) in enumerate(model_flat(md)):
+        if i == len(MODEL_KEYS):
+            w("# One model: the corrections a self-measurement finds, Kilo's servo zeros, tail, outline, inertia box")
+            w("# and sensor; MODEL_VIEW_<NAME>_*: numbers a part of the mind fitted for itself that disagree with the")
+            w("# model (spec [model.views]), also as MODEL_VIEWS; MODEL_ABOUT: key -> (what, unit, source).")
+        w(f"MODEL_{k} = {tuple(v)!r}" if isinstance(v, list) else f"MODEL_{k} = {v!r}")
+    w("MODEL_VIEWS: dict[str, dict[str, float]] = {")
+    for name, view in md["views"].items():
+        w(f"    {name!r}: {{" + ", ".join(f"{k!r}: {v!r}" for k, v in view.items()) + "},")
+    w("}")
+    w("MODEL_ABOUT: dict[str, tuple[str, str, str]] = {")
+    for k, v in md["about"].items():
+        w(f"    {k!r}: {tuple(v)!r},")
+    w("}")
     w("")
     w("")
 

@@ -91,8 +91,10 @@ constexpr bool kDefaultOn = true;         // the kernel's default (kilo guard on
 constexpr double kMaxRangeMm = 2500;      // beyond: not a reading (the recordings: echoes to 3.4 m, outliers)
 constexpr double kWindowS = 0.30;         // readings this recent make the median (3 at 12.5 Hz)
 constexpr double kStaleS = 0.40;          // no reading for this long: no range (green)
-constexpr double kFloorTiltDeg = 12;      // beam tilted down more than this: the floor is in view
-constexpr double kSensorHeightMm = 80;    // the sensor above the floor, standing (a little low: the floor nearer)
+constexpr double kFloorTiltDeg = KILO_MODEL_SENSOR_ULTRASONIC_FLOOR_TILT_DEG;  // beam tilted down more than this
+                                          //   (12): the floor is in view (the body model, spec [model.sensor])
+constexpr double kSensorHeightMm = KILO_MODEL_SENSOR_ULTRASONIC_HEIGHT_MM;  // the sensor above the floor, standing
+                                          //   (80, a little low: the floor nearer; spec [model.sensor])
 constexpr double kFloorShare = 0.75;      // ... readings from this share of the floor's distance on are the floor
 constexpr double kCloseHoldS = 1.0;       // no echo right after something very close: the range holds this long
 constexpr double kStopGapMm = 100;        // left between the sensor and the obstacle after the stop

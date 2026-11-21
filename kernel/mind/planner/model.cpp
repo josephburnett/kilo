@@ -56,7 +56,7 @@ V3 BodyModel::com(const real xs[kLegs], const real zs[kLegs]) const {
     sz -= mu * uz + ml * lz;
     m += mu + ml;
   }
-  return {sx / m, sy / m, sz / m};
+  return {sx / m + com_dx_mm, sy / m + com_dy_mm, sz / m + com_dz_mm};
 }
 
 void plane_coeffs(real pitch_deg, real roll_deg, real* a, real* b) {

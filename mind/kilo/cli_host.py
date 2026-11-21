@@ -589,7 +589,7 @@ def parse_log_argv(argv: list[str], host: str | None, key: str | None = None) ->
 
 
 # Commands run on this machine alone; the others talk to Kilo, without --host found by mDNS (kilo.mdns).
-LOCAL_ONLY = ("key", "find", "card")
+LOCAL_ONLY = ("key", "find", "card", "model")
 
 
 def wants_host(args: argparse.Namespace) -> bool:

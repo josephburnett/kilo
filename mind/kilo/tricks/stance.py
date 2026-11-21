@@ -48,6 +48,7 @@ from typing import Mapping, Sequence
 import numpy as np
 
 from kilo.calibration import angle_window
+from kilo.planner.model import BodyModel, Outline, view_numbers
 
 from . import sagittal as S
 from .model import JOINT_IDS, JOINT_LIMITS
@@ -61,7 +62,7 @@ from .model import JOINT_IDS, JOINT_LIMITS
 # recalibrates (kilo cal set ...), `kilo cal show` gives the new offsets and
 # CZP = 90 + dir * mid + dir * offset.
 # JOINT_DIR and the a2p, b and pulse range: kilo.calibration's table (angle_window).
-KILO_CZP = (73, 69, 85, 90, 45, 135, 45, 135, 111, 83, 116, 82, 141, 67, 127, 59)  # by legacy joint id
+KILO_CZP = BodyModel().czp  # by legacy joint id: the body model's (protocol/spec.toml [model.servo])
 
 LEGS = ("lf", "rf", "rb", "lb")
 FRONT = {"lf": True, "rf": True, "rb": False, "lb": False}
@@ -121,9 +122,19 @@ class Geometry3:
     czp: tuple | None = KILO_CZP
     offsets: tuple = ()
     tail_offset: float = 0.0
-    half_width: float = 30.0
-    imu_pitch: float = -1.9
-    com_dy: float = 0.0
+    half_width: float = Outline().half_width_mm
+    imu_pitch: float = -view_numbers("tricks")["imu_pitch_deg"]  # the model's "tricks" view, nose up +
+    com_dy: float = BodyModel().com_dy_mm
+
+    @classmethod
+    def of(cls, body: BodyModel, **kw) -> "Geometry3":
+        """The 3-D geometry of ``body`` (the body model or one of its views):
+        its servo zeros, width, centre-of-mass correction and IMU pitch
+        offset (the model's is TELEMETRY's, nose down +; here nose up +)."""
+        d = dict(g=S.Geometry.of(body), czp=body.czp, half_width=body.outline.half_width_mm,
+                 imu_pitch=-body.imu_pitch_deg, com_dy=body.com_dy_mm)
+        d.update(kw)
+        return cls(**d)
 
     def with_(self, **kw) -> "Geometry3":
         return replace(self, **kw)
@@ -192,8 +203,9 @@ def masses(g3: Geometry3, js: Mapping) -> list[tuple[str, float, np.ndarray]]:
     t0x, _, t0z = S.tail_point(g, 0.0, g.tail_com_frac)
     fx = (b.body.grams * b.body.x - g.tail_g * t0x) / frame_g
     fz = (b.body.grams * b.body.z - g.tail_g * t0z) / frame_g
-    out = [("frame", frame_g, np.array((fx + g.com_dx * total / frame_g, g3.com_dy * total / frame_g,
-                                        fz + g.com_dz * total / frame_g))),
+    dx, dy, dz = g.com_dx, g3.com_dy, g.com_dz  # the centre-of-mass correction (the model's unless given)
+    out = [("frame", frame_g, np.array((fx + dx * total / frame_g, dy * total / frame_g,
+                                        fz + dz * total / frame_g))),
            ("battery", b.battery.grams, np.array((b.battery.x, 0.0, b.battery.z))),
            ("pi", b.pi.grams, np.array((b.pi.x, 0.0, b.pi.z)))]
     for leg in LEGS:

@@ -71,6 +71,9 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
+from kilo.calibration import POSTURES
+from kilo.planner.model import BodyModel, view_numbers
+
 from . import model as M
 from . import sagittal as S
 from . import stance as T
@@ -81,18 +84,21 @@ JOINTS = tuple(M.JOINT_NAMES[j] for j in M.CANONICAL)   # the 11 driven joints, 
 LEGS = T.LEGS                      # lf rf rb lb
 G_MM_PER_KG_CM = 9810.0 * 10000.0  # g mm^2/s^2 per kg cm (a torque of 1 kg cm)
 KIN_EVERY = 2                      # physics steps per kinematics update
-SLEW_DEG_TICK = 10.0               # the body's safety slew
+# Every number about Kilo's body here is the body model's (kilo.planner.model.BodyModel, from
+# protocol/spec.toml [model]); FITTED is its "tricks" view (mind/tests/test_one_model.py).
+BODY = BodyModel()
+SLEW_DEG_TICK = BODY.slew_deg_per_tick  # the body's safety slew (10 deg a tick)
 FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "rear_up_2026_11_21.json"
 
-# The body's postures (body/src/core/posture.cpp) as joint dicts.
-STAND = {"head_pan": 0, "head_tilt": 0, "tail": 0, "lf_shoulder": 30, "rf_shoulder": 30, "rb_shoulder": -30,
-         "lb_shoulder": -30, "lf_knee": 30, "rf_knee": 30, "rb_knee": -30, "lb_knee": -30}
-SIT = {"head_pan": 10, "head_tilt": -20, "tail": -60, "lf_shoulder": 30, "rf_shoulder": 30, "rb_shoulder": -90,
-       "lb_shoulder": -90, "lf_knee": 60, "rf_knee": 60, "rb_knee": 45, "lb_knee": 45}
+# The body's postures (body/src/core/posture.cpp; kilo.calibration.POSTURES is the copy the tests
+# tie to it) as joint dicts.
+STAND = dict(zip(JOINTS, POSTURES["stand"]))
+SIT = dict(zip(JOINTS, POSTURES["sit"]))
 
 # The right hind shoulder's servo zero after its upper leg was re-seated (docs/rear-up-trick.md
 # section 2: calibration offset +12, the range it may end in +7..+25): it reaches -80 like the left.
-DESIGN_CZP = tuple(88 if j == M.JOINT_IDS["rb_shoulder"] else v for j, v in enumerate(T.KILO_CZP))
+assert M.JOINT_IDS["rb_shoulder"] == 10  # BodyModel.czp_reseated's joint
+DESIGN_CZP = BODY.czp_reseated
 
 
 # ---- parameters -----------------------------------------------------------------------------------
@@ -100,22 +106,36 @@ DESIGN_CZP = tuple(88 if j == M.JOINT_IDS["rb_shoulder"] else v for j, v in enum
 class Params:
     """What the model is uncertain about. Defaults: kilo.tricks.stance's
     nominal values (the re-seated calibration), stiff servos."""
-    com_dx: float = 0.0          # mm: the whole robot's centre of mass moved forward (body frame)
-    com_dy: float = 0.0          # ...to the left
-    com_dz: float = 0.0          # ...up
-    sag: float = 0.0             # deg per kg cm: every leg servo's compliance under load
+    com_dx: float = BODY.com_dx_mm  # mm: the whole robot's centre of mass moved forward (body frame; the model's)
+    com_dy: float = BODY.com_dy_mm  # ...to the left
+    com_dz: float = BODY.com_dz_mm  # ...up
+    sag: float = BODY.sag_deg_per_kg_cm  # deg per kg cm: every leg servo's compliance under load
     mu: float = 0.5              # friction, feet and tail on the floor
-    lag_ms: float = 50.0         # servo dead time (planner model, fitted 2026-11-15)
-    tau_ms: float = 70.0         # servo first-order time constant (ditto)
+    lag_ms: float = BODY.servo_lag_ms  # servo dead time (the body model's, fitted 2026-11-15: 50)
+    tau_ms: float = BODY.servo_tau_ms  # servo first-order time constant (ditto: 70)
     czp: tuple = DESIGN_CZP      # the servo zeros: the pulse clamp (stance.KILO_CZP: before the re-seat)
-    tail_len: float = 94.0
-    tail_droop_deg: float = 18.0
-    belly_z: float = -24.0       # the frame's underside at its rear corner (an ESTIMATE)
+    tail_len: float = BODY.tail.len_mm
+    tail_droop_deg: float = BODY.tail.droop_deg
+    belly_z: float = BODY.outline.belly_z_mm  # the frame's underside at its rear corner (an ESTIMATE)
     offsets: tuple = ()          # (joint, deg): the joint really sits this far off what it is sent
-    imu_pitch: float = -1.9      # TELEMETRY nose up minus the model's, deg (STAND reads -1.9)
+    # TELEMETRY nose up minus the model's, deg (STAND reads -1.9): the "tricks" view's, the tricks' default too
+    imu_pitch: float = -view_numbers("tricks")["imu_pitch_deg"]
     imu_roll: float = 0.0
     k_mm: float = 3.0e6          # contact stiffness, g/s^2 (3 N/mm)
     c_mm: float = 1.5e4          # contact damping, g/s
+
+    @classmethod
+    def of(cls, body: BodyModel, **kw) -> "Params":
+        """The parameters as ``body`` (the body model or one of its views) has them: its
+        centre-of-mass correction, the legs' give, the IMU's offsets (TELEMETRY's pitch is nose
+        down +, this module's nose up +), the servo response, the tail and the underside; the
+        servo zeros as re-seated."""
+        d = dict(com_dx=body.com_dx_mm, com_dy=body.com_dy_mm, com_dz=body.com_dz_mm, sag=body.sag_deg_per_kg_cm,
+                 lag_ms=body.servo_lag_ms, tau_ms=body.servo_tau_ms, czp=body.czp_reseated,
+                 tail_len=body.tail.len_mm, tail_droop_deg=body.tail.droop_deg, belly_z=body.outline.belly_z_mm,
+                 imu_pitch=-body.imu_pitch_deg, imu_roll=body.imu_roll_deg)
+        d.update(kw)
+        return cls(**d)
 
     def with_(self, **kw) -> "Params":
         return replace(self, **kw)
@@ -128,7 +148,10 @@ class Params:
 
 NOMINAL = Params()
 # Fitted to the recorded plays (``validate``; the module's docstring).
-FITTED = Params(com_dx=-5.5, com_dy=-5.0, sag=4.0, tail_droop_deg=16.0, imu_roll=2.0)
+# The numbers are the body model's "tricks" view (protocol/spec.toml [model.views.tricks]: the
+# centre of mass 5.5 mm back and 5 mm right, sag 4, the tail's droop 16, an IMU roll offset of 2):
+# they disagree with the model's own and stay the tricks' until a self-measurement settles them.
+FITTED = Params.of(BODY.view("tricks"))
 
 
 def bands(p: Params | None = None) -> list[tuple[str, Params]]:
@@ -180,10 +203,11 @@ class Kin:
         self.radius = np.array([self.r] * 4 + [0.0] * 4 + [0.0] + [rr for _, _, rr in self.fixed_pts])
         self.n = len(self.labels)
         self.fixed_P = np.array([q for _, q, _ in self.fixed_pts])
-        # the frame lump as a box (ESTIMATE 130 x 60 x 45 mm), the rest as points
+        # the frame lump as a box (the model's frame_box_mm, an ESTIMATE: 130 x 60 x 45 mm), the rest as points
         fw = self.fixed_m[0][0]
-        self.I_box = np.diag([fw / 12 * (60 ** 2 + 45 ** 2), fw / 12 * (130 ** 2 + 45 ** 2),
-                              fw / 12 * (130 ** 2 + 60 ** 2)])
+        bx, by, bz = b.frame_box_mm
+        self.I_box = np.diag([fw / 12 * (by ** 2 + bz ** 2), fw / 12 * (bx ** 2 + bz ** 2),
+                              fw / 12 * (bx ** 2 + by ** 2)])
         self.total = sum(w for w, _ in self.fixed_m) + 4 * (self.upper_g + self.lower_g) + self.tail_g
         self.reach = {name: T.reach(M.JOINT_IDS[name], p.czp) if p.czp is not None
                       else M.JOINT_LIMITS[M.JOINT_IDS[name]] for name in JOINTS}
