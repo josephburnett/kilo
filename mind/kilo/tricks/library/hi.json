@@ -1,7 +1,7 @@
 {
   "name": "hi",
   "source": {
-    "file": "src/InstinctNybble.h",
+    "file": "legacy/InstinctNybble.h",
     "legacy_name": "hi",
     "kind": "behaviour",
     "period": -6,

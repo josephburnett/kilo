@@ -1,7 +1,7 @@
 {
   "name": "pee",
   "source": {
-    "file": "src/InstinctNybble.h",
+    "file": "legacy/InstinctNybble.h",
     "legacy_name": "pee",
     "kind": "behaviour",
     "period": -5,

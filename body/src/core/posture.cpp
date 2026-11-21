@@ -15,7 +15,7 @@ struct PostureRow {
   int8_t roll, pitch;  // rc rows (below): dur and hold, ticks
 };
 
-// The legacy recovery behaviour `rc` (src/InstinctNybble.h; legacy
+// The legacy recovery behaviour `rc` (legacy/InstinctNybble.h; legacy
 // reaction.h plays it whenever |roll| > 90 deg, mirrored at random) is rows
 // RC_ROW.. of the same table, converted the way the mind's importer converts
 // behaviours (mind/kilo/tricks/legacy.py: dur = ceil(round(maxDelta /

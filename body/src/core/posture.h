@@ -1,4 +1,4 @@
-// posture: the built-in postures (PROGMEM), from src/InstinctNybble.h.
+// posture: the built-in postures (PROGMEM), from legacy/InstinctNybble.h.
 //
 // Ids are the SET_POSTURE values of the protocol (Appendix E). LIMP has no
 // angles (every channel full-off). STANCE (P2) has no table either: its

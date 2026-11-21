@@ -1,7 +1,7 @@
 {
   "name": "push_up",
   "source": {
-    "file": "src/InstinctNybble.h",
+    "file": "legacy/InstinctNybble.h",
     "legacy_name": "pu",
     "kind": "behaviour",
     "period": -6,

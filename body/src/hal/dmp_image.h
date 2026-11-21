@@ -1,5 +1,5 @@
 // The InvenSense MotionApps V6.12 DMP firmware image (3062 B), copied byte for
-// byte from src/mpu6050/MPU6050_6Axis_MotionApps_V6_12.h (dmpMemory[]).
+// byte from legacy/mpu6050/MPU6050_6Axis_MotionApps_V6_12.h (dmpMemory[]).
 // It is uploaded into the MPU6050's DMP memory in 16 B chunks at boot
 // (hal/mpu6050.cpp). It lives in flash (PROGMEM): it is 1.5x the size of RAM.
 // body/test/test_dmp_image.cpp re-parses the legacy header and checks that

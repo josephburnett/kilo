@@ -4,7 +4,7 @@
 #include "posture.h"
 
 // ---- Per-joint gains -----------------------------------------------------
-// The legacy adaptiveParameterArray {rollFactor, pitchFactor} (src/motion.h:
+// The legacy adaptiveParameterArray {rollFactor, pitchFactor} (legacy/motion.h:
 // panF 60, tiltF 60, uRF 60, uPF 30, lRF = -1.5 uRF, lPF = -1.5 uPF), which
 // Kilo's legacy EEPROM holds byte for byte at ADAPT_PARAM (128). Units:
 // joint degrees per 57.3 degrees of tilt (legacy divides by 57.3 through
@@ -18,7 +18,7 @@ static const int8_t GAIN[DRIVEN_COUNT][2] PROGMEM = {
 };
 
 // ---- The mapping ---------------------------------------------------------
-// Legacy adjust(i) (src/motion.h), for a posture (postureOrWalkingFactor 1):
+// Legacy adjust(i) (legacy/motion.h), for a posture (postureOrWalkingFactor 1):
 //   rollAdj = |dR| * rF * (1.2 on one side)   for i == 1 (tilt) and legs (i > 3)
 //           =  dR  * rF                       for pan and tail
 //       side: leftQ = (i - 1) % 4 > 1 gets 1.2 when dR > 0, the right side when dR < 0

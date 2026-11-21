@@ -35,10 +35,10 @@ JOINT_NAMES = {j.id: j.name for j in P.JOINT_INFO.values() if j.driven}
 JOINT_IDS = {n: j for j, n in JOINT_NAMES.items()}
 
 # Joint limits in degrees for the driven joints: the spec's [[joints]] (the
-# body's joints.cpp reads the same; from src/OpenCat.h angleLimit[]).
+# body's joints.cpp reads the same; from the original firmware's angleLimit[] in OpenCat.h).
 JOINT_LIMITS = {j.id: (j.lo, j.hi) for j in P.JOINT_INFO.values() if j.driven}
 
-# Mirror rule, from legacy Skill::mirror() (src/skill.h): negate head pan (0)
+# Mirror rule, from legacy Skill::mirror() (legacy/skill.h): negate head pan (0)
 # and tail (2), swap the L/R columns (8,9) (10,11) (12,13) (14,15) (legacy also
 # swaps 4-7, which Nybble never drives), and negate the expected roll.
 # Head tilt is left alone. Legacy mirrors on a trailing 'R' in the skill name

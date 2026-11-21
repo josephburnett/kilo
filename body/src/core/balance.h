@@ -15,7 +15,7 @@
 // Joint-space owners (IDLE postures; tricks with BALANCE later) add
 // balance_joint(k) to each joint's base angle, after the owner/crossfade
 // stage and before limits and slew. The per-joint gains are the legacy
-// adaptiveParameterArray (src/motion.h, also Kilo's EEPROM ADAPT_PARAM @128),
+// adaptiveParameterArray (legacy/motion.h, also Kilo's EEPROM ADAPT_PARAM @128),
 // applied the way legacy adjust() applied them, including its roll
 // asymmetry: legs and head tilt get |roll| times their roll factor (a
 // symmetric crouch) with 1.2x on one side. balance.cpp has the details and

@@ -1,6 +1,6 @@
-"""Parser for the legacy OpenCat skill tables (src/InstinctNybble.h).
+"""Parser for the legacy OpenCat skill tables (legacy/InstinctNybble.h).
 
-Array layout (src/skill.h dataLen()/formatSkill(), all int8):
+Array layout (legacy/skill.h dataLen()/formatSkill(), all int8):
 
     header  period, roll, pitch, angle_ratio            (4 B)
             + loop_start, loop_end, loop_cycles         (3 B more if period < 0)
@@ -211,7 +211,7 @@ def _nearest_posture(angles: tuple, tables: dict) -> tuple[Posture, float]:
 
 def to_trick(skill: LegacySkill, name: str | None = None,
              skills: dict[str, LegacySkill] | None = None,
-             source_file: str = "src/InstinctNybble.h") -> Trick:
+             source_file: str = "legacy/InstinctNybble.h") -> Trick:
     """Map a legacy skill onto a Kilo Trick. `skills` (the whole file) supplies
     the start pose (`up`) and the posture tables used for end_posture."""
     skills = skills or {}
