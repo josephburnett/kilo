@@ -13,41 +13,90 @@ is not measured.
 
 ## Light sleep
 
-Press **A7** (sleep, column A, top row). Kilo stops, lies down (REST) and
-then, if **nothing else happens for 30 seconds**, goes to light sleep:
+Press **A7** (sleep, column A, top row). Kilo stops, lies down (REST), and
+**about 3 seconds later, once he lies still, the servos go off** (the
+body's LIMP). From then on he is inert, like a soft toy: pick him up, turn
+him over, and nothing moves, because in LIMP the body's fall reflex is off
+too. He stays like that until you press a key that moves him. Then, if
+**nothing else happens for 30 seconds**, the Pi goes to light sleep as
+well:
 
-| What | Light sleep |
-|---|---|
-| Servos | off (the body's LIMP: every servo output off). He is already lying down, so nothing falls: the body's own watchdog does the same, REST then LIMP. |
-| The Pi's CPU | idles. Awake, the main loop runs 900 times a second and never stops; asleep, it runs every 10 ms and waits in `wfi` (the core's clock stops) in between. |
-| Ethernet | kept on while a cable is in (the laptop can still fetch recordings). With no cable, the PHY (the chip's cable driver) powers down and wakes by itself when a cable brings a signal; every 10 s it is fully on for 3 s, in case the laptop's port is asleep in the same way. |
-| The Pi's green LED (ACT) | off, but a short flash every 5 seconds, so that asleep does not look like dead. |
-| The flight recorder | keeps recording (every TELEMETRY: the battery trace is the measurement). If saving to the card is on, it saves what it holds before he sleeps, and goes on saving while asleep. Nothing is lost by sleeping. |
+| What | After A7 (3 s) | Light sleep (30 s more of nothing) |
+|---|---|---|
+| Servos | off (LIMP: every servo output off). He is already lying down, so nothing falls: the body's own watchdog does the same, REST then LIMP. | off |
+| The Pi's CPU | full speed | idles. Awake, the main loop runs 900 times a second and never stops; asleep, it runs every 10 ms and waits in `wfi` (the core's clock stops) in between. |
+| Ethernet | on | kept on while a cable is in (the laptop can still fetch recordings). With no cable, the PHY (the chip's cable driver) powers down and wakes by itself when a cable brings a signal; every 10 s it is fully on for 3 s, in case the laptop's port is asleep in the same way. |
+| The Pi's green LED (ACT) | as awake | off, but a short flash every 5 seconds, so that asleep does not look like dead. |
+| The flight recorder | recording | keeps recording (every TELEMETRY: the battery trace is the measurement). If saving to the card is on, it saves what it holds before he sleeps, and goes on saving while asleep. Nothing is lost by sleeping. |
+| Sound | as awake | stopped; the mew when he wakes |
+
+The servos go off whether or not a laptop is connected. The Pi's part waits
+while one is: a laptop needs the full-speed loop.
+
+The 3 seconds count from when everything has stopped: the walk's planned
+stop, a trick coming down, and the lie-down itself (REST takes half a
+second). If he is turned over before then and the body's fall reflex
+rights him, he ends up standing: then the sleep is called off (he stays
+awake and standing), because going limp from standing would drop him.
 
 The body keeps running: its 50 Hz loop, the IMU, the IR receiver, the
 link and TELEMETRY at 25 a second. That is how the remote still wakes him.
 
-"Nothing happens" means: no key, no laptop connected or asking anything,
-nothing moving. Any of these starts the 30 seconds again. A key that
-moves Kilo (B6, C5, A4, B4, C4, A6, C6, A5, A2) calls the sleep off.
+"Nothing happens" (for the Pi's 30 seconds) means: no key, no laptop
+connected or asking anything, nothing moving. Any of these starts the 30
+seconds again, but none of them turns the servos back on. A key that moves
+Kilo (B6, C5, A4, B4, C4, A6, C6, A5, A2) calls the sleep off.
 
-The 30 seconds are `kSleepAfterUs` in `kernel/mind/power/sleep.h`.
+**He also goes to sleep on his own.** If he lies in REST with the servos on
+and nothing happens for **2 minutes** (no key at all, nothing moving, the
+A5 behaviour not running, no laptop holding him), he does what A7 does: the
+servos off at once, then the Pi's light sleep 30 seconds later. The log
+says `power: lying idle in REST for 2 min: asleep as after A7`. A laptop
+that is only connected or checking his status (`kilo status`, the HUD) does
+not keep him awake for this. He is never laid down by it: standing or
+sitting, nothing happens. This catches the case where he was left lying
+with the servos on, for example after the Pi restarted for an update while
+the body kept him lying in REST.
+
+How the mind knows he lies in REST: the posture it asked for, and the
+body's TELEMETRY (servos on, no walk or trick, and none of his feet counted
+as standing on the ground: the body counts all four in SIT, STAND and
+STANCE, none in REST). After a Pi restart there is no asked posture on
+record, so TELEMETRY alone decides. It cannot tell REST from the
+calibration postures (CALIB, ZERO) or from the pose the body holds after
+it restarts by itself (which may be standing), so then the mind also
+wants the distance sensor to see the floor under his nose (40 to 90 mm;
+lying it reads 55 to 63 mm) at least once every 2 seconds. Standing, the
+floor is not in view, so he is not dropped; lying with no echo at all, he
+does not sleep on his own (as before). A laptop holding him in CALIB
+counts as activity, so `kilo posture calib --host` is safe.
+
+The constants are in `kernel/mind/power/sleep.h`: `kLimpSettleUs` (3 s),
+`kSleepAfterUs` (30 s), `kIdleSleepUs` (2 min).
+
+`kilo power --host` shows the servos apart from the Pi: `state` is the
+Pi's (awake, drowsy, asleep), `servos` is what the body reports (on or
+off), `limps` how many times light sleep sent LIMP, `idle_sleeps` how many
+sleeps began by lying idle.
 
 ### Waking him
 
-- **Any key** on the remote wakes him. The Pi is back to full speed at the
+- **Any key** on the remote wakes the Pi. It is back to full speed at the
   next pass of its loop (within 10 ms). Then the key does what it always
   does: B6 stands him up. Keys that do nothing (rows 1-3, a held key, C7)
-  only wake the Pi; A7 still holds, so 30 seconds later he sleeps again.
-  B2 (the meow) is one of those too: it wakes him, and the wake's mew is
-  what you hear (docs/sound.md).
+  only wake the Pi; the servos stay off, A7 still holds, so 30 seconds
+  later he sleeps again. B2 (the meow) is one of those too: it wakes him,
+  and the wake's mew is what you hear (docs/sound.md).
 - A walk, a turn, a trick or the behaviour key (A4, B4, C4, A6, C6, A2,
   A5) first powers the servos back to REST (a trick cannot start while
-  limp), then does its job.
+  limp), then does its job. B6 and C5 go to their posture directly.
+- **A7 again** lies him down again (REST, servos on) and the servos go off
+  3 seconds later, as the first time.
 - **The laptop**: any connection (`kilo status --host`, `kilo log --host`,
-  `kilo power --host`, ...) wakes him and keeps him awake while it is
-  connected. When it disconnects, A7 still holds: 30 seconds later he
-  sleeps again.
+  `kilo power --host`, ...) wakes the Pi and keeps it awake while it is
+  connected. The servos stay off. When it disconnects, A7 still holds: 30
+  seconds later the Pi sleeps again. A laptop that poses him (`kilo posture
+  stand --host`) calls the sleep off.
 - Being picked up does not wake him. Waking takes 10 ms, so there is
   nothing to gain by waking early, and a bump would wake him for nothing.
 
@@ -133,7 +182,9 @@ the battery itself, and the laptop reads it whenever you come back.
 
 **Test C (optional): lying in REST, awake.** The same as Test B with a
 kernel built with light sleep off (`make -C kernel KILO_LIGHT_SLEEP=0`,
-then `kilo update --host kilo.local`), so A7 is plain REST. This separates
+then `kilo update --host kilo.local`), so A7 is plain REST and the servos
+stay on (the switch turns off the whole of light sleep: the servos' part,
+the 2-minute idle sleep and the Pi's part). This separates
 the servos' part from the Pi's: B against C is the whole of light sleep;
 A against C is standing against lying.
 
@@ -196,8 +247,9 @@ a reading of 6.87 V, docs/p0-hardware-test-results.md).
 
 **Cheap things that would extend play time** (none needs body flash):
 
-1. Do not hold the servos when lying: light sleep does this 30 s after A7.
-   The same LIMP could follow any REST after a few seconds.
+1. Do not hold the servos when lying: light sleep does this 3 s after A7,
+   and 2 minutes after any REST with nothing happening (since 2026-11-21;
+   until then 30 s after A7 and never by itself).
 2. Find out why REST draws so much. Likely a servo pushing against a hard
    stop or the floor in the REST pose, or the held head (TELEMETRY says
    the head was held, HEAD_HELD, the whole time he lay there). Feel for a

@@ -11,7 +11,8 @@
 //   KILO_RECORD_SAVE    the flight recorder's card saver from the start
 //                       (mind/record/saver.h; else off until `kilo record
 //                       save on --host`, remembered as kilorec/SAVE_ON)
-//   KILO_LIGHT_SLEEP    light sleep after A7 and 30 s of nothing (mind/power/
+//   KILO_LIGHT_SLEEP    light sleep: the servos off 3 s after A7, the Pi's
+//                       idle loop after 30 s of nothing (mind/power/
 //                       sleep.h, docs/power.md; 0: A7 is plain rest)
 //   KILO_SOUND          the sounds on the 3.5 mm jack (src/sound.h, docs/
 //                       sound.md; 0: every play request is a counted no-op)

@@ -78,7 +78,7 @@ struct MindConfig {
   const behaviour::Personality* personality = nullptr;  // null: behaviour::kPersonality
   uint32_t stats_period_ms = 0;  // > 0: STATS_REQ this often, the answer logged ("body STATS: ...")
   bool record_save = false;     // the card saver on from the start (KILO_RECORD_SAVE; the card's SAVE_ON also turns it on)
-  bool light_sleep = false;     // A7, then 30 s of nothing: light sleep (power/sleep.h; KILO_LIGHT_SLEEP)
+  bool light_sleep = false;     // A7: LIMP once still, light sleep after 30 s of nothing (power/sleep.h; KILO_LIGHT_SLEEP)
   bool guard = guard::kDefaultOn;  // the distance guard (guard/guard.h; kilo guard on|off --host at run time)
   // Kilo's sounds (sound/player.h, docs/sound.md): the table the build packed (sound::kSounds) and the
   // platform's output; without either every play request is a counted no-op.
@@ -227,6 +227,7 @@ class Mind final : public LinkListener,
   void ir_key(const kilo_event_t& e);
   bool forward_key(const remote::Key& key) const;
   bool lying(const kilo_telemetry_t& t) const;
+  bool lying_rest();
   double head_held(int field) const;  // the SET_HEAD goal's pan (2) or tilt (4) in degrees, 0 when not held
   void stats(uint64_t now);
   bool safe_for_card(uint64_t now);
@@ -246,7 +247,7 @@ class Mind final : public LinkListener,
   behaviour::Runner runner_;
   RunnerHook runner_hook_;
   remote::RemoteControl remote_;
-  power::Sleep sleep_;  // light sleep after A7 (power/sleep.h)
+  power::Sleep sleep_;  // light sleep after A7 or lying idle (power/sleep.h)
   guard::DistanceGuard guard_;
   behaviour::Alive alive_;
   bool sitting_variant_ = false;  // the runner's sitting variant (the guard's)
@@ -254,6 +255,8 @@ class Mind final : public LinkListener,
   sound::SoundPlayer sound_;
   sound::Chatter chatter_;        // the behaviour's own sounds (A5)
   bool was_asleep_ = false;       // light sleep, the last pass
+  bool floor_seen_ = false;       // lying_rest(): the ultrasonic read the floor under his nose
+  uint64_t floor_seen_us_ = 0;    // ... last at
   bool hello_said_ = false;       // the first HELLO's mew
   uint32_t hisses_said_ = 0;      // the guard's RED reactions hissed at
   bool head_centred_ = false;     // the head held straight ahead for a walk (head_for_walk)

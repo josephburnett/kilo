@@ -199,6 +199,8 @@ void Mind::poll() {
   act.busy = walker_.active() || player_.busy() || remote_.busy() || behaviour_active();
   act.host_events = host_.stats().accepted + host_.stats().requests;
   act.host_clients = listener_ != nullptr ? host_.clients() : 0;
+  act.host_holds = host_controls();
+  act.lying_rest = lying_rest();
   sleep_.poll(act);
   sound_events();
   sound_.poll();
@@ -545,6 +547,34 @@ bool Mind::lying(const kilo_telemetry_t& t) const {
   const Goal* g = const_cast<SerialLink&>(link_).goal(KILO_MSG_SET_POSTURE);
   if (g == nullptr || g->len < 2 || walker_.active()) return false;
   return g->payload[1] == KILO_POSTURE_REST || g->payload[1] == KILO_POSTURE_LIMP;
+}
+
+// Lying in REST with the servos powered, for light sleep's idle count (power/sleep.h): the body IDLE
+// with its servos on, no walk, trick or FEET, no feet it balances on (TELEMETRY support 0: the body
+// reports all four feet in SIT, STAND and STANCE, none in REST, LIMP, CALIB and ZERO), and no other
+// posture asked. After a mind restart there is no goal on record (the body kept the REST its watchdog
+// took, or the last one asked): then TELEMETRY alone must say it. support 0 is also the body's pose
+// held after a warm reboot (standing, perhaps) and the calibration postures CALIB and ZERO, so with
+// no goal the ultrasonic must also have read the floor under his nose (55-63 mm lying, docs/distance-
+// guard.md) within the last 2 s (a missed echo does not count against it).
+bool Mind::lying_rest() {
+  constexpr uint16_t kFloorMinMm = 40, kFloorMaxMm = 90;
+  constexpr uint64_t kFloorFreshUs = 2000000;
+  const BodyState& b = link_.state();
+  uint64_t now = clock_.now_us();
+  if (!b.has_telemetry || !link_.connected()) return false;
+  const kilo_telemetry_t& t = b.telemetry;
+  if (t.dist_mm >= kFloorMinMm && t.dist_mm <= kFloorMaxMm) {
+    floor_seen_ = true;
+    floor_seen_us_ = now;
+  }
+  if (walker_.active() || player_.busy()) return false;
+  if (t.mode != KILO_MODE_IDLE || !(t.flags & KILO_TELEMETRY_FLAGS_SERVOS_POWERED) ||
+      (t.flags & (KILO_TELEMETRY_FLAGS_GAIT | KILO_TELEMETRY_FLAGS_TRICK)) || t.support != 0)
+    return false;
+  const Goal* g = link_.goal(KILO_MSG_SET_POSTURE);
+  if (g != nullptr && g->len >= 2) return g->payload[1] == KILO_POSTURE_REST;
+  return floor_seen_ && now - floor_seen_us_ < kFloorFreshUs;
 }
 
 // A key that would walk forward now (remote.h): the gait keys (start forward, or straight forward

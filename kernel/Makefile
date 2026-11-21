@@ -59,7 +59,8 @@ OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/
 #                           until the staged trials of docs/rear-up-trick.md are done)
 #   KILO_RECORD_SAVE=0|1    save the flight recorder to the SD card from the start (default 0: off until
 #                           `kilo bench sd --host` has measured the card and `kilo record save on --host`)
-#   KILO_LIGHT_SLEEP=1|0    light sleep after the remote's A7 and 30 s of nothing (default 1; 0: A7 is plain rest,
+#   KILO_LIGHT_SLEEP=1|0    light sleep: the servos off 3 s after the remote's A7 (or 2 min lying idle in REST),
+#                           the Pi's idle loop after 30 s more of nothing (default 1; 0: A7 is plain rest,
 #                           the awake baseline of docs/power.md)
 #   KILO_SOUND=1|0          Kilo's sounds on the 3.5 mm jack (docs/sound.md): kernel/sounds/*.wav packed into the
 #                           image, Circle's PWM sound device (default 1; 0: no sound code, no sounds, no libsound)
