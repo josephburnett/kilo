@@ -58,7 +58,10 @@ bool RemoteControl::direction(planner::Direction* d) const {
 }
 
 double RemoteControl::speed_mm_s() const {
-  if (planner::is_long_trot(*pattern_)) return kLongTrotSpeeds[iabs(level_) - 1];
+  if (planner::is_long_trot(*pattern_)) {
+    int k = iabs(level_) < kLongTrotStages ? iabs(level_) : kLongTrotStages;
+    return kLongTrotSpeeds[k - 1];
+  }
   return speed_factors(*pattern_)[iabs(level_) - 1] * (double)planner::default_speed(*pattern_);
 }
 
@@ -336,7 +339,8 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
         int most = planner::is_long_trot(*pattern_) ? kLongTrotSteerSteps : kSteerSteps;
         int sv = h == Heading::Left ? (steer_ < most ? steer_ + 1 : steer_) : (steer_ > -most ? steer_ - 1 : steer_);
         if (sv == steer_) {
-          walk_done(most < kSteerSteps ? ": already the tightest (the long trot steers one level)" : ": already the tightest");
+          walk_done(most < kSteerSteps ? ": already the tightest (the long trot steers one level)"
+                                       : ": already the tightest");
           return;
         }
         steer_ = sv;
