@@ -26,7 +26,10 @@ limits, from
   fall recovery's three rows; ``POSTURES`` below, checked against the C
   table by mind/tests/test_calibration.py),
 - the gaits: the planner (kilo.planner) at every remote level the walk, the
-  trot and the crawl have, forward, backward, turning and steering, through
+  trot and the crawl have, forward, backward, turning and steering, and the
+  long trot's three stages (A1, B7: straight and at its one steer level,
+  each walk ended by the quick stop, whose square-up starts from the
+  furthest back its feet go), through
   the body's IK (body/src/core/ik.h: shoulder = -theta1, knee = -(theta2 -
   sigma 90)),
 - the trick library (kilo.tricks.library, the tricks the mind ships),
@@ -163,6 +166,7 @@ def _note(acc: dict, j: int, a: float, by: str) -> None:
 SPEED_FACTORS = (0.4, 0.7, 1.0, 1.15, 1.25)
 TROT_SPEED_FACTORS = (0.4, 0.7, 1.0, 1.3, 1.6)
 STEER_LEVELS = (0.25, 0.5, 1.0)
+LONG_TROT_STAGES = (160.0, 180.0, 200.0)  # kLongTrotSpeeds (kilo.planner.longtrot.STAGES)
 
 
 def _gait_cases():
@@ -174,6 +178,9 @@ def _gait_cases():
             for s in STEER_LEVELS:
                 yield gait, "forward", f, s, f"{gait} +{lv} steer {s:g}"
                 yield gait, "back", f, -s, f"{gait} -{lv} steer {s:g}"
+    for lv, v in enumerate(LONG_TROT_STAGES, start=1):  # forward only, steering at the first level only
+        for s in (0.0, STEER_LEVELS[0], -STEER_LEVELS[0]):
+            yield "longtrot", "forward", v, s, f"longtrot stage {lv}" + (f" steer {s:g}" if s else "")
 
 
 CATEGORIES = ("postures", "gaits", "tricks")
@@ -183,6 +190,7 @@ def compute_asked(ticks: int = 200) -> dict[str, dict[int, Asked]]:
     """Per category (postures, gaits, tricks): every joint's lowest and highest
     asked angle (degrees, after the joint limits) and what asks it."""
     from kilo.planner import patterns as pat
+    from kilo.planner.longtrot import LongTrotPlanner
     from kilo.planner.model import BodyModel
     from kilo.planner.plan import Planner
     from kilo.tricks import library
@@ -199,9 +207,16 @@ def compute_asked(ticks: int = 200) -> dict[str, dict[int, Asked]]:
     acc = cats["gaits"]
     model = BodyModel()
     for gait, d, f, steer, label in _gait_cases():
-        p = Planner(model, gait, d, pat.default_speed(gait) * f, steer=steer)
-        for _ in range(ticks):
-            tp = p.next()
+        if gait == "longtrot":  # f: the stage's speed; the walk ends in the quick stop
+            p = LongTrotPlanner(model, d, f, steer=steer)
+            plans = [p.next() for _ in range(ticks)]
+            p.halt()
+            while not p.done and len(plans) < 3 * ticks:
+                plans.append(p.next())
+        else:
+            p = Planner(model, gait, d, pat.default_speed(gait) * f, steer=steer)
+            plans = (p.next() for _ in range(ticks))
+        for tp in plans:
             for leg in range(4):
                 t1, t2 = model.ik(leg, float(tp.x[leg]), float(tp.z[leg]))
                 sigma = 1.0 if leg < 2 else -1.0
@@ -236,12 +251,12 @@ ASKED: dict[str, dict[int, Asked]] = {
     'gaits': {
         8: Asked(-14.3, 73.0, 'crawl -5', 'crawl -5'),
         9: Asked(-12.6, 73.6, 'crawl -1 steer 0.5', 'crawl -4'),
-        10: Asked(-79.4, -8.5, 'crawl -5', 'crawl -2'),
-        11: Asked(-79.1, -8.5, 'crawl -2', 'crawl -4'),
+        10: Asked(-79.4, -5.2, 'crawl -5', 'longtrot stage 3 steer 0.25'),
+        11: Asked(-79.1, -2.8, 'crawl -2', 'longtrot stage 3 steer -0.25'),
         12: Asked(-14.9, 53.1, 'crawl -2', 'crawl -5'),
         13: Asked(-15.0, 51.1, 'crawl turn 2', 'crawl -1 steer 0.5'),
-        14: Asked(-29.1, 22.4, 'crawl -2', 'crawl +1 steer 0.25'),
-        15: Asked(-29.1, 20.8, 'crawl -4', 'crawl +4'),
+        14: Asked(-33.4, 22.4, 'longtrot stage 3 steer 0.25', 'crawl +1 steer 0.25'),
+        15: Asked(-35.6, 20.8, 'longtrot stage 3 steer -0.25', 'crawl +4'),
     },
     'tricks': {
         0: Asked(-45.0, 95.0, 'wash_face', 'wash_face'),

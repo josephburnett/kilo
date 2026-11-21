@@ -149,6 +149,7 @@ class Recorder final : public FrameTap, public planner::WalkObserver, public Log
   uint32_t runs_changed_ = 0;
 
   uint32_t walk_ = 0;      // the open walk run's id, 0 none
+  bool walk_long_ = false;  // ... and it went into the long trot (its label says so)
   uint32_t trick_ = 0;     // the open trick run's id
   uint64_t tail_end_us_ = 0;  // the latest post-roll's end (0: none running)
   uint64_t last_end_us_ = 0;
