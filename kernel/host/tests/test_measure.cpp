@@ -6,7 +6,8 @@
 // body: a run to its end (the stream, the balance off and back, the run in
 // the flight recorder, STAND), every key stopping it, a fall, the
 // refusals (battery, USB, not standing, not level, not still), a tip
-// cutting a sweep short, and the stop on a tilt.
+// cutting a sweep short, a tripod's lean that is not a tip, and the stop on
+// a tilt.
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -101,7 +102,7 @@ void test_vectors(const char* path) {
     }
   }
   std::printf("measure vectors (%s): %ld runs, %ld ticks, rest within %.4f deg\n", path, runs, ticks, worst);
-  CHECK(runs == 2 && ticks > 4000);
+  CHECK(runs == 2 && ticks > 7500);
 }
 
 // ---- the poses' safety ------------------------------------------------------------------------------
@@ -156,7 +157,7 @@ void test_safety() {
   std::printf("measure poses: %u ticks (%.1f s), x %d..%d z %d..%d mm, reach margin %.1f mm, the mass %.1f mm inside "
               "the feet at least, tilt at most %.1f deg (the mass anywhere in its bands)\n",
               n, n * 0.02, xmin, xmax, zmin, zmax, (double)reach_margin, (double)min_four, (double)max_tilt);
-  CHECK(n == max_ticks() && n * 20 <= 51000);
+  CHECK(n == max_ticks() && n * 20 <= 95000);
   CHECK(xmin >= -60 && xmax <= 60 && zmin >= 30 && zmax <= 95);  // FEET's ranges
   CHECK(reach_margin >= 0.5);
   CHECK(min_four >= 10);       // inside the four feet with 10 mm to spare, the mass anywhere in its bands
@@ -251,19 +252,19 @@ void test_full_run() {
   r.stand();
   r.key(0x4A, 100);  // B1
   CHECKF(r.measuring(), "not measuring");
-  CHECK(r.ring_has("remote B1 (0x4A, measure): measuring (about 45 s; any key stops it)"));
+  CHECK(r.ring_has("remote B1 (0x4A, measure): measuring (about 80 s; any key stops it)"));
   r.run_ms(1000);
   const Goal* b = r.goal(KILO_MSG_SET_BALANCE);
   CHECK(b != nullptr && b->payload[0] == 0);  // the balance off while it measures
   CHECK(r.goal(KILO_MSG_SET_POSTURE) == nullptr && r.body.mode == KILO_MODE_GAIT);
-  for (int i = 0; i < 700 && r.measuring(); i++) r.run_ms(100);
-  CHECKF(!r.measuring(), "still measuring after 70 s");
+  for (int i = 0; i < 1100 && r.measuring(); i++) r.run_ms(100);
+  CHECKF(!r.measuring(), "still measuring after 110 s");
   // the body did what the model said: every sweep tipped where the model has its crossing, and ended early
   uint32_t ticks = r.mind.measure().script().tick();
-  CHECKF(r.mind.measure().ended_ok() && r.mind.measure().tips() == 6, "%s, %u tips", r.mind.measure().ended(),
+  CHECKF(r.mind.measure().ended_ok() && r.mind.measure().tips() == 8, "%s, %u tips", r.mind.measure().ended(),
          r.mind.measure().tips());
-  CHECKF(ticks < max_ticks() - 400 && ticks * 20 <= 45000, "%u ticks of %u", ticks, max_ticks());
-  std::printf("measure: a run on a body that does what the model says: %u ticks (%.1f s), 6 tips\n", ticks,
+  CHECKF(ticks < max_ticks() - 500 && ticks * 20 <= 80000, "%u ticks of %u", ticks, max_ticks());
+  std::printf("measure: a run on a body that does what the model says: %u ticks (%.1f s), 8 tips\n", ticks,
               ticks * 0.02);
   // the stream: every script tick sent once, in order, 50 Hz TELEMETRY asked for and put back
   std::vector<Sent> feet = r.body.of(KILO_MSG_FEET);
@@ -292,6 +293,19 @@ void test_full_run() {
   if (run != nullptr) CHECKF(std::string(run->text, run->text_len) == "measure=self end=DONE", "%.*s", run->text_len, run->text);
   CHECK(r.marked("measure id=1 format=1") && r.marked("model com_x=") && r.marked("step i=0 exp=level phase=level t=0") &&
         r.marked("step i=") && r.marked("end reason=DONE"));
+  // the header says which script and its tip rule; each sweep left its two baselines and its tip
+  bool script2 = false;
+  int bases = 0, tip_lines = 0;
+  for (const std::string& m : r.marks()) {
+    if (m.compare(0, 8, "measure ") == 0)
+      script2 = m.find(" script=2 ") != std::string::npos && m.find(" tip_rise_c=150 ") != std::string::npos &&
+                m.find(" tip_jump_c=100 tip_jump_t=8 tip_base_t=10 tip_up_pct=60 ") != std::string::npos &&
+                m.find(" battery_mv=") != std::string::npos;
+    bases += m.compare(0, 9, "base exp=") == 0;
+    tip_lines += m.compare(0, 8, "tip exp=") == 0 && m.find(" how=tip ") != std::string::npos;
+  }
+  CHECKF(script2 && bases == 8 && tip_lines == 8, "script2 %d, %d base lines, %d tip lines", (int)script2, bases,
+         tip_lines);
   int steps = 0;
   for (const std::string& m : r.marks()) steps += m.compare(0, 5, "step ") == 0;
   const Step* st;
@@ -420,6 +434,13 @@ void test_refusals() {
   }
 }
 
+// The first sweep's experiment (edge_lf) in kExperimentTable.
+int edge_lf() {
+  for (int i = 0; i < kExperiments; i++)
+    if (std::strcmp(kExperimentTable[i].name, "edge_lf") == 0) return i;
+  return -1;
+}
+
 // A tip in the first sweep: the scripted body tips toward the lifted foot 30 ticks into it.
 void test_tip() {
   Rig r(cfg());
@@ -427,23 +448,69 @@ void test_tip() {
   r.start();
   r.stand();
   uint32_t sweep_from = 0;
+  const int e = edge_lf();
   r.each = [&](Rig& q) {
     const Measure& m = q.mind.measure();
     if (!m.active() || m.script().done()) return;
     const Step& s = m.script().step();
-    if (s.exp == 2 && std::strcmp(s.phase, "sweep") == 0 && sweep_from == 0) sweep_from = m.script().tick();
-    if (sweep_from != 0 && m.script().tick() > sweep_from + 30 && s.exp == 2) {
+    if (s.exp == e && std::strcmp(s.phase, "sweep") == 0 && sweep_from == 0) sweep_from = m.script().tick();
+    if (sweep_from != 0 && m.script().tick() > sweep_from + 30 && s.exp == e) {
       q.body.pitch = 37;  // the model's tip, a16
       q.body.roll = 70;
     }
-    if (s.exp > 2) q.body.pitch = q.body.roll = 0;
+    if (s.exp > e) q.body.pitch = q.body.roll = 0;
   };
   r.key(0x4A, 100);
-  for (int i = 0; i < 700 && r.measuring(); i++) r.run_ms(100);
+  for (int i = 0; i < 1100 && r.measuring(); i++) r.run_ms(100);
   CHECK(!r.measuring() && r.mind.measure().ended_ok() && r.mind.measure().tips() == 1);
-  CHECK(r.marked("tip exp=edge_lf"));
+  CHECK(r.marked("tip exp=edge_lf") && r.marked("base exp=edge_lf settle_p=0.00 settle_r=0.00 lifted_p=0.00"));
   CHECKF(r.mind.measure().script().tick() < max_ticks() - 100, "%u of %u ticks", r.mind.measure().script().tick(),
          max_ticks());
+}
+
+// A tripod's lean is not a tip: as the foot comes up the scripted body leans 1.8 deg toward it (legs
+// that give, a twist: Kilo's first run, 2026-11-21) and creeps 0.5 deg more along the sweep. No tip is
+// seen and the sweep runs to its end. The same lean and then a jump of 2 deg is a tip.
+void test_lean_is_not_a_tip() {
+  for (int jump = 0; jump < 2; jump++) {
+    Rig r(cfg());
+    r.follow = false;
+    r.start();
+    r.stand();
+    const int e = edge_lf();
+    uint32_t sweep_from = 0, sweep_ticks = 0;
+    r.each = [&](Rig& q) {
+      const Measure& m = q.mind.measure();
+      if (!m.active() || m.script().done()) return;
+      const Step& s = m.script().step();
+      bool in = s.exp == e && (std::strcmp(s.phase, "lifted") == 0 || std::strcmp(s.phase, "sweep") == 0);
+      if (!in) {
+        q.body.pitch = q.body.roll = 0;
+        return;
+      }
+      double deg = 1.8;
+      if (std::strcmp(s.phase, "sweep") == 0) {
+        if (sweep_from == 0) sweep_from = m.script().tick();
+        sweep_ticks = m.script().tick() - sweep_from;
+        deg += 0.5 * sweep_ticks / 240.0;
+        if (jump && sweep_ticks > 60) deg += 2.0;
+      }
+      q.body.pitch = (int16_t)std::lround(deg * 37 / 79.18 * 16);  // along the model's tip (37, 70) a16
+      q.body.roll = (int16_t)std::lround(deg * 70 / 79.18 * 16);
+    };
+    r.key(0x4A, 100);
+    for (int i = 0; i < 1100 && r.measuring(); i++) r.run_ms(100);
+    CHECK(!r.measuring() && r.mind.measure().ended_ok());
+    CHECK(r.marked("base exp=edge_lf settle_p=0.00 settle_r=0.00 lifted_p=0.8"));
+    if (jump) {
+      CHECKF(r.mind.measure().tips() == 1 && r.marked("tip exp=edge_lf") && sweep_ticks < 100, "%u tips, %u ticks",
+             r.mind.measure().tips(), sweep_ticks);
+    } else {
+      CHECKF(r.mind.measure().tips() == 0 && !r.marked("tip exp=") && sweep_ticks >= 235, "%u tips, %u ticks",
+             r.mind.measure().tips(), sweep_ticks);
+      CHECK(r.mind.measure().script().tick() == max_ticks());
+    }
+  }
 }
 
 }  // namespace
@@ -459,5 +526,6 @@ int main(int argc, char** argv) {
   test_fall_and_tilt();
   test_refusals();
   test_tip();
+  test_lean_is_not_a_tip();
   return report("measure");
 }

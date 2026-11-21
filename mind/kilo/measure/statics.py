@@ -23,8 +23,11 @@ and its moments about the centre of mass (horizontal positions in the
 world, so a tilted body's higher centre of mass leans over the feet). An
 active-set solve per pose: the feet that push, the others in the air.
 The feet's lengths may each be off by ``leg_dz`` mm (calibration), the
-centre of mass off the model by ``com_d*``, and the IMU reads the body's
-tilt plus an offset (applied by the caller, kilo.measure.fit).
+centre of mass off the model by ``com_d*``, the feet's rectangle other
+than the model's (``length`` front to back and ``track`` left to right at
+x 0, about the same origin; ``x_scale`` mm of foot per mm of x commanded),
+and the IMU reads the body's tilt plus an offset (applied by the caller,
+kilo.measure.fit).
 
 Conventions as kilo.planner.model: body x forward, y left, z up, mm;
 pitch nose DOWN +, roll RIGHT side up + (TELEMETRY's).
@@ -56,6 +59,18 @@ class Body:
     sag: float = 0.0        # deg per kg cm, every leg servo
     leg_dz: tuple = (0.0, 0.0, 0.0, 0.0)  # mm each leg is longer than commanded, LF RF RB LB
     model: BodyModel = field(default_factory=BodyModel)
+    length: float | None = None  # mm front to back between the feet at x 0 (None: the model's length_mm)
+    track: float | None = None   # mm left to right between the feet (None: the model's track_mm)
+    x_scale: float = 1.0    # mm a foot moves fore-aft per mm of x commanded
+
+    def hips(self) -> list:
+        """Where each leg stands at x 0, (x, y) in the body frame: the
+        model's shoulder axles, or the rectangle ``length`` x ``track``
+        about the same origin (the centre of mass keeps its place in the
+        body frame)."""
+        hl = (self.model.length_mm if self.length is None else self.length) / 2.0
+        ht = (self.model.track_mm if self.track is None else self.track) / 2.0
+        return [(hl if PM.FRONT[leg] else -hl, ht if PM.LEFT[leg] else -ht) for leg in LEGS]
 
 
 # ---- the rigid model (the C++ routine's prediction) ---------------------------------------
@@ -179,8 +194,8 @@ def candidates(poses: Poses, body: Body = Body(), iters: int = 4) -> Candidates:
     n = len(poses)
     sag = max(body.sag, SAG_MIN)
     k = 1.0 / np.maximum(sag * SAG_UNIT * poses.lever2, 1e-6)  # g per mm
-    hips = np.array(poses.hips)
-    X = hips[None, :, 0] + poses.xs
+    hips = np.array(body.hips())
+    X = hips[None, :, 0] + body.x_scale * poses.xs
     Y = np.broadcast_to(hips[None, :, 1], (n, 4))
     Lg = poses.zs + np.array(body.leg_dz, float)[None, :] + m.foot_r_mm
     com = poses.com0 + np.array([body.com_dx, body.com_dy, body.com_dz])[None, :]
@@ -252,13 +267,17 @@ def rest(poses: Poses, body: Body = Body()) -> Rest:
 EDGE = {PM.LF: (PM.RF, PM.LB), PM.RB: (PM.RF, PM.LB), PM.RF: (PM.LF, PM.RB), PM.LB: (PM.LF, PM.RB)}
 
 
-def edge_distance(model: BodyModel, xs, zs, body: Body, lifted: int) -> float:
+def edge_distance(model: BodyModel, xs, zs, body: Body, lifted: int, att: tuple | None = None) -> float:
     """Signed distance (mm) of the centre of mass's projection from the
     edge foot ``lifted`` tips over, + on the lifted foot's side (it tips),
-    with the body resting on the other three (compliant statics)."""
+    with the body resting on the other three (compliant statics), or, if
+    ``att`` (pitch, roll in deg) is given, tilted as it was measured to be:
+    where the mass is over the feet depends on how the body really leans,
+    which the IMU knows better than any model of the legs' give."""
     sag = max(body.sag, SAG_MIN)
-    X = [model.hip(leg)[0] + xs[leg] for leg in LEGS]
-    Y = [model.hip(leg)[1] for leg in LEGS]
+    hips = body.hips()
+    X = [hips[leg][0] + body.x_scale * xs[leg] for leg in LEGS]
+    Y = [hips[leg][1] for leg in LEGS]
     L = [zs[leg] + body.leg_dz[leg] + model.foot_r_mm for leg in LEGS]
     c = []
     for leg in LEGS:
@@ -266,8 +285,11 @@ def edge_distance(model: BodyModel, xs, zs, body: Body, lifted: int) -> float:
         c.append(max(sag * SAG_UNIT * (xs[leg] ** 2 + (model.l2_mm * math.sin(t1 + t2)) ** 2), 1e-6))
     c0 = model.com(xs, zs)
     com = (c0[0] + body.com_dx, c0[1] + body.com_dy, c0[2] + body.com_dz)
-    # the tripod alone (the lifted foot not allowed down), whatever the centre of mass does
-    p, r = _tripod(X, Y, L, c, com, model.total_g, lifted)
+    if att is not None:
+        p, r = att
+    else:
+        # the tripod alone (the lifted foot not allowed down), whatever the centre of mass does
+        p, r = _tripod(X, Y, L, c, com, model.total_g, lifted)
     R = PM.rotation(p, r)
     a, b = EDGE[lifted]
 

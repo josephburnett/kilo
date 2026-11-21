@@ -11,25 +11,51 @@ using planner::RF;
 
 const Experiment kExperimentTable[kExperiments] = {
     {"level", -1, 0, 0},
-    {"steps", -1, 0, 0},
+    {"stairs_pitch", -1, 0, 0},
+    {"stairs_roll", -1, 0, 0},
+    {"twist", -1, 0, 0},
+    {"splay", -1, 0, 0},
     {"edge_lf", LF, 37, 70},
     {"edge_rf", RF, 37, -70},
     {"edge_lb", LB, -37, 70},
     {"edge_rb", RB, -37, -70},
-    {"edge_rf_roll", RF, 37, -70},
-    {"edge_rb_roll", RB, -37, -69},
+    {"edge_lf_away", LF, 37, 70},
+    {"edge_lf_toward", LF, 37, 69},
+    {"edge_rf_away", RF, 37, -70},
+    {"edge_lb_toward", LB, -37, 69},
+    {"check", -1, 0, 0},
     {"level_end", -1, 0, 0},
 };
 
 namespace {
 
-// The model's crossings (the feet's x, mm; script.py, test_measure checks them against the model).
-constexpr int kXFront = 8, kXBack = 8, kXRoll = -12, kXRollB = -7;
+// The experiments' indices (kExperimentTable's order).
+enum : uint8_t {
+  kLevel,
+  kStairsPitch,
+  kStairsRoll,
+  kTwist,
+  kSplay,
+  kEdgeLf,
+  kEdgeRf,
+  kEdgeLb,
+  kEdgeRb,
+  kEdgeLfAway,
+  kEdgeLfToward,
+  kEdgeRfAway,
+  kEdgeLbToward,
+  kCheck,
+  kLevelEnd
+};
+
+// The model's crossings (the feet's x, mm; script.py, test_measure checks them against the model):
+// front and back feet lifted, flat; rolled 4 mm away (front); 3 mm toward, LF and LB.
+constexpr int kXFront = 8, kXBack = 8, kXAway = -12, kXLfToward = 23, kXLbToward = -7;
 
 Step g_steps[kMaxSteps];
 int g_n = 0;
 
-void add(uint8_t exp, const char* phase, StepKind kind, int ticks, bool keep_x, int x, const int dz[4]) {
+void add(uint8_t exp, const char* phase, StepKind kind, int ticks, bool keep_x, const int dx[4], const int dz[4]) {
   Step& s = g_steps[g_n++];
   s.exp = exp;
   s.phase = phase;
@@ -37,9 +63,13 @@ void add(uint8_t exp, const char* phase, StepKind kind, int ticks, bool keep_x, 
   s.ticks = (uint16_t)ticks;
   s.keep_x = keep_x;
   for (int k = 0; k < 4; k++) {
-    s.dx[k] = (int8_t)x;
+    s.dx[k] = (int8_t)dx[k];
     s.dz[k] = (int8_t)dz[k];
   }
+}
+
+void all(int v, int out[4]) {
+  for (int k = 0; k < 4; k++) out[k] = v;
 }
 
 void roll_dz(int mm, int out[4]) {  // + left side down (TELEMETRY roll +)
@@ -49,52 +79,123 @@ void roll_dz(int mm, int out[4]) {  // + left side down (TELEMETRY roll +)
   out[LB] = -mm;
 }
 
+void pitch_dz(int mm, int out[4]) {  // + nose down (TELEMETRY pitch +)
+  out[LF] = -mm;
+  out[RF] = -mm;
+  out[RB] = mm;
+  out[LB] = mm;
+}
+
+void twist_dz(int mm, int out[4]) {  // + LF and RB longer, RF and LB shorter
+  out[LF] = mm;
+  out[RF] = -mm;
+  out[RB] = mm;
+  out[LB] = -mm;
+}
+
 int iabs(int v) { return v < 0 ? -v : v; }
 
 void edge(uint8_t exp, int leg, int x0, int x1, int roll_mm) {
-  int dz[4], up[4], zero[4] = {0, 0, 0, 0};
+  int dz[4], up[4], zero[4] = {0, 0, 0, 0}, a[4], b[4];
   roll_dz(roll_mm, dz);
   for (int k = 0; k < 4; k++) up[k] = k == leg ? dz[k] - kLiftMm : dz[k];
-  add(exp, "to_start", StepKind::Move, 25, false, x0, dz);
-  add(exp, "settle", StepKind::Hold, 10, false, x0, dz);
-  add(exp, "lift", StepKind::Move, 10, false, x0, up);
-  add(exp, "lifted", StepKind::Hold, 15, false, x0, up);
-  add(exp, "sweep", StepKind::Sweep, iabs(x1 - x0) * kTicksPerMm, false, x1, up);
-  add(exp, "lower", StepKind::Move, 10, true, 0, dz);
-  add(exp, "lowered", StepKind::Hold, 10, true, 0, dz);
-  add(exp, "home", StepKind::Move, 25, false, 0, zero);
-  add(exp, "home_hold", StepKind::Hold, 10, false, 0, zero);
+  all(x0, a);
+  all(x1, b);
+  add(exp, "to_start", StepKind::Move, 20, false, a, dz);
+  add(exp, "settle", StepKind::Hold, 10, false, a, dz);
+  add(exp, "lift", StepKind::Move, 10, false, a, up);
+  add(exp, "lifted", StepKind::Hold, kLiftedTicks, false, a, up);
+  add(exp, "sweep", StepKind::Sweep, iabs(x1 - x0) * kTicksPerMm, false, b, up);
+  add(exp, "lower", StepKind::Move, 10, true, zero, dz);
+  add(exp, "lowered", StepKind::Hold, 10, true, zero, dz);
+  add(exp, "home", StepKind::Move, 20, false, zero, zero);
+  add(exp, "home_hold", StepKind::Hold, kHomeHold, false, zero, zero);
 }
 
 void build() {
   if (g_n != 0) return;
-  int zero[4] = {0, 0, 0, 0};
-  add(0, "level", StepKind::Hold, 75, false, 0, zero);
-  const int p = kStepPitchMm, r = kStepRollMm;
-  int down[4] = {-p, -p, p, p}, up[4] = {p, p, -p, -p}, left[4], right[4];
-  roll_dz(r, left);
-  roll_dz(-r, right);
-  const struct {
-    const char* name;
-    const char* hold;
-    const int* dz;
-  } kSteps[] = {{"pitch_down", "pitch_down_hold", down},        {"pitch_level", "pitch_level_hold", zero},
-                {"pitch_up", "pitch_up_hold", up},              {"pitch_level", "pitch_level_hold", zero},
-                {"roll_left_down", "roll_left_down_hold", left}, {"roll_level", "roll_level_hold", zero},
-                {"roll_right_down", "roll_right_down_hold", right}, {"roll_level", "roll_level_hold", zero}};
-  for (const auto& s : kSteps) {
-    add(1, s.name, StepKind::Move, 2, false, 0, s.dz);
-    add(1, s.hold, StepKind::Hold, 38, false, 0, s.dz);
+  int zero[4] = {0, 0, 0, 0}, dz[4], dx[4];
+  add(kLevel, "level", StepKind::Hold, 75, false, zero, zero);
+  // the stairs: each level's half difference, in the order played from home (script.py STAIRS_*)
+  const int kPitch[] = {2, 4, 6, 0, -2, -4, -6, 0, 6, 4, 2, 0, -6, -4, -2, 0};
+  const int kRoll[] = {2, 4, 0, -2, -4, 0, 4, 2, 0, -4, -2, 0};
+  for (int lv : kPitch) {
+    pitch_dz(lv, dz);
+    add(kStairsPitch, "step", StepKind::Move, kStairMove, false, zero, dz);
+    add(kStairsPitch, "hold", StepKind::Hold, kStairHold, false, zero, dz);
   }
+  for (int lv : kRoll) {
+    roll_dz(lv, dz);
+    add(kStairsRoll, "step", StepKind::Move, kStairMove, false, zero, dz);
+    add(kStairsRoll, "hold", StepKind::Hold, kStairHold, false, zero, dz);
+  }
+  // the twist, the body kTwistX forward
+  all(kTwistX, dx);
+  add(kTwist, "to_start", StepKind::Move, 20, false, dx, zero);
+  add(kTwist, "hold", StepKind::Hold, kStairHold, false, dx, zero);
+  const int kTwists[] = {1, 2, 1, 0, -1, -2, -1, 0};
+  for (int k : kTwists) {
+    twist_dz(k, dz);
+    add(kTwist, "step", StepKind::Move, kStairMove, false, dx, dz);
+    add(kTwist, "hold", StepKind::Hold, kStairHold, false, dx, dz);
+  }
+  add(kTwist, "home", StepKind::Move, 20, false, zero, zero);
+  add(kTwist, "home_hold", StepKind::Hold, kHomeHold, false, zero, zero);
+  // the splay: nose down, the feet's rectangle longer, shorter, twice
+  pitch_dz(kSplayPitchMm, dz);
+  const int out[4] = {kSplayOutMm, kSplayOutMm, -kSplayOutMm, -kSplayOutMm};
+  const int inn[4] = {-kSplayInMm, -kSplayInMm, kSplayInMm, kSplayInMm};
+  add(kSplay, "step", StepKind::Move, 4, false, zero, dz);
+  add(kSplay, "hold", StepKind::Hold, kStairHold, false, zero, dz);
+  const int* kSplays[] = {out, inn, out, inn, zero};
+  for (const int* x : kSplays) {
+    add(kSplay, "step", StepKind::Move, 12, false, x, dz);
+    add(kSplay, "hold", StepKind::Hold, kStairHold, false, x, dz);
+  }
+  add(kSplay, "home", StepKind::Move, 4, false, zero, zero);
+  add(kSplay, "home_hold", StepKind::Hold, kHomeHold, false, zero, zero);
   int S = kSweepSpanMm;
-  edge(2, LF, kXFront + S, kXFront - S, 0);  // front feet lifted: the tripod stands with the feet forward
-  edge(3, RF, kXFront + S, kXFront - S, 0);
-  edge(4, LB, kXBack - S, kXBack + S, 0);  // back feet lifted: the other way
-  edge(5, RB, kXBack - S - kRbBackMm, kRbMaxX, 0);  // the RB shoulder's clamp: no further forward
+  edge(kEdgeLf, LF, kXFront + S, kXFront - S, 0);  // front feet lifted: the tripod stands with the feet forward
+  edge(kEdgeRf, RF, kXFront + S, kXFront - S, 0);
+  edge(kEdgeLb, LB, kXBack - S, kXBack + S, 0);  // back feet lifted: the other way
+  edge(kEdgeRb, RB, kXBack - S - kRbBackMm, kRbMaxX, 0);  // the RB shoulder's clamp: no further forward
+  // rolled, against the flat sweep of the same foot: LF both ways, RF away, LB toward (what the RB
+  // shoulder's reach allows, all four feet sweeping together)
   S = kRollSpanMm;
-  edge(6, RF, kXRoll + S, kXRoll - S, kRollSweepMm);     // RF up, the left side down: the mass leans away from it
-  edge(7, RB, kXRollB - S, kXRollB + S, -kRollSweepBMm);  // RB up, the right side down: toward it
-  add(8, "level_end", StepKind::Hold, 50, false, 0, zero);
+  edge(kEdgeLfAway, LF, kXAway + S, kXAway - S, -kRollSweepMm);
+  edge(kEdgeLfToward, LF, kXLfToward + S, kXLfToward - S, kRollSweepBMm);
+  edge(kEdgeRfAway, RF, kXAway + S, kXAway - S, kRollSweepMm);
+  edge(kEdgeLbToward, LB, kXLbToward - S, kXLbToward + S, kRollSweepBMm);
+  // the check poses (script.py CHECK_POSES): x for all four feet, dz, the foot lifted or -1
+  const struct {
+    int x;
+    int dz[4];
+    int leg;
+  } kChecks[] = {
+      {0, {-5, -1, 5, 1}, -1},    // pitch 3 and roll 2
+      {0, {7, 1, -7, -1}, -1},    // pitch -4 and roll -3
+      {-10, {-3, 3, 3, -3}, -1},  // forward, rolled 3
+      {10, {-2, -2, 2, 2}, -1},   // back, pitched 2
+      {-16, {0, 0, 0, 0}, LB},    // LB up
+      {22, {-2, 2, 2, -2}, RF},   // RF up, rolled 2
+  };
+  for (const auto& c : kChecks) {
+    all(c.x, dx);
+    add(kCheck, "step", StepKind::Move, 15, false, dx, c.dz);
+    if (c.leg < 0) {
+      add(kCheck, "hold", StepKind::Hold, kStairHold, false, dx, c.dz);
+    } else {
+      int up[4];
+      for (int k = 0; k < 4; k++) up[k] = k == c.leg ? c.dz[k] - kLiftMm : c.dz[k];
+      add(kCheck, "hold", StepKind::Hold, 10, false, dx, c.dz);
+      add(kCheck, "up", StepKind::Move, 10, false, dx, up);
+      add(kCheck, "up_hold", StepKind::Hold, kStairHold, false, dx, up);
+      add(kCheck, "down", StepKind::Move, 10, false, dx, c.dz);
+    }
+  }
+  add(kCheck, "home", StepKind::Move, 20, false, zero, zero);
+  add(kCheck, "home_hold", StepKind::Hold, kHomeHold, false, zero, zero);
+  add(kLevelEnd, "level_end", StepKind::Hold, 50, false, zero, zero);
 }
 
 // a + (b - a) j / n, rounded half away from zero, in integers (script.py _lerp)

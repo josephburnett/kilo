@@ -3,8 +3,11 @@
 The C++ routine (kernel/mind/measure/measure.h) records its run in the
 flight recorder (kernel/mind/record/recorder.h): a run of kind TRICK whose
 label is "measure=self end=REASON", whose first MARK is "measure id=..
-tick0=.. ...", then "model ...", a "step i=.. exp=.. phase=.. t=.." at each
-step's first tick, "tip ..." at each tip it saw and "end reason=..". The
+script=N tick0=.. ...", then "model ...", a "step i=.. exp=.. phase=.. t=.."
+at each step's first tick, for each sweep (script 2) "base ..." with the
+settle hold's and the lifted hold's tilt, "tip ..." at each tip it saw and
+"end reason=..". ``script`` says which of kilo.measure.script.SCRIPTS the
+run played (its step and experiment indices are that script's). The
 FEET it sent (the feet and the rigid model's attitude for each body tick)
 and the TELEMETRY (the measured pitch, roll, rates and battery) are in the
 stream around it. Script tick t is body tick tick0 + t.
@@ -103,17 +106,32 @@ def run_of(s: flight.Stream, span: flight.RunSpan, name: str = "") -> F.Run:
     if (step < 0).any():
         first = int(np.argmax(step >= 0)) if (step >= 0).any() else n
         step[:first] = 0
-    exp = np.array([SC.STEPS[i].exp if 0 <= i < len(SC.STEPS) else -1 for i in step])
-    phase = [SC.STEPS[i].phase if 0 <= i < len(SC.STEPS) else "?" for i in step]
+    script = script_of(head.fields, span.id)
+    steps = script.steps
+    exp = np.array([steps[i].exp if 0 <= i < len(steps) else -1 for i in step])
+    phase = [steps[i].phase if 0 <= i < len(steps) else "?" for i in step]
     meta = {"run": span.id, "header": head.fields, "path": s.meta.get("path")}
     for w in ("model", "end"):
         mk = next((m for m in marks if m.word == w), None)
         if mk is not None:
             meta[w] = mk.fields
     meta["tips"] = [m.fields for m in marks if m.word == "tip"]
+    meta["bases"] = [m.fields for m in marks if m.word == "base"]  # script 2: each sweep's two baselines
     meta["keys"] = [m.fields.get("text") for m in marks if m.word == "key"]
     return F.Run(name=name or f"run {span.id}", x=x, z=z, exp=exp, phase=phase, meas=meas, pred=pred,
-                 batt_mv=batt, rate=rate, meta=meta)
+                 batt_mv=batt, rate=rate, meta=meta, script=script, step=step)
+
+
+def script_of(fields: dict, run_id: Any = "?") -> SC.ScriptDef:
+    """The script a run played, from its header's ``script=`` (1 if it has none)."""
+    try:
+        v = int(fields.get("script", 1))
+    except (TypeError, ValueError):
+        v = -1
+    if v not in SC.SCRIPTS:
+        raise RecordError(f"run {run_id}: script {fields.get('script')!r} is not one this kilo knows "
+                          f"({', '.join(map(str, sorted(SC.SCRIPTS)))})")
+    return SC.SCRIPTS[v]
 
 
 def walks_of(s: flight.Stream, name: str = "") -> list[F.Walk]:
@@ -170,7 +188,8 @@ def save_run(run: F.Run, path: str | Path) -> Path:
     d = {"format": RUN_FORMAT, "name": run.name, "x": run.x.tolist(), "z": run.z.tolist(), "exp": run.exp.tolist(),
          "phase": list(run.phase), "meas": np.where(np.isfinite(run.meas), run.meas, None).tolist(),
          "pred": np.where(np.isfinite(run.pred), run.pred, None).tolist(),
-         "batt_mv": np.where(np.isfinite(run.batt_mv), run.batt_mv, None).tolist(), "meta": run.meta}
+         "batt_mv": np.where(np.isfinite(run.batt_mv), run.batt_mv, None).tolist(), "meta": run.meta,
+         "script": run.script.version, "step": None if run.step is None else np.asarray(run.step).tolist()}
     p.write_text(json.dumps(d, default=float) + "\n")
     return p
 
@@ -188,9 +207,11 @@ def load(path: str | Path, heading: int = 1) -> list[F.Run]:
         d = json.loads(p.read_text())
         if d.get("format") != RUN_FORMAT:
             raise RecordError(f"{p}: not a {RUN_FORMAT} file")
+        script = script_of({"script": d.get("script", 1)}, p.name)
         return [F.Run(name=d.get("name", p.stem), x=_arr(d["x"]), z=_arr(d["z"]), exp=np.array(d["exp"]),
                       phase=list(d["phase"]), meas=_arr(d["meas"]), pred=_arr(d["pred"]), batt_mv=_arr(d["batt_mv"]),
-                      heading=heading, meta=d.get("meta", {}))]
+                      heading=heading, meta=d.get("meta", {}), script=script,
+                      step=None if d.get("step") is None else np.array(d["step"]))]
     try:
         s = flight.load(p)
     except (OSError, ValueError) as e:

@@ -101,29 +101,79 @@ void Measure::watch(const kilo_telemetry_t& t, int64_t tick) {
   if (pl.step < 0 || pl.step >= n) return;
   const Step& st = steps[pl.step];
   const Experiment& ex = kExperimentTable[st.exp];
-  if (str_eq(st.phase, "settle")) {  // the baseline: all four feet down, before the lift
+  if (ex.lifted < 0) return;
+  if (str_eq(st.phase, "settle")) {  // the first baseline: all four feet down, before the lift
     if (base_exp_ != st.exp) {
       base_exp_ = st.exp;
       base_n_ = 0;
       base_p_ = base_r_ = 0;
+      lift_n_ = 0;
+      lift_p_ = lift_r_ = 0;
+      base_marked_ = tip_fired_ = false;
+      for (Rel& q : rel_) q.tick = -1;
     }
     base_p_ = (base_p_ * (real)base_n_ + p) / (real)(base_n_ + 1);
     base_r_ = (base_r_ * (real)base_n_ + r) / (real)(base_n_ + 1);
     base_n_++;
     return;
   }
-  if (ex.lifted < 0 || base_exp_ != st.exp || base_n_ == 0) return;
-  if (!str_eq(st.phase, "lifted") && !str_eq(st.phase, "sweep")) return;
-  if (script_.done() || script_.step().exp != st.exp) return;
+  if (base_exp_ != st.exp || base_n_ == 0 || tip_fired_) return;
+  bool lifted = str_eq(st.phase, "lifted");
+  if (!lifted && !str_eq(st.phase, "sweep")) return;
   real up = deg(ex.tip_pitch_a16), ur = deg(ex.tip_roll_a16);
   real T = planner::m_sqrt(up * up + ur * ur);
   real proj = ((p - base_p_) * up + (r - base_r_) * ur) / T;
-  if (proj < kTipFraction * T) return;
+  const char* how = nullptr;
+  real rel = 0;
+  if (lifted) {
+    if (proj >= kTipUpFraction * T) {  // tipped as the foot came up
+      how = "up";
+      rel = proj;
+    } else if (pl.into >= (int)st.ticks - kTipBaseTicks) {  // the second baseline: the lifted hold's end
+      lift_p_ = (lift_p_ * (real)lift_n_ + p) / (real)(lift_n_ + 1);
+      lift_r_ = (lift_r_ * (real)lift_n_ + r) / (real)(lift_n_ + 1);
+      lift_n_++;
+    }
+  } else {
+    if (lift_n_ == 0) return;  // no TELEMETRY in the lifted hold's end: no baseline, no tip
+    if (!base_marked_) {
+      base_marked_ = true;
+      char a[16], b[16], c[16], d[16], l[120];
+      fixed2(a, sizeof a, base_p_);
+      fixed2(b, sizeof b, base_r_);
+      fixed2(c, sizeof c, lift_p_);
+      fixed2(d, sizeof d, lift_r_);
+      format(l, sizeof l, "base exp=%s settle_p=%s settle_r=%s lifted_p=%s lifted_r=%s n=%u", ex.name, a, b, c, d,
+             (unsigned)lift_n_);
+      line(l);
+    }
+    real base = ((lift_p_ - base_p_) * up + (lift_r_ - base_r_) * ur) / T;
+    rel = proj - base;
+    rel_[ts % kRel] = {ts, rel};
+    // what it was kTipJumpTicks ago (the baseline before the sweep's first tick; a TELEMETRY lost: the one before)
+    int64_t first = ts - pl.into;
+    bool have = false;
+    real old = 0;
+    for (int back = kTipJumpTicks; back < kTipJumpTicks + 5 && !have; back++) {
+      int64_t k = ts - back;
+      if (k < first) {
+        have = true;
+      } else if (rel_[k % kRel].tick == k) {
+        old = rel_[k % kRel].v;
+        have = true;
+      }
+    }
+    if (have && rel >= kTipRiseDeg && rel - old >= kTipJumpDeg) how = "tip";
+  }
+  if (how == nullptr) return;
+  tip_fired_ = true;
+  if (script_.done() || script_.step().exp != st.exp) return;
   int x = script_.x_at((uint32_t)ts);
   if (!script_.tip((uint32_t)ts)) return;
   tips_++;
-  char l[96];
-  format(l, sizeof l, "tip exp=%s seen=%d x=%d phase=%s", ex.name, (int)ts, x, st.phase);
+  char l[120], v[16];
+  fixed2(v, sizeof v, rel);
+  format(l, sizeof l, "tip exp=%s seen=%d x=%d phase=%s how=%s rise=%s", ex.name, (int)ts, x, st.phase, how, v);
   line(l);
 }
 
@@ -182,6 +232,9 @@ const char* Measure::start(bool has_rested, uint16_t rested_mv) {
   have_offset_ = false;
   base_exp_ = -1;
   base_n_ = 0;
+  lift_n_ = 0;
+  base_marked_ = tip_fired_ = false;
+  for (Rel& q : rel_) q.tick = -1;
   last_mark_step_ = -1;
   gait_seen_ = stalled_ = false;
   prev_support_ = 0xF;
@@ -238,11 +291,15 @@ void Measure::begin_stream(uint64_t now) {
   const BodyState& st = link_.state();
   const Step* sp;
   int n_steps = measure::steps(&sp);
-  char fields[200], cx[16], cy[16], cz[16], mass[16];
+  // (the whole MARK is at most 255 bytes: the recorder puts "measure id=.. format=.. mind_build=.. body_build=.."
+  // before these)
+  char fields[190], cx[16], cy[16], cz[16], mass[16];
   format(fields, sizeof fields,
-         "script=1 tick0=%u steps=%d max_ticks=%u home_z=%d lift_mm=%d ticks_per_mm=%d tip_fraction=40 "
-         "tip_extra_mm=%d battery_mv=%u",
-         (unsigned)(tick0_ & 0xFFFF), n_steps, (unsigned)max_ticks(), kHomeZ, kLiftMm, kTicksPerMm, kTipExtraMm,
+         "script=%d tick0=%u steps=%d max_ticks=%u home_z=%d lift_mm=%d ticks_per_mm=%d tip_rise_c=%d "
+         "tip_jump_c=%d tip_jump_t=%d tip_base_t=%d tip_up_pct=%d tip_extra_mm=%d battery_mv=%u",
+         kScriptVersion, (unsigned)(tick0_ & 0xFFFF), n_steps, (unsigned)max_ticks(), kHomeZ, kLiftMm, kTicksPerMm,
+         (int)planner::round_i(kTipRiseDeg * 100), (int)planner::round_i(kTipJumpDeg * 100), kTipJumpTicks,
+         kTipBaseTicks, (int)planner::round_i(kTipUpFraction * 100), kTipExtraMm,
          st.has_telemetry ? (unsigned)st.telemetry.batt_mv : 0u);
   if (obs_ != nullptr) obs_->measure_begin(fields);
   real xs[4] = {0, 0, 0, 0}, zs[4] = {(real)kHomeZ, (real)kHomeZ, (real)kHomeZ, (real)kHomeZ};
@@ -315,7 +372,7 @@ void Measure::wake(uint64_t now) {
     planner::Attitude a = rigid_rest(model_, xs, zs, prev_support_, &sup);
     prev_support_ = sup;
     Planned& pl = ring_[ts % kRing];
-    pl = {(int64_t)ts, (int16_t)step, a16(a.pitch), a16(a.roll)};
+    pl = {(int64_t)ts, (int16_t)step, (int16_t)script_.into(), a16(a.pitch), a16(a.roll)};
     if (first && step != last_mark_step_) {
       last_mark_step_ = step;
       const Step& s = script_.step();

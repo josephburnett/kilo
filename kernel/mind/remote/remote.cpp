@@ -640,7 +640,7 @@ void RemoteControl::act() {
     }
     case Kind::Measure: {
       why = measure_ != nullptr ? measure_->start() : "no self-measurement";
-      if (why == nullptr) format(what, sizeof what, "measuring (about 45 s; any key stops it)");
+      if (why == nullptr) format(what, sizeof what, "measuring (about 80 s; any key stops it)");
       else format(what, sizeof what, "measure refused: %s", why);
       done(what, why != nullptr);
       return;

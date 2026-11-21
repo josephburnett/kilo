@@ -1029,10 +1029,10 @@ start_body "$OUT/vbody_measure.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u "$H
 trap stop_body EXIT
 MEAS="$OUT/measure"
 rm -rf "$MEAS"
-run_mind "$OUT/host_measure.log" --remote --seed 3 --authorized-keys "$KEYS" --listen 127.0.0.1:0 --duration 80
+run_mind "$OUT/host_measure.log" --remote --seed 3 --authorized-keys "$KEYS" --listen 127.0.0.1:0 --duration 150
 trap 'kill $MIND_PID 2>/dev/null || true; stop_body' EXIT
 wait_listening "$OUT/host_measure.log"; MPORT="$PORT"
-for _ in $(seq 1 300); do grep -Eq "measure: (done|stopped|.*off the model|tilted|the body)" "$OUT/host_measure.log" && break; sleep 0.25; done
+for _ in $(seq 1 560); do grep -Eq "measure: (done|stopped|.*off the model|tilted|the body)" "$OUT/host_measure.log" && break; sleep 0.25; done
 sleep 3                       # the run's post-roll
 KPY -m kilo.cli --host "127.0.0.1:$MPORT" runs > "$OUT/measure_runs.txt"
 KPY -m kilo.cli --host "127.0.0.1:$MPORT" measure fetch --out "$MEAS" 2>&1 | tee "$OUT/measure_fit.txt"
@@ -1040,8 +1040,8 @@ kill "$MIND_PID" 2>/dev/null || true; wait "$MIND_PID" 2>/dev/null || true
 stop_body
 trap - EXIT
 grep -E "remote B|measure" "$OUT/host_measure.log" | sed 's/^/   /' | head -12
-expect "$OUT/host_measure.log" "remote B1 \(0x4A, measure\): measuring \(about 45 s; any key stops it\)" "B1 started it"
-expect "$OUT/host_measure.log" "measure: done \([0-9]+ ticks, [0-9]+ s, 6 tips\)" "it ran to its end, every sweep tipped"
+expect "$OUT/host_measure.log" "remote B1 \(0x4A, measure\): measuring \(about 80 s; any key stops it\)" "B1 started it"
+expect "$OUT/host_measure.log" "measure: done \([0-9]+ ticks, [0-9]+ s, 8 tips\)" "it ran to its end, every sweep tipped"
 expect "$OUT/measure_runs.txt" "self-measurement \(B1\)" "kilo runs lists it"
 expect "$OUT/measure_fit.txt" "measure 1: [0-9]+ bytes in [0-9.]+ s -> .*run-[0-9-]+-measure-1\.krec" "fetched"
 expect "$OUT/measure_fit.txt" "^com_x +mm" "the fit's table"
@@ -1054,7 +1054,7 @@ model = {k: v["model"] for k, v in d["parameters"].items()}
 def check(cond, what):
     if not cond:
         print(f"FAILED: the fit of the virtual body's run: {what}\n{json.dumps(d, indent=1)[:2500]}"); sys.exit(1)
-check(sum(1 for c in d["crossings"] if c["measured_x"] is not None) == 6, "a crossing from every sweep")
+check(sum(1 for c in d["crossings"] if c["measured_x"] is not None) == 8, "a crossing from every sweep")
 check(abs(p["imu_pitch"] - 1.5) < 0.2 and abs(p["imu_roll"] + 2.0) < 0.2, "the IMU offsets")
 check(abs(p["com_x"] - (model["com_x"] - 4)) < 1.5 and abs(p["com_y"] + 3) < 1.0, "the centre of mass")
 check(p["sag"] < 0.5, "no sag (rigid legs)")

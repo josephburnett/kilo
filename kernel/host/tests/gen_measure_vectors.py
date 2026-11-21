@@ -1,6 +1,6 @@
 """Golden vectors for the C++ self-measurement script (kernel/mind/measure/script.cpp),
-from the Python one (mind/kilo/measure/script.py, statics.rigid_rest): every
-tick of three runs, as lines that kernel/host/tests/test_measure.cpp replays.
+from the Python one (mind/kilo/measure/script.py script 2, statics.rigid_rest):
+every tick of two runs, as lines that kernel/host/tests/test_measure.cpp replays.
 
     ~/OpenCat/.venv/bin/python kernel/host/tests/gen_measure_vectors.py > kernel/host/tests/measure_vectors.txt
 
@@ -49,7 +49,9 @@ def main() -> None:
     out.write("# kernel/host/tests/gen_measure_vectors.py: the self-measurement script, tick by tick\n")
     run("no_tips", {}, out)
     tips: dict[int, int] = {}
-    for e, phase, k in ((2, "sweep", 40), (3, "lifted", 4), (4, "sweep", 95), (7, "sweep", 13)):
+    E = SC.SCRIPT.index
+    for e, phase, k in ((E("edge_lf"), "sweep", 40), (E("edge_rf"), "lifted", 4), (E("edge_lb"), "sweep", 95),
+                        (E("edge_lf_toward"), "sweep", 60), (E("edge_lb_toward"), "sweep", 13)):
         tips[e] = phase_start(e, phase, tips) + k  # each in the timeline the tips before it made
     run("tips", tips, out)
 

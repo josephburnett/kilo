@@ -23,8 +23,11 @@
 //    KILO_FEET_LOOKAHEAD_TICKS goes out as FEET with the rigid model's
 //    attitude and support for it (measure/script.h rigid_rest: "the model's
 //    prediction" in the recording); TELEMETRY watched for each sweep's tip
-//    (the tilt toward the lifted foot, from the settle hold's average, past
-//    kTipFraction of the model's tip: Script::tip) and for trouble;
+//    (measure/script.h: the tilt toward the lifted foot kTipRiseDeg above
+//    the lifted hold's and risen kTipJumpDeg within kTipJumpTicks, or
+//    kTipUpFraction of the model's tip from the settle hold's during the
+//    lifted hold: Script::tip; a "base" line with both baselines and a
+//    "tip" line go into the recording) and for trouble;
 // 4. the end: once the last tick has played, STAND (which ends GAIT on the
 //    body), the balance goal and the TELEMETRY rate put back, and the run
 //    closed once the body has left GAIT (or after kEndWaitUs).
@@ -151,14 +154,26 @@ class Measure {
   struct Planned {
     int64_t tick;  // script tick, -1 none
     int16_t step;
+    int16_t into;  // ticks into its step
     int16_t pitch_a16, roll_a16;  // the prediction
   };
   Planned ring_[kRing] = {};
   bool have_offset_ = false;
   real off_p_ = 0, off_r_ = 0;  // measured - predicted at the start (the IMU's offset, roughly)
+  // the tip's watch (script.py TipWatch): the sweep's two baselines, the tilt above the second
   int base_exp_ = -1;           // the experiment whose settle hold the baseline is of
   real base_p_ = 0, base_r_ = 0;
   uint32_t base_n_ = 0;
+  real lift_p_ = 0, lift_r_ = 0;  // the lifted hold's last kTipBaseTicks, averaged
+  uint32_t lift_n_ = 0;
+  bool base_marked_ = false;    // the "base" line written
+  bool tip_fired_ = false;      // this sweep's tip seen
+  struct Rel {
+    int64_t tick;  // script tick, -1 none
+    real v;
+  };
+  static constexpr int kRel = 16;
+  Rel rel_[kRel] = {};
   int last_mark_step_ = -1;
 
   Seen seen_[kSeen] = {};
