@@ -47,7 +47,7 @@ struct FakeHw final : power::Hardware {
   }
 };
 
-constexpr uint8_t kA7 = 0xA2, kB6 = 0x02, kA4 = 0x68, kA1 = 0x42, kC7 = 0xE2, kB2 = 0x38;
+constexpr uint8_t kA7 = 0xA2, kB6 = 0x02, kA4 = 0x68, kC1 = 0x52, kC7 = 0xE2, kB2 = 0x38;
 
 MindConfig sleep_cfg() {
   MindConfig c = MindRig::remote_cfg();
@@ -131,13 +131,13 @@ void test_cancel_and_restart() {
     r.run_ms(40000);
     CHECK(r.state() == State::Awake && r.posture_goal() == KILO_POSTURE_STAND && r.mind.sleep().sleeps() == 0);
   }
-  {  // A1 (a key that does nothing) after 20 s: the count starts again
+  {  // C1 (a key that does nothing) after 20 s: the count starts again
     Rig r(sleep_cfg());
     r.start();
     r.key(kA7);
     r.run_ms(20000);
-    r.key(kA1);
-    r.run_ms(15000);  // 35 s after A7, 15 s after A1
+    r.key(kC1);
+    r.run_ms(15000);  // 35 s after A7, 15 s after C1
     CHECK(r.state() == State::Drowsy);
     r.run_ms(16000);
     CHECK(r.state() == State::Asleep);
@@ -199,9 +199,9 @@ void test_wake_by_key() {
     r.key(kA7);
     r.run_ms(31000);
     size_t from = r.body.sent.size();
-    r.key(kA1);
+    r.key(kC1);
     CHECK(r.state() == State::Drowsy && r.posture_goal() == KILO_POSTURE_LIMP);
-    CHECK(r.log.has("power: awake (key:A1) after ") && r.log.has("A7 still holds"));
+    CHECK(r.log.has("power: awake (key:C1) after ") && r.log.has("A7 still holds"));
     r.run_ms(31000);
     CHECK(r.state() == State::Asleep && r.mind.sleep().sleeps() == 2);
     for (int p : r.postures_since(from)) CHECKF(p == KILO_POSTURE_LIMP, "posture %d", p);
@@ -261,7 +261,7 @@ void test_limp_with_laptop() {
     s.poll(a);
   }
   CHECK(s.state() == State::Drowsy && s.limp() && r.posture_goal() == KILO_POSTURE_LIMP);
-  r.key(kA1);  // does nothing: limp still
+  r.key(kC1);  // does nothing: limp still
   CHECK(s.limp() && r.posture_goal() == KILO_POSTURE_LIMP);
   for (int i = 0; i < 100; i++) {  // 100 s more, the client still there: no Asleep
     r.body.clock.advance_ms(1000);
@@ -458,9 +458,9 @@ void test_idle_sleep() {
     r.body.dist_mm = 59;
     r.start();
     r.run_ms(100000);
-    r.key(kA1);
+    r.key(kC1);
     r.run_ms(100000);
-    r.body.event(KILO_EVENT_IR_KEY, 0x142);  // A1 held: its repeat
+    r.body.event(KILO_EVENT_IR_KEY, 0x152);  // C1 held: its repeat
     r.run_ms(100000);
     CHECK(r.state() == State::Awake && !r.mind.sleep().limp());
     r.run_ms(21000);

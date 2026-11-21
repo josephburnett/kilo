@@ -16,9 +16,22 @@
 // - A4 trot, B4 crawl, C4 walk: not walking, start walking forward in that
 //   gait at +3. Walking in another gait: change the gait (the walk and the
 //   trot directly, the crawl after every leg has stepped home), level,
-//   heading and steer kept. Walking in that gait: straight forward at the
-//   current level's magnitude, no steer (from a turn, a bend or backward);
-//   already straight forward, nothing changes.
+//   heading and steer kept (out of the long trot: +3). Walking in that gait:
+//   straight forward at the current level's magnitude, no steer (from a
+//   turn, a bend or backward); already straight forward, nothing changes.
+// - A1 the long trot (docs/walking-and-balance.md §15, planner/longtrot.h):
+//   as a gait key, into its first stage, +1: 160 mm/s, straight forward,
+//   from standing or from any gait (the walk and the trot straight over, the
+//   crawl after the legs have stepped home), the steer kept but at most one
+//   level. The planner starts it at the trot's 8-tick swing and builds the
+//   swing up a tick a step. Its levels are three stages, forward only:
+//   kLongTrotSpeeds, 160, 180, 200 mm/s (swings of 9, 10, 11 ticks; strides
+//   33.6, 41.4, 50 mm). B7 a stage up (at +3: "already the top stage"); B5 a
+//   stage down, and at +1 out of it into the trot at +3 (144 mm/s, the
+//   planner shortens the swing a tick a step first), from where B5 goes on as
+//   in the trot. A6 / C6 steer it one level (0.25) at most: its balance was
+//   fitted to straight trots only. Stops, freeze, the guard: as for the trot.
+//   From standing, A6 / C6 after a long trot turn in place in the trot.
 // - A6 / C6: not walking, turn left / right in place in the selected gait
 //   at 1x. Walking forward or backward: steer one level to the left / right
 //   (kSteerLevels: the inner side's stride 0.25, 0.5 or 1 of it shorter,
@@ -72,7 +85,7 @@
 //   that crossfade first (Phase::Settle).
 // - B2 meows (Kind::Sound): the Mind asks its sound player (sound/player.h)
 //   and never calls perform() for it.
-// - Rows 1-3 but B2 (and A2 unless switched on) do nothing (Mind::ir_key logs them as ignored).
+// - Rows 1-3 but A1, B2 (and A2 unless switched on) do nothing (Mind::ir_key logs them as ignored).
 // Every key leaves one log line, "remote <grid> (0x.., <label>): <outcome>".
 // Which keys never reach perform() (repeats, other remotes' keys, rows 1-3,
 // a laptop client holding the body) is the caller's call (Mind::ir_key).
@@ -95,6 +108,9 @@ const double* speed_factors(const planner::Pattern& p);
 constexpr int kSteerSteps = 3;
 extern const double kSteerLevels[kSteerSteps];   // the steer's magnitudes, level 1..3
 constexpr int kDefaultLevel = 3;                  // +3: 1x, the gait's spec defaults
+constexpr int kLongTrotStages = 3;                // the long trot's levels +1..+3 (A1, then B7 / B5) ...
+extern const double kLongTrotSpeeds[kLongTrotStages];  // ... 160, 180, 200 mm/s
+constexpr int kLongTrotSteerSteps = 1;            // the long trot steers at kSteerLevels' first level only
 constexpr uint16_t kTrickMinMv = KILO_BATTERY_TRICK_MIN_MV;  // spec [battery]: A2 refuses below this pack voltage
 
 enum class Heading : uint8_t { Straight, Left, Right };
@@ -187,6 +203,8 @@ class RemoteControl {
   void act();
   void done(const char* what, bool failed);
   void walk_done(const char* suffix, const char* prefix = "");
+  void long_trot_start();
+  void long_trot_speed(bool up);
   // ", steering left 2", or "" when straight.
   void steer_text(char* buf, uint32_t cap) const;
   planner::WalkGoal walk_goal() const;

@@ -15,7 +15,10 @@
 //           2026-11-17 (the owner: A2 matches the picture better)
 //   B2 0x38 meow (Kind::Sound: one of the meow family, docs/sound.md;
 //           the Mind plays it at once, past the remote's queue: it moves nothing)
-//   A3 0x30, B3 0x18, C3 0x7A, C2 0x5A, A1 0x42, B1 0x4A,
+//   A1 0x42 long trot (Kind::Gait "longtrot": the trot with a longer stride
+//           built up a step at a time, three stages with B7 / B5; since
+//           2026-11-21, docs/walking-and-balance.md §15)
+//   A3 0x30, B3 0x18, C3 0x7A, C2 0x5A, B1 0x4A,
 //   C1 0x52: nothing (logged as ignored)
 //
 // The rear-up key is OFF unless switched on (docs/rear-up-trick.md, the
@@ -55,7 +58,7 @@ const Key* key_for(uint8_t command);
 // The command byte and whether it is a held-key repeat.
 inline uint8_t key_command(uint16_t arg) { return (uint8_t)(arg & 0xFF); }
 inline bool key_repeat(uint16_t arg) { return (arg & kRepeat) != 0; }
-// The key's entry (rows 1-3 too, Kind::Ignore but A2 and B2), or null
+// The key's entry (rows 1-3 too, Kind::Ignore but A1, A2 and B2), or null
 // for a held-key repeat or a key of another remote. With the rear-up key
 // off, A2's entry is a Kind::Ignore one ("none").
 const Key* action_for(uint16_t arg);
