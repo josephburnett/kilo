@@ -350,6 +350,7 @@ class Prediction:
     events: list = field(default_factory=list)  # (t, text)
     fell: float | None = None     # t when |pitch| or |roll| passed 75 deg for 120 ms (the body's fall)
     stopped: tuple | None = None  # (t, why) when the mind's checks stopped the play
+    up: list = field(default_factory=list)  # the world's up in the body frame, per sample (kilo.tricks.righting)
 
     def first(self, label: str, after: float = 0.0) -> float | None:
         for t, c in zip(self.t, self.contacts):
@@ -384,15 +385,19 @@ def _sent(kin: Kin, cmd: np.ndarray, prev: np.ndarray) -> np.ndarray:
 def simulate(frames, p: Params = FITTED, start: Mapping = STAND, settle_s: float = 0.6,
              stop_tick: int | None = None, stop_ticks: int = 75, end: Mapping = SIT,
              t_end: float | None = None, dt: float = 1e-3, sample_s: float = 0.02,
-             guards: Sequence[M.Guard] = (), roll_max: float | None = None) -> Prediction:
+             guards: Sequence[M.Guard] = (), roll_max: float | None = None,
+             R0: np.ndarray | None = None, kin: "Kin | None" = None) -> Prediction:
     """Play ``frames`` (a Trick, Keyframes, or (joints, dur, hold) tuples)
     from ``start`` (held ``settle_s`` first). With ``guards`` / ``roll_max``
     the mind's checks run on the model's own TELEMETRY (a guard: the mean
     nose up over the second half of its frame's hold, the largest |roll|
     there; the roll limit: every sample) and stop the play as the mind
     would (the straight line to ``end`` over ``stop_ticks``). Returns the
-    trace, sampled every ``sample_s``."""
-    kin = Kin(p)
+    trace, sampled every ``sample_s``. ``R0``: the attitude he starts in (body
+    -> world; None: level, on the start posture's lowest points), for a start
+    lying down; ``kin``: the kinematics, if not Kin(p) (kilo.tricks.righting's,
+    which has the head and the legs' sideways bulk)."""
+    kin = kin if kin is not None else Kin(p)
     cmd, idx = commands(frames, start, stop_tick, stop_ticks, end)
     n_ticks = len(cmd)
     fr_all = as_frames(frames)
@@ -415,9 +420,13 @@ def simulate(frames, p: Params = FITTED, start: Mapping = STAND, settle_s: float
     q = start_c.copy()
     qd = dict(zip(JOINTS, q + off_v))
     P, c, I = kin.state(qd)
-    R = np.eye(3)
-    floor = float(np.min(P[:, 2] - kin.radius))
-    x = np.array([0.0, 0.0, -floor]) + c
+    if R0 is None:
+        R = np.eye(3)
+        floor = float(np.min(P[:, 2] - kin.radius))
+        x = np.array([0.0, 0.0, -floor]) + c
+    else:  # lying: in that attitude, the lowest point just touching
+        R = np.array(R0, float)
+        x = np.array([0.0, 0.0, -float(np.min(((P - c) @ R.T)[:, 2] - kin.radius))])
     v = np.zeros(3)
     w = np.zeros(3)
     m = kin.total
@@ -430,6 +439,7 @@ def simulate(frames, p: Params = FITTED, start: Mapping = STAND, settle_s: float
     t0 = -settle_s
     steps = int(round(((n_ticks * TICK_S if t_end is None else t_end) - t0) / dt))
     out_t, out_nu, out_ro, out_fr, out_c = [], [], [], [], []
+    out_up = []
     loads: dict = {lb: [] for lb in kin.labels}
     clears: dict = {lb: [] for lb in kin.labels}
     next_sample = t0
@@ -528,6 +538,7 @@ def simulate(frames, p: Params = FITTED, start: Mapping = STAND, settle_s: float
                 out_ro.append(roll + p.imu_roll)
                 out_fr.append(fi)
                 out_c.append(cs)
+                out_up.append(R[2].copy())
                 for i, lb in enumerate(kin.labels):
                     loads[lb].append(F[i, 2] / G)
                     clears[lb].append(z[i])
@@ -575,7 +586,7 @@ def simulate(frames, p: Params = FITTED, start: Mapping = STAND, settle_s: float
                       clear={k: np.array(v_) for k, v_ in clears.items()},
                       slide={kin.labels[i]: float(s) for i, s in enumerate(slid) if s > 0.05},
                       torque={k: (float(v_), float(t_)) for k, v_, t_ in zip(JOINTS, torque, torque_t) if v_ > 0},
-                      events=events, fell=fall_t, stopped=stopped_by)
+                      events=events, fell=fall_t, stopped=stopped_by, up=out_up)
 
 
 # ---- the recorded plays: what the model is held to --------------------------------------------------
