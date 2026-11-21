@@ -45,7 +45,7 @@ link and TELEMETRY at 25 a second. That is how the remote still wakes him.
 "Nothing happens" (for the Pi's 30 seconds) means: no key, no laptop
 connected or asking anything, nothing moving. Any of these starts the 30
 seconds again, but none of them turns the servos back on. A key that moves
-Kilo (B6, C5, A4, B4, C4, A6, C6, A5, A2) calls the sleep off.
+Kilo (B6, C5, A4, B4, C4, A1, A6, C6, A5, A2) calls the sleep off.
 
 **He also goes to sleep on his own.** If he lies in REST with the servos on
 and nothing happens for **2 minutes** (no key at all, nothing moving, the
@@ -87,7 +87,7 @@ sleeps began by lying idle.
   only wake the Pi; the servos stay off, A7 still holds, so 30 seconds
   later he sleeps again. B2 (the meow) is one of those too: it wakes him,
   and the wake's mew is what you hear (docs/sound.md).
-- A walk, a turn, a trick or the behaviour key (A4, B4, C4, A6, C6, A2,
+- A walk, a turn, a trick or the behaviour key (A4, B4, C4, A1, A6, C6, A2,
   A5) first powers the servos back to REST (a trick cannot start while
   limp), then does its job. B6 and C5 go to their posture directly.
 - **A7 again** lies him down again (REST, servos on) and the servos go off

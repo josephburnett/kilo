@@ -11,6 +11,10 @@ namespace guard {
 
 namespace {
 constexpr double kPi = 3.14159265358979;
+// The gaits that turn round slowly, so very close they only stop: the crawl (its strides 0.5 mm a
+// tick: 4 s to walk back) and the long trot (0.75 mm a tick from a 50 mm stride: 1.5 s, while the
+// quick stop has him still in 0.6 s).
+bool turns_slowly(const char* gait) { return str_eq(gait, "crawl") || str_eq(gait, "longtrot"); }
 }  // namespace
 
 const char* zone_name(Zone z) {
@@ -361,14 +365,14 @@ void DistanceGuard::poll() {
       if (wk == Walk::Forward) {
         v_ = v;
         gait_ = gait;
-        // the crawl turns round slowly (its strides 0.5 mm a tick: 4 s to walk back): it only stops
-        if (zone_ == Zone::Red && backs_ < kMaxBacks && !str_eq(gait, "crawl")) {
+        // the crawl and the long trot turn round slowly (turns_slowly): they only stop
+        if (zone_ == Zone::Red && backs_ < kMaxBacks && !turns_slowly(gait)) {
           red_new_ = blue_new_ = false;
           decide(state, "back off");
           back_off(now, "very close: backing off");
           return;
         }
-        if (zone_ == Zone::Red && backs_ < kMaxBacks) {  // the crawl, very close: stop (the hiss, counted)
+        if (zone_ == Zone::Red && backs_ < kMaxBacks) {  // the crawl or the long trot, very close: stop (the hiss, counted)
           hisses_++;
           backs_++;
         }
@@ -406,7 +410,7 @@ void DistanceGuard::poll() {
       return;
     }
     case Action::Stopping:
-      if (zone_ == Zone::Red && backs_ < kMaxBacks && walker_.active() && !str_eq(gait_, "crawl") &&
+      if (zone_ == Zone::Red && backs_ < kMaxBacks && walker_.active() && !turns_slowly(gait_) &&
           walker_.goal().direction == planner::Direction::Forward) {
         // RED during BLUE's stop: back off once it has stopped (the back walk waits for the stop)
         red_new_ = false;

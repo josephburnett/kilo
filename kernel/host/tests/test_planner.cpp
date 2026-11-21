@@ -655,6 +655,60 @@ void test_a_heavier_side_shifts_the_lean() {
 
 int16_t a16(double deg) { return (int16_t)std::nearbyint(deg * 16); }
 
+// The long trot (test_long_trot.py; the golden vectors compare it tick for tick): A1's stages from
+// standing, the swing a tick a step, every tick in reach and under the trot's own bound above 184 mm/s
+// (9.7: test_long_trot.py BOUND), the quick stop from every phase of the top stage done in 1.3 s.
+void test_the_long_trot() {
+  CHECK(find_pattern("longtrot") == &kLongTrot && find_pattern("LongTrot") == &kLongTrot && is_long_trot(kLongTrot));
+  CHECK(!is_long_trot(P("trot")));
+  const real stages[3] = {160, 180, 200};
+  const int swings[3] = {9, 10, 11};
+  Planner& p = fresh("longtrot", 1000, stages[0]);
+  std::vector<TickPlan> t;
+  int last_w = p.swing_ticks();
+  CHECK(last_w == 9);
+  for (int k = 0; k < 3; k++) {
+    p.set_speed(stages[k]);
+    for (int i = 0; i < 150; i++) {
+      t.push_back(p.next());
+      CHECKF(p.swing_ticks() - last_w <= 1, "stage %d: swing %d after %d", k + 1, p.swing_ticks(), last_w);
+      last_w = p.swing_ticks();
+    }
+    CHECKF(p.swing_ticks() == swings[k], "stage %d: swing %d", k + 1, p.swing_ticks());
+    Timing tm = p.timing();
+    CHECKF(near(tm.speed_mm_s, stages[k], 0.01) && near(tm.stride_mm, p.s_cur()[0], 0.01), "stage %d: %g mm/s", k + 1,
+           (double)tm.speed_mm_s);
+  }
+  check_ticks(t, "longtrot stages");
+  CHECKF(max_joint_step(t) < 9.7, "longtrot stages: %.2f", max_joint_step(t));
+  for (int at = 0; at < 24; at++) {
+    Planner& q = fresh("longtrot", 1000, stages[2]);
+    std::vector<TickPlan> u;
+    plan(&u, q, 200 + at);
+    q.halt();
+    int n = 0;
+    for (; !q.done() && n < 400; n++) u.push_back(q.next());
+    CHECKF(q.done() && n * 0.02 < 1.3, "halt at %d: %d ticks", at, n);
+    std::vector<TickPlan> tail(u.begin() + 150, u.end());
+    check_ticks(tail, "longtrot halt");
+    CHECKF(max_joint_step(tail) < 9.7, "longtrot halt at %d: %.2f", at, max_joint_step(tail));
+  }
+  // out of the long trot into the trot: once its swing is 8 ticks again
+  Planner& r = fresh("longtrot", 1000, stages[2]);
+  std::vector<TickPlan> u;
+  plan(&u, r, 150);
+  r.set_pattern(P("trot"));
+  r.set_speed(144);
+  int n = 0;
+  for (; r.long_trot() && n < 200; n++) {
+    u.push_back(r.next());
+    if (r.long_trot()) last_w = r.swing_ticks();
+  }
+  CHECKF(!r.long_trot() && last_w == 8 && n < 100, "into the trot after %d ticks, swing %d", n, last_w);
+  plan(&u, r, 100);
+  check_ticks(u, "longtrot to trot");
+}
+
 void test_error_offset_lag_and_spike() {
   ErrorTracker tr;
   for (int t = 0; t < 300; t++) {
@@ -712,6 +766,7 @@ int main() {
   test_gate_holds_the_lift_and_catch_lands_the_foot();
   test_the_walk_catches_each_leg_of_a_couplet();
   test_a_heavier_side_shifts_the_lean();
+  test_the_long_trot();
   test_error_offset_lag_and_spike();
   return report("planner");
 }

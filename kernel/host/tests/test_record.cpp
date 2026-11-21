@@ -244,6 +244,47 @@ uint16_t trick_done_arg(const char* name, uint8_t reason) {
   return (uint16_t)(tricks::trick_id_for(*t) | (reason << 8));
 }
 
+// A1: a long-trot run is labelled so, also when the walk went into it from the trot and out again.
+void test_long_trot_runs() {
+  MindConfig cfg;
+  cfg.remote = true;
+  Rig r(cfg);
+  r.start();
+  r.run_ms(2000);
+  record::Recorder& rec = r.mind.recorder();
+  r.body.event(KILO_EVENT_IR_KEY, 0x42);  // A1: the long trot
+  r.run_ms(3000);
+  r.body.event(KILO_EVENT_IR_KEY, 0x62);  // B7: stage 2
+  r.run_ms(1500);
+  r.body.event(KILO_EVENT_IR_KEY, 0x02);  // B6: the quick stop
+  for (int k = 0; k < 400 && r.mind.walker().active(); k++) r.run_ms(20);
+  r.run_ms((uint32_t)(record::Recorder::kPostRollUs / 1000) + 100);
+  const record::Run* run = rec.find(1);
+  CHECK(run != nullptr && run->kind == KILO_RUN_KIND_WALK && (run->flags & KILO_WALK_FLAGS_ENDED_OK));
+  std::string text(run->text, run->text_len);
+  CHECKF(text.find("gait=longtrot dir=forward speed=180.0") == 0 && text.find(" end=stopped") != std::string::npos,
+         "%s", text.c_str());
+  std::vector<Rec> rs = r.records();
+  const Rec* st = mark(rs, "stream");
+  CHECKF(st != nullptr && st->payload.find("pattern=longtrot") != std::string::npos, "%s", st ? st->payload.c_str() : "-");
+  CHECK(r.ring_has("walk longtrot forward at 160.0 mm/s"));
+  // the trot, into the long trot and out again: still a long-trot run
+  r.body.event(KILO_EVENT_IR_KEY, 0x68);  // A4: trot
+  r.run_ms(2000);
+  r.body.event(KILO_EVENT_IR_KEY, 0x42);  // A1
+  r.run_ms(2000);
+  r.body.event(KILO_EVENT_IR_KEY, 0xA8);  // B5: out into the trot
+  r.run_ms(2000);
+  r.body.event(KILO_EVENT_IR_KEY, 0x02);
+  for (int k = 0; k < 400 && r.mind.walker().active(); k++) r.run_ms(20);
+  r.run_ms((uint32_t)(record::Recorder::kPostRollUs / 1000) + 100);
+  run = rec.find(2);
+  CHECK(run != nullptr);
+  text.assign(run->text, run->text_len);
+  CHECKF(text.find("gait=longtrot dir=forward speed=144.0") == 0, "%s", text.c_str());
+  CHECK(std::strcmp(r.mind.walker().planner().pattern().name, "trot") == 0);
+}
+
 void test_trick_runs() {
   MindConfig cfg;
   cfg.remote = true;
@@ -832,6 +873,7 @@ int main() {
   test_flight_store();
   test_records_from_boot();
   test_walk_run();
+  test_long_trot_runs();
   test_trick_runs();
   test_rear_up_stages();
   test_play_session_log();

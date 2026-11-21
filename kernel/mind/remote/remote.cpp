@@ -13,6 +13,7 @@ namespace remote {
 const double kSpeedFactors[kSpeedSteps] = {0.4, 0.7, 1.0, 1.15, 1.25};
 const double kTrotSpeedFactors[kSpeedSteps] = {0.4, 0.7, 1.0, 1.3, 1.6};  // 57.6 .. 230.4 mm/s
 const double kSteerLevels[kSteerSteps] = {0.25, 0.5, 1.0};
+const double kLongTrotSpeeds[kLongTrotStages] = {160.0, 180.0, 200.0};  // longtrot.py STAGES: 9, 10, 11-tick swings
 
 const double* speed_factors(const planner::Pattern& p) {
   return str_eq(p.name, "trot") ? kTrotSpeedFactors : kSpeedFactors;
@@ -57,6 +58,10 @@ bool RemoteControl::direction(planner::Direction* d) const {
 }
 
 double RemoteControl::speed_mm_s() const {
+  if (planner::is_long_trot(*pattern_)) {
+    int k = iabs(level_) < kLongTrotStages ? iabs(level_) : kLongTrotStages;
+    return kLongTrotSpeeds[k - 1];
+  }
   return speed_factors(*pattern_)[iabs(level_) - 1] * (double)planner::default_speed(*pattern_);
 }
 
@@ -152,12 +157,44 @@ void RemoteControl::done(const char* what, bool failed) {
 // The walk as it now is ("walk forward (trot) 55.6 mm/s, steering left 1").
 void RemoteControl::walk_done(const char* suffix, const char* prefix) {
   char what[112], v[16], st[24];
-  planner::Timing t = planner::timing(*pattern_, (planner::real)speed_mm_s());
+  planner::Timing t = planner::pattern_timing(*pattern_, (planner::real)speed_mm_s(), dir());
   format_speed(v, sizeof v, (double)t.speed_mm_s);
   steer_text(st, sizeof st);
   format(what, sizeof what, "%swalk %s (%s) %s mm/s%s%s", prefix, planner::direction_name(dir()), pattern_->name, v,
          st, suffix);
   done(what, false);
+}
+
+// Into the long trot (A1): its first stage, straight forward, the steer at most its one level.
+void RemoteControl::long_trot_start() {
+  level_ = 1;
+  heading_ = Heading::Straight;
+  if (iabs(steer_) > kLongTrotSteerSteps) steer_ = steer_ > 0 ? kLongTrotSteerSteps : -kLongTrotSteerSteps;
+}
+
+// B7 / B5 in the long trot: a stage up or down; B5 at the first stage: the trot at 1x (144 mm/s),
+// from where B5 goes on as in the trot.
+void RemoteControl::long_trot_speed(bool up) {
+  int l = up ? (level_ < kLongTrotStages ? level_ + 1 : level_) : (level_ > 1 ? level_ - 1 : 0);
+  const char* end = l == level_ ? ": already the top stage" : "";
+  const char* out = "";
+  if (l == 0) {
+    pattern_ = planner::find_pattern("trot");
+    level_ = kDefaultLevel;
+    out = ": out of the long trot";
+  } else {
+    level_ = l;
+  }
+  const char* why = end[0] == '\0' ? walker_.start(walk_goal()) : nullptr;
+  char stage[24], v[16], st[24], what[128];
+  if (planner::is_long_trot(*pattern_)) format(stage, sizeof stage, "stage %d", level_);
+  else format(stage, sizeof stage, "1x");
+  planner::Timing t = planner::pattern_timing(*pattern_, (planner::real)speed_mm_s(), dir());
+  format_speed(v, sizeof v, (double)t.speed_mm_s);
+  steer_text(st, sizeof st);
+  format(what, sizeof what, "speed %s (%s %s mm/s %s%s)%s%s%s%s", stage, pattern_->name, v,
+         planner::direction_name(dir()), st, end, out, why != nullptr ? ": walk failed: " : "", why != nullptr ? why : "");
+  done(what, why != nullptr);
 }
 
 void RemoteControl::freeze(const Key& key, uint16_t arg) {
@@ -263,6 +300,7 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
         bool same = p == pattern_;
         int was_level = level_, was_steer = steer_;
         Heading was_heading = heading_;
+        bool was_long = planner::is_long_trot(*pattern_);
         pattern_ = p;
         if (same) {  // that gait already: straight forward at the level's magnitude, no steer
           heading_ = Heading::Straight;
@@ -272,12 +310,17 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
             walk_done(": unchanged");
             return;
           }
+        } else if (planner::is_long_trot(*p)) {  // into the long trot: its first stage, straight
+          long_trot_start();
+        } else if (was_long) {  // out of it: the gait's 1x, forward
+          level_ = kDefaultLevel;
         }
         act();
         return;
       }
       reset_motion();
       pattern_ = p;
+      if (planner::is_long_trot(*p)) long_trot_start();
       break;  // a trick first, then the walk (act)
     }
     case Kind::Turn: {
@@ -292,11 +335,12 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
           act();
           return;
         }
-        // walking forward or backward: steer a level that way, without stopping
-        int sv = h == Heading::Left ? (steer_ < kSteerSteps ? steer_ + 1 : steer_)
-                                    : (steer_ > -kSteerSteps ? steer_ - 1 : steer_);
+        // walking forward or backward: steer a level that way, without stopping (the long trot: one)
+        int most = planner::is_long_trot(*pattern_) ? kLongTrotSteerSteps : kSteerSteps;
+        int sv = h == Heading::Left ? (steer_ < most ? steer_ + 1 : steer_) : (steer_ > -most ? steer_ - 1 : steer_);
         if (sv == steer_) {
-          walk_done(": already the tightest");
+          walk_done(most < kSteerSteps ? ": already the tightest (the long trot steers one level)"
+                                       : ": already the tightest");
           return;
         }
         steer_ = sv;
@@ -305,6 +349,7 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
       }
       reset_motion();
       heading_ = h;
+      if (planner::is_long_trot(*pattern_)) pattern_ = planner::find_pattern("trot");  // turns in place in the trot
       break;
     }
     case Kind::Speed: {
@@ -326,6 +371,10 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
           return;
         }
         walk_done("", "turn ended: ");
+        return;
+      }
+      if (planner::is_long_trot(*pattern_)) {
+        long_trot_speed(up);
         return;
       }
       int l = level_;

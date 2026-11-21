@@ -8,11 +8,15 @@ Line format (space separated; SPEED -1 is the pattern's default speed):
 
     sr PATTERN  lo hi                                         patterns.speed_range
     tm PATTERN SPEED  stride shift stance period speed        patterns.timing
+    ltm SPEED DIR  stride shift stance period speed swing     longtrot.pattern_timing (LONG_TROT), swing_for
+    land W V  x                                               longtrot.TROT_FIT.land_x
     ik LEG X Z  t1 t2                                         BodyModel.ik (radians)
     com X0..X3 Z0..Z3  cx cy cz                               BodyModel.com
     fit X0..X3 Z0..Z3 SUPPORT PP PR  pitch roll               fit_attitude with prev (PP, PR)
     stab X0..X3 Z0..Z3 SUPPORT P R  margin                    stability
-    S NAME PATTERN DIRECTION SPEED TICK                       a new Planner
+    S NAME PATTERN DIRECTION SPEED TICK                       a new Planner (the long trot's scenarios, and those
+                                                              that change into it: longtrot.LongTrotPlanner,
+                                                              which in the other gaits is Planner)
     speed V | dir D | steer K | pattern P | stop | halt | observe EP ER
                                                               a command before the next tick
     t TICK X0..X3 Z0..Z3 SUPPORT PITCH ROLL PLAN_PITCH PLAN_ROLL MARGIN LIFTING
@@ -29,6 +33,7 @@ import math
 import sys
 
 from kilo.planner import errors
+from kilo.planner import longtrot as lt
 from kilo.planner import patterns as pat
 from kilo.planner.model import BodyModel, fit_attitude, stability
 from kilo.planner.plan import Planner
@@ -72,10 +77,26 @@ def statics() -> None:
                 line("stab", *xs, *zs, sup, f(att[0]), f(att[1]), f(stability(M, xs, zs, sup, *att)))
 
 
-def scenario(name, pattern, direction="forward", speed=None, tick=1000, script=()):
+def long_statics() -> None:
+    for v in (0.0, 40.0, 100.0, 144.0, 150.0, 150.5, 160.0, 168.0, 170.0, 180.0, 186.0, 190.0, 200.0, 207.0, 230.0,
+              400.0):
+        for d in ("forward", "back"):
+            t = lt.pattern_timing(lt.LONG_TROT, v, d)
+            line("ltm", repr(v), d, f(t.stride_mm), f(t.shift_ms), f(t.stance_ms), f(t.period_ms), f(t.speed_mm_s),
+                 lt.swing_for(v))
+    for w in range(8, 14):
+        for v in (-180.0, 0.0, 144.0, 207.0):
+            line("land", w, repr(v), f(lt.TROT_FIT.land_x(w, v)))
+
+
+def scenario(name, pattern, direction="forward", speed=None, tick=1000, script=(), long=False):
     """script: ("run", n) plans n ticks, ("until_done", n) up to n until the
-    planner is done, the rest are commands."""
-    p = Planner(M, pattern, direction, speed, tick=tick)
+    planner is done, the rest are commands. long: made by LongTrotPlanner
+    (the long trot, and changes into and out of it)."""
+    if long or pattern == "longtrot":
+        p = lt.LongTrotPlanner(M, direction, speed, tick=tick, pattern=pattern)
+    else:
+        p = Planner(M, pattern, direction, speed, tick=tick)
     line("S", name, pattern, direction, -1 if speed is None else repr(float(speed)), tick)
 
     def tick_line():
@@ -191,6 +212,57 @@ def scenarios() -> None:
              script=[("run", 40), ("observe", 6.0, 0.0), ("run", 40), ("observe", 0.0, 0.0), ("run", 30)])
 
 
+def long_scenarios() -> None:
+    """The long trot (2026-11-21, remote key A1): its stages and build-up from stand, the stops from
+    the long stride at every phase, steering, the changes to and from the other gaits, backward, the
+    turns, the gate and the catch."""
+    st1, st2, st3 = lt.STAGES
+    scenario("lt_stages", "longtrot", speed=st1, script=[("run", 120), ("speed", st2), ("run", 80), ("speed", st3),
+                                                         ("run", 80), ("speed", 207.0), ("run", 50), ("speed", 400.0),
+                                                         ("run", 30), ("speed", st1), ("run", 120), ("stop",),
+                                                         ("until_done", 400)])
+    for n in (0, 3, 6, 9, 13, 17, 22):
+        scenario(f"lt_halt_{n}", "longtrot", speed=st3, script=[("run", 150 + n), ("halt",), ("until_done", 300)])
+    for n in (0, 5, 11):
+        scenario(f"lt_stop_{n}", "longtrot", speed=207.0, script=[("run", 150 + n), ("stop",), ("until_done", 400)])
+    scenario("lt_steer", "longtrot", speed=st3, script=[("run", 120), ("steer", lt.STEER_MAX), ("run", 80),
+                                                        ("steer", -lt.STEER_MAX), ("run", 80), ("steer", 1.0),
+                                                        ("run", 60), ("speed", st1), ("run", 60), ("halt",),
+                                                        ("until_done", 300)])
+    scenario("trot_to_lt", "trot", long=True, script=[("run", 60), ("pattern", "longtrot"), ("speed", st1),
+                                                       ("run", 150), ("stop",), ("until_done", 300)])
+    scenario("trot_top_to_lt", "trot", speed=230.4, long=True, script=[("steer", 1.0), ("run", 80),
+                                                                        ("pattern", "longtrot"), ("steer", 0.25),
+                                                                        ("speed", st1), ("run", 150)])
+    scenario("trot_turn_to_lt", "trot", "left", long=True, script=[("run", 50), ("pattern", "longtrot"),
+                                                                    ("dir", "forward"), ("speed", st1), ("run", 150)])
+    scenario("lt_to_trot", "longtrot", speed=st3, script=[("run", 150), ("pattern", "trot"), ("speed", 144.0),
+                                                          ("run", 200), ("halt",), ("until_done", 200)])
+    scenario("lt_to_walk", "longtrot", speed=st2, script=[("run", 150), ("pattern", "walk"), ("speed", 80.0),
+                                                          ("run", 250)])
+    scenario("lt_to_crawl", "longtrot", speed=st3, script=[("run", 150), ("pattern", "crawl"), ("speed", 18.0),
+                                                           ("run", 300)])
+    scenario("crawl_to_lt", "crawl", long=True, script=[("run", 150), ("pattern", "longtrot"), ("speed", st1),
+                                                         ("run", 350)])
+    scenario("walk_to_lt", "walk", long=True, script=[("run", 80), ("pattern", "longtrot"), ("speed", st1),
+                                                       ("run", 150), ("pattern", "walk"), ("run", 10),
+                                                       ("pattern", "longtrot"), ("run", 100)])
+    scenario("lt_change_halt", "longtrot", speed=st3, script=[("run", 150), ("pattern", "trot"), ("run", 12),
+                                                              ("halt",), ("until_done", 300)])
+    scenario("lt_stop_halt", "longtrot", speed=st2, script=[("run", 150), ("stop",), ("run", 9), ("halt",),
+                                                            ("until_done", 300)])
+    # the guard's back-off (RED): the walk turns backward at 40 mm/s
+    scenario("lt_reverse", "longtrot", speed=st3, script=[("run", 150), ("dir", "back"), ("speed", 40.0),
+                                                          ("run", 200), ("halt",), ("until_done", 200)])
+    scenario("lt_back", "longtrot", "back", speed=180.0, script=[("run", 200), ("stop",), ("until_done", 400)])
+    scenario("lt_turns", "longtrot", "left", speed=st1, script=[("run", 80), ("dir", "right"), ("run", 80),
+                                                                ("dir", "forward"), ("run", 80)])
+    scenario("lt_gate_catch", "longtrot", speed=st2, script=[("run", 100), ("observe", 0.0, 8.0), ("run", 30),
+                                                             ("observe", 0.0, 0.0), ("run", 3), ("observe", -3.0, 8.0),
+                                                             ("run", 5), ("observe", 0.0, 0.0), ("run", 60),
+                                                             ("halt",), ("observe", 9.0, 0.0), ("until_done", 300)])
+
+
 class _Tel:
     pass
 
@@ -239,3 +311,5 @@ if __name__ == "__main__":
     statics()
     scenarios()
     tracker()
+    long_statics()
+    long_scenarios()

@@ -594,14 +594,15 @@ behaviour runner (`remote/remote.h` says what each key does):
 | B6 | stand and stop: the quick stop of a walk (the feet in the air put down where they are, the body stopped in about 0.2 s, the legs squared up under the shoulders; docs/walking-and-balance.md §14), then STAND |
 | A7 | sleep: the quick stop, then REST; 30 s later, if nothing else happened, light sleep (servos off, the Pi idles; any key or the laptop wakes him: `power/sleep.h`, docs/power.md) |
 | C5 | the quick stop, then the calibration posture (CALIB) |
-| A4, B4, C4 | trot, crawl, walk: walk forward in that gait from standing; change the gait while walking; the gait in use: straight forward again |
+| A4, B4, C4 | trot, crawl, walk: walk forward in that gait from standing; change the gait while walking; the gait in use: straight forward again (out of the long trot: at that gait's +3) |
+| A1 | the long trot (`planner/longtrot.h`, docs/walking-and-balance.md §15): from standing or any gait, straight forward at its stage 1 (160 mm/s, a 9-tick swing, 33.6 mm stride), the swing built up a tick a step from the trot's 8; B7 / B5 stages 2 and 3 (180 and 200 mm/s, 10 and 11 ticks, 41.4 and 50 mm), B5 at stage 1 into the trot at 144 mm/s; A6 / C6 steer it one level (0.25) at most; stops and the guard as the trot (very close: the quick stop only) |
 | B7, B5 | faster, slower by one speed level (the trot 0.4, 0.7, 1, 1.3, 1.6 × its speed: 58 to 230 mm/s; the walk and the crawl 0.4, 0.7, 1, 1.15, 1.25); past the slowest B5 goes backward; only while walking. Turning in place: stop turning and walk straight forward (B7) or backward (B5) at once |
 | A6, C6 | from standing: turn left, right in place; walking forward or backward: steer one level left or right (0.25, 0.5, 1 of the stride off the inner side, at most 3 each way), without stopping (docs/walking-and-balance.md §13) |
 | C7 | freeze: the quick stop of the walk (as B6, ending in STANCE, powered), a trick and the behaviour runner stopped; then only B6 and A7 act |
 | A5 | start the behaviour runner |
 | A2 | off unless built with `KILO_REAR_UP=1`, `2` or `3` (the highest stage allowed): rear up (docs/rear-up-trick.md): up to stage 1 (28 degrees nose up) and hold; A2 again while he holds a stage (4 s) takes him on to the next (40, then 54 degrees), up to the build's; without it he comes down to SIT from there; the top stage holds 2 s and comes down. A2 at another moment, B6 or C7: down at once (1.5 to 2.5 s); refused below 7400 mV at rest (the highest reading of the last 20 s). B2 until 2026-11-17 |
 | B2 | a meow: one of the meow family, picked at random (`sound/`, docs/sound.md); it moves nothing, so it plays at once, also while a walk or the behaviour runs |
-| rows 1-3 but A2 and B2 | nothing (logged as ignored) |
+| rows 1-3 but A1, A2 and B2 | nothing (logged as ignored) |
 
 The remote's waits are phases of `poll()` and keys that come
 meanwhile queue (4); C7 does not queue: it cancels

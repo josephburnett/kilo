@@ -753,6 +753,40 @@ expect "$OUT/host_ir.log" "behaviour: idle \(free\)" "the runner ran"
 expect "$OUT/host_ir.log" "remote B6 \(0x02, stand\): behaviour runner stopped, posture stand" "B6 stopped the runner"
 if grep -Eq "decode errors [1-9]|remote .*failed|no longer stamping" "$OUT/host_ir.log"; then echo "FAILED: errors"; exit 1; fi
 
+echo "== P3 integration: A1, the long trot, against the virtual body (its stages, out into the trot, the quick stop)"
+start_ctl_body "$OUT/vbody_lt.log"
+trap stop_body EXIT
+run_mind "$OUT/host_lt.log" --remote --seed 3 --duration 11
+sleep 1
+ctl ir 0x02                   # B6: stand (from LIMP)
+sleep 1
+ctl ir 0x42                   # A1: the long trot, stage 1 (160 mm/s)
+sleep 2.5
+ctl ir 0x62                   # B7: stage 2 (180 mm/s)
+sleep 1.5
+ctl ir 0x62                   # B7: stage 3 (200 mm/s)
+sleep 1.5
+ctl ir 0xA8                   # B5: stage 2
+sleep 0.3
+ctl ir 0xA8                   # B5: stage 1
+sleep 0.3
+ctl ir 0xA8                   # B5: out of it, the trot at 1x
+sleep 1.5
+ctl ir 0x02                   # B6: the quick stop, then stand
+wait_mind "$OUT/host_lt.log"
+stop_body
+trap - EXIT
+grep -E "remote|walk" "$OUT/host_lt.log"
+expect "$OUT/host_lt.log" "remote A1 \(0x42, long trot\): walk forward \(longtrot\) 160\.0 mm/s" "A1 walked"
+expect "$OUT/host_lt.log" "walk longtrot forward at 160\.0 mm/s" "the long trot started"
+expect "$OUT/host_lt.log" "remote B7 \(0x62, faster\): speed stage 2 \(longtrot 180\.0 mm/s forward\)" "B7: stage 2"
+expect "$OUT/host_lt.log" "remote B7 \(0x62, faster\): speed stage 3 \(longtrot 200\.0 mm/s forward\)" "B7: stage 3"
+expect "$OUT/host_lt.log" "remote B5 \(0xA8, slower\): speed 1x \(trot 144\.0 mm/s forward\): out of the long trot" "B5: the trot"
+expect "$OUT/host_lt.log" "walk ended: stopped" "the quick stop"
+if grep -Eq "decode errors [1-9]|remote .*failed|no longer stamping|underruns [1-9]|refused FEET" "$OUT/host_lt.log"; then
+    echo "FAILED: errors"; exit 1
+fi
+
 echo "== P3 integration: the behaviour runner idles for 5 s (--behaviour)"
 start_body "$OUT/vbody_bh.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u -m kilo.vbody.core
 trap stop_body EXIT

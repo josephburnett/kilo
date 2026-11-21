@@ -402,10 +402,12 @@ void Recorder::walk_text(const planner::Walker& w, const char* end) {
   Run* r = run(walk_);
   if (r == nullptr) return;
   const planner::WalkGoal& g = w.goal();
+  if (planner::is_long_trot(*g.pattern)) walk_long_ = true;
   real speed = (r->flags & KILO_WALK_FLAGS_STREAMED) ? w.planner().timing().speed_mm_s : g.speed_mm_s;
-  // "gait=trot dir=forward speed=55.6[ end=REASON]" (Line puts a space before each key)
+  // "gait=trot dir=forward speed=55.6[ end=REASON]" (Line puts a space before each key); a walk that
+  // went into the long trot at any time is "gait=longtrot" (its runs told apart from the trot's)
   Line s("");
-  s.str("gait", g.pattern->name);
+  s.str("gait", walk_long_ ? planner::kLongTrot.name : g.pattern->name);
   s.str("dir", planner::direction_name(g.direction));
   if (speed >= 0) s.fixed("speed", speed, 1);
   else s.str("speed", "default");
@@ -453,6 +455,7 @@ void Recorder::on_walk_mark(const planner::Walker& w, planner::WalkMark mark) {
     if (walk_ != 0) end_run(walk_, now);  // cannot be: a walk ends before the next one's setup
     Run* r = begin_run(KILO_RUN_KIND_WALK, now);
     walk_ = r->id;
+    walk_long_ = false;
     last_ = {};
     const BodyState& b = link_.state();
     Line l("walk");

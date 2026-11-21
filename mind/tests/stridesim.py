@@ -235,8 +235,9 @@ def _fold(slots, j):
 
 
 def recorded_rock(paths, physics: str = "rocking", settle: int = 30) -> dict:
-    """Straight trots in the recordings, by (direction, speed, stride): the folded rock (deg, + toward
-    the front foot in the air), measured and replayed, deduplicated (runs copied in two files)."""
+    """Straight trots and long trots in the recordings, by (pattern, direction, speed, stride): the
+    folded rock (deg, + toward the front foot in the air), measured and replayed, deduplicated (runs
+    copied in two files)."""
     seen, by = set(), defaultdict(list)
     for path, w in _recordings(paths):
         segs = []
@@ -254,12 +255,13 @@ def recorded_rock(paths, physics: str = "rocking", settle: int = 30) -> dict:
                 end = segs[i + 1][0] if i + 1 < len(segs) else 1 << 30
                 if sg[0] + settle <= s[0] and s[0] + 10 < end:
                     lab = sg
-            if lab is None or lab[1] != "trot" or lab[3] not in (None, "0.00") or lab[2] not in ("forward", "back"):
+            if (lab is None or lab[1] not in ("trot", "longtrot") or lab[3] not in (None, "0.00")
+                    or lab[2] not in ("forward", "back")):
                 continue
             key = (s[0], s[1], round(s[2][0], 3))
             if key not in seen:
                 seen.add(key)
-                by[(lab[2], lab[4], lab[5])].append(s)
+                by[(lab[1], lab[2], lab[4], lab[5])].append(s)
     res = {}
     for k, ss in by.items():
         if len(ss) >= 4:
@@ -276,12 +278,20 @@ def fit(paths) -> None:
     for physics in ("physics", "rocking"):
         for k, r in recorded_rock(paths, physics).items():
             rows.setdefault(k, {"n": r["n"], "tip": r["tip"]})[physics] = r["tip_virtual"]
+    # the long trot (A1, since 2026-11-21): its swing and its landing from the planner's rules, so the
+    # fitted pendulum's prediction there is the long trot's (about 0: it lands at the balanced point)
     print("| trot | stride | slots | tip measured | fitted pendulum | virtual body (Physics) | RockingPhysics |")
     print("|---|---|---|---|---|---|---|")
-    for (d, v, s), r in sorted(rows.items(), key=lambda kv: (kv[0][0] != "forward", kv[0][1])):
+    for (p, d, v, s), r in sorted(rows.items(), key=lambda kv: (kv[0][0], kv[0][1] != "forward", kv[0][2])):
         sv = v if d == "forward" else -v
         land = s / 2 if d == "forward" else -s / 2
-        print(f"| {d} {v:.0f} mm/s | {s} mm | {r['n']} | {r['tip']:+.2f} | {TROT_FIT.tip_deg(8, sv, land):+.2f} "
+        w = 8
+        if p == "longtrot":
+            w = swing_for(v)
+            x = TROT_FIT.land_x(w, sv)
+            land = min(s / 2 + 6, max(0.0, x)) if sv > 0 else max(-s / 2 - 6, min(0.0, x))
+        print(f"| {'long ' if p == 'longtrot' else ''}{d} {v:.0f} mm/s ({w} ticks) | {s} mm | {r['n']} "
+              f"| {r['tip']:+.2f} | {TROT_FIT.tip_deg(w, sv, land):+.2f} "
               f"| {r.get('physics', float('nan')):+.2f} | {r.get('rocking', float('nan')):+.2f} |")
 
 
