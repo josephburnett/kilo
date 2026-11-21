@@ -84,8 +84,8 @@ counts a reading from three quarters of that distance on as the floor and
 ignores it, and everything nearer as real: a hand in front of a lowered
 head still counts. Up to 12 degrees down the floor is not in view.
 
-After A7 Kilo lies in REST with the head down, and in light sleep he goes
-limp the same way; the sensor then reads the floor at 55-63 mm. Every
+After A7 Kilo lies in REST with the head down, and 3 seconds later (light
+sleep) he goes limp the same way; the sensor then reads the floor at 55-63 mm. Every
 reading while he lies (the REST or LIMP posture asked and no walk, or the
 body limp by itself) is the floor: the zone stays green, the eyes stay
 green, nothing is logged, and nothing wakes him. Without that the eyes

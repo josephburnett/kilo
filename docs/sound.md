@@ -174,7 +174,8 @@ running at silence between sounds (no ramp per sound, 86 interrupts a
 second, the switching always on). That is the one to try if the ramps
 still pop.
 
-**Light sleep** (A7, then 30 s of nothing: docs/power.md) ramps the
+**Light sleep** (A7, then 30 s of nothing: docs/power.md; the servos
+going off 3 s after A7 changes nothing here) ramps the
 output down and stops it in both modes, so nothing runs or hisses while
 he sleeps; any sound asked for meanwhile is dropped. Waking starts it
 again ("run") and plays the mew.

@@ -260,7 +260,7 @@ boolean CKernel::Initialize (void)
 	{
 		logf (*m_pLog, LogLevel::Info, "power: ARM %u MHz, SoC %d C, throttled 0x%x; light sleep %s",
 		      (unsigned) (Soc.arm_hz / 1000000), (int) (Soc.temp_mc / 1000), (unsigned) Soc.throttled,
-		      KILO_LIGHT_SLEEP ? "on (A7, then 30 s of nothing)" : "off (KILO_LIGHT_SLEEP=0)");
+		      KILO_LIGHT_SLEEP ? "on (A7: servos off 3 s after, the Pi after 30 s of nothing)" : "off (KILO_LIGHT_SLEEP=0)");
 	}
 
 	kilo::Serial *pSerial = ChooseSerial ();

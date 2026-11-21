@@ -751,7 +751,7 @@ a frame only when `tx_free()` covers all of it; otherwise it counts
 | 2 Hz | the body is alive: TELEMETRY flowing |
 | 5 Hz | the body's HELLO has another protocol major: the kernel stays up and keeps the heartbeat, but sends no goals or FEET (kilo-mind-host exits 2 instead) |
 | double flash (two 100 ms flashes, once a second) | flashing the body, from the laptop or the SD card, until the new firmware's HELLO (or FAILED); or writing a kernel update to the card (the flashes stretch: the loop stalls on each 16 KB slice) |
-| one 50 ms flash every 5 s | light sleep (docs/power.md): A7, then 30 s of nothing |
+| one 50 ms flash every 5 s | light sleep (docs/power.md): A7 (or 2 min lying idle in REST), then 30 s of nothing. The servos go off earlier (3 s after A7) without changing the LED |
 | steady on or off for more than ~20 s | stopped: `Initialize` failed or a crash (Circle halts, the LED freezes) |
 
 The LED says nothing about the network (the log does). The blink freezes
@@ -774,7 +774,7 @@ Ethernet ("Network bring-up").
 | `seed` | 32 bits from the hardware RNG | the behaviour runner logs it (`seed N`, at boot or in the remote's A5 line), so a run can be replayed on the laptop |
 | `stats_period_ms` | 1000 | a STATS_REQ to the body each second, logged `body STATS: ...`, as `kilo-mind-host` does |
 | `sounds`, `sound_output` | `make -C kernel KILO_SOUND=0` leaves them out | Kilo's sounds on the 3.5 mm jack (docs/sound.md, `src/sound.h`, `mind/sound/`): the sounds `tools/pack_sounds.py` packs from `kernel/sounds/*.wav` and Circle's PWM sound device. Logged at boot: `sound: PWM on the 3.5 mm jack, 44100 Hz, range 5669, chunks of 512 frames, idle stopped` and `sound: N sounds (S s) in the image, on, volume 70`. `KILO_SOUND_IDLE=run` keeps the device running between sounds; `KILO_SOUNDS_DIR=DIR` packs another directory. `kilo sound on|off|volume N --host` switches them at run time (not kept over a reboot) |
-| `light_sleep` | on; `make -C kernel KILO_LIGHT_SLEEP=0` turns it off | the remote's A7, then 30 s of nothing: light sleep (servos off, the loop idles in wfi, the Ethernet PHY powered down while no cable is in; docs/power.md, `mind/power/sleep.h`). Logged at boot: `power: ARM 600 MHz, SoC .. C, throttled 0x..; light sleep on`. Off, A7 is plain REST: the awake baseline docs/power.md compares against. `kilo-mind-host --light-sleep` runs the same state machine on Linux (no wfi there) |
+| `light_sleep` | on; `make -C kernel KILO_LIGHT_SLEEP=0` turns it off | the remote's A7: the servos off (LIMP, inert) 3 s after he lies still, then after 30 s of nothing (no laptop connected) light sleep (the loop idles in wfi, the Ethernet PHY powered down while no cable is in); lying idle in REST for 2 min does the same as A7 (docs/power.md, `mind/power/sleep.h`). Logged at boot: `power: ARM 600 MHz, SoC .. C, throttled 0x..; light sleep on`. Off, none of it: A7 is plain REST with the servos on, the awake baseline docs/power.md compares against. `kilo-mind-host --light-sleep` runs the same state machine on Linux (no wfi there) |
 
 The runner's wind-down ends in a poweroff request. The kernel cannot switch the Pi off: it logs `behaviour runner
 asked for poweroff ...` once and keeps the link up (the runner has stopped).
@@ -798,7 +798,7 @@ floor only, never on a desk.**
 
 | Key | Code | What it does |
 |---|---|---|
-| A7 | 0xA2 | sleep: the quick stop (below), then lie down (REST). With light sleep on, 30 s of nothing after it puts the Pi to sleep (docs/power.md) |
+| A7 | 0xA2 | sleep: the quick stop (below), then lie down (REST). With light sleep on, 3 s after he lies still the servos go off (LIMP: inert, no fall reflex) until a key moves him, and 30 s of nothing after it puts the Pi to sleep (docs/power.md) |
 | B7 | 0x62 | faster: one speed level up, while walking. While turning in place: stop turning and walk straight forward. Standing: nothing |
 | C7 | 0xE2 | freeze: at once, ahead of any key still waiting. The quick stop, stop a trick and the behaviour runner; standing, Kilo keeps his posture. Then every key but B6 and A7 is ignored |
 | A6 | 0x22 | standing: turn left in place, in the gait last chosen, at 1×. Walking forward or backward: steer one step more to the left |

@@ -1,9 +1,12 @@
-// Light sleep (power/sleep.h) on a scripted body: A7 then 30 s of nothing
-// puts Kilo to sleep (LIMP, the loop's sleep period); keys and laptop
-// activity restart or cancel the count; any key or a laptop wakes him; a
-// walk, a trick or the runner from sleep gets REST first; the network
-// policy with and without an Ethernet link; the card saver's save before
-// sleeping; the battery trend (power/battery.h) and the metrics lines.
+// Light sleep (power/sleep.h) on a scripted body: A7 limps the servos as
+// soon as he lies still (with or without a laptop), then 30 s of nothing
+// puts the Pi to sleep (the loop's sleep period); keys and laptop activity
+// restart or cancel the count but never power the servos; any key or a
+// laptop wakes him; a walk, a trick or the runner from limp gets REST
+// first; lying idle in REST for 2 min sleeps as after A7; turned over and
+// righted before the limp calls it off; the network policy with and
+// without an Ethernet link; the card saver's save before sleeping; the
+// battery trend (power/battery.h) and the metrics lines.
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -81,14 +84,21 @@ void test_enter_after_30s() {
   r.key(kA7);
   CHECK(r.posture_goal() == KILO_POSTURE_REST && r.state() == State::Drowsy);
   CHECK(r.log.has("power: A7: light sleep in 30 s unless something happens"));
-  r.run_ms((uint32_t)(power::kSleepAfterUs / 1000) - 1000);  // 29 s after the key
-  CHECK(r.state() == State::Drowsy && r.posture_goal() == KILO_POSTURE_REST);
+  CHECK(r.log.has("the servos off once he lies still (3 s)"));
+  r.run_ms((uint32_t)(power::kLimpSettleUs / 1000) - 200);  // still settling: REST
+  CHECK(r.state() == State::Drowsy && r.posture_goal() == KILO_POSTURE_REST && !r.mind.sleep().limp());
+  r.run_ms(300);  // the settle is over: LIMP, the Pi still awake
+  CHECK(r.state() == State::Drowsy && r.posture_goal() == KILO_POSTURE_LIMP && r.mind.sleep().limp());
+  CHECK(r.log.has("power: A7, lying still: servos off (LIMP): inert until a key moves him"));
+  CHECK(r.mind.sleep().limps() == 1);
+  r.run_ms((uint32_t)(power::kSleepAfterUs / 1000) - 4000);  // 29 s after the key
+  CHECK(r.state() == State::Drowsy && r.posture_goal() == KILO_POSTURE_LIMP);
   r.run_ms(1100);
   CHECKF(r.state() == State::Asleep, "state %s", power::state_name(r.state()));
   CHECK(r.posture_goal() == KILO_POSTURE_LIMP && r.mind.sleep().asleep());
   CHECK(r.mind.sleep().loop_period_us() == power::kSleepLoopUs && power::kSleepLoopUs == 10000);
-  CHECK(r.log.has("power: light sleep (30 s after A7 with nothing else): servos off (LIMP)"));
-  CHECK(r.mind.sleep().sleeps() == 1 && r.mind.sleep().wakes() == 0);
+  CHECK(r.log.has("power: light sleep (30 s after A7 with nothing else): servos off (LIMP already)"));
+  CHECK(r.mind.sleep().sleeps() == 1 && r.mind.sleep().wakes() == 0 && r.mind.sleep().limps() == 1);
   // the body's watchdog stays fed: heartbeats or goal refreshes keep going while asleep
   size_t before = r.body.sent.size();
   r.run_ms(2000);
@@ -103,6 +113,9 @@ void test_enter_after_30s() {
   off.key(kA7);
   off.run_ms(40000);
   CHECK(off.posture_goal() == KILO_POSTURE_REST && off.state() == State::Awake && !off.log.has("power: light"));
+  // ... and lying in REST for long never limps him either (KILO_LIGHT_SLEEP=0: the awake baseline)
+  off.run_ms(200000);
+  CHECK(off.posture_goal() == KILO_POSTURE_REST && off.state() == State::Awake && off.mind.sleep().limps() == 0);
 }
 
 // any key or activity in the 30 s restarts the count; a key that moves Kilo cancels it
@@ -231,6 +244,271 @@ void test_wake_by_key() {
   }
 }
 
+
+// A7 with a laptop connected (the cable in, a client open): the servos go off all the same; the Pi
+// stays awake while the client is there; a do-nothing key and the laptop's requests keep him limp
+void test_limp_with_laptop() {
+  Rig r(sleep_cfg());
+  r.start();
+  power::Sleep& s = r.mind.sleep();
+  r.key(kA7);
+  power::Activity a;
+  a.host_clients = 1;
+  a.lying_rest = true;
+  for (int i = 0; i < 40; i++) {  // 4 s of passes with a client connected and asking
+    a.host_events++;
+    r.body.clock.advance_ms(100);
+    s.poll(a);
+  }
+  CHECK(s.state() == State::Drowsy && s.limp() && r.posture_goal() == KILO_POSTURE_LIMP);
+  r.key(kA1);  // does nothing: limp still
+  CHECK(s.limp() && r.posture_goal() == KILO_POSTURE_LIMP);
+  for (int i = 0; i < 100; i++) {  // 100 s more, the client still there: no Asleep
+    r.body.clock.advance_ms(1000);
+    s.poll(a);
+  }
+  CHECK(s.state() == State::Drowsy && s.limp() && s.sleeps() == 0 && s.wakes() == 0);
+  CHECK(r.posture_goal() == KILO_POSTURE_LIMP && !r.log.has("power: awake"));
+  // the whole Mind with a real connection: A7 limps after the settle, and nothing re-powers him
+  Rig m(sleep_cfg(), true);
+  m.start();
+  m.listener.pending.push_back(0);
+  m.run_ms(40);
+  m.key(kA7);
+  m.run_ms(4000);
+  CHECKF(m.posture_goal() == KILO_POSTURE_LIMP && m.mind.sleep().limp(), "posture %d", m.posture_goal());
+}
+
+// A7 during a walk: no LIMP while the planned stop and REST are still under way; then after the settle
+void test_no_limp_while_stopping() {
+  Rig r(sleep_cfg());
+  r.start();
+  r.key(kA4);  // trot
+  r.run_ms(2000);
+  CHECK(r.mind.walker().active());
+  r.key(kA7);
+  bool limp_while_busy = false, saw_busy = false;
+  uint64_t free_at = 0, limp_at = 0;
+  for (int i = 0; i < 5000 && limp_at == 0; i++) {
+    r.pass();
+    bool busy = r.mind.walker().active() || r.mind.remote().busy() || r.body.mode == KILO_MODE_GAIT;
+    if (busy) {
+      saw_busy = true;
+      free_at = 0;
+    } else if (free_at == 0) {
+      free_at = r.body.clock.t;
+    }
+    if (r.mind.sleep().limp()) {
+      limp_at = r.body.clock.t;
+      limp_while_busy = busy;
+    }
+  }
+  CHECK(saw_busy && !limp_while_busy && limp_at != 0);
+  CHECKF(limp_at - free_at + 10000 >= power::kLimpSettleUs && limp_at - free_at < power::kLimpSettleUs + 100000,
+         "limp %llu us after the stop", (unsigned long long)(limp_at - free_at));
+  r.run_ms(100);  // the LIMP goal goes out
+  std::vector<int> p = r.postures_since(0);
+  std::string seq;
+  for (int x : p) seq += std::to_string(x) + " ";
+  CHECKF(p.size() >= 2 && p[p.size() - 2] == KILO_POSTURE_REST && p.back() == KILO_POSTURE_LIMP, "postures %s",
+         seq.c_str());
+}
+
+// limp, not yet asleep: a second A7 rests him again and the limp follows after the settle again; a
+// posture key goes straight there; a walk or a trick key gets REST first
+void test_keys_from_limp() {
+  {
+    Rig r(sleep_cfg());
+    r.start();
+    r.key(kA7);
+    r.run_ms(4000);
+    CHECK(r.mind.sleep().limp());
+    r.key(kA7);
+    CHECK(r.posture_goal() == KILO_POSTURE_REST && !r.mind.sleep().limp() && r.state() == State::Drowsy);
+    CHECK(r.log.has("power: A7 again: REST, the servos off again once he lies still"));
+    r.run_ms(2000);
+    CHECK(r.posture_goal() == KILO_POSTURE_REST);
+    r.run_ms(1500);
+    CHECK(r.posture_goal() == KILO_POSTURE_LIMP && r.mind.sleep().limps() == 2);
+  }
+  {  // B6 from limp: STAND directly
+    Rig r(sleep_cfg());
+    r.start();
+    r.key(kA7);
+    r.run_ms(4000);
+    size_t from = r.body.sent.size();
+    r.key(kB6);
+    CHECK(r.state() == State::Awake && r.posture_goal() == KILO_POSTURE_STAND && !r.mind.sleep().limp());
+    std::vector<int> p = r.postures_since(from);
+    CHECK(p.size() == 1 && p[0] == KILO_POSTURE_STAND);
+  }
+  {  // A4 from limp (the Pi awake): REST goes out before the walk's FEET
+    Rig r(sleep_cfg());
+    r.start();
+    r.key(kA7);
+    r.run_ms(4000);
+    CHECK(r.state() == State::Drowsy && r.mind.sleep().limp());
+    size_t from = r.body.sent.size();
+    r.key(kA4);
+    r.run_ms(3000);
+    CHECK(r.state() == State::Awake && r.mind.walker().active());
+    size_t rest_at = 0, feet_at = 0;
+    for (size_t i = from; i < r.body.sent.size(); i++) {
+      const Sent& s = r.body.sent[i];
+      if (rest_at == 0 && s.type == KILO_MSG_SET_POSTURE && s.payload.size() >= 2 && s.payload[1] == KILO_POSTURE_REST)
+        rest_at = i;
+      if (feet_at == 0 && s.type == KILO_MSG_FEET) feet_at = i;
+    }
+    CHECKF(rest_at != 0 && feet_at != 0 && rest_at < feet_at, "rest at %zu feet at %zu", rest_at, feet_at);
+  }
+  {  // a laptop connecting while he is asleep and limp: the Pi wakes, the servos stay off
+    Rig r(sleep_cfg(), true);
+    r.start();
+    r.key(kA7);
+    r.run_ms(31000);
+    CHECK(r.state() == State::Asleep);
+    size_t from = r.body.sent.size();
+    r.listener.pending.push_back(0);
+    r.run_ms(2000);
+    CHECK(r.state() == State::Drowsy && r.log.has("power: awake (laptop) after "));
+    for (int p : r.postures_since(from)) CHECKF(p == KILO_POSTURE_LIMP, "posture %d", p);
+    CHECK(r.mind.sleep().limp());
+  }
+}
+
+// turned over after A7 before the limp (the recording of 2026-11-21): the body's fall reflex rights
+// him and leaves him STANDING; the sleep is called off, never a LIMP from standing
+void test_righted_before_limp() {
+  for (int late = 0; late < 2; late++) {
+    Rig r(sleep_cfg());
+    r.start();
+    r.key(kA7);
+    r.run_ms(late ? 2900 : 1000);
+    r.body.mode = KILO_MODE_FALLEN;
+    r.body.event(KILO_EVENT_FELL, -1);
+    r.run_ms(1000);
+    r.body.mode = KILO_MODE_RECOVERING;
+    r.run_ms(3000);
+    r.body.mode = KILO_MODE_IDLE;  // RECOVERED: IDLE STAND
+    r.body.support = 0xF;
+    r.body.event(KILO_EVENT_RECOVERED, 0);
+    r.run_ms(60000);
+    CHECKF(r.state() == State::Awake && !r.mind.sleep().limp() && r.mind.sleep().limps() == 0, "state %s limps %u",
+           power::state_name(r.state()), (unsigned)r.mind.sleep().limps());
+    CHECK(r.posture_goal() != KILO_POSTURE_LIMP && r.log.has("power: light sleep called off (no longer lying in REST)"));
+    for (int p : r.postures_since(0)) CHECKF(p != KILO_POSTURE_LIMP, "posture %d", p);
+  }
+}
+
+// awake, lying in REST with nothing happening for 2 min: asleep as after A7 (LIMP at once, Asleep 30 s later)
+void test_idle_sleep() {
+  CHECK(power::kIdleSleepUs == 120000000);
+  {  // the mind restarted while the body kept REST: no goal on record, TELEMETRY support 0
+    Rig r(sleep_cfg(), true);
+    r.body.dist_mm = 59;  // the floor under his nose
+    r.start();
+    CHECK(r.posture_goal() == -1);
+    for (int i = 0; i < 119; i++) {  // a laptop polling now and then (the HUD): not activity for this
+      if (i % 10 == 0) r.listener.pending.push_back(0);
+      r.run_ms(1000);
+    }
+    CHECK(r.state() == State::Awake && !r.mind.sleep().limp());
+    r.run_ms(1200);
+    CHECKF(r.state() == State::Drowsy && r.mind.sleep().limp() && r.posture_goal() == KILO_POSTURE_LIMP, "state %s",
+           power::state_name(r.state()));
+    CHECK(r.log.has("power: lying idle in REST for 2 min: asleep as after A7"));
+    CHECK(r.log.has("power: lying idle: servos off (LIMP): inert until a key moves him"));
+    CHECK(r.mind.sleep().idle_sleeps() == 1);
+    r.run_ms(31000);
+    CHECK(r.state() == State::Asleep);
+    r.key(kB6);  // B6 stands him up: awake, and standing he never sleeps on his own
+    r.body.support = 0xF;
+    r.run_ms(300000);
+    CHECK(r.state() == State::Awake && r.posture_goal() == KILO_POSTURE_STAND && r.mind.sleep().idle_sleeps() == 1);
+  }
+  {  // REST asked by the remote (A7) with light sleep on is the A7 path; a REST from a laptop then
+     // released: the idle path. Standing (the real body's support 0xF): never.
+    Rig r(sleep_cfg());
+    r.start();
+    r.body.support = 0xF;
+    r.key(kB6);
+    r.run_ms(300000);
+    CHECK(r.state() == State::Awake && r.mind.sleep().limps() == 0);
+  }
+  {  // no goal on record and no floor in view (a warm reboot's held pose, perhaps standing): never
+    Rig r(sleep_cfg());
+    r.body.dist_mm = 400;
+    r.start();
+    r.run_ms(300000);
+    CHECK(r.state() == State::Awake && r.mind.sleep().limps() == 0);
+  }
+  {  // the floor with a missed echo now and then (0 mm, every 0.5 s) still counts
+    Rig r(sleep_cfg());
+    r.start();
+    for (int i = 0; i < 130 * 2; i++) {
+      r.body.dist_mm = 0;
+      r.run_ms(40);
+      r.body.dist_mm = 60;
+      r.run_ms(460);
+    }
+    CHECK(r.state() == State::Drowsy && r.mind.sleep().idle_sleeps() == 1);
+  }
+  {  // a key within the 2 min starts them again, any key (a do-nothing one, a repeat)
+    Rig r(sleep_cfg());
+    r.body.dist_mm = 59;
+    r.start();
+    r.run_ms(100000);
+    r.key(kA1);
+    r.run_ms(100000);
+    r.body.event(KILO_EVENT_IR_KEY, 0x142);  // A1 held: its repeat
+    r.run_ms(100000);
+    CHECK(r.state() == State::Awake && !r.mind.sleep().limp());
+    r.run_ms(21000);
+    CHECK(r.state() == State::Drowsy && r.mind.sleep().limp());
+  }
+  {  // the Sleep alone: busy, a moving mode, a laptop holding the body, not lying: no count
+    Rig r(sleep_cfg());
+    r.start();
+    power::Sleep& s = r.mind.sleep();
+    power::Activity a;
+    a.lying_rest = true;
+    auto run = [&](int secs) {
+      for (int i = 0; i < secs; i++) {
+        r.body.clock.advance_ms(1000);
+        s.poll(a);
+      }
+    };
+    a.busy = true;  // the behaviour runner (resting when tired), a trick, the walker, the remote
+    run(300);
+    CHECK(s.state() == State::Awake);
+    a.busy = false;
+    a.host_holds = true;
+    run(300);
+    CHECK(s.state() == State::Awake);
+    a.host_holds = false;
+    a.lying_rest = false;
+    run(300);
+    CHECK(s.state() == State::Awake);
+    a.lying_rest = true;
+    a.host_clients = 1;  // merely connected and polling: counts on
+    run(119);
+    CHECK(s.state() == State::Awake);
+    a.host_events += 5;
+    run(2);
+    CHECK(s.state() == State::Drowsy && s.limp() && s.idle_sleeps() == 1);
+  }
+  {  // the behaviour runner on, the body reporting REST: never asleep on his own
+    MindConfig c = sleep_cfg();
+    Rig r(c);
+    r.start();
+    r.key(0xE0);  // A5: the runner
+    r.run_ms(1000);
+    CHECK(r.mind.behaviour_active());
+    r.run_ms(200000);
+    CHECK(r.mind.behaviour_active() && r.mind.sleep().idle_sleeps() == 0 && r.mind.sleep().limps() == 0);
+  }
+}
+
 // a laptop connecting or asking anything wakes him; no sleep while a client is connected
 void test_wake_by_host() {
   {
@@ -254,6 +532,7 @@ void test_wake_by_host() {
     r.key(kA7);
     power::Activity a;
     a.host_events = 7;
+    a.lying_rest = true;  // the body in REST, as Mind::lying_rest() reads it
     s.poll(a);
     a.host_clients = 1;  // a client connected: the count holds at 0
     for (int i = 0; i < 100; i++) {
@@ -423,7 +702,8 @@ void test_metric_lines() {
   CHECKF(got[15].find("sound: on=1 ") == 0, "%s", got[15].c_str());
   const std::string& p = got[11];
   CHECKF(p.find("power: state=awake ") == 0 && p.find(" sleeps=1 wakes=1 last_wake=key:B6 ") != std::string::npos &&
-             p.find(" asleep_s=12") != std::string::npos && p.find("light_sleep=on") != std::string::npos,
+             p.find(" asleep_s=12") != std::string::npos && p.find("light_sleep=on") != std::string::npos &&
+             p.find(" servos=on limps=1 idle_sleeps=0") != std::string::npos,
          "%s", p.c_str());
   CHECKF(got[12].find("power_hw: net=on net_device=yes net_saves=1 ") == 0 &&
              got[12].find("arm_mhz=600 temp_c=41 throttled=0x0") != std::string::npos,
@@ -495,6 +775,11 @@ int main() {
   test_cancel_and_restart();
   test_wake_by_key();
   test_wake_by_host();
+  test_limp_with_laptop();
+  test_no_limp_while_stopping();
+  test_keys_from_limp();
+  test_righted_before_limp();
+  test_idle_sleep();
   test_network_policy();
   test_recorder_flushed_first();
   test_battery_trend();

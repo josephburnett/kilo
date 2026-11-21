@@ -22,6 +22,7 @@ struct FakeBody {
   uint16_t flags = KILO_TELEMETRY_FLAGS_SERVOS_POWERED;
   int16_t pitch = 0, roll = 0;
   uint16_t dist_mm = 0;
+  uint8_t support = 0;  // TELEMETRY support: 0 as in REST (the real body: 0xF in SIT, STAND, STANCE)
   uint16_t batt_mv = 8000;
   bool telemetry_on = true;
   bool eyes = false;  // HELLO caps EYES (the body firmware of 2026-11-17 on)
@@ -48,6 +49,7 @@ struct FakeBody {
     t.pitch = pitch;
     t.roll = roll;
     t.dist_mm = dist_mm;
+    t.support = support;
     t.batt_mv = batt_mv;
     serial.feed_frame(KILO_MSG_TELEMETRY, seq++, &t, sizeof t);
   }

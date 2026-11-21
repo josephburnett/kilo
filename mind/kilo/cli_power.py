@@ -31,6 +31,7 @@ METRIC_GROUPS = ("power", "power_hw", "battery", "power_segments")
 def add_parsers(sub: Any) -> None:
     s = sub.add_parser("power", help="light sleep and the battery's trend: over --host, or from a recording",
                        description="Over --host: the mind's power state (awake, drowsy: A7 counting down, asleep), "
+                                   "whether the servos are on, "
                                    "the time in each, and the battery's trend in mV per minute. With a .krec "
                                    "(kilo record fetch): the trend per stretch of the recording (asleep, limp, "
                                    "resting or standing, walking, a trick). docs/power.md.")
@@ -93,6 +94,9 @@ def print_power(d: dict[str, Any]) -> None:
     p, hw, b = d.get("power", {}), d.get("power_hw", {}), d.get("battery", {})
     print(f"state       {p.get('state')} for {_hms(p.get('for_s'))}  (light sleep {p.get('light_sleep')}; "
           f"{p.get('sleeps')} sleeps, {p.get('wakes')} wakes, last wake {p.get('last_wake')})")
+    if "servos" in p:  # kernels from 2026-11-21 on: the servos apart from the Pi's state
+        print(f"servos      {p.get('servos')}  ({p.get('limps')} LIMPs sent by light sleep, "
+              f"{p.get('idle_sleeps')} sleeps after lying idle in REST)")
     print(f"time        awake {_hms(p.get('awake_s'))}  drowsy {_hms(p.get('drowsy_s'))}  "
           f"asleep {_hms(p.get('asleep_s'))}")
     print(f"battery     {b.get('mv')} mV (lowest {b.get('min_mv')})  trend {_rate(b.get('mv_per_min_1m'))} over 1 min, "
@@ -134,7 +138,8 @@ def cmd_power(args: argparse.Namespace, hl: Any) -> int:
         print(json.dumps(d, indent=2))
     else:
         print_power(d)
-        print("(this connection woke Kilo if he was asleep; A7 still holds: he sleeps again 30 s after it closes)")
+        print("(this connection woke the Pi if he was asleep; the servos stay off, and he sleeps again 30 s after "
+              "it closes)")
     return EXIT_OK
 
 

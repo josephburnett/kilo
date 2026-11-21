@@ -85,6 +85,7 @@ void Sleep::on_telemetry(const kilo_telemetry_t& t) {
 void Sleep::key(uint16_t arg, bool acts) {
   if (!enabled_) return;
   uint64_t now = clock_.now_us();
+  idle_on_ = false;  // any key at all: lying idle starts again
   // null for a held key's repeat, another remote's key, or a key the mind does not act on now
   const remote::Key* k = acts ? remote::action_for(arg) : nullptr;
   bool a7 = k != nullptr && k->kind == remote::Kind::Posture && str_eq(k->name, "rest");
@@ -98,11 +99,20 @@ void Sleep::key(uint16_t arg, bool acts) {
     if (any != nullptr) format(why, sizeof why, "key:%s", any->grid);
   }
   if (a7) {
+    // the remote rests him (again): the servos on until he lies still, then LIMP
+    bool was_limp = limp_;
+    limp_ = false;
+    limp_pending_ = true;
+    still_since_us_ = now;
     if (state_ == State::Asleep) wake(State::Drowsy, why, now);
     else if (state_ == State::Awake) {
       set_state(State::Drowsy, now);
-      logf(log_, LogLevel::Info, "power: A7: light sleep in %u s unless something happens",
-           (unsigned)(kSleepAfterUs / 1000000u));
+      logf(log_, LogLevel::Info,
+           "power: A7: light sleep in %u s unless something happens; the servos off once he lies still (%u s)",
+           (unsigned)(kSleepAfterUs / 1000000u), (unsigned)(kLimpSettleUs / 1000000u));
+    } else if (was_limp) {
+      logf(log_, LogLevel::Info, "power: A7 again: REST, the servos off again once he lies still (%u s)",
+           (unsigned)(kLimpSettleUs / 1000000u));
     }
     quiet_since_us_ = now;
     flush_asked_ = false;
@@ -110,10 +120,12 @@ void Sleep::key(uint16_t arg, bool acts) {
   }
   if (moves) {
     if (state_ == State::Awake) return;
-    if (state_ == State::Asleep && k->kind != remote::Kind::Posture) {
+    if (limp_ && k->kind != remote::Kind::Posture) {
       // a walk, a trick or the runner from LIMP: the servos take REST first (TRICK_PLAY is BUSY in LIMP)
       client_posture(link_, &walker_, "rest");
     }
+    limp_ = false;
+    limp_pending_ = false;
     if (state_ == State::Asleep) wake(State::Awake, why, now);
     else {
       set_state(State::Awake, now);
@@ -121,11 +133,38 @@ void Sleep::key(uint16_t arg, bool acts) {
     }
     return;
   }
-  // a key that does nothing here: activity, the count starts again
+  // a key that does nothing here: activity, the count starts again (the servos stay as they are)
   if (state_ == State::Awake) return;
   if (state_ == State::Asleep) wake(State::Drowsy, why, now);
   quiet_since_us_ = now;
   flush_asked_ = false;
+}
+
+bool Sleep::send_limp(const char* why) {
+  bool ok = client_posture(link_, &walker_, "limp");
+  limp_pending_ = false;
+  limp_ = ok;  // refused: enter() tries again
+  limps_++;
+  logf(log_, ok ? LogLevel::Info : LogLevel::Warn,
+       "power: %s: servos off (LIMP%s): inert until a key moves him", why, ok ? "" : ": REFUSED by the link");
+  return ok;
+}
+
+// A posture goal on record other than REST or LIMP while nothing is busy: someone else (a laptop)
+// posed him, so light sleep must not limp him later.
+bool Sleep::posed_elsewhere() {
+  const Goal* g = link_.goal(KILO_MSG_SET_POSTURE);
+  return g != nullptr && g->len >= 2 && g->payload[1] != KILO_POSTURE_REST && g->payload[1] != KILO_POSTURE_LIMP;
+}
+
+void Sleep::call_off(const char* why, uint64_t now) {
+  limp_ = false;
+  limp_pending_ = false;
+  if (state_ == State::Asleep) wake(State::Awake, why, now);
+  else {
+    set_state(State::Awake, now);
+    logf(log_, LogLevel::Info, "power: light sleep called off (%s)", why);
+  }
 }
 
 void Sleep::poll(const Activity& a) {
@@ -138,10 +177,49 @@ void Sleep::poll(const Activity& a) {
     soc_ok_ = hw_->soc(&soc_);
   }
   if (!enabled_) return;
+  // nothing moving, and no laptop holding the body (it may pose him: the mind sends nothing under it)
+  bool still = !a.busy && !moving_mode() && !a.host_holds;
   switch (state_) {
     case State::Awake:
+      // lying in REST with the servos on and nothing at all happening: asleep as after A7
+      if (!a.lying_rest || !still) {
+        idle_on_ = false;
+        break;
+      }
+      if (!idle_on_) {
+        idle_on_ = true;
+        idle_since_us_ = now;
+        break;
+      }
+      if (now - idle_since_us_ < kIdleSleepUs) break;
+      idle_on_ = false;
+      set_state(State::Drowsy, now);
+      quiet_since_us_ = now;
+      flush_asked_ = false;
+      idle_sleeps_++;
+      logf(log_, LogLevel::Info, "power: lying idle in REST for %u min: asleep as after A7 (light sleep in %u s)",
+           (unsigned)(kIdleSleepUs / 60000000u), (unsigned)(kSleepAfterUs / 1000000u));
+      send_limp("lying idle");
       break;
     case State::Drowsy: {
+      if (still && posed_elsewhere()) {
+        call_off("posed by a laptop", now);
+        break;
+      }
+      // A7's LIMP: once the remote's stop and REST are done and nothing has moved for kLimpSettleUs,
+      // whether or not a laptop is connected. Never from anything but REST: turned over in the
+      // meantime, the body's fall reflex rights him and leaves him standing (its RECOVERED takes
+      // STAND), and a LIMP then would drop him: the sleep is called off instead.
+      if (limp_pending_) {
+        if (!still) still_since_us_ = now;
+        else if (now - still_since_us_ >= kLimpSettleUs) {
+          if (!a.lying_rest) {
+            call_off("no longer lying in REST", now);
+            break;
+          }
+          send_limp("A7, lying still");
+        }
+      }
       if (a.busy || host || a.host_clients > 0 || moving_mode()) {
         quiet_since_us_ = now;
         flush_asked_ = false;
@@ -159,6 +237,10 @@ void Sleep::poll(const Activity& a) {
         }
         if (saver_->state() == KILO_RECORD_CARD_STATE_SAVING && now - flush_at_us_ < kFlushWaitUs) break;
       }
+      if (!limp_ && !a.lying_rest) {  // the LIMP was refused, and he has moved since: no LIMP now
+        call_off("no longer lying in REST", now);
+        break;
+      }
       enter(now);
       break;
     }
@@ -175,7 +257,9 @@ void Sleep::enter(uint64_t now) {
   set_state(State::Asleep, now);
   sleeps_++;
   flush_asked_ = false;
-  bool ok = client_posture(link_, &walker_, "limp");
+  // the servos are off since A7 as a rule; if not yet (or the LIMP was refused), now
+  bool already = limp_;
+  bool ok = already || send_limp("light sleep");
   const char* net = "none";
   if (hw_ != nullptr && hw_->net_device()) net = hw_->net_link() ? "kept on (a cable is in)" : "no link: PHY power-down";
   char q[24];
@@ -183,7 +267,8 @@ void Sleep::enter(uint64_t now) {
   logf(log_, LogLevel::Info,
        "power: light sleep (%s after A7 with nothing else): servos off (LIMP%s), the loop idles %u ms a pass, "
        "Ethernet %s; battery %u mV",
-       q, ok ? "" : ": REFUSED by the link", (unsigned)(kSleepLoopUs / 1000u), net, (unsigned)battery_.last_mv());
+       q, already ? " already" : ok ? "" : ": REFUSED by the link", (unsigned)(kSleepLoopUs / 1000u), net,
+       (unsigned)battery_.last_mv());
 }
 
 void Sleep::wake(State to, const char* why, uint64_t now) {
@@ -259,12 +344,22 @@ void Sleep::metric_line(uint32_t i, char* out, uint32_t n) const {
   out[0] = '\0';
   switch (i) {
     case 0:
+    {
+      // servos: what the body says (TELEMETRY), whoever turned them off
+      const BodyState& b = link_.state();
+      const char* servos = "?";
+      if (b.has_telemetry)
+        servos = b.telemetry.mode == KILO_MODE_LIMP || !(b.telemetry.flags & KILO_TELEMETRY_FLAGS_SERVOS_POWERED)
+                     ? "off"
+                     : "on";
       format(out, n, "power: state=%s for_s=%u light_sleep=%s sleeps=%u wakes=%u last_wake=%s awake_s=%u "
-                     "drowsy_s=%u asleep_s=%u",
+                     "drowsy_s=%u asleep_s=%u servos=%s limps=%u idle_sleeps=%u",
              state_name(state_), (unsigned)((now - since_us_) / 1000000u), enabled_ ? "on" : "off", (unsigned)sleeps_,
              (unsigned)wakes_, last_wake_, (unsigned)(time_in_us(State::Awake) / 1000000u),
-             (unsigned)(time_in_us(State::Drowsy) / 1000000u), (unsigned)(time_in_us(State::Asleep) / 1000000u));
+             (unsigned)(time_in_us(State::Drowsy) / 1000000u), (unsigned)(time_in_us(State::Asleep) / 1000000u), servos,
+             (unsigned)limps_, (unsigned)idle_sleeps_);
       return;
+    }
     case 1: {
       int32_t t = soc_.temp_mc;
       format(out, n, "power_hw: net=%s net_device=%s net_saves=%u net_looks=%u net_errors=%u card_flushes=%u "

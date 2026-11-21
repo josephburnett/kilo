@@ -1,40 +1,63 @@
-// sleep: Kilo's light sleep (docs/power.md). The owner puts Kilo to sleep
-// with the remote's A7 (rest); if nothing else happens for kSleepAfterUs,
-// he drops to the lowest power state from which the remote and the laptop
-// still wake him:
+// sleep: Kilo's light sleep (docs/power.md). Two parts, on different clocks:
 //
-//   the body   SET_POSTURE LIMP: every servo output off (he is lying in REST
-//              already; the body's own watchdog goes REST -> LIMP the same
-//              way). The body keeps running: its 50 Hz loop, the IMU, the
-//              IR receiver (keys still arrive as EVENT IR_KEY), TELEMETRY at
-//              25/s (the battery trend comes from it), the link watchdog
-//              (the mind's heartbeat keeps going).
-//   the Pi     the platform's main loop idles between passes (Circle: wfi
-//              and one pass per kSleepLoopUs instead of a busy 1 ms loop; the
-//              loop reads asleep()); the ACT LED off but a blink every 5 s;
-//              the Ethernet PHY in its energy-detect power-down while no
-//              cable is in (below). What it cannot switch is in
-//              docs/power.md "What light sleep cannot switch off".
+//   the servos  off (SET_POSTURE LIMP: every servo output off, the fall
+//               reflex off too: he is inert) as soon as he lies still after
+//               the remote's A7: the remote's own A7 action (its planned
+//               stop, then REST) is done, the body is in no moving mode, and
+//               kLimpSettleUs have passed with nothing moving. A laptop
+//               connected or asking does not hold this back. The body keeps
+//               running: its 50 Hz loop, the IMU, the IR receiver (keys
+//               still arrive as EVENT IR_KEY), TELEMETRY at 25/s (the battery
+//               trend comes from it), the link watchdog (the mind's heartbeat
+//               keeps going). He stays limp until a key that moves him.
+//   the Pi      if then nothing happens for kSleepAfterUs (no key, no laptop
+//               connected or asking, nothing moving), the lowest power state
+//               from which the remote and the laptop still wake him: the
+//               platform's main loop idles between passes (Circle: wfi and
+//               one pass per kSleepLoopUs instead of a busy 1 ms loop; the
+//               loop reads asleep()); the ACT LED off but a blink every 5 s;
+//               the Ethernet PHY in its energy-detect power-down while no
+//               cable is in (below). A laptop needs the full-speed loop, so
+//               this part waits while one is connected. What it cannot switch
+//               is in docs/power.md "What light sleep cannot switch off".
+//
+// He also goes to sleep on his own: awake, lying in REST with the servos
+// powered (Activity::lying_rest), and kIdleSleepUs with no remote key at
+// all, nothing busy, the body in no moving mode and no laptop holding the
+// body (a laptop merely connected or polling does not count): exactly as
+// after A7, Drowsy with the servos off at once. A standing Kilo is never
+// laid down by this.
 //
 // States:
 //
-//   Awake    the default; A7 (a remote key the mind acts on) -> Drowsy
-//   Drowsy   A7 was the last key: counting kSleepAfterUs of nothing
-//            happening. Any activity restarts the count: a key that does
-//            nothing (rows 1-3, B2's meow, a held key's repeats, another remote's key,
-//            C7, B5/B7 while not walking), a laptop connecting or sending a
-//            request, a client connected at all, the walker, a trick, the
-//            remote's own action (A7's planned stop), the behaviour runner,
-//            the body in GAIT, TRICK, FALLEN, RECOVERING, CALIB or BOOT. A
-//            key that moves Kilo (B6, C5, A4-C4, A6, C6, A5, A2) cancels:
-//            back to Awake. When the count runs out and the card saver is
-//            not writing (it is asked to save what it holds first: "save
-//            now", when saving is on), -> Asleep.
-//   Asleep   light sleep. Any key or laptop activity wakes him (back to
-//            Drowsy: A7 still stands, so 30 s after the last activity he
-//            sleeps again); a key that moves him wakes him to Awake, and
-//            for a walk, a turn, a trick or the behaviour runner the servos
-//            first get REST again (a trick refuses to start from LIMP).
+//   Awake    the default; A7 (a remote key the mind acts on), or kIdleSleepUs
+//            lying idle in REST -> Drowsy
+//   Drowsy   A7 stands: the servos go off once he lies still (above), and
+//            kSleepAfterUs of nothing happening are counted. Any activity
+//            restarts the count: a key that does nothing (rows 1-3, B2's
+//            meow, a held key's repeats, another remote's key, C7, B5/B7
+//            while not walking), a laptop connecting or sending a request, a
+//            client connected at all, the walker, a trick, the remote's own
+//            action (A7's planned stop), the behaviour runner, the body in
+//            GAIT, TRICK, FALLEN, RECOVERING, CALIB or BOOT. None of these
+//            powers the servos again. A key that moves Kilo (B6, C5, A4-C4,
+//            A6, C6, A5, A2) cancels: back to Awake, and for a walk, a turn,
+//            a trick or the behaviour runner the servos first get REST again
+//            if they were off (a trick refuses to start from LIMP); a posture
+//            key goes there directly. A second A7: the remote rests him again
+//            (servos on), so the limp follows again after the settle. A
+//            laptop posing him (a posture goal other than REST or LIMP on
+//            record while nothing is busy) also calls it off. When the count
+//            runs out and the card saver is not writing (it is asked to save
+//            what it holds first: "save now", when saving is on), -> Asleep.
+//   Asleep   light sleep. Any key or laptop activity wakes the Pi (back to
+//            Drowsy: A7 still stands, the servos stay off, so 30 s after the
+//            last activity he sleeps again); a key that moves him wakes him
+//            to Awake, as from Drowsy.
+//
+// The sound (Mind::sound_events) follows Asleep only: the output stops on
+// Asleep and the wake's mew plays when he leaves it, never for the servos
+// alone.
 //
 // Waking is one pass: the next pass of the loop is a full one again (the
 // platform reads asleep()), so a key acts within one sleep period of its
@@ -48,9 +71,14 @@
 // the PHY is fully on for kNetLookUs, sending link pulses. A link found
 // keeps it on. Waking puts it back to normal.
 //
+// Off (set_enabled(false), KILO_LIGHT_SLEEP=0): none of it, the servo part
+// included: A7 is plain REST and he never limps on his own (the awake
+// baseline of docs/power.md). The battery trend is kept either way.
+//
 // The flight recorder records all of it (the log lines below go into it;
 // every TELEMETRY too), and the metrics lines (metric_line) give the state,
-// the time in each, the counts and the battery trend (battery.h):
+// the servos (servos=on|off from TELEMETRY, limps= the LIMPs sent),
+// the time in each state, the counts and the battery trend (battery.h):
 // `kilo power --host`, `kilo metrics --host`.
 #ifndef KILO_MIND_POWER_SLEEP_H
 #define KILO_MIND_POWER_SLEEP_H
@@ -65,6 +93,11 @@ namespace kilo {
 namespace power {
 
 constexpr uint64_t kSleepAfterUs = 30000000;   // A7, then nothing for this long: light sleep
+// After A7, nothing moving for this long: the servos off. The remote's REST is a 0.5 s move
+// (SET_POSTURE's default POSTURE_TICKS, 25 ticks of 20 ms), the body's own REST 1 s
+// (REST_MOVE_TICKS, 50 ticks); the servos need a moment more to arrive.
+constexpr uint64_t kLimpSettleUs = 3000000;
+constexpr uint64_t kIdleSleepUs = 120000000;   // awake, lying in REST with nothing happening this long: as after A7
 constexpr uint32_t kSleepLoopUs = 10000;       // the platform loop's period asleep (awake: 1 ms)
 constexpr uint64_t kNetRecheckUs = 10000000;   // asleep with no link: a look for one this often
 constexpr uint64_t kNetLookUs = 3000000;       // ... the PHY fully on this long
@@ -108,12 +141,14 @@ struct Activity {
   bool busy = false;          // the walker, a trick, the remote's action, the behaviour runner
   uint32_t host_events = 0;   // the host server's connections + requests so far: a change is laptop activity
   uint32_t host_clients = 0;  // clients connected now
+  bool host_holds = false;    // a laptop client holds (controls) the body
+  bool lying_rest = false;    // lying in REST, the servos powered (Mind::lying_rest)
 };
 
 class Sleep {
  public:
   Sleep(SerialLink& link, planner::Walker& walker, Clock& clock, Log& log);
-  // Off (the default): it only keeps the battery trend; A7 is just rest.
+  // Off (the default): it only keeps the battery trend; A7 is just rest, no limp.
   void set_enabled(bool on) { enabled_ = on; }
   bool enabled() const { return enabled_; }
   void set_hardware(Hardware* hw) { hw_ = hw; }
@@ -132,6 +167,11 @@ class Sleep {
   uint32_t loop_period_us() const { return asleep() ? kSleepLoopUs : 0; }
   Net net() const { return net_; }
   uint32_t sleeps() const { return sleeps_; }
+  // The LIMPs sent (after A7, lying idle, or at sleep), and the sleeps begun by lying idle.
+  uint32_t limps() const { return limps_; }
+  uint32_t idle_sleeps() const { return idle_sleeps_; }
+  // The servos off by light sleep's LIMP (sent, and no key or posture since).
+  bool limp() const { return limp_; }
   uint32_t wakes() const { return wakes_; }
   // Time in each state so far, the running one included.
   uint64_t time_in_us(State s) const;
@@ -150,6 +190,9 @@ class Sleep {
   void set_state(State s, uint64_t now);
   void enter(uint64_t now);
   void wake(State to, const char* why, uint64_t now);
+  bool send_limp(const char* why);
+  void call_off(const char* why, uint64_t now);
+  bool posed_elsewhere();
   void network(uint64_t now);
   void net_set(Net n, uint64_t now);
   bool moving_mode() const;
@@ -170,6 +213,12 @@ class Sleep {
   bool host_seen_ = false;      // host_events_ was set once
   bool flush_asked_ = false;
   uint64_t flush_at_us_ = 0;
+  bool limp_pending_ = false;    // Drowsy: A7's LIMP to send once he lies still
+  bool limp_ = false;            // the LIMP sent, no key or posture since
+  uint64_t still_since_us_ = 0;  // limp_pending_: nothing moving since
+  bool idle_on_ = false;         // Awake: lying idle in REST since idle_since_us_
+  uint64_t idle_since_us_ = 0;
+  uint32_t limps_ = 0, idle_sleeps_ = 0;
   uint32_t sleeps_ = 0, wakes_ = 0, flushes_ = 0;
   char last_wake_[32] = "-";
 
