@@ -264,7 +264,7 @@ and follow this page inside it. In step 2 of the card route there is no
 desktop inside WSL to mount the card, and `lsblk` does not show it. The card reader belongs to Windows; inside WSL mount
 its drive letter (here `E:`) with
 `sudo mkdir -p /mnt/e && sudo mount -t drvfs E: /mnt/e` and use `/mnt/e` as
-`CARD` (not checked on WSL yet). Before ejecting, release it inside WSL with `sudo umount /mnt/e`, then
+`CARD` (used this way since 2026-11-21; `make mount` and `make unmount` in the clone's top folder run these two lines, `DRIVE=F` for another letter). Before ejecting, release it inside WSL with `sudo umount /mnt/e`, then
 eject the card from Windows (the tray's "Safely Remove"); step 4's
 `udisksctl` line does not apply.
 For the direct cable, Windows gives the wired port a 169.254 address by
