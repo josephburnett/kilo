@@ -38,6 +38,8 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
       runner_(body_, personality(cfg), log_, cfg.seed),
       runner_hook_(*this),
       remote_(link_, walker_, player_, clock, log_),
+      measure_(link_, clock, log_),
+      measure_hook_(*this),
       sleep_(link_, walker_, clock, log_),
       guard_(link_, walker_, clock, log_),
       alive_(link_, player_, log_, cfg.seed),
@@ -50,6 +52,8 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
   link_.set_quiet_log(&log_.status());  // a held IR key's repeats: not into the ring unless a laptop reads it
   remote_.set_behaviour(&runner_hook_);
   remote_.set_trick_notes(this);
+  remote_.set_measure(&measure_hook_);
+  measure_.set_observer(this);
   recorder_.set_metrics(&metrics_);
   host_.attach_metrics(*this);
   host_.attach_guard(guard_);
@@ -108,7 +112,8 @@ bool Mind::safe_for_card(uint64_t now) {
   bool moving = b.has_telemetry && (b.telemetry.mode == KILO_MODE_GAIT || b.telemetry.mode == KILO_MODE_TRICK ||
                                     b.telemetry.mode == KILO_MODE_FALLEN || b.telemetry.mode == KILO_MODE_RECOVERING ||
                                     b.telemetry.mode == KILO_MODE_CALIB || b.telemetry.mode == KILO_MODE_BOOT);
-  bool busy = booting || moving || walker_.active() || player_.busy() || remote_.busy() || recorder_.recording() ||
+  bool busy = booting || moving || walker_.active() || player_.busy() || remote_.busy() || measure_.active() ||
+              recorder_.recording() ||
               host_.link_paused() || host_.flashing() || host_.updating() || behaviour_active();
   if (busy) unsafe_at_us_ = now;
   return !busy && now - unsafe_at_us_ >= kCardQuietUs;
@@ -179,6 +184,8 @@ void Mind::poll() {
   player_.collect();
   stats(now);
   walker_.poll();
+  if (measure_.active() && host_controls()) measure_.stop("a laptop client taking the body");
+  measure_.poll();
   player_.poll();
   if (flinch_pending_ && !player_.busy()) {
     flinch_pending_ = false;
@@ -199,7 +206,7 @@ void Mind::poll() {
   card_safe_ = safe_for_card(clock_.now_us());
   if (saver_ != nullptr) saver_->poll(card_safe_, body_limp());
   power::Activity act;  // after the saver: a save it was asked for has started by now
-  act.busy = walker_.active() || player_.busy() || remote_.busy() || behaviour_active();
+  act.busy = walker_.active() || player_.busy() || remote_.busy() || measure_.active() || behaviour_active();
   act.host_events = host_.stats().accepted + host_.stats().requests;
   act.host_clients = listener_ != nullptr ? host_.clients() : 0;
   act.host_holds = host_controls();
@@ -327,6 +334,7 @@ void Mind::on_hello(const kilo_hello_t& hello, bool solicited) {
 
 void Mind::on_telemetry(const kilo_telemetry_t& t) {
   walker_.on_telemetry(t);
+  measure_.on_telemetry(t);
   sleep_.on_telemetry(t);
   guard_.on_telemetry(t, head_held(4), lying(t));
   if (t.batt_mv != 0 && !(t.flags & KILO_TELEMETRY_FLAGS_NO_BATTERY)) {
@@ -346,6 +354,7 @@ void Mind::on_telemetry(const kilo_telemetry_t& t) {
 
 void Mind::on_event(const kilo_event_t& e) {
   walker_.on_event(e);
+  measure_.on_event(e);
   host_.on_body_event(e);
   player_.on_event(e);
   if (n_events_ == behaviour::Snapshot::kEvents) {
@@ -396,6 +405,12 @@ void Mind::ir_key(const kilo_event_t& e) {
   }
   for (int k = 0; k < remote::kKeys && k < 32; k++)
     if (&remote::kKeyTable[k] == key) metrics_.key_counts[k]++;
+  if (measure_.active() && !host_controls()) {  // every key stops the self-measurement first (remote.h, B1)
+    metrics_.keys_acted++;
+    recorder_.key(text);
+    remote_.perform(*key, arg);
+    return;
+  }
   if (key->kind == remote::Kind::Ignore) {  // rows 1-3
     logf(log_, LogLevel::Info, "remote %s: ignored (no action on this key)", text);
     metrics_.keys_no_action++;
@@ -607,6 +622,7 @@ const char* Mind::not_now() {
   if (host_controls()) return "laptop";
   if (paused_) return "paused";
   if (sleep_.asleep()) return "asleep";
+  if (measure_.active()) return "measuring";
   if (trick_playing()) return "trick";
   if (percepts_.picked_up()) return "picked-up";
   return nullptr;
@@ -700,6 +716,14 @@ void Mind::sit_and_behave() {
   if (ok) client_posture(link_, &walker_, "sit");
   logf(log_, ok ? LogLevel::Info : LogLevel::Warn, "guard: behaviour runner %s (sitting variant%s%s)",
        ok ? "started" : "not started", what != nullptr ? ": " : "", what != nullptr ? what : "");
+}
+
+// ---- the self-measurement, as the remote starts it (B1) --------------------------------------
+
+const char* Mind::MeasureHookImpl::start() {
+  uint16_t mv = 0;
+  bool rested = m_.rested_mv(&mv);  // the battery at rest, as the tricks' refusal
+  return m_.measure_.start(rested, mv);
 }
 
 // ---- the behaviour runner, as the remote starts and stops it --------------------------------

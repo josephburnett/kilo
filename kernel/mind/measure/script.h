@@ -1,0 +1,133 @@
+// script: the self-measurement routine's poses, tick by tick (docs/self-measurement.md).
+// A port of mind/kilo/measure/script.py (the experiments, the steps and
+// Runner) and of kilo.measure.statics.rigid_rest (the model's prediction);
+// kernel/host/tests/measure_vectors.txt, made by gen_measure_vectors.py
+// from the Python, checks the two tick for tick.
+//
+// A pose is the four feet as FEET gives them: x mm fore-aft from under the
+// shoulder (+ forward), z mm below it, whole mm. Every pose is the home
+// pose (x 0, z kHomeZ: the body's STANCE) plus a step's offsets; a step
+// moves to its offsets (Move, linearly, in integers), holds (Hold) or
+// sweeps the feet's x 1 mm every kTicksPerMm ticks toward its offsets
+// (Sweep). The experiments, in order:
+//
+//   level         stand still 1.5 s: the IMU's offset (with the floor's slope)
+//   steps         pitch 5.6 deg each way, roll 7 deg each way, 0.8 s each: servo dead time, time constant, sag
+//   edge_lf ..    a foot 5 mm up, the feet swept until the centre of mass crosses the diagonal and Kilo tips
+//   edge_rb       onto the lifted foot (caught by the floor 5 mm down): the centre of mass fore-aft and sideways
+//   edge_rf_roll  the same rolled 7 deg with the mass leaning away from the lifted foot, then 5.3 deg
+//   edge_rb_roll  toward it: the centre of mass's height
+//   level_end     stand still 1 s: the IMU's drift
+//
+// A sweep ends early: once the tilt toward the lifted foot has moved
+// kTipFraction of the model's tip (Measure watches TELEMETRY), tip() makes
+// it go on kTipExtraMm past the x of the tick the tip was seen at; a tip
+// seen in the lifted hold before it (he tipped as the foot came up) makes
+// the sweep only kTipExtraMm long.
+#ifndef KILO_MIND_MEASURE_SCRIPT_H
+#define KILO_MIND_MEASURE_SCRIPT_H
+#include <stdint.h>
+#include "planner/model.h"
+
+namespace kilo {
+namespace measure {
+
+using planner::real;
+
+constexpr int kHomeZ = 76;           // STANCE's height (gait.stance_h_256 205 of L1 + L2 = 76.07 mm)
+constexpr int kLiftMm = 5;           // a lifted foot's height: how far Kilo can tip before the floor catches him
+constexpr int kTicksPerMm = 6;       // a sweep's pace (8.3 mm/s)
+constexpr real kTipFraction = (real)0.4;  // a sweep has tipped once the tilt moved this much of the model's tip
+constexpr int kTipExtraMm = 3;       // ...and goes on this far past it
+constexpr int kStepPitchMm = 6;      // the pitch steps: front legs this much shorter, back longer (5.6 deg)
+constexpr int kStepRollMm = 4;       // the roll steps: left legs shorter, right longer (7.0 deg)
+constexpr int kRollSweepMm = 4;      // the rolled sweep away from the lifted foot (7.0 deg)
+constexpr int kRollSweepBMm = 3;     // ...and toward it (5.3 deg: deeper leaves the mass too near the side)
+constexpr int kSweepSpanMm = 20;     // a sweep starts this far before the model's crossing and ends at most as far past
+constexpr int kRollSpanMm = 16;      // ...rolled (the feet's reach)
+constexpr int kRbBackMm = 6;         // edge_rb starts this much further back and ends at kRbMaxX:
+constexpr int kRbMaxX = 14;          // the RB shoulder's pulse clamp (Kilo's calibration) with RB up
+
+enum class StepKind : uint8_t { Move, Hold, Sweep };
+
+struct Experiment {
+  const char* name;
+  int8_t lifted;                     // the foot a sweep lifts (planner leg), -1 none
+  int16_t tip_pitch_a16, tip_roll_a16;  // the model's tip onto the lifted foot, 1/16 deg
+};
+
+constexpr int kExperiments = 9;
+extern const Experiment kExperimentTable[kExperiments];
+
+struct Step {
+  uint8_t exp;           // kExperimentTable index
+  const char* phase;     // the mark's name for this part
+  StepKind kind;
+  uint16_t ticks;        // Move, Hold: its length; Sweep: its longest
+  bool keep_x;           // the x where the step before ended (a sweep's lower and lowered), not dx
+  int8_t dx[4];          // the feet's x offsets at the step's end, LF RF RB LB
+  int8_t dz[4];          // the legs' z offsets (- = shorter: that corner lower, or that foot lifted)
+};
+
+constexpr int kMaxSteps = 80;
+
+struct Pose {
+  int8_t x[4];
+  uint8_t z[4];
+};
+
+// The steps (built once, as script.py _steps()).
+int steps(const Step** out);
+// Ticks of the whole script with no sweep ended early.
+uint32_t max_ticks();
+
+class Script {
+ public:
+  Script();
+  void reset();
+  // The next tick's pose (and whether it begins its step: a mark); false once over.
+  bool next(Pose* out, bool* first);
+  // A tip seen in the TELEMETRY of script tick tick_seen (above). False if no lifted hold before a
+  // sweep or sweep is under way, or this one has tipped already.
+  bool tip(uint32_t tick_seen);
+  bool done() const { return done_; }
+  // The step the next tick belongs to (valid until done()), the ticks planned so far.
+  int step_index() const { return i_; }
+  const Step& step() const { return steps_[i_]; }
+  uint32_t tick() const { return t_; }
+  bool tipped() const { return tipped_; }
+  uint32_t tipped_at() const { return tipped_at_; }
+  // The sweep's x at a script tick it planned (the last kHistory), or the current x.
+  int x_at(uint32_t tick) const;
+
+ private:
+  static constexpr int kHistory = 64;
+  void begin();
+  const Step* steps_;
+  int n_ = 0;
+  int i_ = 0;
+  uint32_t j_ = 0, t_ = 0;
+  int x_[4] = {}, z_[4] = {};
+  int sx_[4] = {}, sz_[4] = {};
+  int sweep_end_ = 0;
+  bool tipped_ = false, tip_pending_ = false;
+  uint32_t tipped_at_ = 0;
+  bool done_ = false;
+  struct Hist {
+    uint32_t tick;
+    int x;
+  };
+  Hist hist_[kHistory] = {};
+};
+
+// The rigid model's rest for feet (xs, zs) (statics.py rigid_rest): all four feet on one plane
+// (within kTouchMm), else the tripod of the tick before (prev) while possible, else the possible
+// tripod with the most margin; *support the feet down.
+constexpr real kTouchMm = (real)0.1;
+planner::Attitude rigid_rest(const planner::BodyModel& m, const real xs[4], const real zs[4], uint8_t prev,
+                             uint8_t* support);
+
+}  // namespace measure
+}  // namespace kilo
+
+#endif

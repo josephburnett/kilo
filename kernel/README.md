@@ -812,7 +812,8 @@ floor only, never on a desk.**
 | C4 | 0xB0 | walk |
 | A2 | 0x10 | rear up, only when switched on (below); otherwise nothing |
 | B2 | 0x38 | a meow (docs/sound.md). It moves nothing, so it works at any time, also while Kilo walks |
-| A3, B3, C3, C2, A1, B1, C1 | | nothing (logged as ignored) |
+| B1 | 0x4A | Kilo measures himself (docs/self-measurement.md): from a stand on a flat floor, about 40 s of small poses, then he stands. Any key stops it at once (B1 again too) and he stands; B6, A7 and C7 then also do their own job. Refused below 7400 mV at rest, on USB power, or when he is not standing level and still |
+| A3, B3, C3, C2, A1, C1 | | nothing (logged as ignored) |
 
 **Gait keys** (A4, B4, C4). Standing: walk forward in that gait at level
 +3. Walking in another gait: change to it and keep the speed level, the

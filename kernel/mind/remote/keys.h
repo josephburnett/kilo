@@ -15,7 +15,10 @@
 //           2026-11-17 (the owner: A2 matches the picture better)
 //   B2 0x38 meow (Kind::Sound: one of the meow family, docs/sound.md;
 //           the Mind plays it at once, past the remote's queue: it moves nothing)
-//   A3 0x30, B3 0x18, C3 0x7A, C2 0x5A, A1 0x42, B1 0x4A,
+//   B1 0x4A measure himself (Kind::Measure, docs/self-measurement.md: about
+//           45 s of small poses from a stand on a flat floor; any key stops
+//           it, B1 again among them, and he stands); 2026-11-21
+//   A3 0x30, B3 0x18, C3 0x7A, C2 0x5A, A1 0x42,
 //   C1 0x52: nothing (logged as ignored)
 //
 // The rear-up key is OFF unless switched on (docs/rear-up-trick.md, the
@@ -37,7 +40,7 @@ namespace remote {
 
 constexpr uint16_t kRepeat = 0x100;
 
-enum class Kind : uint8_t { Ignore, Posture, Gait, Speed, Turn, Freeze, Behaviour, Trick, Sound };
+enum class Kind : uint8_t { Ignore, Posture, Gait, Speed, Turn, Freeze, Behaviour, Trick, Sound, Measure };
 
 struct Key {
   uint8_t command;     // NEC command byte
@@ -55,7 +58,7 @@ const Key* key_for(uint8_t command);
 // The command byte and whether it is a held-key repeat.
 inline uint8_t key_command(uint16_t arg) { return (uint8_t)(arg & 0xFF); }
 inline bool key_repeat(uint16_t arg) { return (arg & kRepeat) != 0; }
-// The key's entry (rows 1-3 too, Kind::Ignore but A2 and B2), or null
+// The key's entry (rows 1-3 too, Kind::Ignore but A2, B2 and B1), or null
 // for a held-key repeat or a key of another remote. With the rear-up key
 // off, A2's entry is a Kind::Ignore one ("none").
 const Key* action_for(uint16_t arg);

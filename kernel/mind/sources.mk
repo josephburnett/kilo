@@ -88,3 +88,8 @@ MIND_SRCS += \
 MIND_SRCS += \
 	mind/sound/render.cpp \
 	mind/sound/player.cpp
+
+# Kilo measures himself (measure/, docs/self-measurement.md): the remote's B1.
+MIND_SRCS += \
+	mind/measure/script.cpp \
+	mind/measure/measure.cpp

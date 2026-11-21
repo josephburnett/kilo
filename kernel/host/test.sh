@@ -681,8 +681,8 @@ echo "   card route: flashed at start, the same build left alone, a failure reco
 echo "== P3: generated tables up to date (tricks, personality)"
 "$PYTHON" "$REPO/kernel/mind/tricks/gen_library.py" --check  # (each generator imports this checkout's mind/)
 "$PYTHON" "$REPO/kernel/mind/behaviour/gen_personality.py" --check
-echo "== P3: golden vectors up to date with the Python reference (perception, behaviour, planner)"
-for v in perception behaviour planner; do  # (the planner's takes about 1 s)
+echo "== P3: golden vectors up to date with the Python reference (perception, behaviour, planner, measure)"
+for v in perception behaviour planner measure; do  # (the planner's takes about 1 s)
     vectors_current "$v"
 done
 
@@ -986,6 +986,50 @@ CREC="$(ls "$REC"/cardfetch/run-b1-*-trick-1.krec)"
 KPY -m kilo.cli log trick "$CREC" > "$OUT/card_trick.txt"
 expect "$OUT/card_trick.txt" "trick run 1: rear_up stage 1 of 1" "kilo log trick on the card's run"
 expect "$REC/cardfetch/kilo-card-b1.log" "remote A2 \(0x10, rear up\)" "kilo card --fetch: boot 1's saved log"
+# ---- Kilo measures himself (docs/self-measurement.md): B1 on the Python virtual body's walking physics --------
+# Its centre of mass 4 mm back and 3 mm right of the model and its IMU 1.5 / -2 deg off; the routine runs in
+# kilo-mind-host, kilo measure fetch downloads the run and fits it: the fit must find them.
+echo "== self-measurement: B1 on the virtual body's physics, kilo measure fetch --host (download and fit)"
+start_body "$OUT/vbody_measure.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u "$HERE/tests/measure_body.py" \
+    --dcom -4 -3 0 --imu 1.5 -2 --b6-at 1.5 --b1-at 4
+trap stop_body EXIT
+MEAS="$OUT/measure"
+rm -rf "$MEAS"
+run_mind "$OUT/host_measure.log" --remote --seed 3 --authorized-keys "$KEYS" --listen 127.0.0.1:0 --duration 80
+trap 'kill $MIND_PID 2>/dev/null || true; stop_body' EXIT
+wait_listening "$OUT/host_measure.log"; MPORT="$PORT"
+for _ in $(seq 1 300); do grep -Eq "measure: (done|stopped|.*off the model|tilted|the body)" "$OUT/host_measure.log" && break; sleep 0.25; done
+sleep 3                       # the run's post-roll
+KPY -m kilo.cli --host "127.0.0.1:$MPORT" runs > "$OUT/measure_runs.txt"
+KPY -m kilo.cli --host "127.0.0.1:$MPORT" measure fetch --out "$MEAS" 2>&1 | tee "$OUT/measure_fit.txt"
+kill "$MIND_PID" 2>/dev/null || true; wait "$MIND_PID" 2>/dev/null || true
+stop_body
+trap - EXIT
+grep -E "remote B|measure" "$OUT/host_measure.log" | sed 's/^/   /' | head -12
+expect "$OUT/host_measure.log" "remote B1 \(0x4A, measure\): measuring \(about 45 s; any key stops it\)" "B1 started it"
+expect "$OUT/host_measure.log" "measure: done \([0-9]+ ticks, [0-9]+ s, 6 tips\)" "it ran to its end, every sweep tipped"
+expect "$OUT/measure_runs.txt" "self-measurement \(B1\)" "kilo runs lists it"
+expect "$OUT/measure_fit.txt" "measure 1: [0-9]+ bytes in [0-9.]+ s -> .*run-[0-9-]+-measure-1\.krec" "fetched"
+expect "$OUT/measure_fit.txt" "^com_x +mm" "the fit's table"
+"$PYTHON" - "$(ls "$MEAS"/run-*-measure-1.fit.json)" <<'EOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+p = {k: v["value"] for k, v in d["parameters"].items()}
+sd = {k: v["sd"] for k, v in d["parameters"].items()}
+model = {k: v["model"] for k, v in d["parameters"].items()}
+def check(cond, what):
+    if not cond:
+        print(f"FAILED: the fit of the virtual body's run: {what}\n{json.dumps(d, indent=1)[:2500]}"); sys.exit(1)
+check(sum(1 for c in d["crossings"] if c["measured_x"] is not None) == 6, "a crossing from every sweep")
+check(abs(p["imu_pitch"] - 1.5) < 0.2 and abs(p["imu_roll"] + 2.0) < 0.2, "the IMU offsets")
+check(abs(p["com_x"] - (model["com_x"] - 4)) < 1.5 and abs(p["com_y"] + 3) < 1.0, "the centre of mass")
+check(p["sag"] < 0.5, "no sag (rigid legs)")
+check(40 < p["lag_ms"] < 75 and 50 < p["tau_ms"] < 110, "the servo response")
+print(f"   fit: imu {p['imu_pitch']:+.2f} {p['imu_roll']:+.2f} deg (1.5, -2), com_x {p['com_x']:.2f} mm "
+      f"({model['com_x'] - 4:.2f}), com_y {p['com_y']:+.2f} (-3), com_z {p['com_z']:+.1f} +- {sd['com_z']:.1f} "
+      f"({model['com_z']:+.1f}), lag {p['lag_ms']:.0f} ms, tau {p['tau_ms']:.0f} ms, sag {p['sag']:.2f}")
+EOF
+
 echo "== finding Kilo by name: kilo find --ask against the mind's mDNS responder (build/mdns-host, loopback)"
 MDNS_OUT="$OUT/mdns_host.out"
 "$HERE/build/mdns-host" --name kilo --address 192.168.88.9 --build 2d7789e1 --duration 20 > "$MDNS_OUT" 2> "$OUT/mdns_host.log" &
