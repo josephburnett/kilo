@@ -213,8 +213,8 @@ class Trick:
     end_posture: Posture = Posture.STAND
     # Mind-side only (not on the wire): the transition_ticks a TRICK_STOP of
     # this trick asks for (0 = the body's XFADE_TICKS, 0.2 s). A trick that
-    # must come down slowly when stopped (rear_up) sets it; the remotes
-    # (ir.py, kernel/mind/remote) and BodyClient.play() use it.
+    # must come down slowly when stopped (rear_up) sets it; the remote
+    # (kernel/mind/remote) and BodyClient.play() use it.
     stop_ticks: int = 0
     # Mind-side only: checks of the measured attitude while it plays (Guard),
     # and a roll limit for the whole play (deg, 0 = none): past it on two

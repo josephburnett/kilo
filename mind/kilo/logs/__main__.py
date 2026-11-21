@@ -8,7 +8,7 @@
     python -m kilo.logs trick FILE.krec [--run ID] [--csv OUT] [--plot OUT.png] [--json] [--threshold DEG]
     python -m kilo.logs run FILE.krec [--run ID] ...   walk or trick, whichever the run is
 
-FILE is a link JSONL log (``kilo --log``), a ``kilo monitor`` JSONL capture,
+FILE is a link JSONL log (``kilo.log``), a ``kilo monitor`` JSONL capture,
 a ``.kilolog`` (optionally ``.gz``), or a walk recording (``.kwalk``, from
 ``kilo walks --host IP --fetch``; kilo.logs.walkrec), or a flight recording
 (``.krec``, from ``kilo runs --fetch`` or ``kilo record fetch``;

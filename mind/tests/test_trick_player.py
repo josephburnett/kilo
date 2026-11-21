@@ -1,28 +1,24 @@
 """P1 trick player, mind side (docs §3e, §5 "Tricks"): the player timing model,
-the BodyClient uploader/player against the virtual body, and the `kilo trick`
-CLI end to end on a pty. The C player is tested in body/test/test_keyframe.cpp
+and the BodyClient uploader/player against the virtual body. The C player is tested in body/test/test_keyframe.cpp
 and compared message by message with the vbody in test_crosscheck.py."""
 
 from __future__ import annotations
 
 import asyncio
-import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
 
 from kilo.body.client import BodyClient, TrickError, trick_id_for
-from kilo.link import consts
 from kilo.link.serial_link import CommandError, LinkConfig, SerialLink
 from kilo.link.transport import loopback_pair
 from kilo.protocol import kilo_protocol as P
 from kilo.tricks import library
 from kilo.tricks.model import Keyframe, Trick
 from kilo.tricks.player import Player, phase_ticks, play_order, total_ticks
-from kilo.vbody.sim import VirtualBody, open_pty
+from kilo.vbody.sim import VirtualBody
 
 from conftest import FAST
 
@@ -205,68 +201,3 @@ def test_play_timeout_stops_the_trick(rig):
     t = small(repeats=255)
     with pytest.raises(TrickError):
         asyncio.run(client.play(t, timeout=0.3))
-
-
-# ---- the CLI on a pty ----------------------------------------------------------------
-@pytest.fixture
-def vbody_pty():
-    transport, path, slave = open_pty()
-    vb = VirtualBody(transport).start()
-    yield vb, path
-    vb.stop()
-    transport.close()
-    os.close(slave)
-
-
-def _kilo(*args, port=None):
-    pre = ["--port", port] if port else []
-    return subprocess.Popen([sys.executable, "-m", "kilo.cli", *pre, *args], cwd=MIND,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-
-@pytest.mark.slow
-def test_cli_list_and_show_need_no_body():
-    p = _kilo("--port", "/dev/nonexistent-kilo", "trick", "list")
-    out, err = p.communicate(timeout=15)
-    assert p.returncode == 0, err
-    assert all(n in out for n in library.names()) and "until stopped" not in out
-    p = _kilo("trick", "show", "pu")
-    out, err = p.communicate(timeout=15)
-    assert p.returncode == 0, err
-    assert "push_up" in out and "loop 1..2 x3" in out and out.count("cosine") == 6
-    p = _kilo("trick", "show", "nope")
-    assert p.wait(15) == 1
-
-
-@pytest.mark.slow
-def test_cli_upload_then_play(vbody_pty):
-    vb, path = vbody_pty
-    p = _kilo("trick", "upload", "check_around", port=path)
-    out, err = p.communicate(timeout=15)
-    assert p.returncode == 0, err
-    assert "uploaded" in out and vb.trick.state == "ready"
-    p = _kilo("trick", "play", "check_around", port=path)  # the body is LIMP
-    out, err = p.communicate(timeout=15)
-    assert p.returncode == 1 and "LIMP" in err
-    p = _kilo("trick", "play", "check_around", "--posture", "stand", "--mirror", port=path)
-    out, err = p.communicate(timeout=20)
-    assert p.returncode == 0, err
-    assert "cached" in out and "TRICK_DONE DONE after" in out, out
-
-
-@pytest.mark.slow
-def test_cli_play_forever_for_then_watch(vbody_pty):
-    vb, path = vbody_pty
-    vb.params[P.ParamId.WD_REST_MS] = 1000
-    p = _kilo("trick", "play", "push_up", "--repeats", "255", "--for", "1.5", "--posture", "stand",
-              "--then-watch", "2", port=path)
-    seen_trick = False
-    deadline = time.monotonic() + 25
-    while p.poll() is None and time.monotonic() < deadline:
-        seen_trick |= vb.trick.running
-        time.sleep(0.02)
-    out, err = p.communicate(timeout=5)
-    assert p.returncode == 0, err
-    assert seen_trick
-    assert "TRICK_DONE STOPPED" in out and "silent: last frame" in out, out
-    assert "WATCHDOG" in out, out

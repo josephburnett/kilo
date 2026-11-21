@@ -923,7 +923,7 @@ brief = "Ultrasonic cadence"
 
 # Leg geometry for the P2 IK and gait (doc §3d, Appendix B7). Defaults are
 # Kilo's, measured by the owner with calipers on 2026-10-11 (Appendix B7);
-# `kilo param set NAME value --persist` overrides them, no reflash needed.
+# PARAM_SET (persist) overrides them, no reflash needed.
 # The feet are 6 mm radius discs: L2 ends at the disc centre, the floor is
 # 6 mm lower, so body_h_mm (shoulder axle to the foot centres) + 6 = the
 # shoulder axle's height above the floor.
@@ -1123,7 +1123,7 @@ lo = -120
 hi = 60
 
 # Balance (doc §3f): the body's SET_BALANCE state at boot, and the mind's
-# defaults for `kilo balance` / BodyClient.set_balance (which converts Kp and
+# defaults for BodyClient.set_balance (which converts Kp and
 # Kd from these raw values: Kp = kp_q8 / 256, Kd = kd_ms / 1000 s). Keys are
 # the SET_BALANCE field names; all (est.).
 #   kp_q8         proportional gain, Q8 (128 = 0.5)
@@ -1156,7 +1156,7 @@ not_held = -32768
 #                 the personality's safety.*_battery_pct marks are percents on it.
 #   trick_min_mv  the remote's rear-up key (A2) refuses below this pack voltage at
 #                 rest, so that the body's low-battery reflex does not fire half way
-#                 up (docs/rear-up-trick.md; kernel remote/remote.h, kilo.ir)
+#                 up (docs/rear-up-trick.md; kernel remote/remote.h)
 #   flash_min_mv  the card flash (kernel flash/cardflash.h) refuses below this: a
 #                 flash wants margin above the body's LOW trip (BATT_LOW_MV)
 [battery]
@@ -1274,8 +1274,7 @@ servo_tau_ms = 70
 # (others get NOT_CONTROLLER). When the controller lets go (CONTROL take=0),
 # closes its socket, or asked for keepalive and was silent for
 # host.keepalive_timeout_ms, the mind closes the bridge if it was open and
-# latches SET_POSTURE REST (Python counterpart: a client's hold ending in the
-# daemon, kilo/daemon/sessions.py).
+# latches SET_POSTURE REST.
 #
 # Raw bridge: BRIDGE_OPEN pauses the mind's link (no heartbeat, goal or
 # command goes out) and forwards UART bytes both ways in BRIDGE_TX/BRIDGE_RX,

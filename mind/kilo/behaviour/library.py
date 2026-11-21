@@ -7,11 +7,10 @@ The body interface (``ctx.body``) the behaviours call:
 - ``set_balance(enable)``: BodyClient has it.
 - ``look(pan_deg, tilt_deg)``: head target. Not in the body yet (P2).
 - ``play(trick, mirror=False)``: returns an awaitable that resolves on
-  TRICK_DONE (through the adapter: SUCCESS if the trick ended DONE, else
-  FAILURE). Not in the body yet (P2).
+  TRICK_DONE (SUCCESS if the trick ended DONE, else FAILURE). Not in the body yet (P2).
 - ``beep(notes)``: ``[(midi_note, ms), ...]``. Not in the body yet.
 
-``adapter.BodyAdapter`` wraps a real BodyClient and stubs the missing ones.
+The C++ mind implements it (kernel/mind/behaviour/body.h).
 Posture and balance goals are cached in ``ctx.data`` so they are sent on
 change only; the runner clears the cache on an epoch change, when the body
 has dropped all motion goals.
@@ -114,8 +113,8 @@ def idle(cfg: dict[str, Any]) -> Behaviour:
 
 def explore(cfg: dict[str, Any]) -> Behaviour:
     b = cfg["behaviours"]["explore"]
-    # Stand and look around. BodyAdapter.walk() exists, but no behaviour
-    # walks until the owner allows autonomous walking.
+    # Stand and look around. No behaviour walks until the owner allows
+    # autonomous walking.
     scan = Repeat(Sequence("scan", [look_random(b["look_pan_deg"], b["look_tilt_deg"]),
                                     Wait(b["look_every_s"])]), times=int(b["looks"]))
     return Behaviour("explore", Sequence("explore_seq", [posture(b["posture"]), scan,

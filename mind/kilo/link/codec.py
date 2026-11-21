@@ -126,5 +126,5 @@ class KiloCodec:
 
 
 def default_codec() -> Codec:
-    """The codec the CLI, daemon and virtual body use."""
+    """The codec the link and the virtual body use."""
     return KiloCodec()

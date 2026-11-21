@@ -387,12 +387,12 @@ def test_balance_enable_cleared_by_epoch_bump_and_restored_by_refresh(rig):
 def test_realtime_on_a_pty(binary):
     import time
 
-    from kilo.link.transport import open_port
+    from kilo.link.transport import FdTransport
 
     core = CoreBody(binary, clock=time.monotonic)
     path = core.open_pty()
     core.start_realtime()
-    link = SerialLink(lambda: open_port(path), config=LinkConfig(**FAST), port_name=path)
+    link = SerialLink(lambda: FdTransport.open(path), config=LinkConfig(**FAST), port_name=path)
     try:
         link.mark_alive()
         link.start()

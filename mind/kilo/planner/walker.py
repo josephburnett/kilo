@@ -1,19 +1,8 @@
 """Walking: the planner's ticks streamed to the body as FEET, 50 Hz.
 
-``Walker`` (one per BodyClient: ``client.walker``) starts, steers and stops
-a walk; ``Stream`` is one walk's producer, which the walker's thread wakes
-every 20 ms (``Stream.wake``).
-
-Start (``Walker.start``, blocking for about 0.6 s): a planned stop still
-under way is waited for (START_WAIT_S), then aborted; TELEMETRY at 50 Hz
-(SET_STREAM telem_div 1, the JOINTS and IMU_RAW divisors kept, the previous
-rate put back after), the balance off for this walk if asked (SET_BALANCE
-enable 0, the previous goal restored after), the STANCE posture (always:
-it also ends a GAIT the body still holds from a stream that ended without
-the planned stop; it carries the posture's balance flag, as does the STANCE
-at the end) and its transition, then the posture goal is dropped (a
-SET_POSTURE refresh would end GAIT on the body) and the stream starts. The
-first FEET the body accepts puts it in GAIT.
+``Stream`` is one walk's producer, woken every 20 ms (``Stream.wake``) by
+its driver: the walking simulations of the tests (tests/walksim.py) here,
+the C++ mind's walker on Kilo (kernel/mind/planner/walker.h, a port of it).
 
 Every wake (docs/walking-and-balance.md §10 "Stream timing"):
 
@@ -34,35 +23,25 @@ Every wake (docs/walking-and-balance.md §10 "Stream timing"):
    the body has already played are skipped (counted, not sent).
 
 The stream never writes to disk: its per-tick records go to the frame
-log's queue (kilo.log.JsonlLogger.log only enqueues) and are written by
-that logger's thread. While a stream runs the garbage collector's young
-generation threshold is raised and the objects that exist are frozen
-(gc.freeze), so a collection pass stays short.
+log's queue (kilo.log.JsonlLogger.log only enqueues).
 
-Stop: ``stop()`` asks the planner to stop (each leg steps back under its
-shoulder, the body levels at the stance height); when the plan is done the
-walker latches SET_POSTURE STANCE, which ends GAIT on the body (EVENT
-GAIT_STOPPED arg 0), sends no FEET after it, and clears that posture goal
-again once the body has left GAIT. ``abort()`` ends the stream without the
-planned stop (the body holds, then settles on its own).
+Stop: when the planner's stop is done (each leg stepped back under its
+shoulder, the body levelled at the stance height) the stream calls
+``on_done``; its driver then latches the STANCE posture, which ends GAIT on
+the body (EVENT GAIT_STOPPED arg 0).
 """
 
 from __future__ import annotations
 
-import gc
 import logging
 import math
-import threading
-import time
 from collections import deque
 from typing import Any, Callable
 
 from kilo.link import consts
-from kilo.link.serial_link import LinkError
 from kilo.planner import patterns as pat
 from kilo.planner.errors import ErrorTracker
-from kilo.planner.model import BodyModel
-from kilo.planner.plan import Planner, PlannerConfig, TickPlan
+from kilo.planner.plan import Planner, TickPlan
 from kilo.protocol import kilo_protocol as P
 
 log = logging.getLogger("kilo.walk")
@@ -71,20 +50,12 @@ TICK_S = P.TICK_MS / 1000.0
 LOOKAHEAD = P.FEET_LOOKAHEAD_TICKS
 CLOCK_WINDOW = 100            # telemetry frames in the body-clock estimate (2 s at 50 Hz)
 CLOCK_RESET_FRAMES = 5        # ...restarted after this many frames in a row a tick below its maximum
-START_WAIT_S = 5.0            # a start during a planned stop waits this long for it, then aborts it
-ABORT_WAIT_S = 3.0            # ...and this long for the aborted stream's thread to finish
 ENTER_TIMEOUT_S = 0.6         # the body must be in GAIT this soon after the first FEET
 HANDOVER_TIMEOUT_S = 1.0      # ...and out of it this soon after the STANCE posture
 MIND_STALL_S = 0.5
-STANCE_WAIT_S = 0.6           # POSTURE_TICKS (25 ticks, 0.5 s) and a margin
-GC_THRESHOLD0 = 20000
 _FEET = P.Feet._FMT           # the FEET payload layout (generated)
 _A16 = 16.0
 _ATT_RANGE = (-480, 480)      # FEET pitch / roll, 1/16 deg (protocol/spec.toml: +-30 deg)
-
-
-class WalkError(LinkError):
-    pass
 
 
 def stop_timeout(period_ms: float | None = None) -> float:
@@ -316,238 +287,3 @@ class Stream:
             self.on_done()
         return True
 
-
-class Walker:
-    """Starts, steers and stops walks on one BodyClient (one at a time)."""
-
-    def __init__(self, client: Any, model: BodyModel | None = None, config: PlannerConfig | None = None,
-                 clock: Callable[[], float] = time.monotonic, stance_wait_s: float = STANCE_WAIT_S):
-        self.client = client
-        self.link = client.link
-        self.model = model or BodyModel()
-        self.config = config or PlannerConfig()
-        self.clock = clock
-        self.stance_wait_s = stance_wait_s
-        self._lock = threading.RLock()
-        self._thread: threading.Thread | None = None
-        self._stop_thread = threading.Event()
-        self.stream: Stream | None = None
-        self.planner: Planner | None = None
-        self.tracker = ErrorTracker()
-        self._restore_balance: dict | None = None
-        self._balance_changed = False
-        self._telem_div = P.TELEMETRY_DEFAULT_DIV  # the telemetry rate before the walk (put back after)
-        # SET_POSTURE's balance flag before the walk (the latched goal's, else
-        # the last walk's): the STANCE postures at the start and the end carry
-        # it, so a balance that came from the posture is not dropped
-        self._posture_balance = False
-        self.last_result: dict[str, Any] | None = None
-        self._done = threading.Event()
-        self._done.set()
-
-    # ---- state -----------------------------------------------------------------------------
-    @property
-    def active(self) -> bool:
-        t = self._thread
-        return t is not None and t.is_alive()
-
-    def status(self) -> dict[str, Any] | None:
-        """What the walk is doing, or how the last one ended; None if there was none."""
-        s, p = self.stream, self.planner
-        if s is None or p is None:
-            return None
-        tm = p.timing()
-        return {"active": self.active, "pattern": p.pattern.name, "direction": p.direction, "steer": p.steer,
-                "speed_mm_s": round(tm.speed_mm_s, 1), "stride_mm": round(tm.stride_mm, 1),
-                "period_ms": round(tm.period_ms), "stopping": p.stopping, "ended": s.ended, "ok": s.ok,
-                "sent": s.sent, "skipped": s.skipped, "underruns": s.underruns, "max_behind": s.max_behind,
-                "changing_to": p._pending_pattern.name if p.changing else None,
-                "holds": p.stats["holds"], "catches": p.stats["catches"], "waits": p.stats["waits"],
-                "min_margin_mm": None if p.stats["min_margin"] == math.inf else round(p.stats["min_margin"], 1),
-                "error": self.tracker.estimate()}
-
-    # ---- commands -------------------------------------------------------------------------------
-    def start(self, pattern: str = pat.DEFAULT_PATTERN, direction: str = "forward",
-              speed_mm_s: float | None = None, balance: bool = True, steer: float = 0.0) -> dict[str, Any]:
-        """Walk (or, while walking, change pattern, direction, speed and
-        steer: -1..1, + left, bends a forward or backward walk; Planner.set_steer).
-        Blocks for the STANCE transition on a start. Returns status()."""
-        pattern, direction = pat.pattern(pattern).name, pat.direction(direction)
-        with self._lock:
-            if self.active and self.planner is not None and not self.planner.stopping:
-                return self.update(pattern, direction, speed_mm_s, steer)
-            if self.active and not self.wait(START_WAIT_S):
-                # a planned stop still under way (a walk's can take ~10 s): cut
-                # it short, so two streams never send FEET for the same ticks
-                self.abort()
-                if not self.wait(ABORT_WAIT_S):
-                    raise WalkError("the previous walk's stream did not end")
-            self._setup(balance)
-            try:
-                self._begin(pattern, direction, speed_mm_s, steer)
-            except BaseException:
-                self._teardown(None)
-                raise
-        return self.status() or {}
-
-    def update(self, pattern: str | None = None, direction: str | None = None,
-               speed_mm_s: float | None = None, steer: float | None = None) -> dict[str, Any]:
-        with self._lock:
-            p = self.planner
-            if p is None or not self.active:
-                raise WalkError("not walking")
-            if pattern is not None:
-                p.set_pattern(pattern)
-            if direction is not None:
-                p.set_direction(direction)
-            if speed_mm_s is not None:
-                p.set_speed(speed_mm_s)
-            if steer is not None:
-                p.set_steer(steer)
-        return self.status() or {}
-
-    def stop(self, wait_s: float | None = None) -> bool | None:
-        """The planned stop. Without ``wait_s`` returns None at once; with it,
-        whether the walk ended within ``wait_s`` (any end counts)."""
-        with self._lock:
-            if self.planner is not None and self.active:
-                self.planner.stop()
-        if wait_s is None:
-            return None
-        return self.wait(wait_s)
-
-    def abort(self) -> None:
-        """End the stream now, without the planned stop: the body holds the
-        last pose, then settles on its own (or a posture takes the legs)."""
-        s = self.stream
-        if s is not None and self.active:
-            s._end("aborted")
-        self.wait(1.0)
-
-    def wait(self, timeout: float | None = None) -> bool:
-        """Until the walk has ended (True) or ``timeout``. The CLI's main
-        thread stamps the link's liveness while it waits here (the stream
-        stops sending when the mind looks dead)."""
-        if not getattr(self.client, "stamp_liveness", False):
-            return self._done.wait(timeout)
-        end = None if timeout is None else time.monotonic() + timeout
-        while True:
-            self.link.mark_alive()
-            left = 0.05 if end is None else min(0.05, end - time.monotonic())
-            if left <= 0:
-                return self._done.is_set()
-            if self._done.wait(left):
-                return True
-
-
-    # ---- setup and teardown -------------------------------------------------------------------------
-    def _setup(self, balance: bool) -> None:
-        c, st = self.client, self.link.state
-        c._check_drivable()
-        if st.epoch is None or not st.alive:
-            raise WalkError("no telemetry from the body")
-        if st.mode in ("FALLEN", "RECOVERING"):
-            raise WalkError("Kilo is down: the fall reflex holds the joints")
-        self._balance_changed = False
-        self._telem_div = c.stream_divs[0]
-        _, joints_div, imu_raw_div = c.stream_divs
-        c.set_stream(telem_div=1, joints_div=joints_div, imu_raw_div=imu_raw_div)
-        g = self.link.goals().get("SET_POSTURE")
-        if g is not None:  # the posture's balance flag, carried through the walk and its end
-            self._posture_balance = bool(g.fields.get("flags", 0) & consts.POSTURE_BALANCE_FLAG)
-        if not balance:
-            g = self.link.goals().get("SET_BALANCE")
-            self._restore_balance = dict(g.fields) if g is not None else None
-            c.set_balance(False)
-            self._balance_changed = True
-        # STANCE, also when the body is still in GAIT (a stream that ended
-        # without the planned stop: the body holds or settles its last pose):
-        # the posture ends that, and the new stream starts from STANCE's feet.
-        c.posture("stance", balance=balance and self._posture_balance)
-        self._sleep(self.stance_wait_s)
-        self.link.clear_goal("SET_POSTURE")
-
-    def _begin(self, pattern: str, direction: str, speed_mm_s: float | None, steer: float = 0.0) -> None:
-        st = self.link.state
-        bc = BodyClock()
-        with st.lock:
-            hist = list(st.history)[-CLOCK_WINDOW:]
-            epoch = st.epoch
-        for rx, m in hist:
-            bc.add(m.tick, rx)
-        now_tick = bc.now(self.clock())
-        if now_tick is None:
-            raise WalkError("no telemetry from the body")
-        self.tracker = ErrorTracker()
-        planner = Planner(self.model, pattern, direction, speed_mm_s, tick=int(math.floor(now_tick)) + LOOKAHEAD,
-                          config=self.config, steer=steer)
-        self.planner = planner
-        self.stream = Stream(self.link, planner, epoch, bc, self._handover, self.tracker)
-        self._stop_thread.clear()
-        self._done.clear()
-        self._thread = threading.Thread(target=self._run, name="kilo-walk", daemon=True)
-        self._thread.start()
-        log.info("walk %s %s at %.1f mm/s", pattern, direction, planner.timing().speed_mm_s)
-
-    def _handover(self) -> None:
-        try:
-            self.client.posture("stance", balance=self._posture_balance)
-        except (LinkError, ValueError) as e:
-            log.warning("walk: STANCE at the end: %s", e)
-
-    def _run(self) -> None:
-        s = self.stream
-        old = gc.get_threshold()
-        gc.freeze()
-        gc.set_threshold(GC_THRESHOLD0, old[1], old[2])
-        try:
-            nxt = self.clock()
-            while s.wake(self.clock()):
-                nxt += TICK_S
-                d = nxt - self.clock()
-                if d < -2 * TICK_S:
-                    nxt = self.clock()  # far behind (the wake caught up already): no burst of wakes
-                elif d > 0:
-                    time.sleep(d)
-        except Exception as e:  # never leave a dead stream thread silently
-            log.exception("walk stream failed")
-            s._end(f"the stream failed: {e}")
-        finally:
-            gc.set_threshold(*old)
-            gc.unfreeze()
-            try:
-                self._teardown(s)
-            except Exception:  # whatever it was, wait() and stop_walk must not hang on it
-                log.exception("walk teardown failed")
-            finally:
-                self.last_result = self.status()
-                self._done.set()
-
-    def _teardown(self, s: Stream | None) -> None:
-        if s is not None and s.handover_at is not None:
-            self.link.clear_goal("SET_POSTURE", only_if=lambda g: g.fields.get("posture") == consts.POSTURES["stance"])
-        try:
-            _, joints_div, imu_raw_div = self.client.stream_divs  # a monitor's JOINTS / IMU_RAW go on
-            self.client.set_stream(telem_div=self._telem_div, joints_div=joints_div, imu_raw_div=imu_raw_div)
-        except LinkError as e:
-            log.warning("walk: telemetry rate not restored: %s", e)
-        if self._balance_changed:
-            self._balance_changed = False
-            if self._restore_balance is not None:
-                try:
-                    self.link.set_goal("SET_BALANCE", **self._restore_balance)
-                except ValueError:
-                    self.link.clear_goal("SET_BALANCE")
-            else:
-                self.link.clear_goal("SET_BALANCE")
-            self._restore_balance = None
-
-    def _sleep(self, s: float) -> None:
-        end = time.monotonic() + s
-        while True:
-            if getattr(self.client, "stamp_liveness", False):
-                self.link.mark_alive()
-            left = end - time.monotonic()
-            if left <= 0:
-                return
-            time.sleep(min(0.05, left))

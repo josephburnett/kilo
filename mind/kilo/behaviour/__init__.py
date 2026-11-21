@@ -5,10 +5,10 @@
 - selector.py     the utility root: safety branches, scores, hysteresis
 - library.py      idle, explore (stub), nap, greet, startle; fallen, wind-down, low battery
 - personality.py  personality.yaml loader (PyYAML optional) and validation
-- adapter.py      BodyAdapter: the behaviour body interface over BodyClient
 - runner.py       the 10 Hz asyncio ticker and the JSONL behaviour log
 
-``python -m kilo.behaviour --vbody`` runs it against an in-process virtual body.
+The reference for the C++ mind's behaviour layer (kernel/mind/behaviour/,
+checked against it by kernel/host/tests/gen_behaviour_vectors.py).
 """
 
 from .drives import DriveInputs, Drives

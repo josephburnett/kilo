@@ -74,4 +74,4 @@ def test_cli_wiring() -> None:
     assert wants_host(a) and HOST_COMMANDS["power"] is C.cmd_power
     a = cli.parse_args(["power", "x.krec"])
     assert not wants_host(a) and a.file == "x.krec"
-    assert cli.PORT_COMMANDS["power"](cli.parse_args(["power", "/nonexistent.krec"])) == C.EXIT_ERR
+    assert cli.LOCAL_COMMANDS["power"](cli.parse_args(["power", "/nonexistent.krec"])) == C.EXIT_ERR

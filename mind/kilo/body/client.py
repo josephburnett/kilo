@@ -10,12 +10,9 @@ Tricks (P1, §3e): ``upload_trick`` (cached by (trick_id, crc)),
 ``await play(name_or_trick, mirror, speed)`` which resolves on EVENT
 TRICK_DONE, and ``stop_trick``.
 
-Walking (protocol 2.0, §3d): ``walk(direction, pattern, speed_mm_s,
-balance)`` starts or steers a walk, ``stop_walk(wait_s)`` stops it,
-``walk_status()`` reports it; the walk itself is the planner's
-(``client.walker``, kilo.planner.walker: the steps planned in the mind and
-streamed as FEET). Body pose: ``pose(...)`` / ``release_pose()``
-(SET_BODY_POSE).
+The C++ mind is the body's client on Kilo (kernel/mind/link); this one
+drives the virtual bodies and the real body core in tests, and the body
+behind the mind through the raw bridge (kilo.hostlink.BridgeTransport).
 """
 
 from __future__ import annotations
@@ -38,10 +35,6 @@ log = logging.getLogger(__name__)
 class ProtocolMismatch(LinkError):
     pass
 
-
-# Postures the CLI offers. "balance" is STAND with the balance flag (SET_POSTURE
-# flags bit 0); it is not a separate posture code.
-POSTURE_CHOICES = ("limp", "rest", "stand", "sit", "balance", "stance", "calib", "zero")
 
 CAL_LIMIT_A16 = 400  # CAL_SET offset_a16 range: ±25°
 
@@ -90,9 +83,9 @@ def trick_id_for(trick: Any) -> int:
 
 class BodyClient:
     # True when the thread that waits in this client (wait_ready, cal_save,
-    # play) is the mind's main loop, so waiting may stamp the link's liveness
-    # (the CLI). The daemon sets False: its pool threads and the behaviour
-    # runner's trick waits must not keep a stalled loop looking alive.
+    # play) is the mind's main loop, so waiting may stamp the link's liveness.
+    # False when another loop stamps it: waits on other threads must not keep
+    # a stalled loop looking alive.
     stamp_liveness = True
 
     def __init__(self, link: SerialLink):
@@ -104,11 +97,6 @@ class BodyClient:
         self._trick_lock = threading.Lock()
         self._trick_done: list[tuple[float, Any]] = []
         self._upload_lock = threading.RLock()  # one upload sequence on the wire at a time
-        self._walker: Any = None
-        # The SET_STREAM divisors (telem, joints, imu_raw) this client last
-        # set (the body's boot defaults until then): a walk changes only the
-        # telemetry rate and puts it back.
-        self.stream_divs: tuple[int, int, int] = (P.TELEMETRY_DEFAULT_DIV, 0, 0)
         link.subscribe("event", self._on_event)
 
     @property
@@ -185,11 +173,6 @@ class BodyClient:
                 raise ValueError(f"unknown posture {name!r}") from None
         if not 0 <= transition_ticks <= 255:
             raise ValueError("transition_ticks must be 0..255")
-        w = self._walker
-        if w is not None and w.active and threading.current_thread() is not w._thread:
-            # a posture takes the legs from the stream: end the stream first, so
-            # no FEET re-enters GAIT under the posture (refreshed at 5 Hz)
-            w.abort()
         self.link.set_goal("SET_POSTURE", posture=code, transition_ticks=transition_ticks,
                            flags=consts.POSTURE_BALANCE_FLAG if balance else 0)
 
@@ -272,77 +255,6 @@ class BodyClient:
         self.link.clear_goal("SET_HEAD")
         self.link.send("SET_HEAD", epoch=self.state.epoch or 0, mode=int(P.HeadMode.RELEASE), pan=0, tilt=0,
                        tail=0, max_speed_dps=0)
-
-    # ---- walking (the planner's FEET stream; docs §3d) and the body pose ---------------------
-    @property
-    def walker(self) -> Any:
-        """The kilo.planner.walker.Walker of this client (made on first use)."""
-        if self._walker is None:
-            from kilo.planner.walker import Walker
-
-            self._walker = Walker(self)
-        return self._walker
-
-    def walk(self, direction: str = "forward", pattern: str = "trot", speed_mm_s: float | None = None,
-             balance: bool = True, steer: float = 0.0) -> dict[str, Any]:
-        """Walk ``direction`` (forward, back, left, right: turn in place,
-        march: in place) with ``pattern`` (walk, trot, crawl) at
-        ``speed_mm_s`` (default: the pattern's; kilo.planner.patterns). While
-        walking, changes the walk at once (a pattern after every leg has
-        stepped home). ``steer`` (-1..1, + left) bends a forward or
-        backward walk (kilo.planner.patterns.side_strides; the remote's A6 /
-        C6 while walking). ``balance=False`` turns the body's balance off for this walk
-        (restored after). Blocks about 0.6 s on a start (the STANCE
-        posture). Returns the walk's status (Walker.status()). ValueError for
-        an unknown pattern or direction; WalkError if the body cannot walk."""
-        self._check_drivable()
-        return self.walker.start(pattern, direction, speed_mm_s, balance, steer)
-
-    def stop_walk(self, wait_s: float | None = None) -> bool | None:
-        """The planned stop (each leg steps home, the body levels, then the
-        STANCE posture). Without ``wait_s`` returns None at once; with it,
-        whether the walk ended within ``wait_s``."""
-        if self._walker is None:
-            return True if wait_s is not None else None
-        return self._walker.stop(wait_s)
-
-    def walk_status(self) -> dict[str, Any] | None:
-        """The walk (pattern, direction, speed, what the stream did, the
-        model's error estimates), or how the last one ended; None if none."""
-        return None if self._walker is None else self._walker.status()
-
-    def walking(self) -> bool:
-        """The body reports GAIT (mode GAIT or the GAIT flag)."""
-        st = self.state
-        return st.mode == "GAIT" or "gait" in st.flags
-
-    @staticmethod
-    def _check_ranges(name: str, fields: dict[str, int]) -> None:
-        """Client-side BAD_ARG: every field within the spec range (or its wire type's)."""
-        rng = consts.field_ranges(name)
-        for k, v in fields.items():
-            lo, hi = rng[k]
-            if not lo <= v <= hi:
-                raise ValueError(f"{name} {k} must be {lo}..{hi} (got {v})")
-
-    def pose(self, pitch_deg: float = 0, roll_deg: float = 0, dheight_mm: float = 0,
-             xshift_mm: float = 0) -> dict[str, int]:
-        """Latch SET_BODY_POSE: body pitch (+ = nose down) and roll (+ = right
-        side up) in degrees, height delta and forward shift in mm, applied on
-        top of the STANCE posture (other postures ignore it). An epoch goal
-        like a posture. Returns the wire fields; ValueError outside the wire
-        ranges."""
-        fields = {"pitch": int(round(pitch_deg * 16)), "roll": int(round(roll_deg * 16)),
-                  "dheight_mm": int(round(dheight_mm)), "xshift_mm": int(round(xshift_mm))}
-        self._check_ranges("SET_BODY_POSE", fields)
-        self._check_drivable()
-        self.link.set_goal("SET_BODY_POSE", **fields)
-        return fields
-
-    def release_pose(self) -> None:
-        """Back to the neutral pose: SET_BODY_POSE zeros, latched (an epoch
-        change clears it like any epoch goal; the body forgets its pose then too)."""
-        self.link.set_goal("SET_BODY_POSE", pitch=0, roll=0, dheight_mm=0, xshift_mm=0)
 
     # ---- calibration (commands) ------------------------------------------------
     def cal_get(self) -> list[int]:
@@ -446,7 +358,6 @@ class BodyClient:
         """SET_STREAM: divisors of the 50 Hz tick (0 = off)."""
         self.link.request("SET_STREAM", {"telem_div": telem_div, "joints_div": joints_div,
                                          "imu_raw_div": imu_raw_div})
-        self.stream_divs = (telem_div, joints_div, imu_raw_div)
 
     def reboot(self) -> None:
         """REBOOT (watchdog restart of the application)."""
@@ -552,9 +463,7 @@ class BodyClient:
         given); on timeout the trick is stopped and TrickError raised. If the
         coroutine is cancelled (a behaviour preempted, Ctrl-C) before
         TRICK_DONE, the trick is stopped on the body too. It stamps the link's
-        liveness while it waits only when ``stamp_liveness`` (the CLI, whose
-        loop this is); under the daemon the runner's tick or the daemon's pump
-        is the liveness source.
+        liveness while it waits only when ``stamp_liveness``.
         """
         if isinstance(trick, str):
             from kilo.tricks import library

@@ -14,7 +14,7 @@ import pytest
 from kilo.body.client import BodyClient
 from kilo.link import consts
 from kilo.link.serial_link import CommandError, LinkConfig, SerialLink
-from kilo.link.transport import loopback_pair, open_port
+from kilo.link.transport import FdTransport, loopback_pair
 from kilo.protocol import kilo_link_codec as C
 from kilo.protocol import kilo_protocol as P
 from kilo.stepclock import StepClock
@@ -280,7 +280,7 @@ def test_reboot_starts_a_new_epoch():
 def test_pty_round_trip():
     transport, path, slave = open_pty()
     vb = VirtualBody(transport).start()
-    link = SerialLink(lambda: open_port(path), config=LinkConfig(**FAST), port_name=path)
+    link = SerialLink(lambda: FdTransport.open(path), config=LinkConfig(**FAST), port_name=path)
     link.mark_alive()
     link.start()
     try:

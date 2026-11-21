@@ -1,5 +1,5 @@
 """`kilo --host <ip[:port]> COMMAND`: the CLI over the mind's host channel
-(docs/fast-boot.md §5, kilo.hostlink) instead of a serial port or the daemon.
+(docs/fast-boot.md §5, kilo.hostlink).
 
 What a C++ mind (the Circle kernel, or kernel/host's kilo-mind-host) serves
 today, and so what works here:
@@ -23,12 +23,10 @@ today, and so what works here:
     kilo runs --host IP [--json] | --fetch ... | --delete ...   the walks and tricks recorded (kilo.cli_record;
                                                    kilo walks is the same), record, bench sd, metrics
 
-``--host`` may also follow the command (``kilo status --host IP``). Every
-other command prints that it is not available over --host yet. ``--host``
-also takes a ``.local`` name (``--host kilo.local``), found by mDNS
-(kilo.mdns), and walks, reboot and update, which only a C++ mind serves,
-look for kilo.local when --host is left out; the address found is printed
-to stderr. Finding gives only an address: the handshake below still checks
+``--host`` may also follow the command (``kilo status --host IP``).
+``--host`` also takes a ``.local`` name (``--host kilo.local``), found by
+mDNS (kilo.mdns), and every command that talks to Kilo looks for kilo.local
+when --host is left out; the address found is printed to stderr. Finding gives only an address: the handshake below still checks
 the key.
 
 Every connection needs this laptop's key (kilo.hostkey: ``kilo key init``
@@ -38,7 +36,7 @@ key file, or a mind that does not know the key: one line saying what to
 do, exit status 1.
 
 ``posture`` takes control with keepalive and releases it at the end (Ctrl-C,
-``--for``); the mind then latches REST, as the daemon does when a hold ends.
+``--for``); the mind then latches REST.
 If this process dies instead, the mind sees the socket close (or, if the
 machine vanished, two seconds without a keepalive) and does the same.
 """
@@ -210,13 +208,7 @@ def cmd_status(args: argparse.Namespace, hl: HostLink) -> int:
 
 
 def cmd_posture(args: argparse.Namespace, hl: HostLink) -> int:
-    for flag, attr in (("--pca", "pca"), ("--then-watch", "then_watch")):
-        if getattr(args, attr, None) not in (None, False):
-            return _unavailable(f"posture {flag}")
-    try:
-        posture = P.Posture[args.name.upper()]
-    except KeyError:
-        return _unavailable(f"posture {args.name}")
+    posture = P.Posture[args.name.upper()]
     hl.take_control(keepalive=True)
     hl.command(P.HostPosture(posture=int(posture), transition_ticks=args.transition, flags=0))
     print(f"holding {args.name}" + (f" for {args.hold:g} s" if args.hold else " (Ctrl-C to release)"), flush=True)
@@ -235,7 +227,7 @@ def cmd_posture(args: argparse.Namespace, hl: HostLink) -> int:
 
 
 def telem_record(m: Any) -> dict[str, Any]:
-    """One `kilo --host monitor --json` line."""
+    """One `kilo monitor --json` line."""
     t = m.telemetry
     has = bool(m.state & P.HostState.HAS_TELEMETRY)
     return {"time": round(time.time(), 3), "mind_ms": m.uptime_ms, "alive": bool(m.state & P.HostState.BODY_ALIVE),
@@ -247,9 +239,6 @@ def telem_record(m: Any) -> dict[str, Any]:
 
 
 def cmd_monitor(args: argparse.Namespace, hl: HostLink) -> int:
-    for flag, attr in (("--passive", "passive"), ("--percepts", "percepts")):
-        if getattr(args, attr, False):
-            return _unavailable(f"monitor {flag}")
     table = sys.stdout.isatty() and not args.json
 
     def show(m: Any) -> None:
@@ -385,9 +374,7 @@ def _run_for(duration: float | None, hl: HostLink) -> int:
 
 
 def _unavailable(what: str) -> int:
-    print(f"kilo {what}: not available over --host yet (the C++ mind serves status, posture, monitor, log, flash, "
-          "reboot, update, runs, record, bench, metrics)",
-          file=sys.stderr)
+    print(f"kilo {what}: runs on this machine, not over --host", file=sys.stderr)
     return EXIT_ERR
 
 
@@ -569,10 +556,6 @@ def _prepare_flash(args: argparse.Namespace) -> int | None:
     """Build or read the image for `kilo flash --host` (args.flash_image); an exit code on failure."""
     from kilo.tools.flash import FlashError, image_options, prepare_image
 
-    if args.legacy or args.hex or args.sd is not None or args.rollback:
-        print("kilo flash --host: not with --legacy, --hex, --sd or --rollback (use --image/--manifest)",
-              file=sys.stderr)
-        return EXIT_ERR
     try:
         args.flash_image = prepare_image(image_options(args))
     except FlashError as e:
@@ -604,15 +587,19 @@ def parse_log_argv(argv: list[str], host: str | None, key: str | None = None) ->
     return p.parse_args(argv)
 
 
-# Commands only a C++ mind serves: without --host they find Kilo by mDNS (kilo.mdns).
-HOST_ONLY = ("walks", "runs", "bench", "metrics", "reboot", "update", "guard", "sound")
+# Commands run on this machine alone; the others talk to Kilo, without --host found by mDNS (kilo.mdns).
+LOCAL_ONLY = ("key", "find", "card")
 
 
 def wants_host(args: argparse.Namespace) -> bool:
-    return (bool(getattr(args, "host", None)) or args.cmd in HOST_ONLY
-            or (args.cmd == "record" and getattr(args, "rec_cmd", None) != "decode")
-            or (args.cmd == "power" and not getattr(args, "file", None))
-            or (args.cmd == "log" and "--host" in (args.log_argv or [])))
+    if getattr(args, "host", None):
+        return True
+    if args.cmd == "log":
+        return "--host" in (args.log_argv or [])
+    return not (args.cmd in LOCAL_ONLY
+                or (args.cmd == "record" and getattr(args, "rec_cmd", None) == "decode")
+                or (args.cmd == "power" and getattr(args, "file", None))
+                or (args.cmd == "flash" and getattr(args, "sd", None) is not None))
 
 
 def run_host(args: argparse.Namespace) -> int:
@@ -626,6 +613,13 @@ def run_host(args: argparse.Namespace) -> int:
     fn = HOST_COMMANDS.get(args.cmd)
     if fn is None:
         return _unavailable(args.cmd)
+    if args.cmd == "flash" and args.rollback:
+        print("kilo flash --rollback: not yet (the mind keeps no last good image on SD yet; "
+              "docs/fast-boot.md §6)", file=sys.stderr)
+        return EXIT_ERR
+    if args.cmd == "flash" and args.sd is not None:
+        print("kilo flash --sd: not with --host", file=sys.stderr)
+        return EXIT_ERR
     try:  # a .local name, or no --host at all: kilo.local by mDNS (the address found goes to stderr)
         args.host = mdns.host_address(getattr(args, "host", None))
     except mdns.MdnsError as e:

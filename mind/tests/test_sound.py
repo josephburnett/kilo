@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from kilo import cli, cli_sound
-from kilo.cli_host import HOST_COMMANDS, HOST_ONLY, wants_host
+from kilo.cli_host import HOST_COMMANDS, wants_host
 from kilo.protocol import kilo_protocol as P
 
 REPO = Path(__file__).resolve().parents[2]
@@ -269,6 +269,6 @@ def test_status_line_without_an_output():
 def test_kilo_sound_is_a_host_command():
     a = cli.parse_args(["sound", "play", "meow", "--host", "10.0.0.2"])
     assert (a.cmd, a.action, a.value, a.host) == ("sound", "play", "meow", "10.0.0.2")
-    assert "sound" in HOST_ONLY and HOST_COMMANDS["sound"] is cli_sound.cmd_sound
+    assert HOST_COMMANDS["sound"] is cli_sound.cmd_sound
     assert wants_host(cli.parse_args(["sound"]))  # finds kilo.local without --host
     assert cli.parse_args(["sound", "volume", "50"]).value == "50"

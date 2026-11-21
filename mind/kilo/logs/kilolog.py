@@ -1,11 +1,10 @@
 """The ``.kilolog`` raw frame log (docs/architecture.md §5 "Logging").
 
 A binary file of wire frames exactly as they crossed the UART, so a session
-can be replayed through the codec. ``kilo --kilolog [FILE]`` and ``kilo run
---kilolog [FILE]`` hand a ``KilologWriter`` to the SerialLink, which calls
+can be replayed through the codec. ``kilo runs --fetch`` writes one per walk
+(kilo.logs.walkrec.to_kilolog); a SerialLink given a ``KilologWriter`` calls
 ``write_wire(wire, "rx"|"tx")`` once per frame from its reader and writer
-paths (default file ``~/kilo-logs/kilo-<time>.kilolog.gz``). ``kilo --log``
-writes JSONL (``kilo.log``), which ``kilo.logs.reader`` reads too.
+paths. ``kilo.logs.reader`` reads it, and JSONL (``kilo.log``) too.
 
 Format, version 1 (all integers little-endian)::
 
@@ -46,7 +45,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO, Iterator
 
-from kilo.log import DEFAULT_DIR
 from kilo.protocol import kilo_link_codec as C
 from kilo.protocol import kilo_protocol as P
 
@@ -56,11 +54,6 @@ MAGIC = b"KILOLOG\n"
 VERSION = 1
 _REC = struct.Struct("<BIB")
 DIR_RX, DIR_TX = 0, 1
-
-
-def default_path() -> Path:
-    """``~/kilo-logs/kilo-YYYYmmdd-HHMMSS.kilolog.gz``."""
-    return DEFAULT_DIR / time.strftime("kilo-%Y%m%d-%H%M%S.kilolog.gz")
 
 
 def _open(path: Path, mode: str) -> BinaryIO:

@@ -1,5 +1,5 @@
-"""`kilo cal`: joint calibration, over --host (a C++ mind relays CAL to the
-body) or over the serial port / daemon (BodyClient). docs/calibration.md.
+"""`kilo cal`: joint calibration, over --host (the C++ mind relays CAL to the
+body). docs/calibration.md.
 
     kilo cal [show] [--host H]           the 16 offsets, and per joint what it reaches with its
                                          offset against what the postures, gaits and tricks ask
@@ -11,7 +11,7 @@ body) or over the serial port / daemon (BodyClient). docs/calibration.md.
 
 Offsets are degrees, -25 .. +25 (the body's range); a + offset turns the
 joint toward its + angles (a shoulder: the upper leg back, toward the tail).
-Over --host, set / nudge / save / revert need control, or the calibration
+Set / nudge / save / revert need control, or the calibration
 posture held by any client (`kilo posture calib --host H` in another
 window), and no walk or trick running.
 """
@@ -29,7 +29,7 @@ from kilo.protocol import kilo_protocol as P
 
 
 def add_parser(sub: Any) -> None:
-    s = sub.add_parser("cal", help="joint calibration (show, set, nudge, save, revert; also over --host)")
+    s = sub.add_parser("cal", help="joint calibration (show, set, nudge, save, revert)")
     cs = s.add_subparsers(dest="cal_cmd", metavar="ACTION")
     parsers = [cs.add_parser("show", help="the 16 offsets and each joint's reach against what is asked (default)")]
     c = cs.add_parser("set", help="set one joint's absolute offset (not saved)")
@@ -40,9 +40,7 @@ def add_parser(sub: Any) -> None:
     c.add_argument("joint", type=int)
     c.add_argument("degrees", type=float, help="the change in degrees, + or - (e.g. -2: write it as -- -2 or =-2)")
     parsers.append(c)
-    c = cs.add_parser("save", help="write the calibration to the body's EEPROM")
-    c.add_argument("--no-wait", action="store_true", help="do not wait for EEPROM_SAVED (serial only)")
-    parsers.append(c)
+    parsers.append(cs.add_parser("save", help="write the calibration to the body's EEPROM"))
     parsers.append(cs.add_parser("revert", help="reload the saved calibration"))
     for p in parsers:  # `kilo cal show --host H`: the option after the action
         p.add_argument("--host", default=argparse.SUPPRESS, metavar="IP[:PORT]", help="a C++ mind (kilo.local, IP)")
@@ -91,7 +89,7 @@ def show(offsets_a16: list[int]) -> None:
 
 def run(args: argparse.Namespace, get: Callable[[], list[int]], set_: Callable[[int, int], list[int]],
         save: Callable[[], bool], revert: Callable[[], list[int]], where: str) -> int:
-    """The actions, on either path. get() -> offsets (a16); set_(j, a16) -> offsets after."""
+    """The actions. get() -> offsets (a16); set_(j, a16) -> offsets after."""
     cmd = args.cal_cmd or "show"
     if cmd == "show":
         show(get())
@@ -140,17 +138,3 @@ def cmd_cal_host(args: argparse.Namespace, hl: Any) -> int:
 
     return run(args, get, set_, save, revert, " --host")
 
-
-def cmd_cal_link(args: argparse.Namespace, client: Any) -> int:
-    """Over the serial port or the daemon: BodyClient."""
-    client.wait_ready(args.timeout, require_telemetry=False)
-
-    def set_(j: int, a16: int) -> list[int]:
-        client.cal_set(j, a16)
-        return client.cal_get()
-
-    def revert() -> list[int]:
-        client.cal_revert()
-        return client.cal_get()
-
-    return run(args, client.cal_get, set_, lambda: client.cal_save(None if args.no_wait else 2.0), revert, "")

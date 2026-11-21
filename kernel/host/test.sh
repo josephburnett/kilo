@@ -963,7 +963,8 @@ run_mind "$OUT/host_flight2.log" --remote --authorized-keys "$KEYS" --listen 127
 trap 'kill $MIND_PID 2>/dev/null || true; stop_body' EXIT
 wait_listening "$OUT/host_flight2.log"; FPORT="$PORT"
 F="127.0.0.1:$FPORT"
-sleep 2
+# The card is scanned about 2 s into the boot: wait for its listing, not a fixed time.
+for _ in $(seq 1 40); do grep -q "runs of earlier boots listed" "$OUT/host_flight2.log" && break; sleep 0.25; done
 KPY -m kilo.cli --host "$F" runs | tee "$OUT/flight2_runs.txt"
 expect "$OUT/flight2_runs.txt" "1 from earlier boots" "the next boot lists the first boot's run"
 expect "$OUT/flight2_runs.txt" "^b1:1 .*trick +rear_up stage 1 .*card +STOPPED" "the first boot's trick, on the card"

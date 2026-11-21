@@ -2,7 +2,7 @@
 
 Formats, detected from the content:
 
-- **link JSONL** (``kilo --log`` / ``--log-file``, written by ``kilo.log``):
+- **link JSONL** (a SerialLink's ``logger``, written by ``kilo.log``):
   one JSON object per line with ``t`` (monotonic s), ``wall``, ``kind``.
   ``rx``/``tx`` records carry ``type``, ``seq``, ``payload`` (hex) and, for rx,
   the decoded raw ``fields`` (pitch in 1/16°...); also ``event``, ``link``,

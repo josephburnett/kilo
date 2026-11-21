@@ -12,8 +12,7 @@ copy to the SD card: installing a new kernel (`kilo update`) brings its
 sounds with it. Where each recording came from and its licence are in
 `kernel/sounds/SOURCES.md`.
 
-Only the C++ mind that runs on Kilo makes sounds. The old Python daemon
-(`kilo run --remote`) has no speaker: B2 does nothing there.
+Only the C++ mind that runs on Kilo makes sounds.
 
 ## When Kilo makes a sound
 

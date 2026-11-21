@@ -762,9 +762,8 @@ Ethernet ("Network bring-up").
 
 ### The Mind's settings
 
-`MindConfig` as the Pi's daemon ran (`kilo run --remote --balance 0.99`,
-`KILO_RUN_ARGS` in `mind/systemd/env.example`). There is
-no settings file on the card, so they are compiled in (`src/kernel.cpp`):
+`MindConfig` as the retired Pi daemon ran (the remote on, the balance on
+at Kp 0.99). There is no settings file on the card, so they are compiled in (`src/kernel.cpp`):
 
 | Setting | Kernel | Why |
 |---|---|---|
@@ -1253,8 +1252,8 @@ twenty seconds of counters: the session's keys and walks were gone.
 
 Kilo's address comes from DHCP and changes from day to day, so the laptop
 finds him by name: `kilo find`, or `--host kilo.local` on any `--host`
-command (`kilo runs`, `record`, `bench`, `metrics`, `reboot` and `update` look for
-`kilo.local` by themselves when `--host` is left out). That is mDNS
+command (every command that talks to Kilo looks for `kilo.local` by itself
+when `--host` is left out). That is mDNS
 (multicast DNS): the laptop sends "who is kilo.local?" to everyone on the
 wired network at once (the group address 224.0.0.251, UDP port 5353), and
 the kernel answers with its address. The laptop side is `mind/kilo/mdns.py`

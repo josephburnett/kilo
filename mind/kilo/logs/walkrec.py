@@ -14,7 +14,7 @@ files per walk:
   recordings").
 - ``walk-<time>-<id>.kilolog``: the same frames as a ``.kilolog``
   (kilo.logs.kilolog, version 1, ms stamps), so ``kilo log summary|replay|plot``
-  read it as they read the Python daemon's ``--kilolog`` files.
+  read it.
 
 ``kilo log walk FILE.kwalk [--csv OUT] [--plot OUT.png] [--json]`` is the
 analysis: per tick (``tick_table``) what the plan predicted and what the

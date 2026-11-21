@@ -54,7 +54,7 @@ behaviour/alive   small body moves while the runner idles or explores (no Python
 guard/            the distance guard: the range filtered, zones, stop / back off / sit, forward keys refused, the eyes
 sound/            Kilo's sounds: the player (requests, families, the queue, the gap, volume), the renderer the audio
                   interrupt runs, the output seam (no Python counterpart; docs/sound.md)
-remote/           the IR key map and RemoteControl (kilo/ir.py); client.cpp: BodyClient's posture/balance/look
+remote/           the IR key map and RemoteControl; client.cpp: BodyClient's posture/balance/look
 mind.h, mind.cpp  Mind: all of the above, the link and the laptop server in one object
 util/dmath, str   double helpers with Python's sums (dmath), string compare (str)
 proto/            vendored by protocol/vendor.py: never edit; run python3 protocol/vendor.py
@@ -288,7 +288,7 @@ flash that has started runs to its end.
 |---|---|---|---|
 | take the UART | `owns_uart()`: the main loop stops polling the link; no REST first (the body is reset anyway; its watchdog covers the gap) | | docs/fast-boot.md §6 |
 | baud | `Serial::set_baud(115200)` (`KILO_HOST_FLASH_BAUD`) | | optiboot, avrdude `-b 115200` |
-| RESET | `Gpio::reset_assert()`, then `reset_release()` | 100 ms low | spec `reset_pulse_ms`, `mind/kilo/tools/gpio.py` |
+| RESET | `Gpio::reset_assert()`, then `reset_release()` | 100 ms low | spec `reset_pulse_ms` |
 | first GET_SYNC | after release; it waits in the 328P's 2-byte RX FIFO while optiboot blinks | +100 ms | Uno fuses' start-up delay (65 ms) |
 | its answer | `STK_INSYNC STK_OK` | up to 600 ms | 3 LED flashes of 125 ms in the Uno build |
 | later GET_SYNCs | one at a time (a third byte in the FIFO desyncs optiboot, which then starts the firmware) | 200 ms each, none after 1.3 s | optiboot's 1 s watchdog after the blink |
@@ -498,13 +498,11 @@ runner is on (10 s of grace before its first tick), because its 10 Hz grid
 could stall while the loop runs.
 
 **Who drives.** A laptop client holding control (`CONTROL take=1`) pauses
-the behaviour runner and silences the remote: Python refuses client goals
-while the runner is active unless `--override` pauses it, and a controller
-is that override here. The remote's A5 starts the runner at run time;
+the behaviour runner and silences the remote. The remote's A5 starts the runner at run time;
 while it runs, B6, A7 and C7 stop it (`Runner::stop()` halts the running
-behaviour, which cancels its trick) and its other keys are ignored, as in
-`remote_ir.py`. `MindConfig` defaults are the daemon's: remote and
-behaviour off (the Pi's `KILO_RUN_ARGS` turn on `--remote --balance 0.99`),
+behaviour, which cancels its trick) and its other keys are ignored.
+`MindConfig` defaults: remote and behaviour off (the kernel turns on the
+remote and the balance at Kp 0.99, kernel/README.md "The Mind's settings"),
 so without `--behaviour` the runner is off until A5.
 
 `kilo-mind-host` takes `--remote`, `--behaviour`, `--seed N` and
@@ -558,7 +556,7 @@ Neumaier `sum()`, exact `fsum` for `fmean`), so they round alike.
 
 What differs: fixed rings instead of deques (the IMU history holds 256
 samples, 4.5 s at up to 56 Hz); the 10 s `TelemetryRing` is not ported (no
-detector reads it); no `SharedPercepts` lock (one loop).
+detector reads it).
 
 ## Behaviour
 
@@ -582,25 +580,23 @@ path, drive, score and call on the body equal.
 
 In the Mind the behaviours' body is the link (`remote/client.cpp`:
 `BodyClient`'s posture, set_balance and look) and the trick player;
-perception's flags are the percepts (`runner.py` `PerceptFeed`, face always
-false). Each posture, look and trick first quiets the IMU detectors
-(`adapter.py`'s 0.5, 0.3, 2 s).
+perception's flags are the percepts (face always false). Each posture,
+look and trick first quiets the IMU detectors (0.5, 0.3, 2 s).
 
 What differs: no JSONL behaviour log (a log line when the choice changes,
 body events and the behaviours' postures as log lines); `poll()` keeps the
 10 Hz grid instead of an asyncio loop; the wind-down's poweroff only stops
-the runner and sets `Mind::poweroff_requested()`; `beep` is not in the body
-(as in Python's adapter). Python's `play:` action fails after every real
+the runner and sets `Mind::poweroff_requested()`; `beep` is not in the body.
+Python's `play:` action fails after every real
 trick (`_as_status` rejects the `TrickResult` that `BodyClient.play`
 returns); here a trick that ends DONE succeeds.
 
 ## Remote
 
-`remote/` ports `kilo/ir.py`: the key table and map (keys named by grid:
+`remote/` holds the key table and map (keys named by grid:
 columns A-C left to right, rows 1-7 from the bottom; `remote/keys.h`) and
 `RemoteControl`, driving the walker, the postures, the trick player and the
-behaviour runner as `kilo run --remote` does (`remote/remote.h` says what
-each key does):
+behaviour runner (`remote/remote.h` says what each key does):
 
 | Key | Does |
 |---|---|

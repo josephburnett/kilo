@@ -1,6 +1,6 @@
 """Kilo log replay and analysis (docs/architecture.md §5 "Logging").
 
-- ``reader.load(path)``: link JSONL (``kilo --log``), monitor JSONL, or a raw
+- ``reader.load(path)``: link JSONL (``kilo.log``), monitor JSONL, or a raw
   ``.kilolog`` -> ``LogData`` (telemetry samples, events, link counters);
 - ``kilolog``: the raw frame log format, ``KilologWriter`` and its reader;
 - ``analysis``: ``summary``, ``replay`` through ``kilo.perception.Percepts``,

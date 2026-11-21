@@ -25,7 +25,7 @@ mind at that address holds a key this laptop trusts (kilo.hostlink).
 
     kilo find                         the address and build
     kilo status --host kilo.local     any --host command takes a .local name
-    kilo walks                        host-only commands find Kilo without --host
+    kilo walks                        every command that talks to Kilo finds it without --host
 """
 
 from __future__ import annotations

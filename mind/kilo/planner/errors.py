@@ -16,7 +16,7 @@ predicted is the model's error (docs/walking-and-balance.md §9 item 4, §10):
   slope, a slipped foot.
 
 No model parameter is adjusted from these yet; they are reported
-(``kilo walk``, ``kilo status``, the daemon's walk status) so that they can
+(``kilo log walk``, the C++ mind's walk log) so that they can
 be compared with the scale and servo measurements.
 """
 
