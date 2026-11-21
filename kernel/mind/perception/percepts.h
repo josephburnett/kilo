@@ -1,13 +1,12 @@
 // percepts: the perception aggregator the behaviour layer reads. A port of
-// kilo/perception/percepts.py (Percepts, Sample, extract) and the flag view
-// of shared.py: each TELEMETRY feeds the IMU detector, and the ultrasonic
+// kilo/perception/percepts.py (Percepts, Sample, extract) with a flag
+// view: each TELEMETRY feeds the IMU detector, and the ultrasonic
 // one once per fresh range (DIST_FRESH, once the body has been seen to set
 // it; every sample before). tap and startle read true for event_hold_s
 // (1 s) after their event.
 //
-// The mind feeds it from its LinkListener on every TELEMETRY (as the
-// daemon does), with the link's arrival time; nothing else locks or shares
-// it (one cooperative loop: Python's SharedPercepts lock is not needed).
+// The mind feeds it from its LinkListener on every TELEMETRY, with the
+// link's arrival time; nothing locks or shares it (one cooperative loop).
 //
 // What differs: the 10 s TelemetryRing is not ported (no detector reads it:
 // the IMU keeps its own window); recent events are a ring of kRecent

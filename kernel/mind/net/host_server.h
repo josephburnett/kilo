@@ -1,9 +1,8 @@
 // host_server: the laptop interface (docs/fast-boot.md §5, phase P2): one
 // TCP listener, the channel protocol/spec.toml [host] defines, served to up
 // to KILO_HOST_MAX_CLIENTS connections by a cooperative poll() from the
-// mind's main loop (non-blocking, no threads, fixed buffers). Python
-// counterpart: the daemon's Unix socket (kilo/daemon/clients.py, ops.py),
-// and its client kilo/hostlink.py.
+// mind's main loop (non-blocking, no threads, fixed buffers). Its client
+// is kilo/hostlink.py.
 //
 // What it serves:
 // - commands, one reply each (RESULT, or STATUS for STATUS_REQ): STATUS_REQ,
@@ -70,7 +69,7 @@
 // POSTURE, PARAM_SET, REBOOT and the bridge. When the controller gives up
 // control, closes, goes out of step, or asked for keepalive and was silent for
 // KILO_HOST_KEEPALIVE_TIMEOUT_MS, the bridge closes (if open) and the mind
-// latches SET_POSTURE REST (the daemon's end of a hold, kilo/daemon/sessions.py).
+// latches SET_POSTURE REST.
 //
 // Back-pressure: each client has a kTxBytes send ring. A reply
 // that does not fit drops the client (it stopped reading); TELEM that does not

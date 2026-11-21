@@ -3,8 +3,7 @@
 // (the screen, stderr) and to a tap (the flight recorder, record/recorder.h,
 // which keeps every line with the rest of the session). The laptop interface
 // (net/host_server.h) reads it for `kilo log --host`: the history kept, then
-// each new line. Python counterpart: the daemon's log handler that `kilo
-// daemon` tails (kilo/daemon/logs.py).
+// each new line.
 //
 // Two kinds of line:
 // - history: what happened (remote keys acted on, walks, tricks, refusals,

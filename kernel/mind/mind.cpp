@@ -14,7 +14,7 @@ namespace kilo {
 namespace {
 
 constexpr uint32_t kBodyLostUs = KILO_BODY_LOST_MS * 1000u;
-// adapter.py: how long each move the behaviours start keeps the IMU detectors quiet
+// How long each move the behaviours start keeps the IMU detectors quiet
 constexpr double kPostureMoveS = 0.5;
 constexpr double kLookMoveS = 0.3;
 constexpr double kTrickMoveS = 2.0;
@@ -117,7 +117,7 @@ bool Mind::safe_for_card(uint64_t now) {
 void Mind::start() {
   started_us_ = clock_.now_us();
   next_stats_us_ = started_us_ + cfg_.stats_period_ms * 1000u;
-  if (cfg_.balance_kp >= 0) {  // daemon --balance: balance on by default, held by nobody
+  if (cfg_.balance_kp >= 0) {  // balance on by default, held by nobody
     bool ok = client_set_balance(link_, true, cfg_.balance_kp);
     logf(log_, LogLevel::Info, "balance on by default (Kp %d/256)%s", (int)(cfg_.balance_kp * 256 + 0.5),
          ok ? "" : ": refused");
@@ -328,7 +328,7 @@ void Mind::on_telemetry(const kilo_telemetry_t& t) {
     metrics_.battery_mv = t.batt_mv;
     if (metrics_.battery_min_mv == 0 || t.batt_mv < metrics_.battery_min_mv) metrics_.battery_min_mv = t.batt_mv;
   }
-  // every TELEMETRY, at its arrival time (the daemon's _feed_percepts)
+  // every TELEMETRY, at its arrival time
   const perception::PerceptEvents& ev = percepts_.update(t, (double)link_.state().telemetry_at_us / 1e6);
   for (int i = 0; i < ev.n; i++) {
     const perception::PerceptEvent& e = ev.e[i];
@@ -375,7 +375,7 @@ void Mind::on_refused(uint8_t goal_type, uint8_t reason) {
   if (tap_ != nullptr) tap_->on_refused(goal_type, reason);
 }
 
-// remote_ir.py _on_ir_key
+// EVENT IR_KEY: which keys reach the remote (remote/remote.h)
 void Mind::ir_key(const kilo_event_t& e) {
   if (!cfg_.remote) return;
   uint16_t arg = (uint16_t)e.arg;
@@ -767,7 +767,7 @@ void Mind::Body::play_cancel(uint32_t handle) {
   if (m_.player_.result().play == handle) m_.player_.cancel();
 }
 
-void Mind::Body::beep(const uint16_t (*)[2], int) { unsupported_beeps++; }  // BodyClient has no beep (adapter.unsupported)
+void Mind::Body::beep(const uint16_t (*)[2], int) { unsupported_beeps++; }  // the body has no beep from the mind: counted
 
 void Mind::Body::provide(behaviour::BehaviourPercepts& p, double* startle) {
   // runner.py behaviour_percepts(): what Percepts knows, face false (no camera)

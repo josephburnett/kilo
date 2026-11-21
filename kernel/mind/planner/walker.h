@@ -1,7 +1,7 @@
 // walker: the planner's ticks streamed to the body as FEET at 50 Hz. A port
-// of mind/kilo/planner/walker.py (BodyClock, Stream, Walker) to one
-// cooperative state machine: Walker::poll() runs from the mind's main loop
-// (every few ms, never blocking) where Python has a thread per walk.
+// of mind/kilo/planner/walker.py (BodyClock, Stream) to one cooperative
+// state machine with the walk's setup and end around it: Walker::poll()
+// runs from the mind's main loop (every few ms, never blocking).
 //
 // A walk (Walker::start):
 // 1. TELEMETRY at 50 Hz: SET_STREAM telem_div 1, the JOINTS and IMU_RAW
@@ -33,11 +33,9 @@
 // The owner forwards its LinkListener's on_telemetry and on_event here
 // (the link has one listener); time comes from the Clock it is given.
 //
-// What differs from Python: start() returns at once (the setup runs in
-// poll()); a start during a planned stop is queued and started when that
-// stop ends, or after kStartWaitUs with the old stream aborted; no per-tick
-// log records (a WalkObserver gets each tick: the walk recorder), no gc
-// tuning. The end of every walk that streamed logs log_status()'s two lines.
+// A start during a planned stop is queued and started when that stop
+// ends, or after kStartWaitUs with the old stream aborted; no per-tick log
+// records (a WalkObserver gets each tick: the walk recorder). The end of every walk that streamed logs log_status()'s two lines.
 #ifndef KILO_MIND_PLANNER_WALKER_H
 #define KILO_MIND_PLANNER_WALKER_H
 #include <stdint.h>

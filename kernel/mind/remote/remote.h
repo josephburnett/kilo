@@ -1,9 +1,7 @@
-// remote: what the IR remote's keys do. A port of RemoteControl in
-// mind/kilo/ir.py (kilo run --remote) as a cooperative state machine: the
-// daemon runs perform() in a pool thread, one action at a time, and blocks
-// on the planned stop and a trick's TRICK_STOP; here those waits are phases
-// of poll(), and keys that come meanwhile queue (as the daemon's lock
-// queues them). Keys by grid (keys.h): columns A-C left to right, rows 1-7
+// remote: what the IR remote's keys do, as a cooperative state machine:
+// one action at a time; the waits for the planned stop and a trick's
+// TRICK_STOP are phases of poll(), and keys that come meanwhile queue.
+// Keys by grid (keys.h): columns A-C left to right, rows 1-7
 // from the bottom.
 //
 // The remote's state: the gait (trot at start), a signed speed level, the
@@ -77,8 +75,7 @@
 // - Rows 1-3 but B2 (and A2 unless switched on) do nothing (Mind::ir_key logs them as ignored).
 // Every key leaves one log line, "remote <grid> (0x.., <label>): <outcome>".
 // Which keys never reach perform() (repeats, other remotes' keys, rows 1-3,
-// a laptop client holding the body) is the owner's call (Mind::ir_key,
-// remote_ir.py _on_ir_key).
+// a laptop client holding the body) is the caller's call (Mind::ir_key).
 #ifndef KILO_MIND_REMOTE_REMOTE_H
 #define KILO_MIND_REMOTE_REMOTE_H
 #include <stdint.h>
@@ -91,12 +88,12 @@ namespace kilo {
 namespace remote {
 
 constexpr int kSpeedSteps = 5;
-extern const double kSpeedFactors[kSpeedSteps];      // ir.py SPEED_FACTORS: the walk's and the crawl's levels
-extern const double kTrotSpeedFactors[kSpeedSteps];  // ir.py TROT_SPEED_FACTORS
-// ir.py speed_factors(): the five levels of a gait, x its default speed.
+extern const double kSpeedFactors[kSpeedSteps];      // the walk's and the crawl's levels
+extern const double kTrotSpeedFactors[kSpeedSteps];  // the trot's levels
+// The five levels of a gait, x its default speed.
 const double* speed_factors(const planner::Pattern& p);
 constexpr int kSteerSteps = 3;
-extern const double kSteerLevels[kSteerSteps];   // ir.py STEER_LEVELS
+extern const double kSteerLevels[kSteerSteps];   // the steer's magnitudes, level 1..3
 constexpr int kDefaultLevel = 3;                  // +3: 1x, the gait's spec defaults
 constexpr uint16_t kTrickMinMv = KILO_BATTERY_TRICK_MIN_MV;  // spec [battery]: A2 refuses below this pack voltage
 

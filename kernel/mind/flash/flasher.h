@@ -1,7 +1,7 @@
 // flasher: program the body's ATmega328P through its optiboot bootloader
-// over the body link's UART (docs/fast-boot.md §6, phase P4), as `kilo
-// flash` does on Linux with avrdude -c arduino (mind/kilo/tools/flash.py).
-// One cooperative, non-blocking state machine driven by poll() from the
+// over the body link's UART (docs/fast-boot.md §6, phase P4), the way
+// avrdude -c arduino does it on Linux; `kilo flash` (mind/kilo/tools/flash.py)
+// sends the image. One cooperative, non-blocking state machine driven by poll() from the
 // mind's main loop, like the link.
 //
 // The sequence (timings in flasher.cpp, with where they come from):
@@ -9,7 +9,7 @@
 //     link or stream FEET (the walker); the body's watchdog covers the gap
 //     until the reset. set_baud(host.flash_baud, 115200).
 //  2. RESET: Gpio::reset_assert() for link.reset_pulse_ms (100 ms), then
-//     reset_release() (the emulated open drain of mind/kilo/tools/gpio.py).
+//     reset_release() (an emulated open drain, platform.h Gpio).
 //  3. STK500v1 as optiboot speaks it (optiboot.c): GET_SYNC until it answers
 //     INSYNC OK (it listens about 1 s after an external reset), then
 //     ENTER_PROGMODE, READ_SIGN (must be the 328P's 1E 95 0F), per 128-byte
@@ -24,8 +24,8 @@
 //     The link is the main loop's again from here (owns_uart() false).
 //
 // An attempt that fails in step 3 (no sync, no or a bad answer, a verify
-// mismatch) is retried once from a fresh reset, as `kilo flash` retries
-// avrdude: optiboot survives an interrupted flash. Any failure ends with
+// mismatch) is retried once from a fresh reset: optiboot survives an
+// interrupted flash. Any failure ends with
 // the UART back at the link baud and the link restarted.
 #ifndef KILO_MIND_FLASH_FLASHER_H
 #define KILO_MIND_FLASH_FLASHER_H

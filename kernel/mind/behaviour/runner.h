@@ -5,8 +5,8 @@
 // 1. body.on_tick() and body.snapshot();
 // 2. on an epoch change, a body reboot or a connection change the cached
 //    posture/balance goals are forgotten (the body or the link dropped
-//    them), so the behaviours re-assert them. While paused() (Python's
-//    --override; here: a laptop client holds control) only this runs: the
+//    them), so the behaviours re-assert them. While paused() (a laptop
+//    client holds control) only this runs: the
 //    running behaviour is halted (a trick stopped), nothing is ticked;
 // 3. body events: the epoch, new EVENTs (FELL, WATCHDOG, LOW_BATTERY,
 //    BATTERY_OK, BOOT, LINK_RESTORED, GOAL_REFUSED) and connection changes
@@ -35,7 +35,7 @@
 namespace kilo {
 namespace behaviour {
 
-// The runner's percept source (runner.py PerceptFeed / percepts=): writes
+// The runner's percept source (runner.py's percepts=): writes
 // the percepts it knows over p (dict.update) and its startle level.
 class PerceptSource {
  public:

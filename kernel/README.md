@@ -724,7 +724,7 @@ a frame only when `tx_free()` covers all of it; otherwise it counts
   means the same before and after. Divisors from 48 MHz: 115200 is IBRD
   26, FBRD 3 (115176 baud, -0.02 %); 250000 is 12, 0 (exact). Optiboot's
   own 115200 on the 16 MHz 328P (U2X, UBRR 16) is 117647 baud, +2.1 %, as
-  under avrdude on Linux. A byte arriving during the few microseconds the
+  it is for avrdude on a laptop. A byte arriving during the few microseconds the
   UART is off may be lost or garbled; the flasher drops what comes in
   around a switch anyway. Risk: the PL011 TRM wants the UART idle before
   its control registers change; the drain and the BUSY wait give that for
@@ -762,23 +762,21 @@ Ethernet ("Network bring-up").
 
 ### The Mind's settings
 
-`MindConfig` as the retired Pi daemon ran (the remote on, the balance on
-at Kp 0.99). There is no settings file on the card, so they are compiled in (`src/kernel.cpp`):
+`MindConfig` on Kilo: the remote on, the balance on at Kp 0.99. There is no settings file on the card, so they are compiled in (`src/kernel.cpp`):
 
 | Setting | Kernel | Why |
 |---|---|---|
 | `mind_build` | `KILO_BUILD` | `STATUS.mind_build`, the commit's 8 hex digits |
-| `remote` | on | `--remote`: the IR remote drives Kilo; logged `IR remote on` |
-| `balance_kp` | 0.99 | `--balance 0.99`: SET_BALANCE on at start, logged `balance on by default (Kp 253/256)` |
-| `behaviour` | off; `make -C kernel KILO_BEHAVIOUR=1` turns it on | the daemon's default; the remote's A5 starts the runner at run time either way. While it runs, the remote's keys other than B6, A7 and C7 (which stop it) are ignored. Built in, the kernel logs `Kilo mind, build ... (behaviour runner on)` |
-| `rear_up_key` | 0 (off); `make -C kernel KILO_REAR_UP=1` (or `2`, `3`) turns it on at that stage | the remote's A2 starts the rear-up trick only when switched on (docs/rear-up-trick.md, the switch): off until the owner's staged trials are done, A2 does nothing like the other keys of rows 1-3. The value is the stage: 1 `rear_up` (28 degrees), 2 `rear_up_2` (40), 3 `rear_up_3` (54). The daemon's switch is `KILO_REAR_UP=N` in its environment, `kilo-mind-host`'s is `--rear-up[=N]`. Built in, the kernel logs `Kilo mind, build ... (rear-up key A2 on: rear_up_2, stage 2)` |
+| `remote` | on | the IR remote drives Kilo; logged `IR remote on` |
+| `balance_kp` | 0.99 | SET_BALANCE on at start, logged `balance on by default (Kp 253/256)` |
+| `behaviour` | off; `make -C kernel KILO_BEHAVIOUR=1` turns it on | the remote's A5 starts the runner at run time either way. While it runs, the remote's keys other than B6, A7 and C7 (which stop it) are ignored. Built in, the kernel logs `Kilo mind, build ... (behaviour runner on)` |
+| `rear_up_key` | 0 (off); `make -C kernel KILO_REAR_UP=1` (or `2`, `3`) turns it on at that stage | the remote's A2 starts the rear-up trick only when switched on (docs/rear-up-trick.md, the switch): off until the owner's staged trials are done, A2 does nothing like the other keys of rows 1-3. The value is the stage: 1 `rear_up` (28 degrees), 2 `rear_up_2` (40), 3 `rear_up_3` (54). `kilo-mind-host`'s switch is `--rear-up[=N]`. Built in, the kernel logs `Kilo mind, build ... (rear-up key A2 on: rear_up_2, stage 2)` |
 | `seed` | 32 bits from the hardware RNG | the behaviour runner logs it (`seed N`, at boot or in the remote's A5 line), so a run can be replayed on the laptop |
 | `stats_period_ms` | 1000 | a STATS_REQ to the body each second, logged `body STATS: ...`, as `kilo-mind-host` does |
 | `sounds`, `sound_output` | `make -C kernel KILO_SOUND=0` leaves them out | Kilo's sounds on the 3.5 mm jack (docs/sound.md, `src/sound.h`, `mind/sound/`): the sounds `tools/pack_sounds.py` packs from `kernel/sounds/*.wav` and Circle's PWM sound device. Logged at boot: `sound: PWM on the 3.5 mm jack, 44100 Hz, range 5669, chunks of 512 frames, idle stopped` and `sound: N sounds (S s) in the image, on, volume 70`. `KILO_SOUND_IDLE=run` keeps the device running between sounds; `KILO_SOUNDS_DIR=DIR` packs another directory. `kilo sound on|off|volume N --host` switches them at run time (not kept over a reboot) |
 | `light_sleep` | on; `make -C kernel KILO_LIGHT_SLEEP=0` turns it off | the remote's A7, then 30 s of nothing: light sleep (servos off, the loop idles in wfi, the Ethernet PHY powered down while no cable is in; docs/power.md, `mind/power/sleep.h`). Logged at boot: `power: ARM 600 MHz, SoC .. C, throttled 0x..; light sleep on`. Off, A7 is plain REST: the awake baseline docs/power.md compares against. `kilo-mind-host --light-sleep` runs the same state machine on Linux (no wfi there) |
 
-The runner's wind-down ends in a poweroff, which the daemon ran through
-systemd. The kernel cannot switch the Pi off: it logs `behaviour runner
+The runner's wind-down ends in a poweroff request. The kernel cannot switch the Pi off: it logs `behaviour runner
 asked for poweroff ...` once and keeps the link up (the runner has stopped).
 
 ### The remote's keys
@@ -828,7 +826,7 @@ changes.
 times the trot's default speed (the walk's and the crawl's: 0.4, 0.7, 1,
 1.15, 1.25), and -1 to -5 walk backward at the same factors. There is no
 level 0: from +1, B5 goes to -1, and from -1, B7 goes to +1. B7 stops at +5
-and B5 at -5. The speeds are limited as `kilo walk --speed` limits them,
+and B5 at -5. The planner limits each gait's speed (mind/planner/),
 and the log line shows the real speed. In mm/s, levels 1 to 5: crawl 8.9,
 15.6, 22.2, 25.6, 26.9; walk 32, 56, 80, 92, 97; trot 57.6, 100.8, 144,
 187.2, 230.4.

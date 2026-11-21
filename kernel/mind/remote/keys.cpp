@@ -61,7 +61,7 @@ void describe(uint16_t arg, char* buf, uint32_t cap) {
   uint8_t cmd = key_command(arg);
   const Key* k = key_for(cmd);
   const char* rep = key_repeat(arg) ? " repeat" : "";
-  static const char kHex[] = "0123456789ABCDEF";  // ir.py prints 0x%02X; fmt has only %x
+  static const char kHex[] = "0123456789ABCDEF";  // upper-case 0x%02X; fmt has only %x
   char hex[3] = {kHex[cmd >> 4], kHex[cmd & 15], '\0'};
   if (k != nullptr) format(buf, cap, "%s (0x%s, %s)%s", k->grid, hex, k->label, rep);
   else format(buf, cap, "? (0x%s)%s", hex, rep);

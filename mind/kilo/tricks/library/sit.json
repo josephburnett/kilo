@@ -1,7 +1,7 @@
 {
   "name": "sit",
   "source": {
-    "file": "src/InstinctNybble.h",
+    "file": "legacy/InstinctNybble.h",
     "legacy_name": "sit",
     "kind": "posture",
     "period": 1,

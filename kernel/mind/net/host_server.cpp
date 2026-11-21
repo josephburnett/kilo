@@ -177,7 +177,7 @@ void HostServer::lose_control(const char* why) {
   if (receiving_) drop_image("the controller let go");
   if (updater_ != nullptr && updater_->receiving()) drop_update("the controller let go");
   stats_.control_lost++;
-  // Python: the daemon ends a client's hold with REST (kilo/daemon/sessions.py).
+  // A client's hold ends with REST.
   kilo_set_posture_t rest = {0, KILO_POSTURE_REST, 0, 0};  // the link fills the epoch
   bool ok = link_.set_goal(KILO_MSG_SET_POSTURE, (const uint8_t*)&rest, sizeof rest);
   logf(log_, LogLevel::Info, "host: client %d gave up control (%s): %s", (int)was, why,

@@ -176,7 +176,7 @@ private:
 	kilo::Serial *m_pSerial;
 };
 
-// GPIO4, the body's RESET, as an emulated open drain (mind/kilo/tools/gpio.py):
+// GPIO4, the body's RESET, as an emulated open drain:
 // released = input with no pull (the NyBoard's pull-up holds RESET high),
 // asserted = output low. Never driven high.
 class CircleResetGpio final : public kilo::Gpio

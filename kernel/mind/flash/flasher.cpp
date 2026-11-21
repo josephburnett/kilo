@@ -8,8 +8,7 @@ namespace kilo {
 
 namespace {
 
-// RESET low: link.reset_pulse_ms, what mind/kilo/tools/gpio.py holds for
-// `kilo flash` (docs/architecture.md Appendix F).
+// RESET low: link.reset_pulse_ms (protocol/spec.toml).
 constexpr uint64_t kResetUs = KILO_RESET_PULSE_MS * 1000u;
 // After release, before the first GET_SYNC: the 328P's start-up delay (the
 // Uno fuses' SUT, 65 ms) and some margin. From then on a GET_SYNC waits in

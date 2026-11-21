@@ -1,22 +1,14 @@
 # kernel/mind: the portable mind core
 
 The part of the mind that runs both in the Circle kernel on the Pi 2 B and
-on the laptop (`kernel/host/`), against the virtual body. Phase P1 of
-`docs/fast-boot.md`: the body link; P3: the walking planner; P4: flashing
-the body; and updating the kernel on the SD card. Platform-free
-C++17: no exceptions, RTTI, heap, `std::` or `printf`; the only libc
-functions are `memcpy` and `memset`, through the compiler's builtins
-(`util/mem.h`), and the only libm functions the planner's `sinf`, `cosf`,
-`sincosf`, `tanf`, `atanf`, `atan2f` (`planner/fmath.h`; Circle links libm).
-`make -C kernel/host freestanding` proves it by linking the core with
-`-nostdlib`.
-
-`docs/fast-boot.md`: the body link; P2: the laptop interface; P3: the
+on the laptop (`kernel/host/`), against the virtual body. By the phases of
+`docs/fast-boot.md`: P1 the body link; P2 the laptop interface; P3 the
 walking planner, tricks, perception, the behaviour layer and the IR remote,
-composed in one `Mind`. Platform-free C++17: no exceptions, RTTI, heap,
-`std::` or `printf`; the only libc functions are `memcpy` and `memset`,
-through the compiler's builtins (`util/mem.h`), and the only libm functions
-the planner's `sinf`, `cosf`, `sincosf`, `tanf`, `atanf`, `atan2f`
+composed in one `Mind`; P4 flashing the body and updating the kernel on the
+SD card. Platform-free C++17: no exceptions, RTTI, heap, `std::` or
+`printf`; the only libc functions are `memcpy` and `memset`, through the
+compiler's builtins (`util/mem.h`), and the only libm functions the
+planner's `sinf`, `cosf`, `sincosf`, `tanf`, `atanf`, `atan2f`
 (`planner/fmath.h`) and the drives' `exp`, `log`, `sin`, `cos`, `sincos`
 (`util/dmath.h`; Circle links libm). `make -C kernel/host freestanding`
 proves it by linking the core with `-nostdlib`.
@@ -154,7 +146,7 @@ and `kernel/host/test.sh` gives `kilo-mind-host` a throwaway key.
 Control: the first client to send `CONTROL take=1` is the controller, the
 rest observe. When the controller gives control up, closes, goes out of
 step, or asked for keepalive and sent nothing for 2 s, the bridge closes and
-the mind latches `SET_POSTURE REST` (the daemon's end of a hold in Python).
+the mind latches `SET_POSTURE REST`.
 
 Reboot: `REBOOT` (`kilo reboot --host IP`) is the controller's (an observer
 gets `NOT_CONTROLLER`, as for `POSTURE`; a running flash gets `FLASHING`, a
@@ -197,7 +189,8 @@ walker.stop();                        // the planned stop; abort() ends at once
 walker.halt();                        // the quick stop (feet down where they are, then squared up)
 ```
 
-`poll()` does what Python's walk thread does: SET_STREAM telem_div 1, the
+`poll()` drives the stream (Python's `kilo.planner.walker.Stream`, which the
+tests' walking simulations drive): SET_STREAM telem_div 1, the
 STANCE posture for 0.6 s, then every 20 ms (on a deadline grid) the
 TELEMETRY and EVENTs since the last wake, and FEET up to the body's tick + 5
 through `SerialLink::send_stream`; at the end STANCE, then the rates and
@@ -216,7 +209,7 @@ What differs from Python:
   a slot's end must equal what `next()` then computes, or the lean is solved
   again and the slot waits.
 - `Walker::start()` returns at once; a start during a planned stop is
-  queued (Python blocks). No per-tick frame log. `errors.from_history` is
+  queued. No per-tick frame log. `errors.from_history` is
   not ported (the link keeps no history).
 
 The golden test (`kernel/host/tests/test_planner_vectors.cpp`, float and
@@ -233,8 +226,8 @@ trots the virtual body (`kernel/host/test.sh` runs both).
 ## Flashing
 
 Phase P4 of `docs/fast-boot.md` (§6): the mind programs the body's
-ATmega328P itself, through optiboot on the body link's UART, as `kilo flash`
-does on Linux with avrdude (mind/kilo/tools/flash.py). The laptop's side is
+ATmega328P itself, through optiboot on the body link's UART, as avrdude
+`-c arduino` does on Linux. The laptop's side (mind/kilo/tools/flash.py) is
 `kilo flash --host IP [--persist]` and `kilo flash --sd MOUNT`
 (mind/README.md "Flashing").
 
@@ -298,14 +291,14 @@ flash that has started runs to its end.
 | verify | per page `LOAD_ADDRESS` + `READ_PAGE`, compared byte for byte | 200 ms per answer | optiboot implements READ_PAGE for flash |
 | LEAVE_PROGMODE | optiboot resets into the firmware 16 ms later | | |
 | back | `set_baud(250000)` after 50 ms, a 0x00 frame delimiter (the firmware may hold STK500 bytes), the link restarted (as after the bridge) | | |
-| HELLO | `fw_build` == build, `reset_cause` FLASHED (WARM_UNEXPECTED is taken when the body already ran this build: an identical image leaves its reset record as it was, docs/architecture.md §3a) | up to 8 s | `kilo flash --verify-timeout` |
+| HELLO | `fw_build` == build, `reset_cause` FLASHED (WARM_UNEXPECTED is taken when the body already ran this build: an identical image leaves its reset record as it was, docs/architecture.md §3a) | up to 8 s | the body's boot (optiboot's wait, DMP init, the first HELLO: about 2.2 s) with margin |
 
 A failure in sync, a missing or bad answer, or a verify mismatch ends the
-attempt; a second attempt starts from a fresh reset (as `kilo flash` retries
-avrdude once; optiboot survives an interrupted flash). Any failure ends
+attempt; a second attempt starts from a fresh reset (optiboot survives an
+interrupted flash). Any failure ends
 with RESET released, the UART at the link baud and the link restarted. On
 the bench (kernel/host/test.sh, against `tests/fake_optiboot.py`) a 31 KB
-image takes about 3 s; on the 328P expect about 10 s **(est.)**, as avrdude.
+image takes about 3 s; on the 328P expect about 10 s **(est.)**, as with avrdude.
 
 On the laptop `kilo-mind-host --reset-fifo PATH` makes the RESET line a
 named pipe ('L' low, 'H' released; `posix.h` FifoResetGpio), which the fake
@@ -491,10 +484,8 @@ the walker, the player, the snapshot's last 8 and, for IR_KEY, the remote.
 **Liveness.** `Mind::poll()` stamps `link.mark_alive()` once per pass.
 Every part runs in this one cooperative loop, so a pass that returns
 proves nothing is stuck, and a part that hangs stops the stamp, which is
-what the body's watchdog needs. Python stamps from the behaviour runner's
-tick and lets the daemon's pump stamp only while the runner ticked within
-1 s (`daemon/behaviour.py`); here the same check gates the stamp when the
-runner is on (10 s of grace before its first tick), because its 10 Hz grid
+what the body's watchdog needs. One check more gates the stamp when the
+runner is on: a tick within 1 s (10 s of grace before its first tick), because its 10 Hz grid
 could stall while the loop runs.
 
 **Who drives.** A laptop client holding control (`CONTROL take=1`) pauses
@@ -546,7 +537,7 @@ tap, pet, startle; `Percepts`) with the same thresholds, windows and
 hysteresis, in double. `link/body_state` gains `state.py`'s derived values
 (distance median and approach speed, battery percent, fallen, upright,
 moving). The Mind feeds `Percepts` on every TELEMETRY with its arrival
-time, as the daemon does, and logs each percept event.
+time and logs each percept event.
 
 The golden test replays `mind/tests/test_perception.py`'s traces through
 both: `kernel/host/tests/gen_perception_vectors.py` writes them (quantised
@@ -612,10 +603,10 @@ behaviour runner (`remote/remote.h` says what each key does):
 | B2 | a meow: one of the meow family, picked at random (`sound/`, docs/sound.md); it moves nothing, so it plays at once, also while a walk or the behaviour runs |
 | rows 1-3 but A2 and B2 | nothing (logged as ignored) |
 
-The daemon's blocking waits are phases of `poll()` and keys that come
-meanwhile queue (4), as its lock queues them; C7 does not queue: it cancels
+The remote's waits are phases of `poll()` and keys that come
+meanwhile queue (4); C7 does not queue: it cancels
 the action under way and drops the keys behind it (each logged). Repeats and
-other remotes' keys are ignored; there is no shutdown key (Python has none).
+other remotes' keys are ignored; there is no shutdown key.
 Every key leaves one line, `remote B6 (0x02, stand): posture stand`, naming
 the key by grid and by what it does.
 

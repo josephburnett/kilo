@@ -59,7 +59,7 @@ class Log {
 };
 
 // The body's RESET line: GPIO4 on the Pi, an emulated open drain (only ever
-// driven low or released, never driven high; mind/kilo/tools/gpio.py). For
+// driven low or released, never driven high). For
 // flashing the body (docs/fast-boot.md P4); nothing in the link uses it.
 class Gpio {
  public:

@@ -1,7 +1,7 @@
 {
   "name": "rest",
   "source": {
-    "file": "src/InstinctNybble.h",
+    "file": "legacy/InstinctNybble.h",
     "legacy_name": "rest",
     "kind": "posture",
     "period": 1,

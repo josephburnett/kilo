@@ -40,7 +40,7 @@ proto_minor = 0
 
 # ---------------------------------------------------------------------------
 [link]
-baud = 250000                  # 8N1, no flow control; exact on 328P (U2X, UBRR=7) and PL011 (48 MHz / 12)
+baud = 250000                  # 8N1, no flow control; exact on 328P (UBRR=3, U2X off) and PL011 (48 MHz / 12)
 max_payload = 60               # bytes
 header_bytes = 2               # type u8, seq u8
 crc_bytes = 2                  # CRC-16/CCITT-FALSE, LE, over type..payload (type, seq, payload)

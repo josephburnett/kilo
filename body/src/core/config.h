@@ -6,8 +6,9 @@
 // OLDER slot, data first and CRC last, so a torn write leaves that slot
 // invalid and boot falls back to the other one, which is untouched.
 //
-// Why never write the legacy layout: so `kilo flash --legacy` finds the old
-// firmware's EEPROM exactly as it left it. The writer can only address the
+// Why never write the legacy layout: so the original OpenCat firmware
+// (mind/firmware/opencat-legacy.hex), if it is ever flashed again, finds its
+// EEPROM exactly as it left it. The writer can only address the
 // two slots (704..959), and hal/eeprom refuses anything else as well.
 #ifndef KILO_CORE_CONFIG_H
 #define KILO_CORE_CONFIG_H
@@ -22,7 +23,7 @@
 // Version 2 (proto 1.4, P2): the 8 reserved bytes became params 16..19. A
 // version 1 slot is still accepted (those params read as default) and is
 // rewritten as version 2 on the next save, so a saved calibration survives
-// the upgrade and `kilo flash --legacy` still finds its EEPROM untouched.
+// the upgrade and the original firmware's EEPROM stays untouched.
 #define CFG_VERSION 2
 #define CFG_VERSION_OLDEST 1
 #define CFG_PARAM_COUNT KILO_PARAM_SLOTS

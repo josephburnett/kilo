@@ -1,7 +1,7 @@
 {
   "name": "check_around",
   "source": {
-    "file": "src/InstinctNybble.h",
+    "file": "legacy/InstinctNybble.h",
     "legacy_name": "ck",
     "kind": "behaviour",
     "period": -3,

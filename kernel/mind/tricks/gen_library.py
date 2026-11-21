@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Generate kernel/mind/tricks/library.gen.{h,cpp}: the trick library compiled into the mind.
 
-The Python daemon loads its tricks from mind/kilo/tricks/library/*.json
-(kilo.tricks.library, which the legacy importer writes). The C++ mind has
-no filesystem at boot, so this script encodes each of them exactly as the
-Python mind uploads it (kilo.tricks.model: Trick.begin() and the 14 B
+The tricks are mind/kilo/tricks/library/*.json (kilo.tricks.library, which
+the legacy importer writes). The C++ mind has no filesystem at boot, so
+this script encodes each of them exactly as the Python reference
+(kilo.body.client) uploads it (kilo.tricks.model: Trick.begin() and the 14 B
 frames from Keyframe.to_wire(), so the rounding and clamping are Python's)
 into const tables, with the CRC-16, the trick_id and the duration Python
 computes, which kernel/host/tests/test_tricks.cpp checks the C++ against.

@@ -1,5 +1,7 @@
 # P3 walking-with-balance hardware test
 
+*Written for the retired route (the Python mind, over the USB cable or on Raspberry Pi OS); most of its commands, and the serial port they use, no longer exist. What happened when it was run: `docs/p3-hardware-test-results.md`.*
+
 The first run on Kilo of the stance-aware walking model
 (docs/walking-and-balance.md; docs/architecture.md §3d "Support state",
 "Sway", "Early touchdown", "Forward placement"; §3f "Stance-aware under

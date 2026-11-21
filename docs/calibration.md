@@ -8,8 +8,8 @@ servo's middle. Kilo keeps the offsets in the body's EEPROM.
 
 ## The commands
 
-All of them work over the network (`--host kilo.local`, through the mind on
-the Pi) and over a serial port or the daemon (no `--host`).
+All of them work over the network, through the mind on the Pi
+(`--host kilo.local`; left out, the CLI looks for `kilo.local` itself).
 
     kilo cal show --host kilo.local              the offsets, and what each joint reaches (below)
     kilo cal set JOINT DEG --host kilo.local     one joint's offset, absolute (not saved)

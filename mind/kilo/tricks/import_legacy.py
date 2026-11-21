@@ -1,6 +1,6 @@
 """Regenerate tricks/library/*.json from the legacy skill tables.
 
-    python -m kilo.tricks.import_legacy [--check] [--source src/InstinctNybble.h]
+    python -m kilo.tricks.import_legacy [--check] [--source legacy/InstinctNybble.h]
 
 Idempotent: the output depends only on the source file. With --check nothing
 is written and the exit status is 1 if any file would change.

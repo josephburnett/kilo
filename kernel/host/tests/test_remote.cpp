@@ -1,4 +1,4 @@
-// The IR remote: the key table and map (mind/tests/test_ir.py), and
+// The IR remote: the key table and map, and
 // RemoteControl on the real link, walker and trick player over a scripted
 // body: the posture keys (B6, A7, C5), the gait keys (A4, B4, C4), the turn
 // keys (A6, C6: in place from standing, steering while walking), out of a
@@ -59,14 +59,14 @@ void test_key_table(uint8_t stage) {
     if (k.kind == Kind::Posture) CHECKF(posture_code(k.name) >= 0, "posture %s", k.name);
     if (k.kind == Kind::Gait) CHECKF(planner::find_pattern(k.name) != nullptr, "gait %s", k.name);
     if (k.kind == Kind::Trick) CHECKF(tricks::find_trick(k.name) != nullptr, "trick %s", k.name);
-    // rows 1-3 do nothing, but A2 and B2 (the meow: the C++ mind's only; ir.py has no sounds)
+    // rows 1-3 do nothing, but A2 and B2 (the meow)
     CHECKF((k.grid[1] <= '3' && std::strcmp(k.grid, "A2") != 0 && std::strcmp(k.grid, "B2") != 0) ==
                (k.kind == Kind::Ignore),
            "%s", k.grid);
   }
   CHECK(cmds.size() == 21 && grids.size() == 21);
   CHECK(action_for(0x45) == nullptr);
-  // ir.py ACTIONS by grid
+  // the owner's map by grid (keys.h)
   struct {
     const char* grid;
     Kind kind;
@@ -317,7 +317,7 @@ void test_steering() {
   Rig r;
   r.key("A4", 800);
   CHECK(r.walker.active());
-  // A6 while walking forward: steer a level more to the left, without stopping (ir.py STEER_LEVELS)
+  // A6 while walking forward: steer a level more to the left, without stopping (kSteerLevels)
   LAST_IS(r, "A6", "walk forward (trot) 144.0 mm/s, steering left 1");
   CHECK(r.dir() == planner::Direction::Forward && std::fabs(r.walker.planner().steer() - 0.25) < 1e-6);
   CHECK(r.walker.goal().steer == (planner::real)0.25 && !r.walker.planner().stopping());

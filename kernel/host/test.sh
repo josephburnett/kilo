@@ -18,7 +18,7 @@
 #      --status reads body-result.txt, and kilo card --fetch the flight recorder's saved files.
 
 #   5. P3: the generated trick and personality tables and the perception and behaviour golden
-#      vectors up to date with the Python mind (their unit tests run in 1.); IR keys, the
+#      vectors up to date with the Python reference in mind/kilo (their unit tests run in 1.); IR keys, the
 #      behaviour runner and perception against the virtual body (vbody.core --control).
 #
 #   kernel/host/test.sh
@@ -681,7 +681,7 @@ echo "   card route: flashed at start, the same build left alone, a failure reco
 echo "== P3: generated tables up to date (tricks, personality)"
 "$PYTHON" "$REPO/kernel/mind/tricks/gen_library.py" --check  # (each generator imports this checkout's mind/)
 "$PYTHON" "$REPO/kernel/mind/behaviour/gen_personality.py" --check
-echo "== P3: golden vectors up to date with the Python mind (perception, behaviour, planner)"
+echo "== P3: golden vectors up to date with the Python reference (perception, behaviour, planner)"
 for v in perception behaviour planner; do  # (the planner's takes about 1 s)
     vectors_current "$v"
 done

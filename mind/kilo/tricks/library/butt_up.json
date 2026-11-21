@@ -1,7 +1,7 @@
 {
   "name": "butt_up",
   "source": {
-    "file": "src/InstinctNybble.h",
+    "file": "legacy/InstinctNybble.h",
     "legacy_name": "buttUp",
     "kind": "posture",
     "period": 1,

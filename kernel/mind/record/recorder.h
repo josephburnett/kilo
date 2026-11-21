@@ -6,8 +6,8 @@
 // closed by RUN records and listed in the run index (WALK_LIST); the laptop
 // fetches a run's span or any time range (kilo runs --host --fetch, kilo
 // record fetch) and analyses it afterwards (kilo log walk|trick FILE).
-// Python counterpart: the daemon's --kilolog (kilo/logs/kilolog.py), which
-// kept the raw frames of a whole session on the Pi's disk.
+// A walk's frames also download as a .kilolog (kilo/logs/kilolog.py, the
+// raw frame format kilo log reads).
 //
 // A walk's records (protocol/spec.toml "The flight recorder", host.walk_format):
 //   RUN BEGIN, MARK "walk id=N format=2 t0_us_hi=.. t0_us_lo=.. setup_us=0 mind_build=.. body_build=.."

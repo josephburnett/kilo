@@ -1,6 +1,6 @@
 """The trick library, stored as JSON in tricks/library/.
 
-The first-version tricks (§5) are generated from src/InstinctNybble.h by
+The first-version tricks (§5) are generated from legacy/InstinctNybble.h by
 `python -m kilo.tricks.import_legacy`; the authored ones (AUTHORED) by
 their design modules (`python -m kilo.tricks.rear_up`). The files are
 committed; edit the importer or the design module, not the JSON.
@@ -14,7 +14,7 @@ from .model import Trick
 
 LIBRARY_DIR = Path(__file__).resolve().parent / "library"
 
-# Kilo name -> legacy array name in src/InstinctNybble.h, in §5 order.
+# Kilo name -> legacy array name in legacy/InstinctNybble.h, in §5 order.
 FIRST_VERSION = {
     # basics
     "sit": "sit",

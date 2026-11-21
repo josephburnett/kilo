@@ -55,7 +55,7 @@ OBJDUMP="$TOOLS/avr-objdump"
 fail=0
 echo "expected build flags: compiler.cpp/c.extra_flags=$CFLAGS compiler.c.elf.extra_flags=$LDFLAGS"
 
-# Flash = .text + .data (what avrdude writes); globals = .data + .bss +
+# Flash = .text + .data (what the flasher writes); globals = .data + .bss +
 # .noinit (the RAM that is not stack).
 read -r text data bss < <("$SIZE" -A "$ELF" | awk '$1==".text"{t=$2} $1==".data"{d=$2} $1==".bss"{b=$2} $1==".noinit"{n=$2} END{print t, d, b+n}')
 flash=$((text + data))
