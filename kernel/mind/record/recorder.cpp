@@ -197,8 +197,10 @@ void Recorder::trick_header(const tricks::Trick& t, uint32_t id, uint8_t speed, 
   l.unum("id", (unsigned)id);
   l.unum("format", KILO_HOST_WALK_FORMAT);
   l.str("trick", t.name);
-  unsigned stage = tricks::rear_up_stage(t.name);
-  if (stage != 0) l.unum("stage", stage);
+  if (stage_of_ != 0) {
+    l.unum("stage", (unsigned)stage_allowed_);
+    l.unum("of", (unsigned)stage_of_);
+  }
   l.unum("tid", tricks::trick_id_for(t));
   char crc[8];
   format(crc, sizeof crc, "%04x", (unsigned)tricks::trick_crc16(t));
@@ -230,13 +232,22 @@ void Recorder::begin_trick(const tricks::TrickPlayer& p, uint64_t now) {
   const tricks::Trick* t = p.trick();
   Run* r = begin_run(KILO_RUN_KIND_TRICK, now);
   trick_ = r->id;
+  stage_of_ = 0;
+  stage_allowed_ = 0;
+  stage_reached_ = -1;
   if (t == nullptr) return;
+  trick_name_ = t->name;
+  int of = (int)tricks::rear_up_stage(t->name);
+  if (of != 0 && pending_play_ == trick_play_ && pending_of_ == of) {  // the remote's: up a stage at a time
+    stage_of_ = of;
+    stage_allowed_ = pending_allowed_;
+    stage_reached_ = pending_reached_;
+  } else if (of != 0) {  // another client's play: the whole trick
+    stage_of_ = stage_allowed_ = of;
+  }
+  pending_play_ = 0;
   trick_header(*t, r->id, p.speed(), p.mirrored(), now);
-  char text[KILO_HOST_WALK_TEXT_MAX + 1];
-  unsigned stage = tricks::rear_up_stage(t->name);
-  if (stage != 0) format(text, sizeof text, "trick=%s stage=%u", t->name, stage);
-  else format(text, sizeof text, "trick=%s", t->name);
-  set_text(r, text);
+  trick_text(r);
   if (metrics_ != nullptr) {
     metrics_->tricks++;
     metrics_->trick_names.add(t->name);
@@ -253,9 +264,16 @@ void Recorder::end_trick(const char* reason, const char* why, uint32_t elapsed_m
     l.unum("battery_mv", b.telemetry.batt_mv);
     l.str("mode", mode_name(b.telemetry.mode));
   }
+  Run* r = run(trick_);
+  if (stage_of_ != 0) {
+    if (reason[0] == 'D') stage_allowed_ = stage_reached_ = stage_of_;  // DONE: the whole trick played
+    trick_text(r);
+    l.unum("stage", (unsigned)stage_allowed_);
+    l.unum("of", (unsigned)stage_of_);
+    if (stage_reached_ >= 0) l.unum("reached", (unsigned)stage_reached_);
+  }
   l.str("why", why);  // last: it may hold spaces
   mark_line(l.text(), now);
-  Run* r = run(trick_);
   if (r != nullptr) {
     if (reason[0] == 'D') r->flags |= KILO_WALK_FLAGS_ENDED_OK;  // DONE
     char text[KILO_HOST_WALK_TEXT_MAX + 1];
@@ -265,6 +283,40 @@ void Recorder::end_trick(const char* reason, const char* why, uint32_t elapsed_m
   if (metrics_ != nullptr) metrics_->trick_ends.add(reason);
   end_run(trick_, now);
   trick_ = 0;
+  stage_of_ = 0;
+}
+
+// The trick run's label: "trick=NAME [stage=S of=N [reached=R]]" (reached only when short of S's top).
+void Recorder::trick_text(Run* r) {
+  char text[KILO_HOST_WALK_TEXT_MAX + 1];
+  if (stage_of_ == 0)
+    format(text, sizeof text, "trick=%s", trick_name_);
+  else if (stage_reached_ >= 0 && stage_reached_ < stage_allowed_)
+    format(text, sizeof text, "trick=%s stage=%d of=%d reached=%d", trick_name_, stage_allowed_, stage_of_,
+           stage_reached_);
+  else
+    format(text, sizeof text, "trick=%s stage=%d of=%d", trick_name_, stage_allowed_, stage_of_);
+  set_text(r, text);
+}
+
+void Recorder::trick_stage(uint32_t play, int allowed, int reached, int of) {
+  if (trick_ == 0 || play != trick_play_ || stage_of_ != of) {  // its run opens at the player's next poll
+    pending_play_ = play;
+    pending_allowed_ = allowed;
+    pending_reached_ = reached;
+    pending_of_ = of;
+    return;
+  }
+  bool up = allowed > stage_allowed_ || reached > stage_reached_;
+  if (!up) return;
+  if (allowed > stage_allowed_) stage_allowed_ = allowed;
+  if (reached > stage_reached_) stage_reached_ = reached;
+  Line l("stage");
+  l.unum("allowed", (unsigned)stage_allowed_);
+  l.unum("reached", (unsigned)(stage_reached_ < 0 ? 0 : stage_reached_));
+  l.unum("of", (unsigned)stage_of_);
+  mark_line(l.text(), clock_.now_us());
+  trick_text(run(trick_));
 }
 
 void Recorder::trick_refused(const char* trick, const char* why) {
@@ -273,13 +325,13 @@ void Recorder::trick_refused(const char* trick, const char* why) {
   if (trick_ != 0) end_trick("FAILED", "another play began", 0, 0, now);
   Run* r = begin_run(KILO_RUN_KIND_TRICK, now);
   trick_ = r->id;
+  stage_of_ = 0;  // nothing played: no stage
+  stage_allowed_ = 0;
+  stage_reached_ = -1;
+  trick_name_ = trick;
   const tricks::Trick* t = tricks::find_trick(trick);
   if (t != nullptr) trick_header(*t, r->id, tricks::kSpeedUnity, false, now);
-  char text[KILO_HOST_WALK_TEXT_MAX + 1];
-  unsigned stage = tricks::rear_up_stage(trick);
-  if (stage != 0) format(text, sizeof text, "trick=%s stage=%u", trick, stage);
-  else format(text, sizeof text, "trick=%s", trick);
-  set_text(r, text);
+  trick_text(r);
   if (metrics_ != nullptr) {
     metrics_->tricks++;
     metrics_->trick_names.add(trick);

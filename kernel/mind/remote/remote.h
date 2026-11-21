@@ -127,6 +127,9 @@ class TrickNotes {
   virtual void refused(const char* /*trick*/, const char* /*why*/) {}
   // A line into the trick's run (the rear-up's stages).
   virtual void trick_mark(const char* /*line*/) {}
+  // The rear-up's stages in the player's play `play`: the highest stage allowed so far (1 at the
+  // start, A2 raises it), the highest whose top was reached (0: none yet), of `of` (the run's label).
+  virtual void trick_stage(uint32_t /*play*/, int /*allowed*/, int /*reached*/, int /*of*/) {}
   // The battery at rest (power/battery.h RestedBattery), false if none: the trick's refusal.
   virtual bool rested_mv(uint16_t* /*mv*/) { return false; }
 
@@ -209,7 +212,7 @@ class RemoteControl {
   // the rear-up's stages: the play, its highest stage, the stage A2 allows now
   const tricks::Trick* step_trick_ = nullptr;
   uint32_t step_play_ = 0;
-  int step_max_ = 0, step_allowed_ = 0, step_held_ = 0;
+  int step_max_ = 0, step_allowed_ = 0, step_held_ = 0, step_reached_ = 0;
 
   struct Pending {
     const Key* key;

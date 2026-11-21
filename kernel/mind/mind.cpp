@@ -128,8 +128,11 @@ void Mind::start() {
     logf(log_, LogLevel::Info, "behaviour runner: seed %u, personality %s", (unsigned)cfg_.seed,
          personality(cfg_).name);
   if (cfg_.remote) logf(log_, LogLevel::Info, "IR remote on");
-  logf(log_, LogLevel::Info, "distance guard %s (BLUE from %d mm standing, RED below %d mm; docs/distance-guard.md)",
-       guard_.enabled() ? "on" : "off", (int)guard::kBlueMinMm, (int)guard::kRedMm);
+  logf(log_, LogLevel::Info,
+       "distance guard %s (walking forward BLUE from %d mm, RED below %d mm; otherwise BLUE below %d, RED below %d; "
+       "docs/distance-guard.md)",
+       guard_.enabled() ? "on" : "off", (int)guard::kBlueMinMm, (int)guard::kRedMm, (int)guard::kBlueStillMm,
+       (int)guard::kRedStillMm);
   {
     uint32_t ms = sound_.total_ms();
     if (sound_.count() == 0)
@@ -413,11 +416,10 @@ void Mind::ir_key(const kilo_event_t& e) {
     recorder_.key(text);
     return;
   }
-  if (guard_.holds() && forward_key(*key)) {  // the distance guard: only the safe directions
-    char why[96];
-    format(why, sizeof why, "remote %s: refused (distance guard %s: %s, %d mm ahead; turn, back up or B6)", text,
-           guard::action_name(guard_.action()), guard::zone_name(guard_.zone()),
-           guard_.filter().has() ? (int)guard_.filter().mm() : -1);
+  char guard_why[112];
+  if (forward_key(*key) && guard_.refuses_forward(guard_why, sizeof guard_why)) {  // the distance guard: only the safe directions
+    char why[192];
+    format(why, sizeof why, "remote %s: refused (distance guard %s; turn, back up or B6)", text, guard_why);
     logf(log_, LogLevel::Info, "%s", why);
     recorder_.note(why);
     guard_.count_refused();

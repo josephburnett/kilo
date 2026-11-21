@@ -240,6 +240,7 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
         int k = step_at(&end);
         if (k != 0 && k == step_allowed_ && k < step_max_) {  // the rear-up: on to the next stage
           step_allowed_ = k + 1;
+          if (notes_ != nullptr) notes_->trick_stage(step_play_, step_allowed_, step_reached_, step_max_);
           char what[96];
           format(what, sizeof what, "rear_up: on to stage %d (of %d)", k + 1, step_max_);
           step_note(what);
@@ -467,6 +468,8 @@ void RemoteControl::start_trick() {
   step_max_ = stages;
   step_allowed_ = 1;
   step_held_ = 0;
+  step_reached_ = 0;
+  if (stages > 0 && notes_ != nullptr) notes_->trick_stage(step_play_, step_allowed_, step_reached_, step_max_);
   if (stages > 1) {
     format(what, sizeof what, "trick %s started: up to stage 1 (A2 while he holds it: on, up to %d; B6 or C7 bring "
            "him down)", key_->name, stages);
@@ -528,6 +531,10 @@ void RemoteControl::step_gate() {
   if (k == 0) return;
   if (k != step_held_) {
     step_held_ = k;
+    if (k > step_reached_) {
+      step_reached_ = k;
+      if (notes_ != nullptr) notes_->trick_stage(step_play_, step_allowed_, step_reached_, step_max_);
+    }
     char what[64];
     format(what, sizeof what, "rear_up: stage %d (of %d)%s", k, step_max_,
            k < step_max_ && step_allowed_ == k ? ": A2 to go on" : "");

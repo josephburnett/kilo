@@ -2,7 +2,6 @@
 #include "remote/remote.h"
 #include "util/dmath.h"
 #include "util/fmt.h"
-#include "util/dmath.h"
 #include "util/log.h"
 #include "util/mem.h"
 #include "util/str.h"
@@ -127,11 +126,11 @@ void DistanceFilter::feed(double t, uint16_t raw_mm, bool fresh, double floor_mm
   // one reading left in the window: the last range holds until kStaleS
 }
 
-Zone next_zone(Zone now, bool has, double mm, double blue, double red) {
+Zone next_zone(Zone now, bool has, double mm, double blue, double red, double blue_exit, double red_exit) {
   if (!has) return Zone::Green;
-  if (now == Zone::Red && mm <= kRedExitMm) return Zone::Red;
+  if (now == Zone::Red && mm <= red_exit) return Zone::Red;
   if (mm < red) return Zone::Red;
-  if (now != Zone::Green && mm <= blue + kBlueExitMm) return Zone::Blue;
+  if (now != Zone::Green && mm <= blue + blue_exit) return Zone::Blue;
   if (mm < blue) return Zone::Blue;
   return Zone::Green;
 }
@@ -210,16 +209,22 @@ void DistanceGuard::on_telemetry(const kilo_telemetry_t& t, double head_tilt_deg
   double v = 0;
   const char* gait = "";
   bool fwd = forward_walk(&v, &gait);
-  if (action_ != Action::Watch) {  // the speed when the guard acted holds the thresholds
-    v = v_;
-    gait = gait_;
-  } else {
+  if (action_ == Action::Watch) {  // acting or holding, the speed when the guard acted holds the walking thresholds
     v_ = fwd ? v : 0;
     gait_ = fwd ? gait : "";
-    v = v_;
   }
-  blue_ = blue_mm(gait, v);
-  Zone z = next_zone(zone_, filter_.has(), filter_.mm(), blue_, kRedMm);
+  // the walking thresholds are in force while walking forward, and through the guard's own stop and back-off
+  // of a forward walk; once the walk has ended (holding, standing, sitting), and turning or backward, the still ones
+  walking_ = (action_ == Action::Watch || action_ == Action::Holding) ? fwd : v_ > 0;
+  blue_walk_ = blue_mm(gait_, v_);
+  walk_zone_ = next_zone(walk_zone_, filter_.has(), filter_.mm(), blue_walk_, kRedMm);
+  still_zone_ = next_zone(still_zone_, filter_.has(), filter_.mm(), kBlueStillMm, kRedStillMm, kBlueStillExitMm,
+                          kRedStillExitMm);
+  blue_ = walking_ ? blue_walk_ : kBlueStillMm;
+  red_ = walking_ ? kRedMm : kRedStillMm;
+  v = v_;
+  gait = gait_;
+  Zone z = walking_ ? walk_zone_ : still_zone_;
   if (fwd && filter_.has() && (!has_min_ || filter_.mm() < min_mm_)) {
     min_mm_ = filter_.mm();
     has_min_ = true;
@@ -234,15 +239,15 @@ void DistanceGuard::on_telemetry(const kilo_telemetry_t& t, double head_tilt_deg
     char line[128];
     if (filter_.has())
       format(line, sizeof line, "guard zone=%s mm=%d raw=%u blue=%d red=%d v=%d gait=%s action=%s", zone_name(z),
-             d_iround(filter_.mm()), (unsigned)filter_.raw(), d_iround(blue_), d_iround(kRedMm), d_iround(v), gait[0] ? gait : "-",
+             d_iround(filter_.mm()), (unsigned)filter_.raw(), d_iround(blue_), d_iround(red_), d_iround(v), gait[0] ? gait : "-",
              action_name(action_));
     else
       format(line, sizeof line, "guard zone=%s mm=none raw=%u blue=%d red=%d v=%d action=%s", zone_name(z),
-             (unsigned)filter_.raw(), d_iround(blue_), d_iround(kRedMm), d_iround(v), action_name(action_));
+             (unsigned)filter_.raw(), d_iround(blue_), d_iround(red_), d_iround(v), action_name(action_));
     note(line);
   }
   uint64_t us = clock_.now_us();
-  bool green = zone_ == Zone::Green;
+  bool green = walk_zone_ == Zone::Green;  // the hold releases once the way is clear for walking forward
   if (green && !green_) green_since_ = us;
   green_ = green;
 }
@@ -483,9 +488,33 @@ void DistanceGuard::poll() {
         decide(state, "clear");
         return;
       }
-      decide(state, zone_ == Zone::Green ? "holding (clear soon)" : "holding: eyes only");
+      decide(state, green_                   ? "holding (clear soon)"
+                    : zone_ == Zone::Green ? "holding: clear to stand, too close to walk forward"
+                                           : "holding: eyes only");
       return;
   }
+}
+
+bool DistanceGuard::refuses_forward(char* why, uint32_t n) const {
+  if (!on_) return false;
+  bool acting = action_ != Action::Watch;
+  if (!acting && walk_zone_ == Zone::Green) return false;
+  uint32_t len = 0;
+  why[0] = 0;
+  if (acting)
+    len = filter_.has() ? (uint32_t)format(why, n, "%s: %s, %d mm ahead", action_name(action_), zone_name(zone_),
+                                           d_iround(filter_.mm()))
+                        : (uint32_t)format(why, n, "%s: %s, nothing seen", action_name(action_), zone_name(zone_));
+  if (len >= n) return true;
+  if (walk_zone_ != Zone::Green && (!acting || zone_ != walk_zone_)) {  // closer than a forward walk stops for
+    if (!acting) format(why, n, "%d mm ahead, ", d_iround(filter_.mm()));
+    else format(why + len, n - len, "; ");
+    len = (uint32_t)str_len(why);
+    if (len < n)
+      format(why + len, n - len, "a forward walk needs %d (clear above %d)", d_iround(blue_walk_),
+             d_iround(blue_walk_ + kBlueExitMm));
+  }
+  return true;
 }
 
 void DistanceGuard::key_took_over() {
@@ -527,7 +556,7 @@ void DistanceGuard::fill(kilo_host_guard_status_t& s) const {
   s.dist_mm = filter_.has() ? (uint16_t)d_iround(filter_.mm()) : 0;
   s.raw_mm = filter_.raw();
   s.blue_mm = (uint16_t)d_iround(blue_);
-  s.red_mm = (uint16_t)d_iround(kRedMm);
+  s.red_mm = (uint16_t)d_iround(red_);
   s.speed_mm_s = (uint16_t)d_iround(v_);
   s.zone_changes = zone_changes_;
   s.stops = stops_;

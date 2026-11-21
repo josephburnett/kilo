@@ -14,7 +14,10 @@
 // turning is not; a hand waved past and floor echoes with the head tilted
 // down do not stop him; a steer or B7 out of a turn is a forward key while
 // the guard holds; lying in light sleep (the floor at 55-63 mm) changes
-// nothing; the eyes follow the zone when the body has them.
+// nothing; the eyes follow the zone when the body has them. Not walking
+// forward the zones are closer (BLUE 120, RED 80): standing at 190 mm
+// nothing happens, B6 next to something stays standing, and a forward key
+// that would stop at once is refused.
 // The alive layer: its standing poses inside the margin, its sitting
 // tricks inside the joint limits, its choice seeded and never the same
 // move twice in a row, and everything stopped by B6.
@@ -101,6 +104,16 @@ void test_zones() {
   z = next_zone(z, true, 210, blue, red);
   CHECK(z == Zone::Blue);
   CHECK(next_zone(Zone::Red, false, 0, blue, red) == Zone::Green);  // nothing seen
+  // not walking forward: BLUE below 120 (left above 160), RED below 80 (left above 120)
+  auto still = [](Zone now, double mm) {
+    return next_zone(now, true, mm, kBlueStillMm, kRedStillMm, kBlueStillExitMm, kRedStillExitMm);
+  };
+  CHECK(still(Zone::Green, 190) == Zone::Green && still(Zone::Green, 150) == Zone::Green);
+  CHECK(still(Zone::Green, 121) == Zone::Green && still(Zone::Green, 119) == Zone::Blue);
+  CHECK(still(Zone::Blue, 160) == Zone::Blue && still(Zone::Blue, 161) == Zone::Green);
+  CHECK(still(Zone::Blue, 81) == Zone::Blue && still(Zone::Blue, 79) == Zone::Red);
+  CHECK(still(Zone::Red, 120) == Zone::Red && still(Zone::Red, 121) == Zone::Blue);
+  CHECK(still(Zone::Green, 60) == Zone::Red);
   // the thresholds: never below kBlueMinMm; faster is further
   CHECK(blue_mm("trot", 0) == kBlueMinMm && blue_mm("trot", 230.4) > blue_mm("trot", 187.2));
   CHECK(blue_mm("walk", 97) <= blue_mm("trot", 230.4) && blue_mm("crawl", 27) == kBlueMinMm);
@@ -544,7 +557,7 @@ void test_eyes() {
     CHECK(r.run_until_hold(20000));
     g = r.mind.link().goal(KILO_MSG_SET_EYES);
     CHECK(g != nullptr && g->payload[3] == kEyeLevel && r.mind.guard().eyes() == Eyes::Blue);
-    r.wall_mm = r.travel + 100;  // closer: red
+    r.wall_mm = r.travel + 60;  // closer: red (the walk has ended: the still thresholds)
     r.run_ms(600);
     g = r.mind.link().goal(KILO_MSG_SET_EYES);
     CHECK(g != nullptr && g->payload[1] == kEyeLevel && r.mind.guard().eyes() == Eyes::Red);
@@ -613,10 +626,13 @@ void test_hand_in_face_turning_backward_standing_sitting_lying() {
     r.key(A6);
     r.run_ms(2000);
     CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Left);
-    r.fixed_mm = 180;
+    r.fixed_mm = 180;  // closer than a forward walk stops for: not while turning (green)
+    r.run_ms(1500);
+    CHECK(r.mind.walker().active() && !r.mind.walker().planner().stopping() && r.mind.guard().zone() == Zone::Green);
+    r.fixed_mm = 100;
     r.run_ms(1500);
     CHECK(r.mind.walker().active() && !r.mind.walker().planner().stopping() && r.mind.guard().zone() == Zone::Blue);
-    r.fixed_mm = 90;
+    r.fixed_mm = 60;
     double t = run_until(r, 3000, [&] { return r.mind.walker().planner().halting(); });
     CHECKF(t >= 0 && t < 0.45, "turning: halted after %.2f s", t);
     CHECK(r.run_until_hold(6000) && r.mind.guard().hisses() == 1 && r.mind.guard().pullbacks() == 0);
@@ -631,18 +647,18 @@ void test_hand_in_face_turning_backward_standing_sitting_lying() {
     r.key(B5);
     r.run_ms(1500);
     CHECK(r.mind.walker().goal().direction == planner::Direction::Back);
-    r.fixed_mm = 90;
+    r.fixed_mm = 60;
     r.run_ms(1500);
     CHECK(r.mind.walker().active() && !r.mind.walker().planner().stopping() && r.mind.guard().zone() == Zone::Red &&
           r.mind.guard().action() == Action::Watch && r.mind.guard().eyes() == Eyes::Red);
     CHECK(r.log.has("state=walk-back: eyes only (walking away from it)"));
   }
-  {  // standing (B6): BLUE: he looks at it and sits; then RED while sitting: he leans back and hisses
+  {  // standing (B6): BLUE (110 mm): he looks at it and sits; then RED while sitting: he leans back and hisses
     WallRig r(WallRig::remote_cfg());
     r.wall = false;
     r.key(B6);
     r.run_ms(1500);
-    r.fixed_mm = 180;
+    r.fixed_mm = 110;
     double t = run_until(r, 2000, [&] { return r.mind.guard().action() == Action::Holding; });
     CHECKF(t >= 0 && t < 0.4, "standing BLUE: %.2f s", t);
     r.run_ms(200);
@@ -650,7 +666,7 @@ void test_hand_in_face_turning_backward_standing_sitting_lying() {
     CHECK(h != nullptr && r.mind.sitting_variant() && r.log.has("guard: looks at it"));
     CHECK(r.posture_goal() == KILO_POSTURE_SIT || r.mind.alive().sitting());
     size_t tricks_before = r.body.count(KILO_MSG_TRICK_PLAY);
-    r.fixed_mm = 90;
+    r.fixed_mm = 60;
     t = run_until(r, 2000, [&] { return r.mind.guard().hisses() == 1; });
     r.run_ms(1500);
     CHECKF(t >= 0 && t < 0.4 && r.log.has("guard: leans back"), "sitting RED: %.2f s", t);
@@ -662,7 +678,7 @@ void test_hand_in_face_turning_backward_standing_sitting_lying() {
     r.wall = false;
     r.key(B6);
     r.run_ms(1500);
-    r.fixed_mm = 100;
+    r.fixed_mm = 60;
     double t = run_until(r, 2000, [&] { return r.mind.guard().action() == Action::Backing; });
     CHECKF(t >= 0 && t < 0.4, "standing RED: %.2f s", t);
     CHECK(run_until(r, 3000, [&] { return r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Back; }) >= 0);
@@ -677,9 +693,9 @@ void test_hand_in_face_turning_backward_standing_sitting_lying() {
     CHECK(client_posture(r.mind.link(), nullptr, "sit"));
     r.run_ms(1500);
     for (int i = 0; i < 5; i++) {
-      r.fixed_mm = 90;
+      r.fixed_mm = 60;
       r.run_ms(700);
-      r.fixed_mm = 250;  // the hand pulled back a little: blue, not green
+      r.fixed_mm = 140;  // the hand pulled back a little: blue, not green
       r.run_ms(2500);
     }
     CHECKF(r.mind.guard().hisses() == (uint32_t)kMaxBacks, "%u hisses (%s)", (unsigned)r.mind.guard().hisses(),
@@ -688,7 +704,7 @@ void test_hand_in_face_turning_backward_standing_sitting_lying() {
     r.fixed_mm = -1;  // gone: green for a second releases it
     r.run_ms(2500);
     CHECK(r.mind.guard().action() == Action::Watch && r.mind.guard().backs() == 0);
-    r.fixed_mm = 90;
+    r.fixed_mm = 60;
     r.run_ms(700);
     CHECK(r.mind.guard().hisses() == (uint32_t)kMaxBacks + 1);
   }
@@ -721,7 +737,7 @@ void test_hand_in_face_turning_backward_standing_sitting_lying() {
     r.wall = false;
     CHECK(client_posture(r.mind.link(), nullptr, "sit"));
     r.run_ms(1500);
-    r.fixed_mm = 90;
+    r.fixed_mm = 70;
     r.run_ms(500);
     CHECK(r.mind.guard().zone() == Zone::Red);
     r.fixed_mm = 0;  // no echo
@@ -729,6 +745,113 @@ void test_hand_in_face_turning_backward_standing_sitting_lying() {
     CHECK(r.mind.guard().zone() == Zone::Red && r.mind.guard().filter().close_hold());
     r.run_ms(800);
     CHECK(r.mind.guard().zone() == Zone::Green);
+  }
+}
+
+// ---- not walking forward: the closer thresholds (2026-11-21: "maybe the threshold can be lowered
+// when he's not moving forward"), and the moves between them and the walking ones -------------
+
+void test_still_thresholds() {
+  {  // standing (B6) with something at 190 mm (the owner's floor): nothing; at 110: looks at it and sits
+    WallRig r(WallRig::remote_cfg());
+    r.wall = false;
+    r.key(B6);
+    r.run_ms(1500);
+    r.fixed_mm = 190;
+    r.run_ms(3000);
+    CHECKF(r.mind.guard().action() == Action::Watch && r.mind.guard().reactions() == 0 &&
+               r.mind.guard().zone() == Zone::Green && r.mind.guard().eyes() == Eyes::Green &&
+               r.posture_goal() == KILO_POSTURE_STAND,
+           "standing at 190: %s %s posture %d", action_name(r.mind.guard().action()), zone_name(r.mind.guard().zone()),
+           r.posture_goal());
+    CHECK(r.mind.guard().walk_zone() == Zone::Blue && r.mind.guard().blue_now() == kBlueStillMm &&
+          r.mind.guard().red_now() == kRedStillMm);
+    r.fixed_mm = 110;
+    double t = run_until(r, 2000, [&] { return r.mind.guard().action() == Action::Holding; });
+    r.run_ms(1500);
+    CHECKF(t >= 0 && t < 0.4 && r.log.has("guard: looks at it") && r.mind.sitting_variant(), "standing at 110: %.2f s", t);
+    std::printf("guard: standing at 190 mm: nothing; at 110 mm: looks and sits after %.2f s\n", t);
+  }
+  {  // sitting with something at 150 mm: B6 stands him up, and he stays standing; a forward key is refused
+    WallRig r(WallRig::remote_cfg());
+    r.wall = false;
+    CHECK(client_posture(r.mind.link(), nullptr, "sit"));
+    r.run_ms(1500);
+    r.fixed_mm = 150;
+    r.run_ms(1000);
+    r.key(B6);
+    r.run_ms(5000);
+    CHECKF(r.posture_goal() == KILO_POSTURE_STAND && r.mind.guard().action() == Action::Watch &&
+               r.mind.guard().reactions() == 0 && !r.mind.behaviour_active(),
+           "B6 at 150: posture %d %s reactions %u", r.posture_goal(), action_name(r.mind.guard().action()),
+           (unsigned)r.mind.guard().reactions());
+    r.key(A4);  // (a): a walk would stop at once (BLUE below 200): it does not start
+    r.run_ms(1000);
+    CHECKF(r.log.has("remote A4 (0x68, trot): refused (distance guard 150 mm ahead, a forward walk needs 200 (clear "
+                     "above 280); turn, back up or B6)"),
+           "A4 at 150 not refused");
+    CHECK(!r.mind.walker().active() && r.mind.guard().refused() == 1 && r.mind.guard().stops() == 0);
+    r.key(A6);  // turning is allowed
+    r.run_ms(1000);
+    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Left);
+    r.key(B6);
+    r.run_ms(2000);
+    r.fixed_mm = 300;  // moved away: forward walking again
+    r.run_ms(500);
+    r.key(A4);
+    r.run_ms(800);
+    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Forward);
+    std::printf("guard: B6 with something at 150 mm: stands and stays standing; A4 refused\n");
+  }
+  {  // (b): the quick stop at the walking distance, then B6: he stands and stays standing, forward keys stay
+     // refused until the way is clear for walking, and then the hold releases
+    WallRig r(WallRig::remote_cfg());
+    r.wall_mm = 700;
+    r.key(A4);
+    CHECK(r.run_until_hold(20000));
+    double gap = r.gap();
+    r.run_ms(1500);
+    CHECK(r.mind.sitting_variant());
+    CHECKF(gap > kBlueStillMm && gap < kBlueMinMm, "stopped %.0f mm short", gap);
+    CHECK(r.mind.guard().zone() == Zone::Green && r.mind.guard().walk_zone() != Zone::Green);
+    r.key(B6);
+    r.run_ms(5000);
+    CHECKF(r.posture_goal() == KILO_POSTURE_STAND && r.mind.guard().action() == Action::Holding &&
+               r.mind.guard().reactions() == 0 && !r.mind.behaviour_active(),
+           "after the stop, B6: posture %d %s reactions %u (%s)", r.posture_goal(), action_name(r.mind.guard().action()),
+           (unsigned)r.mind.guard().reactions(), r.mind.guard().decision());
+    CHECK(r.mind.guard().eyes() == Eyes::Green);
+    r.key(A4);
+    r.run_ms(500);
+    CHECKF(r.log.has("remote A4 (0x68, trot): refused (distance guard holding: green, ") &&
+               r.log.has("mm ahead; a forward walk needs 200 (clear above 280); turn, back up or B6)"),
+           "A4 after the stop not refused as expected");
+    CHECK(!r.mind.walker().active());
+    r.wall = false;  // taken away: the hold releases, forward walking again
+    r.run_ms(1500);
+    CHECK(r.mind.guard().action() == Action::Watch && r.log.has("clear: forward walking allowed again"));
+    r.key(A4);
+    r.run_ms(800);
+    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Forward);
+    std::printf("guard: stopped %.0f mm short at trot +3, then B6: stands, stays standing, A4 refused until clear\n",
+                gap);
+  }
+  {  // through the guard: the still hysteresis, BLUE from 119 to 160, RED from 79 to 120 (sitting: the eyes only
+     // after the first look and lean)
+    WallRig r(WallRig::remote_cfg());
+    r.wall = false;
+    CHECK(client_posture(r.mind.link(), nullptr, "sit"));
+    r.run_ms(1500);
+    struct S {
+      double mm;
+      Zone z;
+    } steps[] = {{125, Zone::Green}, {115, Zone::Blue}, {155, Zone::Blue}, {165, Zone::Green}, {115, Zone::Blue},
+                 {85, Zone::Blue},   {75, Zone::Red},   {115, Zone::Red},  {125, Zone::Blue},  {170, Zone::Green}};
+    for (const S& st : steps) {
+      r.fixed_mm = st.mm;
+      r.run_ms(600);
+      CHECKF(r.mind.guard().zone() == st.z, "sitting at %.0f mm: zone %s", st.mm, zone_name(r.mind.guard().zone()));
+    }
   }
 }
 
@@ -975,6 +1098,7 @@ int main() {
   test_backward_trick_pickup_and_off_do_not_trigger();
   test_hand_in_face_walking_every_gait();
   test_hand_in_face_turning_backward_standing_sitting_lying();
+  test_still_thresholds();
   test_eyes();
   test_rested_battery();
   test_sag_does_not_send_the_runner_to_rest();

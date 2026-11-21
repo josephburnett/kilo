@@ -174,7 +174,10 @@ def _row(info: Any, when: float | None) -> str:
     if "TRUNCATED" in flags:
         state += " (TRUNCATED: its start is gone)"
     if d["kind"] == "trick":
-        what = d.get("trick", "?") + (f" stage {d['stage']}" if d.get("stage") else "")
+        if d.get("of"):  # the stage allowed in the run: "rear_up stage 1 of 3"
+            what = trickrec.trick_label(d.get("trick", "?"), d.get("stage"), d.get("of"), d.get("reached"))
+        else:  # an older mind: the build's stage
+            what = d.get("trick", "?") + (f" stage {d['stage']}" if d.get("stage") else "")
     else:
         what = f"{d.get('gait', '?')} {d.get('dir', '?')} {d.get('speed', '?')}"
     started = (time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(when)) if when is not None

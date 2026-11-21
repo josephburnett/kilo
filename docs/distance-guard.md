@@ -17,18 +17,41 @@ holding him (the owner: "he should always react, unless sleeping"):
 
 | Kilo is | Blue (too close) | Red (very close) |
 |---|---|---|
-| walking forward, any gait, also steering | the quick stop (below), then he sits and starts the A5 behaviour in its sitting form | backs off a short way (4-8 cm, slowly), the quick stop, sits; hisses. In the crawl he only stops and sits (the crawl takes 4 s to turn round) |
-| turning in place (A6, C6) | nothing: a wall seen as he turns is no reason to stop turning | the quick stop, then he sits; hisses |
-| walking backward | nothing: he is going away from it | nothing (the eyes go red) |
-| standing still | he looks at it (the head straight ahead) and sits | backs off a short way and sits; hisses |
-| sitting | he looks at it | he leans back (shoulders and knees back, the head pulled up, the tail up, about 2 s) and hisses |
+| walking forward, any gait, also steering | below 20 cm (more when faster, up to 23.5 cm at the trot's top speed): the quick stop (below), then he sits and starts the A5 behaviour in its sitting form | below 15 cm: backs off a short way (4-8 cm, slowly), the quick stop, sits; hisses. In the crawl he only stops and sits (the crawl takes 4 s to turn round) |
+| turning in place (A6, C6) | below 12 cm: nothing; a wall seen as he turns is no reason to stop turning | below 8 cm: the quick stop, then he sits; hisses |
+| walking backward | below 12 cm: nothing; he is going away from it | below 8 cm: nothing (the eyes go red) |
+| standing still | below 12 cm: he looks at it (the head straight ahead) and sits | below 8 cm: backs off a short way and sits; hisses |
+| sitting | below 12 cm: he looks at it | below 8 cm: he leans back (shoulders and knees back, the head pulled up, the tail up, about 2 s) and hisses |
 | lying (A7, REST) | nothing: lying, the sensor sees the floor under his nose | nothing |
 | in light sleep, or a laptop holds him, or a trick (the rear-up) plays, or he is picked up | nothing | nothing |
+
+Since 2026-11-21 the distances are shorter when he is not walking
+forward: he is not moving into it, so only something really close
+counts. Before, 20 cm counted in every state, and standing up with B6
+next to something 19 cm away sat him down again each time.
+
+The same thing in front of him, by distance:
+
+| Something at | Walking forward | Standing, sitting, turning, backward |
+|---|---|---|
+| more than 20 cm (at the trot +4 / +5: 20.5 / 23.5 cm) | walks on | nothing |
+| 15 to 20 cm | the quick stop, sits | nothing; but a forward key is refused (the walk would stop at once) |
+| 12 to 15 cm | backs off, stops, sits | nothing; a forward key is refused |
+| 8 to 12 cm | backs off, stops, sits | blue: looks at it (standing: and sits); a forward key is refused |
+| under 8 cm | backs off, stops, sits | red: standing backs off and sits, sitting leans back, turning stops; hisses |
 
 "Something comes close" means the zone **changes** to blue or red: standing
 next to a wall that was already there does nothing; a hand put in front of
 him does. While walking forward the zone itself counts: he stops at blue
 whenever he walks into it.
+
+**A forward key next to something.** Standing 15 cm from a box is fine,
+but a walk would stop for it at once. So a forward key (A4, B4, C4, and
+the others listed below) is refused while something is closer than a
+forward walk stops for (20 cm, and once it was that close, until it is
+more than 28 cm away). The log says `remote A4 (0x68, trot): refused
+(distance guard 150 mm ahead, a forward walk needs 200 (clear above 280);
+turn, back up or B6)`. Turning and backing up work.
 
 How fast: in the host test (`kernel/host/tests/test_guard.cpp`, a hand put
 in front of him at 180 or 100 mm) the guard acts 0.10 to 0.14 s after the
@@ -46,22 +69,30 @@ is B6's, C7's and the other remote keys'.
 
 ## While the guard holds
 
-After any reaction the guard **holds** until the way is clear again (green
-for 1 s). While it holds:
+After any reaction the guard **holds** until the way is clear for walking
+forward again (more than 28 cm, or nothing seen, for 1 s; after a fast
+walk a little more). While it holds:
 
 - forward keys are refused: A4, B4, C4 (each starts or turns into a forward
   walk), B7 when it would go forward (also out of a turn in place: that is
   straight forward), and A6 / C6 while walking forward (a steer bends the
   walk but keeps it going forward). The log says
   `remote A4 (0x68, trot): refused (distance guard holding: blue, 287 mm
-  ahead; turn, back up or B6)`, and the session metrics count it;
+  ahead; turn, back up or B6)`, or after a stop, when the zone for
+  standing is green, `... refused (distance guard holding: green, 175 mm
+  ahead; a forward walk needs 200 (clear above 280); ...)`,
+  and the session metrics count it;
 - turning (A6, C6), backing up (B5 down to the negative levels) and the
   posture keys (B6 stand, A7 sleep, C5) work as always. A turn or backing
   key also ends the sitting behaviour the guard started, so Kilo can be
   steered away;
 - C7 (freeze) works as always;
 - he still reacts: a hand that comes very close while he sits after a stop
-  makes him lean back.
+  makes him lean back;
+- the walk has ended, so the shorter distances apply: stopped 17 cm from a
+  wall, the eyes turn green again and B6 stands him up, and he stays
+  standing (the wall is far enough for standing). Forward keys stay refused
+  until the wall is more than 28 cm away.
 
 A key that the guard lets through while it is stopping or backing takes
 over from it: Kilo does what the key says, and the guard keeps holding. If
@@ -98,16 +129,34 @@ on the floor or to the side, and the guard blind to what is ahead.
 
 ## The thresholds
 
-All in `kernel/mind/guard/guard.h`. Blue depends on the speed when walking
-forward, because a faster walk needs more room to stop:
+All in `kernel/mind/guard/guard.h`. Walking forward, blue depends on the
+speed, because a faster walk needs more room to stop:
 
     blue = 100 mm gap left after the stop
          + speed x 0.40 s   (the readings come in, the stop reaches the body, the servos follow)
          + 5 mm + the quick stop's own way (speed^2 / 2a; a: walk 400, trot 700 mm/s^2; the crawl 20 mm)
-    never below 200 mm (also the threshold when not walking forward)
+    never below 200 mm
     left again 80 mm above it
 
     red  = below 150 mm, left again above 200 mm
+
+These stay in force through the guard's own stop and back-off of a forward
+walk (at the speed he had when it acted). Not walking forward (standing,
+sitting, turning in place, walking backward, and after a walk has ended):
+
+    blue = below 120 mm, left again above 160 mm
+    red  = below 80 mm, left again above 120 mm
+
+Each set keeps its own "left again" history, so when the walk ends the
+zone is the one for standing straight away (17 cm after a stop is green,
+not a blue left over from walking). The zone for walking is still followed
+while he stands: forward keys are refused while it is not green, and the
+hold releases when it has been green for a second.
+
+Why 80 mm is safe for red: the sensor reads down to about 30 mm (lying in
+REST it reads the floor at 55-63 mm steadily), so a hand at 70 mm is a
+reading, not a missed echo. And no echo right after something closer than
+150 mm still holds the last range for a second (below).
 
 | Gait, level | Speed | Blue below (before 2026-11-19) | The quick stop's own way: planner / the guard allows | Stopped short of the wall (simulated, clean / noisy) |
 |---|---|---|---|---|
@@ -173,9 +222,10 @@ Switching it does not need control of Kilo and moves nothing. Off, Kilo
 walks on whatever he sees, but the eyes still show the zone. The setting
 lasts until the mind restarts.
 
-`kilo status --host kilo.local` shows it too:
+`kilo status --host kilo.local` shows it too (the distances in force: 120
+and 80 standing, 200 or more and 150 walking forward):
 
-    guard       on  zone green  watch  412 mm (raw 409)  blue < 200 mm  red < 150 mm
+    guard       on  zone green  watch  412 mm (raw 409)  blue < 120 mm  red < 80 mm
     eyes        green (on the eyes)
     guard count stops 1  pullbacks 0  forward keys refused 2  zone changes 6
 

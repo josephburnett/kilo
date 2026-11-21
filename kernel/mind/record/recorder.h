@@ -19,14 +19,20 @@
 //   MARK "change ..." / "timing ..." / "stop ..." / "queued ..."
 //   MARK "result ..." "error ..." "end ok=.. reason=..", RUN END
 // A trick's (the trick player, polled):
-//   RUN BEGIN, MARK "trick id=N format=2 trick=NAME [stage=S] tid=.. crc=.. frames=.. speed=.. mirror=..
+//   RUN BEGIN, MARK "trick id=N format=2 trick=NAME [stage=S of=N] tid=.. crc=.. frames=.. speed=.. mirror=..
 //                    mind_build=.. body_build=.. battery_mv=.. mode=.. by=remote|other"
+//                    (the rear-up: S the stage allowed at the start, 1 from the remote, N when another
+//                    client plays it whole; N its stages)
 //   MARK "frames dur=a,b,.. hold=x,y,.. loop=start,end,repeats"   each keyframe's ticks at 1x
 //   MARK "uploaded"         when this play uploaded the trick
 //   MARK "play speed=.."    at TRICK_PLAY's ACK: the keyframes' times count from here
 //   MARK "key ..."          a remote key while the run is open (which key stopped it)
+//   MARK "stage allowed=S reached=R of=N"   the rear-up from the remote: A2 allowed a higher stage, or a
+//                           stage's top was reached (R 0: none yet)
 //   MARK "end reason=DONE|STOPPED|PREEMPTED|FELL|FAILED|REFUSED elapsed_ms=.. expected_ticks=..
-//                    battery_mv=.. mode=.. why=..", RUN END
+//                    battery_mv=.. mode=.. [stage=S of=N [reached=R]] why=..", RUN END
+// The run's label (WALK_INFO.text): "trick=NAME [stage=S of=N [reached=R]] end=REASON", S the
+// highest stage allowed in the run, reached=R only when the play did not get to S's top.
 // The frames themselves (TELEMETRY: the measured pitch and roll at every
 // tick; TRICK_PLAY, TRICK_STOP; EVENT TRICK_DONE) are in the stream anyway.
 // A run stays RECORDING for KILO_HOST_WALK_POSTROLL_MS after its end, so
@@ -83,6 +89,9 @@ class Recorder final : public FrameTap, public planner::WalkObserver, public Log
   void poll(const tricks::TrickPlayer& player);
   // The remote refused to start a trick (battery, USB power, the player busy).
   void trick_refused(const char* trick, const char* why);
+  // The rear-up's stages in the player's play `play` (remote::TrickNotes::trick_stage): the open run's
+  // label and a MARK, or kept for the run the play is about to open.
+  void trick_stage(uint32_t play, int allowed, int reached, int of);
   // A remote key's line: a MARK into the open runs (and remembered: a trick
   // started within 5 s of one is "by=remote").
   void key(const char* text);
@@ -126,6 +135,7 @@ class Recorder final : public FrameTap, public planner::WalkObserver, public Log
   void begin_trick(const tricks::TrickPlayer& p, uint64_t now);
   void end_trick(const char* reason, const char* why, uint32_t elapsed_ms, uint32_t expected, uint64_t now);
   void trick_header(const tricks::Trick& t, uint32_t id, uint8_t speed, bool mirror, uint64_t now);
+  void trick_text(Run* r);
 
   Clock& clock_;
   const SerialLink& link_;
@@ -146,6 +156,11 @@ class Recorder final : public FrameTap, public planner::WalkObserver, public Log
   bool have_key_ = false;
 
   uint32_t trick_play_ = 0;   // the player's play the trick run is for
+  const char* trick_name_ = "";
+  // the open trick run's stages (of 0: not staged; reached -1: not known, the play not the remote's)
+  int stage_allowed_ = 0, stage_reached_ = -1, stage_of_ = 0;
+  uint32_t pending_play_ = 0;  // trick_stage() for a play whose run is not open yet
+  int pending_allowed_ = 0, pending_reached_ = 0, pending_of_ = 0;
   bool play_marked_ = false;
   bool upload_marked_ = false;
   planner::PlannerStats last_ = {};

@@ -8,7 +8,8 @@ OUT.png]`` prints it again (``kilo log run FILE`` picks walk or trick).
 What the mind records for a trick (protocol/spec.toml [host] "The flight
 recorder"): RUN begin/end around it, the MARK lines ``trick`` (which trick,
 its id and CRC, the stage for rear_up, the battery and the body's mode at
-the start, who started it), ``frames`` (each keyframe's move and hold in
+the start, who started it), ``stage`` (the rear-up from the remote: A2
+allowed a higher stage, or a stage's top was reached), ``frames`` (each keyframe's move and hold in
 ticks of 20 ms at 1x), ``play`` (the moment the body acknowledged
 TRICK_PLAY: keyframe 0 starts there), ``key`` (each remote key that came
 while it ran, with what the remote did), ``end`` (DONE, STOPPED,
@@ -81,6 +82,7 @@ class TrickRun:
     end: dict[str, str] = field(default_factory=dict)
     end_us: int | None = None
     keys: list[tuple[int, str]] = field(default_factory=list)  # (t_us, text)
+    stages: dict[str, str] = field(default_factory=dict)  # the last `stage` MARK
     telemetry: list[tuple[int, Any]] = field(default_factory=list)
     lo_us: int = 0        # the span's start (CSV times count from it)
 
@@ -90,7 +92,32 @@ class TrickRun:
 
     @property
     def stage(self) -> str | None:
-        return self.start.get("stage")
+        """The highest stage allowed in the run (an older mind: the build's own, from the start)."""
+        return self.end.get("stage") or self.stages.get("allowed") or self.start.get("stage")
+
+    @property
+    def stage_of(self) -> str | None:
+        """The rear-up's stages (None: an older mind, which did not say)."""
+        return self.end.get("of") or self.stages.get("of") or self.start.get("of")
+
+    @property
+    def stage_reached(self) -> str | None:
+        """The highest stage whose top was reached (None: not known, the play not the remote's)."""
+        return self.end.get("reached") or self.stages.get("reached")
+
+
+def trick_label(name: str, stage: str | None, of: str | None = None, reached: str | None = None) -> str:
+    """A trick run's name with its stage: "rear_up stage 1 of 3", "rear_up stage 2 of 3 (reached 1)";
+    an older mind's recording (no ``of``: the build's stage, not the one reached): "rear_up_3 (stage 3)"."""
+    if not stage:
+        return name
+    if not of:
+        return f"{name} (stage {stage})"
+    base = name[: -len(f"_{of}")] if name.endswith(f"_{of}") else name
+    out = f"{base} stage {stage} of {of}"
+    if reached is not None and reached != stage:
+        out += " (top not reached)" if reached == "0" else f" (reached {reached})"
+    return out
 
 
 def trick_run(s: flight.Stream, run: flight.RunSpan | None = None) -> TrickRun:
@@ -116,6 +143,8 @@ def trick_run(s: flight.Stream, run: flight.RunSpan | None = None) -> TrickRun:
             tr.end, tr.end_us = m.fields, m.t_us
         elif m.word == "key":
             tr.keys.append((m.t_us, m.fields.get("text", "")))
+        elif m.word == "stage":
+            tr.stages = m.fields
     if not tr.keys:  # an older mind: the remote's log lines
         tr.keys = [(g.t_us, g.text) for g in part.logs if begin <= g.t_us <= end and g.text.startswith("remote ")]
     tr.telemetry = part.telemetry()
@@ -243,6 +272,8 @@ def analyze(tr: TrickRun, source: dict[str, Any] | None = None, threshold_deg: f
     rs = rows(tr, src)
     out: dict[str, Any] = {
         "path": tr.stream.meta.get("path"), "run": tr.run.id, "trick": tr.name, "stage": tr.stage,
+        "stage_of": tr.stage_of, "stage_reached": tr.stage_reached,
+        "label": trick_label(tr.name, tr.stage, tr.stage_of, tr.stage_reached),
         "start": tr.start, "end": tr.end, "keys": [{"t_s": round((t - tr.lo_us) / 1e6, 3), "text": k}
                                                      for t, k in tr.keys],
         "played": tr.play_us is not None, "has_prediction": bool(kfs and kfs[0].pred_end is not None),
@@ -303,8 +334,8 @@ def analyze(tr: TrickRun, source: dict[str, Any] | None = None, threshold_deg: f
 
 def format_analysis(a: dict[str, Any]) -> str:
     st, en = a.get("start", {}), a.get("end", {})
-    stage = f" (stage {a['stage']})" if a.get("stage") else ""
-    L = [f"{a.get('path') or 'trick'}: trick run {a['run']}: {a['trick']}{stage}, mind {st.get('mind_build', '?')}, "
+    label = a.get("label") or trick_label(a["trick"], a.get("stage"), a.get("stage_of"), a.get("stage_reached"))
+    L = [f"{a.get('path') or 'trick'}: trick run {a['run']}: {label}, mind {st.get('mind_build', '?')}, "
          f"body {st.get('body_build', '?')}, by {st.get('by', '?')}"]
     L.append(f"  start   battery {st.get('battery_mv', '?')} mV, mode {st.get('mode', '?')}, speed "
              f"{st.get('speed', '?')}/64{', mirrored' if st.get('mirror') == '1' else ''}")
