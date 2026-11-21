@@ -1265,3 +1265,261 @@ was never recorded. What to watch on the floor: section 14.6.
 5. The recordings (`kilo runs --host IP --fetch all`): the walk run's
    `stop tick=... quick=1 replanned=N` mark shows the quick stop and how
    many queued ticks it planned again.
+
+## 15. A longer stride for the trot (2026-11-21)
+
+The owner: "Re the trot. Can you find a way to really lengthen out the
+stride? If he's moving at a pace I think you can figure out how to get the
+feet where they need to be before he falls off balance. Maybe it's
+something that you build up. Try and model it."
+
+**[measured]** marks numbers from the floor recordings (`~/kilo-logs`, runs
+of 2026-11-15 to 11-17), **[fitted]** a model fitted to them, **[virtual
+body]** the simulators, **[assumed]** what nobody has measured.
+
+### 15.1 The short answer
+
+- **What limits the stride today is the servos, not the legs and not the
+  balance.** The trot swings a leg in a fixed 160 ms (8 ticks). To carry a
+  44 mm stride (today's top, level 5) in that time the fastest joint turns
+  at 476°/s; the body's own safety limit is 500°/s. A longer stride in the
+  same swing breaks that limit. The legs could reach a stride of about 90
+  mm (48 mm each way at the trot's height).
+- **So a longer stride needs a longer swing, and a longer swing leaves him
+  longer on two diagonal feet**, falling sideways about the line between
+  them. That is the owner's point, and the recordings show how he falls and
+  where the feet must land to catch it (15.3). Landed right, the fall
+  cancels itself: he starts each diagonal with his weight on one side of
+  the line, walks across it, and ends upright.
+- **The model supports a stride of about 52 mm** (nearly twice today's 27.4 mm
+  at the default speed, 18 % more than today's longest), with a swing of 11
+  ticks (220 ms) instead of 8, built up a tick per step as the speed rises
+  from 150 to 207 mm/s. Each pair lands about 6 mm less far ahead than half
+  a stride (19 mm ahead of the shoulders at the top, not 26).
+- **It does not make him faster.** The speed is the stride over the time a
+  foot is on the ground, and both grow together: the top is 207 mm/s,
+  slower than today's level 5 (230). A longer stride gives fewer, longer
+  steps (a 480 ms cycle instead of 360) at the same pace. Faster than about
+  230 mm/s needs faster joints: a firmware slew above 500°/s and servos
+  that can do it (never measured).
+- **It is a prototype** (`kilo.planner.longtrot`), tested in the virtual
+  body only, not in the C++ mind and not on the remote: the owner decides
+  whether it goes further. The existing gaits are unchanged.
+
+### 15.2 What limits the stride, in numbers
+
+| limit | today's trot | what a longer stride needs | source |
+|---|---|---|---|
+| leg reach | the foot goes to ±26 mm at 230 mm/s | ±48.6 mm at the trot's height (76 mm): a stride of about 90 mm; lower bodies reach further (56 mm at 70 mm) | IK, measured links |
+| joint speed, swinging leg | 476°/s at 44 mm (6 mm lift), 364°/s at 27.4 mm | the swing time grows with the stride: 8 ticks carry 40 mm, 9 ticks 46, 10 ticks 52, 11 ticks 59, 12 ticks 64 (8 mm lift, under 476°/s) | the plan's own profile; the 500°/s limit is the body's (`SLEW_MAX_A16`); the servos' own speed under load is **[assumed]** (rated 600°/s unloaded at 4.8 V); the floor ran 476°/s at 230 mm/s and kept up as far as anyone could see |
+| joint speed, legs on the ground | 249°/s at 230 mm/s | under 300°/s at every speed of the long trot | the plan |
+| clearance | 8 mm asked, about 4.7 mm reached through the servos (6 asked and 3.5 reached at 230 mm/s) | a longer swing reaches more of it: 5.2 mm at 10 ticks, 5.4 at 11 | the servo model (50 ms dead time, 70 ms response), **[fitted]** to the crawl's leans |
+| balance | 140 ms on each diagonal pair | 20 ms more per tick of swing; what that costs is 15.3 | the recordings, 15.3 |
+
+(`PYTHONPATH=mind python mind/tests/stridesim.py limits` prints the joint
+table.)
+
+### 15.3 How the trot balances: the pendulum on the diagonal
+
+On a diagonal pair Kilo stands on a line, and nothing holds him sideways:
+he is an inverted pendulum about that line, the tilt growing as e^(t/τ)
+with τ = √(h/g) = 90 ms for his 79 mm high centre of mass (§2). Two things
+push him off the line during each diagonal:
+
+1. **Where his weight sits.** The centre of mass is ahead of the middle
+   (7.5 mm, measured 2026-11-14), and the feet on the ground are wherever
+   they landed: a pair that lands far ahead leaves the weight behind its
+   line, and he tips toward the hind foot in the air.
+2. **Walking across the line.** The diagonal runs at 28° to his length, so
+   walking forward at v carries his weight across it at 0.47 v (67 mm/s at
+   144 mm/s): that alone tips him toward the front foot in the air.
+
+Land the pair at the right place and the two cancel: he ends the diagonal
+upright. That place is x_c + k·v·τ ahead of the shoulders (x_c the
+centre of mass's position, k between 0.5 and 0.9 depending on how long the
+diagonal lasts): a small step ahead of where the body is going, the same
+idea as a "capture point". Half a stride ahead, which is what the trot
+does, is that place only at one speed.
+
+**The recordings agree [measured].** Folding the measured roll of every
+straight trot slot by slot (deduplicated: some runs are in two files) gives
+the tip each diagonal ends with, + toward the front foot in the air:
+
+| trot | stride | slots | tip measured | fitted pendulum | virtual body (Physics) | RockingPhysics |
+|---|---|---|---|---|---|---|
+| forward 101 mm/s | 19.2 mm | 6 | +1.85° | +1.53 | -0.99 | -0.41 |
+| forward 144 mm/s | 27.4 mm | 21 | -1.15° | -0.91 | -0.86 | -0.73 |
+| forward 166 mm/s | 31.5 mm | 7 | -1.73° | -1.78 | -0.85 | -0.83 |
+| forward 180 mm/s | 34.2 mm | 24 | -2.17° | -2.05 | -0.76 | -1.04 |
+| forward 187 mm/s | 35.6 mm | 4 | -2.13° | -2.13 | -0.73 | -1.38 |
+| forward 230 mm/s | 43.8 mm (6 mm lift) | 8 | -1.32° | -2.28 | -0.68 | -1.88 |
+| back 42 mm/s | 8.0 mm | 12 | +2.54° | +2.30 | +2.21 | +2.78 |
+| back 58 mm/s | 10.9 mm | 6 | +2.38° | +2.30 | +2.35 | +2.96 |
+| back 144 mm/s | 27.4 mm | 7 | +2.33° | +2.30 | +2.68 | +3.03 |
+
+Read: forward, the tip changes sign between 100 and 144 mm/s (at 100 the
+pair lands too little ahead, above 144 too far), and today's default sits
+near the sweet spot, which may be why the owner liked the trot at 144.
+Backward, the pairs always land too far back and he always tips the same
+way. The rock is very regular: after the phase-locked part is taken out,
+what is left is 0.1 to 0.3° rms at a steady speed.
+
+**The fitted pendulum [fitted]** (`kilo.planner.longtrot.TrotFit`): the
+pendulum above, from upright at each diagonal's start, with three numbers
+fitted to the table (rms 0.15° over the eight rows with the 8 mm lift):
+
+- the centre of mass 3.5 mm ahead of the middle (measured standing: 7.5);
+- the body rocks as if each diagonal lasted 120 ms longer than the plan's
+  140 ms on two feet: the rotation is not stopped at every touchdown, it
+  runs on into the next diagonal (fits with 100 to 160 ms extra are almost
+  as good, 0.13 to 0.31°);
+- the tip stops at about 2.3°: the foot on the falling side, 4.7 mm off the
+  ground, touches down early and catches him. Most of today's trots run
+  against this stop (backward always, forward above 160 mm/s), and they
+  walk fine: the early touchdown is the trot's real safety net. With the 6
+  mm lift at 230 mm/s it catches sooner (-1.3° measured).
+
+From the fit, a pair that lands 1 mm off its balanced point tips him 2.4°
+by the diagonal's end with today's 8-tick swing; 3.1° with 9 ticks, 3.9
+with 10, 5.0 with 11, 6.3 with 12. That growth is the price of a longer
+swing.
+
+**The virtual body was not faithful here.** Its physics (Physics, §10)
+has the pendulum, but on a diagonal it often stands on one foot of the
+pair (whichever is lower by 0.6 mm), stops every rotation as soon as a
+third foot touches, and its rock hardly changes with the speed: it misses
+the sign change forward and is half the size above 160 mm/s. A second
+physics was built for this study (`kilo.vbody.rocking.RockingPhysics`:
+both feet of a diagonal on the ground, the body free to turn only about
+their line, a third foot that does not yet hold the weight leaves it
+rocking, the rotation carried from one diagonal to the next); with its
+best settings of those tried it gets the backward rock and the sign above
+144 forward, still about half the size forward and the wrong sign at 101.
+So the fitted pendulum is the model the design uses; the two physics check
+the mechanics (reach, joints, clearance, falls, stops) and the direction of
+each effect.
+
+### 15.4 The long trot and its build-up
+
+`kilo.planner.longtrot.LongTrotPlanner`, a Planner with:
+
+- **A swing that grows with the speed, a tick per step.** 8 ticks up to 150
+  mm/s (exactly today's trot: the same stride, cadence and feet within 2
+  mm), then a tick more for every 18 mm/s, at most 11 ticks; a swing is
+  never more than a tick longer than the one before, so a speed change
+  lengthens the stride over a few steps (the stride itself grows 0.75 mm a
+  tick, half the trot's 1.5). One tick on four feet, as today.
+- **Each pair lands at its balanced point**, x_c + k v τ from the fitted
+  pendulum, instead of half a stride ahead.
+- **Each swing long enough for its step** (a square-up after a stop, a
+  steer's outer side), the steer's outer stride capped for its swing.
+
+**The schedule** (forward; [fitted] the tip and the gain, [virtual body]
+the last four columns; the error is the largest |measured - predicted|
+over 8 s; the model errors are the centre of mass 5 mm ahead, behind, or
+5 mm left with 50 g more battery, and the servos slower (100 + 100 ms) or
+faster (20 + 50 ms) than the plan assumes):
+
+| speed | swing | stride | cycle | lands ahead (half a stride) | tip if it landed at half a stride | tip per mm off | error, RockingPhysics / Physics | worst of the model errors | fastest joint | feet |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 144 | 8 (160 ms) | 27.4 | 360 ms | 13.3 (13.7) | -0.9° | 2.4° | 3.1 / 1.0° | 3.6° | 362°/s | -15..13 mm |
+| 160 | 9 (180 ms) | 33.6 | 400 ms | 14.9 (16.8) | -6.0° (caught at -2.3) | 3.1° | 2.6 / 1.2° | 4.1° | 369°/s | -20..15 mm |
+| 170 | 10 (200 ms) | 39.1 | 440 ms | 16.0 (19.6) | -14° (caught) | 3.9° | 1.9 / 1.4° | 4.6° | 369°/s | -25..16 mm |
+| 180 | 10 (200 ms) | 41.4 | 440 ms | 16.7 (20.7) | -16° (caught) | 3.9° | 0.9 / 1.4° | 4.6° | 380°/s | -26..17 mm |
+| 190 | 11 (220 ms) | 47.5 | 480 ms | 17.9 (23.8) | -29° (caught) | 5.0° | 2.4 / 1.6° | 5.0° | 430°/s | -31..18 mm |
+| 200 | 11 (220 ms) | 50.0 | 480 ms | 18.7 (25.0) | -32° (caught) | 5.0° | 1.4 / 1.6° | 5.4° | 451°/s | -33..19 mm |
+| 207 (top) | 11 (220 ms) | 51.8 | 480 ms | 19.2 (25.9) | -33° (caught) | 5.0° | 3.4 / 1.7° | 5.6° | 451°/s | -35..19 mm |
+
+Backward it goes to 180 mm/s (41 mm, 10 ticks): its pairs land further
+forward (-10 mm instead of -21), where the knees work harder, and above
+that the joints pass the bound. Steering keeps every joint under 483°/s
+(the trot allows 480 above 184 mm/s; the extra is the FEET's 1 mm
+rounding) and every foot in reach.
+
+No case fell, caught a foot or held the gait, in either physics, with any
+of the model errors. In RockingPhysics, the same long strides landing at
+half a stride rock three to five times as much (roll rms 1.9 to 2.6° at
+180 to 207 mm/s against 0.4 to 0.6), so the placement matters in both
+physics; where exactly the best landing point is, they disagree by about
+3 mm either side of the fitted one (and so may the real body, 15.6).
+
+**The margins, read honestly.** By the fitted pendulum, a landing more than
+about 0.5 mm off (11 ticks; 1 mm with today's 8) already sends him to the
+2.3° catch: like today's trot above 160 mm/s, the long trot will run
+against its early touchdowns much of the time, and that is how it stays up.
+The useful margin is against what the floor has shown he survives: today's
+backward trot at 144 mm/s lands 7.4 mm off its balanced point, a fitted tip
+of 18° that the early touchdown holds at 2.3°, and it walks. The same 18°
+is a landing 7.5 mm off with 8 ticks, 5.8 with 9, 4.6 with 10 and 3.6 with
+11. So with 11 ticks the placement must be right to about ±3.5 mm, and the
+fit's own uncertainty (the 3 mm the physics disagree by) uses most of
+that: 11 ticks is the edge, which is why the prototype stops there. The
+long stride landed at half a stride (33° at the top) is outside anything
+seen on the floor. A swing of 12 ticks (a 56 mm stride) planned fine but
+rocked 3.6° in RockingPhysics and has a margin of about 2.9 mm.
+
+### 15.5 Stopping from the long stride
+
+Both stops are the Planner's; the long trot only makes each square-up
+step's swing as long as its distance needs (the feet are up to 35 mm
+behind the shoulders), and a stop asked mid-swing keeps that swing's
+landing. The quick stop from the long stride, asked at every second tick of
+a cycle, in RockingPhysics with the momentum on (the stopping study's
+switch, §14.4):
+
+| speed | stride | stopped (median / worst) | way (median / worst) | done | peak tilt | fell |
+|---|---|---|---|---|---|---|
+| 144 | 27.4 mm | 0.18 / 0.20 s | 13 / 15 mm | 0.9 s | 3.2° | no |
+| 180 | 41.4 mm | 0.34 / 0.56 s | 9 / 12 mm | 1.0 s | 4.7° | no |
+| 207 | 51.8 mm | 0.58 / 0.64 s | 11 / 16 mm | 1.0 s | 4.8° | no |
+
+The stride does not have to shorten first: the feet in the air come down
+where they are and the strides go to zero in 6 ticks, as in §14. It takes a
+little longer to be still (the square-up steps from a long stride shift
+the body a few mm, which this measure counts) and goes no further. The
+planned stop takes about 2 s from the top (the strides shrink at 0.75 mm a
+tick), inside the walker's 4.2 s limit.
+
+### 15.6 What is measured, what is assumed, and the floor test that would settle most
+
+- **Measured:** the links, the masses and the centre of mass standing
+  (2026-11-14); the trot's rock at nine speeds (15.3); that the servos
+  followed 476°/s at 230 mm/s well enough to walk (no measurement of the
+  joints themselves: the servos report no position).
+- **Fitted:** the servo response (50 + 70 ms, §12.2); the pendulum's three
+  numbers (15.3), from 8-tick swings only. Its use for 9 to 11 ticks is an
+  extrapolation: the 120 ms of extra rocking may not stay 120 ms with a
+  longer swing, and the 2.3° catch grows with the clearance (5.4 mm reached
+  at 11 ticks against 4.7) or not.
+- **Assumed:** the servos' speed under load; that the feet do not slip
+  (longer strides slide the feet on the ground no faster, under 300°/s);
+  that the early touchdown keeps catching a longer swing as it catches
+  today's.
+
+**The one measurement that settles the most** is the long trot's own rock
+at one speed with a 10-tick swing: run it at 180 mm/s forward for 10 s and
+fold the recording as 15.3 does (`stridesim.py fit` reads it). It needs the
+long trot on Kilo (the C++ port and a key), which is the owner's call.
+**With today's tools**, the measurement worth taking first is a
+slow-motion phone video (240 fps if the phone has it) from the side, at
+floor level, of the trot at level 5 (A4, then B7 four times: 230 mm/s),
+with a tape measure on the floor: whether the swinging foot reaches its
+lift and lands where it should, and how early the falling side's foot
+touches. If the servos keep up with room to spare, a stride longer than 44
+mm in today's 8 ticks may be possible with a firmware slew above 500°/s and
+no balance cost at all; if they already lag, the long trot's longer swing
+is the only way to a longer stride.
+
+### 15.7 What was built
+
+- `mind/kilo/planner/longtrot.py`: `LongTrotPlanner`, `LONG_TROT` (its own
+  pattern object, not in `patterns.PATTERNS`), `TrotFit` (the fitted
+  pendulum, `TROT_FIT`), the schedule (`swing_for`, `timing`). The
+  existing planner, patterns, golden vectors and C++ mind are unchanged.
+- `mind/kilo/vbody/rocking.py`: `RockingPhysics`; `FeetPlayer.PHYSICS`
+  chooses the physics new FEET players use (Physics by default).
+- `mind/tests/stridesim.py`: the study (`limits`, `fit`, `schedule`,
+  `stops`); `mind/tests/test_long_trot.py`: the prototype's tests (reach,
+  joints, the build-up, the placement, the fit against the recorded
+  numbers, walks in both physics, both stops); `WalkSim` takes a
+  `planner_factory`.

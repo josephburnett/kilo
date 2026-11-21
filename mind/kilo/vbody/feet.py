@@ -71,6 +71,10 @@ def ease_cos(i: int, n: int) -> float:
 
 
 class FeetPlayer:
+    # the walking physics new players use: Physics, or a callable with its signature (the long-trot
+    # study puts kilo.vbody.rocking's there, mind/tests/stridesim.py)
+    PHYSICS = Physics
+
     def __init__(self, tick: int, model: BodyModel, lag_ms: float | None = None, tau_ms: float | None = None):
         self.model = model
         self.queue: dict[int, Any] = {}     # unwrapped tick -> Feet
@@ -80,7 +84,7 @@ class FeetPlayer:
         self.x = [0.0] * 4                  # commanded feet (after the slew): STANCE's
         self.z = [self.stance_h] * 4
         self.cur = (list(self.x), list(self.z))  # the pose played (FEET's feet; the settle moves its z)
-        self.physics = Physics(model, lag_ms=lag_ms, feet=(self.x, self.z), tau_ms=tau_ms)
+        self.physics = FeetPlayer.PHYSICS(model, lag_ms=lag_ms, feet=(self.x, self.z), tau_ms=tau_ms)
         self.corr = [0.0, 0.0]              # pitch, roll correction (deg)
         self._lp = [0.0, 0.0]
         self._hold = 0
