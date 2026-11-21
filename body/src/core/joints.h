@@ -32,7 +32,7 @@ struct JointCal {
   uint16_t b_offset_counts;       // B_OFFSET x 10
 };
 
-// Robot-model constants (src/OpenCat.h), read from flash.
+// Robot-model constants (the legacy src/OpenCat.h, in git history), read from flash.
 uint8_t joint_id(uint8_t k);  // canonical index -> joint id
 uint8_t joint_channel(uint8_t j);
 int8_t joint_dir(uint8_t j);

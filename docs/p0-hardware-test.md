@@ -64,7 +64,8 @@ export PATH="$HOME/OpenCat/.venv/bin:$PATH" KILO_PORT=/dev/ttyACM0
 ```
 
 Build the legacy image for the rollback in step 9. `mind/firmware/` does not
-ship one yet. On `mega`, `OpenCat.ino` and `src/` are the legacy firmware:
+ship one yet. On `mega`, `OpenCat.ino` and `src/` are the legacy firmware
+(deleted from the tree on 2026-11-20: check out 64b9447 to build it):
 
 ```sh
 cd ~/OpenCat

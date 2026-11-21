@@ -126,12 +126,12 @@ int main() {
   // orientations with legacy |pitch|, |roll| <= 60 deg (any yaw), float32
   // legacy maths against the integer firmware.
   {
-    std::string imu = slurp("src/imu.h");
+    std::string imu = slurp("legacy/imu.h");
     CHECK(imu.find("mpu.dmpGetGravity(&gravity, &q);\n    mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);") !=
           std::string::npos);
     CHECK(imu.find("ypr[i] *= degPerRad;") != std::string::npos);
     CHECK(imu.find("ypr[1] =") == std::string::npos && imu.find("ypr[2] =") == std::string::npos);
-    std::string skill = slurp("src/skill.h");
+    std::string skill = slurp("legacy/skill.h");
     CHECK(skill.find("RollPitchDeviation[i] = ypr[2 - i] - expectedRollPitch[i];") != std::string::npos);
     int n = 0, tries = 0;
     double ab_p = 0, ab_r = 0;

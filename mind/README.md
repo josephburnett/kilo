@@ -515,7 +515,7 @@ from the bottom), is in `kernel/README.md` "The remote's keys": that is the
 C++ mind's map, and the daemon follows it except where this paragraph says.
 `kilo monitor` shows a key as `IR_KEY B6 (0x02, stand)` (`... repeat` while
 held), the passive timeline as `EVENT IR_KEY ...`. The key table is
-`kilo.ir.KEYS` (from the legacy `src/infrared.h`). `kilo run --remote` (off
+`kilo.ir.KEYS` (from `legacy/infrared.h`). `kilo run --remote` (off
 by default, like `--behaviour`; on the Pi add it to `KILO_RUN_ARGS` in
 `~/.config/kilo/env`) acts on the keys through the daemon's own BodyClient.
 The daemon differs from the C++ mind in three ways: B2 does nothing (the
@@ -914,7 +914,7 @@ accepts the Kilo name or the legacy token.
 | butt_up | `buttUp` | posture | 1 | - | STAND |
 
 **Importer.** `python -m kilo.tricks.import_legacy` (from `mind/`) parses
-`src/InstinctNybble.h` with `legacy.py` and rewrites the library; it is
+`legacy/InstinctNybble.h` with `legacy.py` and rewrites the library; it is
 idempotent, and `--check` only reports stale files (a test does the same).
 `legacy.parse_file()`/`parse_text()` read any file in the same format and
 return the raw arrays (`LegacySkill`), which `legacy.to_trick()` maps:

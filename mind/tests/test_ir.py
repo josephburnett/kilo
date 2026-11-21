@@ -27,7 +27,7 @@ from kilo.link import consts
 
 from test_daemon import remote, start_daemon, vbody_pty, sockdir, wait_for  # noqa: F401  (fixtures)
 
-LEGACY = Path(__file__).resolve().parents[2] / "src" / "infrared.h"
+LEGACY = Path(__file__).resolve().parents[2] / "legacy" / "infrared.h"
 
 
 @pytest.fixture

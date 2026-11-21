@@ -3,7 +3,7 @@
 //   1. the per-joint gain table == legacy adaptiveParameterArray (motion.h
 //      constants) == Kilo's EEPROM ADAPT_PARAM;
 //   2. balance_map() reproduces legacy adjust() (float, transcribed from
-//      src/motion.h + skill.h) over a grid, and the whole controller at
+//      legacy/motion.h + skill.h) over a grid, and the whole controller at
 //      Kp ~ 1, Kd 0 reproduces it for a set of tilts, dead bands included;
 //   3. the mapping's physical direction, checked against the posture tables;
 //   4. toy-plant closed loops (corr space and through body_tick + joints):
@@ -24,13 +24,13 @@
 #include "body_fixture.h"
 #include "fake_eeprom.h"
 
-// ---- Legacy reference (src/motion.h, src/skill.h), in double -------------
+// ---- Legacy reference (legacy/motion.h, legacy/skill.h), in double -------
 static double LEG[16][2];  // adaptiveParameterArray as stored (int8 in EEPROM)
 static double LRF;         // LEFT_RIGHT_FACTOR
 static double TOL[2];      // levelTolerance {roll, pitch}
 
 static void load_legacy() {
-  std::string m = slurp("src/motion.h");
+  std::string m = slurp("legacy/motion.h");
   std::map<std::string, std::string> def;
   // "#define NAME value  // comment" lines.
   std::istringstream lines(m);

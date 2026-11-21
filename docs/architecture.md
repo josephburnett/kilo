@@ -5,7 +5,9 @@ a Petoi Nybble on a NyBoard V1_2 with a Raspberry Pi 2 Model B as its mind (toda
 
 **Status:** revised draft for implementation, 2026-10-10.
 
-**Ground truth:** `OpenCat.ino` and `src/` on branch `mega` at 684d0eb, plus
+**Ground truth:** `OpenCat.ino` and `src/` on branch `mega` at 684d0eb (the
+legacy firmware, deleted from the tree on 2026-11-20 except the headers in
+`legacy/` that tests read; git history has the rest), plus
 `docs/raspberry-pi.md`. Numbers marked **(est.)** are estimates. All other
 numbers were read from the code or measured on that commit. Compiling it with
 `arduino-cli -b arduino:avr:uno` gives 32016 B of flash and 1620 B of globals.
@@ -329,8 +331,8 @@ needs an ISP programmer. That is not planned.
 | 14 | RB knee | 7 | +1 | 30 | -120..60 |
 | 15 | LB knee | 0 | −1 | 30 | -120..60 |
 
-The values come from `src/OpenCat.h`, except the tail `dir`: current
-`src/OpenCat.h` says −1 because upstream commit b152455 (N_240907, Bittle
+The values come from the legacy `src/OpenCat.h` (in git history), except the tail `dir`: current
+upstream `OpenCat.h` says −1 because upstream commit b152455 (N_240907, Bittle
 robot arm) flipped the shared `rotationDirection[2]`; Nybble firmware up to
 N_240702, and Kilo's own EEPROM, say +1, and the legacy firmware drives with
 the EEPROM value. The leg order LF, RF, RB, LB is not
@@ -1051,7 +1053,7 @@ folds, back extends) → the nose comes down. Right side up 10° reads roll +10
 pair 1.2× → the right side comes down.
 
 **Expected attitude per posture** (the balance reference), from the legacy
-skill headers in `src/InstinctNybble.h` (frame count, expected roll, expected
+skill headers in `legacy/InstinctNybble.h` (frame count, expected roll, expected
 pitch, angle ratio), used verbatim (Kilo's attitude is the legacy `ypr`):
 
 | Posture | Header roll, pitch (legacy) | Kilo `ref` roll, pitch | Balance |
@@ -1171,7 +1173,7 @@ As implemented in P1 (`core/reflex.{h,cpp}` for the detector,
   20) as legacy beeped. REFLEX holds the current output (`POSTURE_HOLD`).
 - **Still.** Every body rate < 20°/s on 10 consecutive samples. Until then
   it holds, however long it is handled.
-- **rc.** The legacy behaviour (`src/InstinctNybble.h` `rc`, 3 frames)
+- **rc.** The legacy behaviour (`legacy/InstinctNybble.h` `rc`, 3 frames)
   converted like the trick importer converts behaviours: dur 11, 5, 18
   ticks (cosine), hold 30, 25, 0 ticks, 89 ticks (1.8 s) in all, played by
   the REFLEX mover from the current output. Legacy `reaction.h` played it
@@ -1684,7 +1686,7 @@ the body: it boots at a new epoch (§3c "Boot epoch").
 **Tricks.**
 - Tricks are JSON keyframes named by joint, with a model, validation, mirror
   and time-scaling, and are uploaded with caching by `(trick_id, crc)`.
-- The first-version library is imported from `src/InstinctNybble.h`:
+- The first-version library is imported from `legacy/InstinctNybble.h`:
   - basics: `sit`, `rest`, `up`, `str` (stretch), `balance`;
   - social: `hi`, `wsf` (wash face), `ck` (check around), `snf` (sniff),
     `scrh` (scratch), `pee`, `pu` (push-up), `buttUp`.
@@ -1883,7 +1885,8 @@ and the results go in the merge commit message. Highlights:
 
 Order: talking and standing under Pi control (P0), today's chosen tricks (P1),
 walking (P2). `kilo flash --legacy` stays available throughout. `OpenCat.ino`
-and `src/` are deleted after P2 is accepted.
+and `src/` were deleted on 2026-11-20; the six headers the tests read are in
+`legacy/`.
 
 **P0: protocol + skeleton body.**
 - **Deliverables:**
@@ -2573,12 +2576,14 @@ docs/                     the design (architecture.md), setup (setup.md, laptop-
                           kilo-eeprom-legacy, firmware-size-report), hardware test procedures and their
                           dated -results.md logs, reviews and outage notes
 tools/kilo-hud/           a Claude Code mod that shows Kilo's state beside the chat
-OpenCat.ino, src/         the legacy firmware: kept as a reference (headers read by tests and the
-                          trick importer); the rollback image is mind/firmware/opencat-legacy.hex
+legacy/                   six headers of Petoi's original OpenCat firmware, read by tests and the trick
+                          importer, not built (legacy/README.md); the rest of that firmware is in git
+                          history, its rollback image is mind/firmware/opencat-legacy.hex
+LICENSE                   MIT, OpenCat's
 ```
 
-arduino-cli compiles `src/` recursively, which is why the logic lives under
-`body/src/`.
+arduino-cli compiles a sketch's `src/` recursively, which is why the logic
+lives under `body/src/`.
 
 **CLI.** `kilo` talks to the daemon over a Unix socket (JSON lines), or
 opens the port directly if no daemon is running (`--direct` forces that). As

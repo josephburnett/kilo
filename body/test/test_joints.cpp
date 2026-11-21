@@ -1,6 +1,6 @@
 // Differential test: the integer transfer function against a transcription
-// of the legacy float path (src/motion.h calibratedPWM() ->
-// src/PCA9685servo.h writeAngle()), for every driven joint and every whole
+// of the legacy float path (legacy/motion.h calibratedPWM() ->
+// PCA9685servo.h writeAngle(), not kept: git history), for every driven joint and every whole
 // degree within its limits, over several plausible per-robot EEPROM sets.
 #include <cstdlib>
 #include "../src/core/joints.h"
@@ -78,7 +78,7 @@ int main() {
   CHECK(joint_clamp(10, -90 * 16) == -80 * 16);  // legacy "sit" RB shoulder
   CHECK(joint_clamp(1, 60 * 16) == 45 * 16);
   CHECK(joint_clamp(0, JOINT_OFF) == JOINT_OFF);
-  // Channel map spot checks (OpenCat.h pwm_pin).
+  // Channel map spot checks (legacy OpenCat.h pwm_pin, in git history).
   CHECK(joint_channel(0) == 12 && joint_channel(15) == 0 && joint_channel(8) == 14);
   // The legacy prescaler: 25 MHz nominal -> 24; a calibrated 26.5 MHz
   // oscillator would give 26 (why hal/pca9685 does NOT use the stored value).

@@ -32,8 +32,9 @@ sets up a dev host and the Pi, `docs/laptop-setup.md` a laptop that updates
 Kilo through his SD card, `mind/README.md` lists the commands, and
 `docs/p*-hardware-test*.md` record what has been tried on Kilo.
 
-The original OpenCat firmware (`OpenCat.ino` and `src/`) is still in the
-tree: `src/InstinctNybble.h` holds the stock postures and skills that the new
-firmware and the trick importer read, and the tests check a few other headers
-against it. The rest of the fork (its desktop UI, module tests, skill library)
-was removed on 2026-10-11; git history has it. Licence: MIT, as OpenCat's.
+Of the original OpenCat firmware only six headers remain, in `legacy/`
+(`legacy/README.md`): `legacy/InstinctNybble.h` holds the stock postures and
+skills that the new firmware and the trick importer read, and the tests check
+the others against the new code. The rest of the fork was removed (its
+desktop UI, module tests and skill library on 2026-10-11, `OpenCat.ino` and
+`src/` on 2026-11-20); git history has it. Licence: MIT, as OpenCat's.

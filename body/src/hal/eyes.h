@@ -1,6 +1,6 @@
 // eyes: the six WS2812 LEDs of the RGB ultrasonic module, data on D7
 // (legacy RgbUltrasonic(6, 7): the sonar on D6, the LEDs on D7, Grove
-// socket G4; src/rgbUltrasonic/RGBLed.cpp drove them the same way).
+// socket G4; the legacy src/rgbUltrasonic/RGBLed.cpp, in git history, drove them the same way).
 //
 // SET_EYES (core/link.cpp keeps the last one in link_eyes) is shown from
 // the tick (app/main.cpp) when a new one came and no echo is being timed.

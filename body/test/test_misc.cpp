@@ -99,7 +99,7 @@ int main() {
   events_pop(e);
   CHECK(events_peek(e)->code == 2);
   // ---- DMP image == legacy dmpMemory[], byte for byte.
-  std::string h = slurp("src/mpu6050/MPU6050_6Axis_MotionApps_V6_12.h");
+  std::string h = slurp("legacy/mpu6050/MPU6050_6Axis_MotionApps_V6_12.h");
   size_t a = h.find("dmpMemory[MPU6050_DMP_CODE_SIZE] PROGMEM = {");
   size_t b = h.find("};", a);
   CHECK(a != std::string::npos && b != std::string::npos);
@@ -112,7 +112,7 @@ int main() {
     if (legacy[i] != dmp_image[i]) diff++;
   CHECK(diff == 0);
   // ---- Built-in postures == InstinctNybble.h (joints 3-7 dropped).
-  std::string inst = slurp("src/InstinctNybble.h");
+  std::string inst = slurp("legacy/InstinctNybble.h");
   struct {
     const char* name;
     uint8_t id;
