@@ -28,7 +28,7 @@
 // kilo-mind-host --rear-up[=N]; for the Python daemon KILO_REAR_UP=N in
 // its environment (ir.py).
 //
-// The legacy meaning (src/infrared.h) is kept for reference. There is no
+// The legacy meaning (legacy/infrared.h) is kept for reference. There is no
 // shutdown key (Python has none either).
 #ifndef KILO_MIND_REMOTE_KEYS_H
 #define KILO_MIND_REMOTE_KEYS_H

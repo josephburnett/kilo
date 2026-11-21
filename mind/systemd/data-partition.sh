@@ -1,5 +1,5 @@
 #!/bin/sh
-# Give the Pi's SD card a writable data partition (docs/setup.md "Power: safe mode").
+# Give the Pi's SD card a writable data partition (retired; docs/setup.md "Power: safe mode", in git history).
 # Run on a Linux host (rtb, a laptop) with the card in a USB reader, as root.
 # NOT on the Pi: the Pi's root cannot be shrunk while it is mounted.
 #

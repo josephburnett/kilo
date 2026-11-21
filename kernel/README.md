@@ -763,7 +763,7 @@ Ethernet ("Network bring-up").
 ### The Mind's settings
 
 `MindConfig` as the Pi's daemon ran (`kilo run --remote --balance 0.99`,
-`KILO_RUN_ARGS` in docs/setup.md and `mind/systemd/env.example`). There is
+`KILO_RUN_ARGS` in `mind/systemd/env.example`). There is
 no settings file on the card, so they are compiled in (`src/kernel.cpp`):
 
 | Setting | Kernel | Why |

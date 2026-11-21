@@ -2,7 +2,7 @@
 #include "pgm.h"
 #include "../proto/kilo_protocol.h"
 
-// One row per legacy joint id, straight from src/OpenCat.h (pwm_pin[],
+// One row per legacy joint id, straight from the legacy src/OpenCat.h (git history; pwm_pin[],
 // rotationDirection[], middleShift[]); the limits (angleLimit[], whole
 // degrees, int8) come from the spec's [[joints]] (protocol/spec.toml), which
 // the mind's trick validator reads too. test_joints.cpp checks every row's

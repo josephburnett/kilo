@@ -2,7 +2,7 @@
 #include "../proto/crc16.h"
 #include "pgm.h"
 
-// Legacy addresses (src/OpenCat.h; Appendix C4).
+// Legacy addresses (the legacy src/OpenCat.h, in git history; Appendix C4).
 #define L_PWM_PIN 0
 #define L_CALIB 16
 #define L_MID_SHIFT 32

@@ -13,7 +13,7 @@
 #include "../../src/hal/ultrasonic.cpp"
 #include "../../src/core/ir_nec.cpp"
 
-// The Petoi remote's 21 command bytes (mind/kilo/ir.py KEYS, src/infrared.h).
+// The Petoi remote's 21 command bytes (mind/kilo/ir.py KEYS, legacy/infrared.h).
 static const uint8_t KEYS[21] = {0xA2, 0x62, 0xE2, 0x22, 0x02, 0xC2, 0xE0, 0xA8, 0x90, 0x68, 0x98,
                                  0xB0, 0x30, 0x18, 0x7A, 0x10, 0x38, 0x5A, 0x42, 0x4A, 0x52};
 

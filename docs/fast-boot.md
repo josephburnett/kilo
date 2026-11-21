@@ -11,8 +11,9 @@ Pi follows `docs/fast-boot-first-boot.md`, results in
 
 ## 1. Why
 
-Measured on 2026-10-12 (docs/setup.md "The daemon as a system service, and
-boot time"): kernel 7.8 s, `kilo.service` started at 22 s, first daemon log
+Measured on 2026-10-12 (the retired Pi setup's "The daemon as a system
+service, and boot time", deleted from docs/setup.md on 2026-11-20; git
+history has it): kernel 7.8 s, `kilo.service` started at 22 s, first daemon log
 line at 26.6 s after power, of which ~4.6 s is Python starting `kilo run`.
 Whole boot 38.6 s.
 
@@ -215,7 +216,7 @@ image on SD for a `kilo flash --rollback`.
 - **Floating point and timing** in the planner on a Cortex-A7 without Linux:
   enable the FPU in Circle; check the 20 ms budget early in P3.
 - **Persistent logs** without journald: decide how much goes to SD and when,
-  given power cuts (docs/setup.md "Power: safe mode").
+  given power cuts (the retired Pi setup's "Power: safe mode", in git history).
 - **Porting fidelity.** The Python tests and `vbody` are the oracle. Add a
   mode where the C++ mind runs on the laptop against `vbody` (Circle code
   behind a thin platform layer) so the same cases run in CI.

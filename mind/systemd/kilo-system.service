@@ -1,5 +1,7 @@
 # Kilo mind daemon as a systemd *system* service running as the owner
-# (mind/README.md "Daemon and systemd"; docs/setup.md). The recommended unit.
+# Retired with the Pi's Raspberry Pi OS (docs/fast-boot.md section 8); its docs,
+# mind/README.md "Daemon and systemd" and docs/setup.md "The Pi", are in git
+# history (deleted 2026-11-20). The recommended unit.
 #
 # Installed by `sudo mind/systemd/install.sh --system` to
 # /etc/systemd/system/kilo.service, with @USER@, @GROUP@, @HOME@ and @KILO@

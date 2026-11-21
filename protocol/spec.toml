@@ -1001,7 +1001,7 @@ brief = "Knee bend at joint angle 0 (θ2_0)"
 stance_h_256 = 205             # STANCE's body height when IDLE enters it from another posture, and the settle height after a FEET underrun: /256 of (L1 + L2), 0.80
 
 # Joint limits (doc §3b), whole degrees in the joint (OpenCat) convention, by
-# legacy joint id 0..15 (every id, in order; from src/OpenCat.h angleLimit[]).
+# legacy joint id 0..15 (every id, in order; from the legacy src/OpenCat.h angleLimit[], git history).
 # The body clamps every output to them (the last stage before the slew); the
 # mind's trick validator refuses keyframes outside them.
 #   id      legacy joint id (= index); the PCA channel, direction and mid shift

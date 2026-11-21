@@ -245,7 +245,7 @@ and the closest range seen while walking forward.
 The module on the head is Petoi's RGB ultrasonic sensor: one signal wire
 for the range finder on D6, and the six WS2812 lights' data on D7 (Grove
 socket G4; the legacy firmware's `RgbUltrasonic(6, 7)` in
-`src/ultrasonic.h`, which lit them white, yellow, blue and red by distance).
+`src/ultrasonic.h`, now in git history only, which lit them white, yellow, blue and red by distance).
 The new body firmware drives them from the mind's `SET_EYES`
 (`body/src/hal/eyes.cpp`): green 0x30, blue 0x30 or red 0x30 on all six,
 or for orange red 0x30 with green 0x10.

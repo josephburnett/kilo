@@ -28,40 +28,6 @@ random value per process. Heartbeats, goal refreshes and HELLO polls (also the
 one on connect) are only sent while the mind's main loop proved alive within
 1 s.
 
-## Install on the Pi
-
-> **Retired route.** This section installs the Python mind on the Pi's Raspberry Pi OS. Kilo no longer runs that: the Pi now starts the mind kernel straight from the SD card, with no operating system under it (`docs/fast-boot.md` section 8 lists what is retired). On the laptop the `kilo` command is installed as `docs/laptop-setup.md` says; the mind on Kilo is the kernel (`kernel/README.md`). This text stays until the owner decides what to do with it.
-
-The full recipe for the Pi and a dev host is `docs/setup.md`; the essentials:
-pyserial comes from apt (`python3-serial`, 3.5). Recommended: a per-repo venv
-that can see the system site packages, so pyserial is not installed twice and
-the system Python stays untouched:
-
-```sh
-sudo apt install python3-serial python3-venv
-cd ~/OpenCat
-python3 -m venv --system-site-packages ~/OpenCat/.venv
-~/OpenCat/.venv/bin/pip install -e mind pytest
-echo 'export PATH="$HOME/OpenCat/.venv/bin:$PATH"' >> ~/.bashrc
-```
-
-The alternative, `pip install --break-system-packages -e .` into the system
-Python, works but mixes pip-managed files into `/usr/local`; prefer the venv.
-`pip install -e` makes the source tree live, so `git pull` is enough to update.
-
-Tests: `python -m pytest mind/tests -q`. `-m "not slow"` skips the tests
-marked slow (they start `kilo` subprocesses or a daemon and wait in wall
-time). `pip install pytest-xdist` and `-n 4` runs the suite in parallel
-(sockets, ptys and log directories are per test), but the slow tests then
-compete for the CPU and can time out on a loaded machine, so the default run
-stays serial. The link and virtual-body timing rules (heartbeat, liveness
-window, goal refresh, ACK retries, backoff, the body watchdog) run on a
-stepped clock (`kilo.stepclock.StepClock`) and do not depend on load.
-
-Serial access needs the `dialout` group (`sudo usermod -aG dialout $USER`), and
-the Pi configuration in docs/architecture.md Appendix F (serial console off,
-UART on, 1-Wire off, UART clock 48 MHz, GPIO4 left as an input).
-
 ## Port rules
 
 1. `--port P` (or `$KILO_PORT`) always wins.
@@ -389,260 +355,6 @@ stop), `pose(...)`, `release_pose()`. No behaviour walks yet
 (`BodyAdapter.walk` exists): the owner decides when autonomous walking is
 allowed.
 
-## Daemon and systemd
-
-> **Retired route.** Running `kilo run` on the Pi as Kilo's mind, under systemd, is the old way. Kilo no longer runs that: the Pi now starts the mind kernel straight from the SD card, with no operating system under it (`docs/fast-boot.md` section 8 lists what is retired). The C++ mind kernel does this job now (`kernel/README.md`); the laptop talks to it with `kilo --host`. `kilo run` itself is still in the code, and its tests run it against the virtual body. This text stays until the owner decides what to do with it.
-
-`kilo run` is one process that owns the serial port, the `SerialLink` and the
-`BodyClient`, and serves a Unix socket. The socket path comes from one
-resolver (`kilo.remote.socket_candidates()`) used by both sides: `--socket`,
-else `$KILO_SOCKET`, else `/run/kilo/kilo.sock` for root, else
-`$XDG_RUNTIME_DIR/kilo/kilo.sock`, then `/run/user/<uid>/kilo/kilo.sock` when
-`/run/user/<uid>` exists, then `~/.kilo/kilo.sock`. The daemon listens on the
-first; a client without `--socket`/`$KILO_SOCKET` tries them in order and
-uses the first daemon that answers. The `/run/user/<uid>` step matters on the
-Pi: a non-login SSH shell (`ssh kilo kilo status`) has no `$XDG_RUNTIME_DIR`,
-while the systemd user service listens on `/run/user/1000/kilo/kilo.sock`;
-before, such a command silently fell back to opening the port directly. The
-daemon logs the socket it serves at startup, and `kilo daemon` lists every
-path it tried when none answers.
-
-**Port hot-plug.** The daemon starts whether or not the port exists (robot
-unplugged, adapter not enumerated yet): `kilo daemon` then shows
-`connected=False` and a `link` line (`device MISSING`, the last open error,
-the retry period). The link keeps trying to open it, after 2 s and backing
-off to every 10 s, so a body plugged in later is picked up within 10 s. A
-USB replug makes the next read fail; the daemon closes the port, logs it and
-reopens it the same way, and `kilo daemon` counts `reconnects`/`disconnects`.
-Every change goes out on the `connection` stream as `{connected, alive, port,
-error}`. With `KILO_PORT` (or `--port`) the daemon waits for that exact
-node; without, it re-runs the port rules on every attempt. A USB adapter can
-come back under another name (`ttyACM1`) if something still holds the old
-node; `KILO_PORT=/dev/serial/by-id/usb-...` pins it by serial number.
-
-**Where it is written down.** The daemon is the package `kilo/daemon/`; its
-docstrings are the reference and this section only covers running it.
-`kilo/daemon/__init__.py`: the module map and the threading rules (what runs
-on the asyncio loop, what in the thread pool). `kilo/remote.py`: the wire
-format (JSON lines: request, reply, stream). `kilo/daemon/ops.py`: every op
-and its arguments, and how requests share the link (one in flight).
-`kilo/daemon/sessions.py`: holds, leases, the idle REST/LIMP latch, balance
-by default. `kilo/daemon/streams.py`: `subscribe` and the stream kinds.
-`kilo/daemon/behaviour.py`: the behaviour runner contract and `--override`.
-`kilo/daemon/remote_ir.py`, `port.py` (release for flashing), `logs.py`.
-
-**Protocol.** A failed op comes back as the same exception type the direct
-path raises, so the CLI prints the same errors through the daemon as without
-it. Ops run in order per client (`trick_play` excepted, so a `trick_stop` or
-a disconnect is still seen while a trick plays). The generic `call` op serves
-only `look`, `release_head` and `ping` (what `RemoteBody` reaches through its
-proxy); goals and tricks have their own ops. The loop never blocks: a client
-that does not read loses stream messages (counted, then one `dropped` line)
-instead of stalling anyone; one that does not read its replies is
-disconnected.
-
-**Holds.** A goal a client sets (`kilo posture`, `kilo balance`, `kilo
-walk`, `kilo pose`, a trick) belongs to that client. The daemon keeps it
-alive while the client stays connected and sends something at least every
-3 s (`RemoteBody` pings while the command holds). When the client goes away,
-or goes quiet, the hold ends the way `kilo posture --for` ends without a
-daemon, minus the 0.5 s stop stage: the daemon latches REST at once and LIMP
-10 s later (`kilo run --idle-posture rest|limp|none`, `--idle-limp S`), a
-walk is stopped first (never just dropped), a pose goes back to neutral, and
-a balance enable is switched off (or back on with `kilo run --balance`,
-below). With a behaviour runner the daemon only drops the goal. The rules for
-several clients at once are in `kilo/daemon/sessions.py`.
-
-**Tricks through the daemon.** `kilo trick upload|play|stop` use the trick
-ops: the daemon uploads (cached), takes `--posture` first, plays the trick on
-its loop and replies on TRICK_DONE. When the `kilo trick play` process exits
-or is killed, even mid `--repeats 255`, the daemon stops the trick and runs
-the idle REST/LIMP timeline (`kilo daemon` shows `TRICK` in the holds while
-it plays). A second client cannot start a trick over a playing one (`kilo
-trick stop` first). `kilo trick play --then-watch` needs the port to itself
-and is refused through the daemon.
-
-**Behaviour runner and CLI holds.** While `kilo run --behaviour` runs the
-behaviour runner, `kilo posture`, `kilo balance`, `kilo walk`, `kilo pose`
-and `kilo trick upload|play` through the daemon are refused ("behaviour
-runner active; stop it with `kilo daemon stop` ... or pass --override"),
-since both would drive the legs. `kilo --override posture stand` pauses the
-runner (its running behaviour is halted, a trick it plays stopped, nothing is
-ticked) for as long as that command's hold lasts; when the hold ends the
-runner resumes and re-asserts its own goals. `kilo trick stop` and `kilo
-walk stop` are always allowed.
-
-**Silent modes.** `kilo monitor --passive` and `kilo posture --then-watch`
-must send nothing and therefore need the port to themselves; with a daemon on
-that port they refuse and say so. Stop the daemon first (`kilo daemon stop`,
-or `sudo systemctl stop kilo`).
-
-**Flashing with a daemon.** `kilo flash` builds first, then asks the daemon
-to release the port (`release_port`, 300 s lease), runs avrdude, settles the
-port, asks the daemon to reacquire it and verifies the HELLO on the daemon's
-link. If the flashing client dies (avrdude may still be writing), the daemon
-keeps the port released until the lease ends (or `reacquire_port`); every
-reopen after a release settles the port first (`kilo/daemon/port.py`). A
-daemon without a port yet (nothing plugged in when it started) is still
-asked to release, so it does not grab the port mid-flash. Without a
-reachable daemon (`--direct`, a daemon of another user, `sudo kilo flash`
-while the user service runs) the port's exclusive lock is checked right
-before avrdude and a held port is refused (`--force` flashes anyway, with a
-warning). As root, `kilo` also looks for the invoking user's daemon at
-`/run/user/$SUDO_UID/kilo/kilo.sock`.
-
-**Shutdown.** SIGTERM or SIGINT (or `kilo daemon stop`): stop the behaviour
-runner, close clients, drop every goal and go silent so the body's watchdog
-takes over (stop, REST, LIMP), close the port, remove the socket.
-
-**Behaviour runner.** `kilo run --behaviour` runs
-`kilo.behaviour.runner.run_behaviour` in its own thread with the daemon's
-`BodyClient` and its `SharedPercepts` (so the runner and `kilo monitor
---percepts` see the same percepts); the calling contract is in
-`kilo/daemon/behaviour.py`. The runner stamps the link's liveness on every
-tick; the daemon stamps too, but with a runner only while the runner has
-ticked within the last 1 s (10 s of grace for its first tick), so a hung
-runner trips the body's watchdog (logged once: "behaviour runner has not
-ticked ..."). If the import fails the daemon logs it and runs without. The
-packaged runner writes `<log-dir>/behaviour-<time>.jsonl` (see Behaviour)
-and stops within 0.1 s of SIGTERM; `$KILO_PERSONALITY` (in
-`~/.config/kilo/env`) picks another personality file.
-
-**IR remote.** The body decodes the Petoi IR remote (NEC, on the NyBoard's
-receiver at D4) and relays every key as `EVENT IR_KEY` (arg = the NEC
-command byte, `| 0x100` for a held-key repeat; HELLO caps bit `IR`). What each key does, and how keys are named (columns A to C, rows 1 to 7
-from the bottom), is in `kernel/README.md` "The remote's keys": that is the
-C++ mind's map, and the daemon follows it except where this paragraph says.
-`kilo monitor` shows a key as `IR_KEY B6 (0x02, stand)` (`... repeat` while
-held), the passive timeline as `EVENT IR_KEY ...`. The key table is
-`kilo.ir.KEYS` (from the legacy `src/infrared.h`). `kilo run --remote` (off
-by default, like `--behaviour`; on the Pi add it to `KILO_RUN_ARGS` in
-`~/.config/kilo/env`) acts on the keys through the daemon's own BodyClient.
-The daemon differs from the C++ mind in three ways: B2 does nothing (the
-daemon has no speaker); B6, A7 and C5 stop a walk the planned way (each leg
-steps home, then STANCE) and wait for it, where the C++ mind uses the quick
-stop; and C7 ends the walk at once with no planned stop (the body holds the
-last pose for `link.feet_hold_ticks`, 100 ms, sets the swing feet down and
-stays in STANCE, powered; EVENT GAIT_STOPPED arg 1), after which every
-other key is logged as `ignored (frozen: B6 or A7 to go on)`. A posture key
-still waiting for a planned stop when C7 comes gives up (`cancelled`).
-`--behaviour` starts the runner at boot; without it the runner is off until
-A5.
-
-In the C++ mind (on Kilo), A5's behaviour also moves the body a little
-(`kernel/mind/behaviour/alive.h`): standing, slow weight shifts, leans,
-height changes, a shoulder dip, a sway, a lean toward where the head looks
-and now and then a stretch, all on four feet within a few degrees and mm;
-sitting, small leg and tail moves (a lean, a shoulder dip, the hips, a
-sway, a stretch of the front legs) played as short tricks from SIT and back.
-Seeded by the runner's seed, a 1.5-6 s pause between moves, never the same
-move twice in a row; B6, A7 and C7 stop them with the runner. The head's
-glances reach a little further than before (personality.yaml: idle 40° pan,
-20° tilt; explore 70°, 30°). The distance guard (`docs/distance-guard.md`)
-stops a forward walk that gets too close, sits Kilo and starts this
-behaviour in its sitting form; while it holds, forward keys are refused.
-
-Repeats (a held key) are ignored. Every key leaves one line in the daemon's
-log, `remote <grid> (0x.., <what the key does>): <outcome>`, for example
-`remote A4 (0x68, trot): walk forward (trot) 144.0 mm/s` or `remote B5
-(0xA8, slower): speed -0.4x (walk 7.1 mm/s back)`. What the remote sets is
-held like the daemon's idle latch: no idle REST/LIMP over it, it stays until
-the next key or a client goal. Keys are logged and ignored while the port is
-released for flashing and while a client holds the posture, a trick or a
-walk (the daemon side is `kilo/daemon/remote_ir.py`). `kilo daemon` shows
-`remote on, last key ...`.
-
-**Balance by default.** `kilo run --balance [KP]` (off by default) latches
-SET_BALANCE on with the given Kp (default 0.5, the firmware's; 0.99 levels
-the whole slope and passed H13 on Kilo) at start, again after a port release
-for flashing, and whenever a client's balance hold ends (instead of switching
-balance off). Nobody owns it, like the idle latch: Kilo wakes up balancing
-whenever it stands or sits, and walks with the same gains (correcting what
-the plan did not predict). The body switches balance off on every epoch bump (a fall, the
-watchdog, LOW battery, a reboot; P1 finding B1) and the link's 5 Hz refresh
-switches it back on within about 200 ms. A client's `kilo balance off` holds it off until the
-client goes away (the remote has no balance key).
-`kilo daemon` shows `balance on by default (Kp ...)`. On the Pi:
-`KILO_RUN_ARGS=--remote --balance 0.99` in `~/.config/kilo/env` (the owner's choice, 2026-10-11).
-
-**Logs of the daemon.** `kilo run` writes its own log to
-`<log-dir>/daemon.log` (`~/kilo-logs/daemon.log`, rotating at 1 MB, 3 old
-files kept; `--daemon-log FILE|none`) as well as to stderr, which systemd
-sends to the journal; the file is written by a `QueueListener` thread, so a
-slow SD card never stalls the link's reader thread, which logs too. `--log`
-adds the JSON-lines frame log (64 MB x 6 per start, so it is off unless
-asked for: `KILO_RUN_ARGS=--log`) and `--kilolog` the raw `.kilolog.gz`
-(both in the log dir). The log dir is kept under 500 MB: at start and hourly
-the daemon deletes the oldest kilo logs (`kilo-*`, `behaviour-*`, rotated
-`daemon.log.N`) beyond that, never an open file or one written in the last
-10 minutes.
-
-**systemd: a system service running as joe.** `mind/systemd/kilo-system.service`,
-installed by `sudo mind/systemd/install.sh --system` as
-`/etc/systemd/system/kilo.service`, runs `kilo run` as `User=joe`,
-`Group=dialout`, with `RuntimeDirectory=kilo`: the socket is
-`/run/kilo/kilo.sock` (owned by joe, mode 0660), the first place every
-`kilo` command looks, from any shell. Settings stay in
-`~/.config/kilo/env` (absolute path written into the unit by install.sh),
-so they are edited without sudo and shared with the fallback user unit; the
-logs stay in `~/kilo-logs`. Why not the user service it replaces: a user
-manager starts only after `systemd-user-sessions.service`, which is ordered
-after `network.target`, i.e. after NetworkManager has come up (34 s on the
-Pi 2 B), so the daemon started 67 s after power. The system unit has only
-the default dependencies (after `basic.target`) and no network or
-serial-device ordering (the daemon waits for its port itself): it starts
-about 15-20 s after power once the boot is trimmed (docs/setup.md "The daemon as a
-system service, and boot time"), and it starts and runs with no network at all (Wi-Fi dongle
-unplugged). With no network the only controls are the IR remote
-(`--remote`) and the behaviour runner (`--behaviour`), and `~/kilo-logs` is
-the only record until the network is back. A daemon started by hand
-(`kilo run`) or by the user unit listens in `/run/user/<uid>/kilo` (it
-cannot create `/run/kilo`) and refuses to start while another daemon
-answers on a socket the clients would find first. The fallback, a *user*
-service with lingering (`mind/systemd/kilo.service`, `install.sh` without
-`--system`), still works and needs no sudo, but starts a minute late.
-
-```sh
-sudo mind/systemd/install.sh --system  # idempotent: unit -> /etc/systemd/system/kilo.service, ~/.config/kilo/env
-                                       # from env.example if missing, user unit + lingering off, daemon-reload, enable
-sudo mind/systemd/install.sh --system --start  # ... and (re)start it now
-mind/systemd/install.sh --system       # not root: prints the sudo command to run
-systemctl status kilo
-tail -f ~/kilo-logs/daemon.log         # the daemon's own log: always there
-journalctl -u kilo -f                  # the same through the journal (joe is in adm)
-kilo daemon                            # pid, socket, port and link state, clients, holds, behaviour, percepts
-sudo systemctl stop kilo               # before `kilo monitor --passive` or the hardware-test steps
-```
-
-**On the Pi: the behaviour runner under systemd.**
-
-```sh
-cd ~/OpenCat && git pull                       # pip install -e: the update is live
-nano ~/.config/kilo/env                        # KILO_PORT=/dev/ttyACM0
-                                               # KILO_RUN_ARGS=--behaviour --kilolog
-                                               # (or --remote --balance: the remote, balance always on)
-sudo systemctl restart kilo
-kilo daemon                                    # behaviour running, link up, raw log path
-kilo monitor --percepts                        # percept flags and events, through the daemon
-tail -f ~/kilo-logs/daemon.log                 # daemon log (socket, port, reconnects, runner)
-tail -f ~/kilo-logs/behaviour-*.jsonl          # what the runner chose and why
-kilo log summary ~/kilo-logs/kilo-*.kilolog.gz # after a session: rates, attitude, modes, events
-sudo systemctl stop kilo                       # SIGTERM: runner stops, goals dropped, port closed
-```
-
-`journalctl -u kilo` reads the system journal (joe is in `adm`); for a
-journal that survives reboots, `sudo mkdir -p /var/log/journal && sudo
-systemctl restart systemd-journald`. `~/kilo-logs/daemon.log` depends on
-neither. With the fallback user unit, `journalctl --user -u kilo` may answer
-"No journal files were found" (volatile user journal); use
-`journalctl _SYSTEMD_USER_UNIT=kilo.service` there.
-
-`~/.config/kilo/env` (systemd `EnvironmentFile` syntax) sets `KILO_PORT`
-(`/dev/ttyACM0`, the CH343 adapter in a Pi USB port, for now; `/dev/ttyAMA0`
-once the Pi sits on the NyBoard header) and `KILO_RUN_ARGS` (e.g.
-`--behaviour --kilolog`). `--kilo PATH` points the unit at another `kilo`
-executable than `~/OpenCat/.venv/bin/kilo`.
-
 ### Watching the body on its own (passive)
 
 Every command keeps the body's link watchdog fed while it runs (HELLO_REQ on
@@ -914,7 +626,7 @@ accepts the Kilo name or the legacy token.
 | butt_up | `buttUp` | posture | 1 | - | STAND |
 
 **Importer.** `python -m kilo.tricks.import_legacy` (from `mind/`) parses
-`src/InstinctNybble.h` with `legacy.py` and rewrites the library; it is
+`legacy/InstinctNybble.h` with `legacy.py` and rewrites the library; it is
 idempotent, and `--check` only reports stale files (a test does the same).
 `legacy.parse_file()`/`parse_text()` read any file in the same format and
 return the raw arrays (`LegacySkill`), which `legacy.to_trick()` maps:
@@ -1267,6 +979,15 @@ second:
 pip install -e '.[test]'      # or: sudo apt install python3-pytest
 python3 -m pytest             # from mind/
 ```
+
+Tests: `python -m pytest mind/tests -q`. `-m "not slow"` skips the tests
+marked slow (they start `kilo` subprocesses or a daemon and wait in wall
+time). `pip install pytest-xdist` and `-n 4` runs the suite in parallel
+(sockets, ptys and log directories are per test), but the slow tests then
+compete for the CPU and can time out on a loaded machine, so the default run
+stays serial. The link and virtual-body timing rules (heartbeat, liveness
+window, goal refresh, ACK retries, backoff, the body watchdog) run on a
+stepped clock (`kilo.stepclock.StepClock`) and do not depend on load.
 
 Everything runs with the real codec and messages. `test_codec.py` checks the
 adapters against `protocol/vectors` and that the vendored copies match

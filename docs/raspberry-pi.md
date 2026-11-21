@@ -13,7 +13,7 @@ Petoi documents them; unconfirmed items are flagged at the end.
 | Power | NyBoard V1_1/V1_2 has a TPS565201 buck converter giving 5 V 3 A (5 A peak, thermal cutoff) for the Pi, fed from the battery. The Pi rail is live only with the battery connected, not from the USB uploader. |
 | Wiring | The socket mates Pi header pins 1-10: 1=3V3, 2=5V, 3=SDA, 4=5V, 5=SCL, 6=GND, 7=GPIO4 (lands on the NyBoard reset/DTR line), 8=GPIO14 TXD -> NyBoard RX, 9=GND, 10=GPIO15 RXD -> NyBoard TX. UART at 3.3 V. **Derived from docs, no official diagram found: verify with a meter before soldering.** |
 | I2C switch | The "Arduino / Raspberry Pi" switch on the board selects the I2C master of the MPU6050, PCA9685 and EEPROM. Leave it on **Arduino**; on "Pi" the firmware loses its peripherals. |
-| Serial | 115200 baud (`BAUD_RATE` in src/OpenCat.h). The ATmega328P has one UART, shared with the 6-pin socket (USB uploader, Bluetooth dongle, ESP8266). **Unplug the USB adapter / dongle while the Pi drives serial.** |
+| Serial | 115200 baud (`BAUD_RATE` in the legacy `src/OpenCat.h`, in git history). The ATmega328P has one UART, shared with the 6-pin socket (USB uploader, Bluetooth dongle, ESP8266). **Unplug the USB adapter / dongle while the Pi drives serial.** |
 | Pi config | `raspi-config` -> Interface Options -> Serial Port: login shell **No**, hardware **Yes**. **Disable the 1-wire interface**, otherwise GPIO4 keeps resetting the NyBoard. On Ubuntu: `enable_uart=1`, remove `console=serial0,115200` from cmdline, disable `serial-getty@ttyS0`. |
 | Port name | Petoi's `serialMaster/ardSerial.py` globs `/dev/ttyS*` and strips `ttyAMA0` (workaround for a pyserial platform-port issue on Bookworm / Ubuntu 22.04). On Pi 3/4/Zero 2 W, Bluetooth owns the PL011 (`ttyAMA0`) and GPIO14/15 get the mini-UART `ttyS0` (= `/dev/serial0`); if 115200 is flaky, add `dtoverlay=disable-bt` or `core_freq_min=500`. On Pi models without onboard BT (Pi 2 B, Pi 1, original Zero) the PL011 is on GPIO14/15 as `ttyAMA0`, so `ardSerial.py`'s port filter needs adjusting. |
 | USB alternative | Skip the header entirely: plug the Petoi CH340/CH343 USB adapter into a Pi USB port and use `/dev/ttyUSB0`. `ardSerial.py` auto-detects it. Avoids the mini-UART, GPIO4 and I2C-switch issues at the cost of a dangling dongle. Good first step for developing the mind off-robot. |
@@ -21,48 +21,10 @@ Petoi documents them; unconfirmed items are flagged at the end.
 ## Software
 
 - `serialMaster/` is Petoi's Pi-side Python library (`ardSerial.py`, `SerialCommunication.py`, `example.py`, `allSkills.py`, `demos/`); it was removed from this repo in ccfb3d8 (Kilo's mind replaces it) and lives on upstream in PetoiCamp/OpenCat and in this repo's history. Needs `pyserial` from pip (not apt's python-serial). `./ardSerial.py kcrF` is equivalent to typing `kcrF` in the Arduino serial monitor.
-- Same token protocol as USB serial: `k`+skill, `m`/`M` and `i`/`I` joint moves, `L` listed angles, `b`/`B` buzzer, `c` calibrate, `d` rest, `G`/`g` gyro, `?` query. Full list in `src/OpenCat.h`; docs at https://docs.petoi.com/apis/serial-protocol. Uppercase tokens take binary arguments (one byte per angle).
+- Same token protocol as USB serial: `k`+skill, `m`/`M` and `i`/`I` joint moves, `L` listed angles, `b`/`B` buzzer, `c` calibrate, `d` rest, `G`/`g` gyro, `?` query. Full list in the legacy `src/OpenCat.h` (git history); docs at https://docs.petoi.com/apis/serial-protocol. Uppercase tokens take binary arguments (one byte per angle).
 - ROS / ROS 2 wrapper: https://github.com/PetoiCamp/ros_opencat (Docker; "recommended to use with Raspberry Pi").
 - No Petoi Raspberry Pi OS image exists; use stock Raspberry Pi OS or Ubuntu.
 - The IR receiver is on PD4 and does not conflict with Pi serial, but IR and Pi commands fight for the single command slot in the firmware. The MU camera uses Grove G1 (I2C) on the head; it shares the I2C bus the switch arbitrates.
-
-## Kilo mind service (the daemon under systemd)
-
-> **Retired route.** This section runs the Python mind as a service on Raspberry Pi OS. Kilo no longer runs that: the Pi now starts the mind kernel straight from the SD card, with no operating system under it (`docs/fast-boot.md` section 8 lists what is retired). The current setup is `docs/laptop-setup.md`; the kernel is in `kernel/README.md`. This text stays until the owner decides what to do with it.
-
-Kilo's own mind (not Petoi's token protocol) runs as `kilo run`, a daemon that
-owns the serial port and serves `kilo` commands over a Unix socket. Details:
-mind/README.md "Daemon and systemd". On the Pi (joe, mind venv in
-`~/OpenCat/.venv`, see mind/README.md "Install on the Pi"):
-
-```sh
-cd ~/OpenCat && git pull
-sudo mind/systemd/install.sh --system --start   # once: /etc/systemd/system/kilo.service, /etc/sudoers.d/kilo, ~/.config/kilo/env
-nano ~/.config/kilo/env                         # KILO_PORT=/dev/ttyACM0 for now
-kilo daemon                                     # pid, port, clients
-kilo status                                     # goes through the daemon
-journalctl -u kilo -f                           # its log; daemon.log and frame logs in ~/kilo-logs
-mind/systemd/update.sh [--flash]                # day to day: git pull, pip, restart (and flash)
-sudo -n systemctl stop kilo.service             # before the hardware-test docs that open the port directly
-```
-
-- It is a **system service** since 2026-10-12 (`/etc/systemd/system/kilo.service`,
-  `User=joe`, `Group=dialout`, `RequiresMountsFor=/home/joe`), started at
-  boot before the network (the daemon is up about 22 s after power, docs/setup.md
-  "The daemon as a system service, and boot time"). The socket is
-  `/run/kilo/kilo.sock`. `/etc/sudoers.d/kilo` lets joe run
-  `systemctl restart|start|stop kilo.service` without a password, which is
-  what `update.sh` uses; the `.service` suffix is part of the rule. (Until
-  2026-10-12 it was a user unit with lingering; `install.sh` without
-  `--system` still installs that form.)
-- **Port.** `/dev/ttyACM0` (the CH343 adapter in one of the Pi's USB ports)
-  for now; `/dev/ttyAMA0` (the PL011 on the header) once the Pi sits on the
-  NyBoard. Set it in `~/.config/kilo/env`; never both at once (they share the
-  328P's RX line).
-- `sudo -n systemctl stop kilo.service` (SIGTERM) drops the goals and goes silent: the
-  body's watchdog takes over (stop, REST, LIMP) before the port closes.
-- `kilo flash` works with the service running: it asks the daemon to release
-  the port for avrdude and to reacquire it afterwards.
 
 ## Power budget
 
@@ -113,4 +75,4 @@ sudo -n systemctl stop kilo.service             # before the hardware-test docs 
 9. https://wiki.gentoo.org/wiki/Raspberry_Pi_Serial_Ports (ttyS0 / ttyAMA0 / BT overlays)
 10. https://github.com/PetoiCamp/ros_opencat
 11. https://pidramble.com/wiki/benchmarks/power-consumption (Pi power figures)
-12. Local: `src/OpenCat.h` (tokens, baud); `serialMaster/ardSerial.py` (port detection) as it was before ccfb3d8 removed it
+12. Local, in git history: `src/OpenCat.h` (tokens, baud; deleted on 2026-11-20); `serialMaster/ardSerial.py` (port detection) as it was before ccfb3d8 removed it

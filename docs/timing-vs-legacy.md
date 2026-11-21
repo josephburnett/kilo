@@ -14,11 +14,11 @@ part, not checked on Kilo. Times in ms unless marked s.
 
 ## 1. How the legacy firmware times a gait [code]
 
-- A gait is a table of frames (`src/InstinctNybble.h`; `wkF` 44 frames, `trF`
+- A gait is a table of frames (`legacy/InstinctNybble.h`; `wkF` 44 frames, `trF`
   33, `crF` 42, `bk` 32, `vtF` 14). Each frame holds 8 leg angles.
-- `loop()` (`OpenCat.ino`) runs `readEnvironment()` (IMU), `readSignal()` (IR,
+- `loop()` (`OpenCat.ino`, in git history) runs `readEnvironment()` (IMU), `readSignal()` (IR,
   serial, ultrasonic), then `reaction()`, which calls `skill.perform()` once.
-- `perform()` (`src/skill.h`) writes **one joint per call**: joints 0-3 (head,
+- `perform()` (`legacy/skill.h`) writes **one joint per call**: joints 0-3 (head,
   tail, one unused), then 8-15 (legs). So **one frame = 12 passes of
   `loop()`**. There is no `delay()` in the gait path (the `delayMicroseconds(850)`
   is compiled only without the gyro). The header's "speed" field does not
@@ -29,7 +29,7 @@ part, not checked on Kilo. Times in ms unless marked s.
   skips all of that.
 - I2C runs at 500 kHz (`Wire.setClock(500000L)`). One servo write
   (`setPWM`) is 6 bytes ≈ 0.11 ms on the wire.
-- The IR library (`src/ir/IRremote.cpp`) samples the receiver in a 50 µs timer
+- The IR library (`src/ir/IRremote.cpp`, in git history) samples the receiver in a 50 µs timer
   interrupt with `digitalRead()`, which takes roughly 10-20% of the CPU
   [assumed share].
 

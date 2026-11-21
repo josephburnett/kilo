@@ -1,4 +1,4 @@
-# Kilo mind daemon: a systemd *user* service (mind/README.md "Daemon and systemd").
+# Kilo mind daemon: a systemd *user* service (retired; mind/README.md "Daemon and systemd", deleted 2026-11-20, is in git history).
 #
 # Installed by mind/systemd/install.sh to ~/.config/systemd/user/kilo.service,
 # with lingering enabled so it runs from boot without a login session.

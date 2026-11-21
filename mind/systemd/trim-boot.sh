@@ -1,5 +1,5 @@
 #!/bin/sh
-# Trim the Pi's boot of things Kilo does not need (docs/setup.md "The daemon as a system service, and boot time").
+# Trim the Pi's boot of things Kilo does not need (retired; docs/setup.md "The daemon as a system service, and boot time", in git history).
 # Run on the Pi, once, with sudo; safe to run again (it only changes what is
 # still there to change), and prints every change. Reboot afterwards.
 #
@@ -24,7 +24,7 @@
 #
 # What it leaves alone: NetworkManager, wpa_supplicant, ssh, tailscaled, udev,
 # and rpi-resize-swap-file.service (not known for certain to be a one-shot
-# that has already done its work; see docs/setup.md for how to look).
+# that has already done its work; systemctl cat shows what it runs).
 set -eu
 
 root=${KILO_SYSROOT:-}   # tests only: a fake /

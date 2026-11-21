@@ -58,7 +58,7 @@ GAIT_FRAME_TICKS = 1
 # The pose a behaviour is assumed to start from when sizing frame 0's dur.
 START_POSTURE = "up"
 
-DEFAULT_PATH = Path(__file__).resolve().parents[3] / "src" / "InstinctNybble.h"
+DEFAULT_PATH = Path(__file__).resolve().parents[3] / "legacy" / "InstinctNybble.h"
 
 POSTURE_TABLES = (("up", Posture.STAND), ("sit", Posture.SIT), ("rest", Posture.REST))
 

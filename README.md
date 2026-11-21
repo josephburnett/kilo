@@ -17,23 +17,26 @@ that share the work:
   body feels, catching falls, watching the battery and the link to the Pi.
   If the Pi goes quiet, the body puts its feet down, stops, lies down and
   goes limp on its own.
-- `mind/`: a Python daemon on the Pi, the upper mind. It decides what Kilo
+- `kernel/`: the upper mind, a bare-metal C++ kernel the Pi boots from its
+  SD card (`kernel/README.md`, `docs/fast-boot.md`). It decides what Kilo
   does: postures, tricks, walking (it plans every step from a model of the
-  body and streams them to the body), the IR remote, perception and, later,
-  a personality. It talks to the body over a serial link and offers a `kilo`
-  command line.
+  body and streams them to the body), the IR remote, perception and a
+  personality. It talks to the body over the serial link on the NyBoard's
+  Pi socket.
+- `mind/`: the Python mind, where the kernel's design was first written and
+  tested; today it is the laptop's `kilo` command line, which talks to the
+  kernel over the network (`--host`) or updates it through the SD card.
 - `protocol/`: the single definition of the messages between the two; the C
   and Python sides are generated from it.
-- `kernel/`: the mind as a bare-metal C++ kernel for the Pi, in progress
-  (`docs/fast-boot.md`, `kernel/README.md`).
 
 Where to read more: `docs/architecture.md` is the design, `docs/setup.md`
-sets up a dev host and the Pi, `docs/laptop-setup.md` a laptop that updates
+sets up a dev host, `docs/laptop-setup.md` a laptop that updates
 Kilo through his SD card, `mind/README.md` lists the commands, and
 `docs/p*-hardware-test*.md` record what has been tried on Kilo.
 
-The original OpenCat firmware (`OpenCat.ino` and `src/`) is still in the
-tree: `src/InstinctNybble.h` holds the stock postures and skills that the new
-firmware and the trick importer read, and the tests check a few other headers
-against it. The rest of the fork (its desktop UI, module tests, skill library)
-was removed on 2026-10-11; git history has it. Licence: MIT, as OpenCat's.
+Of the original OpenCat firmware only six headers remain, in `legacy/`
+(`legacy/README.md`): `legacy/InstinctNybble.h` holds the stock postures and
+skills that the new firmware and the trick importer read, and the tests check
+the others against the new code. The rest of the fork was removed (its
+desktop UI, module tests and skill library on 2026-10-11, `OpenCat.ino` and
+`src/` on 2026-11-20); git history has it. Licence: MIT, as OpenCat's.
