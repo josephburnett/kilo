@@ -674,7 +674,7 @@ void test_runs() {
   frames(2100);
   w = walk_list(r, a, 0, 5);
   std::string text(w.text, w.text + std::strlen((const char*)w.text));
-  CHECKF(w.found == 1 && !(w.flags & KILO_WALK_FLAGS_RECORDING) && text == "trick=rear_up stage=1 end=REFUSED" &&
+  CHECKF(w.found == 1 && !(w.flags & KILO_WALK_FLAGS_RECORDING) && text == "trick=rear_up end=REFUSED" &&
              w.bytes > 0 && w.capacity == rec.flight().capacity(),
          "flags %x text %s bytes %u", w.flags, text.c_str(), (unsigned)w.bytes);
   CHECK(walk_list(r, a, 1, 6).found == 0);

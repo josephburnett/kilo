@@ -274,6 +274,40 @@ def test_a_refused_trick():
     assert "REFUSED: battery 7100 mV (needs 7400)" in text and "not played" in text
 
 
+def test_the_stage_reached_labels_a_staged_trick():
+    # the mind since 2026-11-21: the stage allowed at the start, each rise (A2) and top reached, the end's
+    recs = [run_mark(T0, 9, P.RunKind.TRICK, P.RunEvent.BEGIN),
+            mark(T0, "trick id=9 format=2 trick=rear_up_3 stage=1 of=3 tid=5 crc=0 frames=12 speed=64 mirror=0 "
+                     "battery_mv=7900 mode=IDLE by=remote"),
+            mark(T0 + 100, "rear_up: up to stage 1 (of 3)"),
+            mark(T0 + 200, "stage allowed=1 reached=1 of=3"),
+            mark(T0 + 300, "stage allowed=2 reached=1 of=3"),
+            mark(T0 + 400, "end reason=STOPPED elapsed_ms=9000 expected_ticks=900 battery_mv=7800 mode=IDLE "
+                           "stage=2 of=3 reached=1 why="),
+            run_mark(T0 + 500, 9, P.RunKind.TRICK, P.RunEvent.END)] + [tel(T0 + i * TEL_US, i) for i in range(10)]
+    s = flight.parse_blocks(blocks(recs))
+    tr = trickrec.trick_run(s)
+    assert (tr.stage, tr.stage_of, tr.stage_reached) == ("2", "3", "1")
+    a = trickrec.analyze(tr, source={})
+    assert "trick run 9: rear_up stage 2 of 3 (reached 1), mind" in trickrec.format_analysis(a)
+    # without the end's fields (a run still open): the last stage MARK
+    s = flight.parse_blocks(blocks(recs[:5] + recs[6:]))
+    assert trickrec.trick_run(s).stage == "2"
+    # an older mind: the build's stage only, as it was
+    old = [run_mark(T0, 9, P.RunKind.TRICK, P.RunEvent.BEGIN),
+           mark(T0, "trick id=9 format=2 trick=rear_up_3 stage=3 tid=5 crc=0 frames=12 speed=64 mirror=0 "
+                    "battery_mv=7900 mode=IDLE by=remote"),
+           run_mark(T0 + 500, 9, P.RunKind.TRICK, P.RunEvent.END)] + [tel(T0 + i * TEL_US, i) for i in range(10)]
+    a = trickrec.analyze(trickrec.trick_run(flight.parse_blocks(blocks(old))), source={})
+    assert a["stage"] == "3" and a["stage_of"] is None
+    assert "trick run 9: rear_up_3 (stage 3), mind" in trickrec.format_analysis(a)
+    lab = trickrec.trick_label
+    assert lab("rear_up_3", "1", "3", "1") == "rear_up stage 1 of 3"
+    assert lab("rear_up_3", "1", "3", "0") == "rear_up stage 1 of 3 (top not reached)"
+    assert lab("rear_up", "1", "1") == "rear_up stage 1 of 1"
+    assert lab("rear_up_2", "2") == "rear_up_2 (stage 2)" and lab("sit", None) == "sit"
+
+
 def test_decode_rows_json_and_the_file(tmp_path, capsys):
     recs, _ = trick_records()
     meta = {"mind": "x", "mind_t0_ms": 1000}
@@ -341,7 +375,7 @@ class RecMind(FakeMind):
                               id=(6 << 20) | 2, start_ms=50000, duration_ms=9000, bytes=0, records=0,
                               flags=int(P.WalkFlags.TRICK | P.WalkFlags.SAVED | P.WalkFlags.EARLIER_BOOT
                                         | P.WalkFlags.ENDED_OK | P.WalkFlags.STREAMED),
-                              text=b"trick=rear_up stage=1 end=DONE")
+                              text=b"trick=rear_up_3 stage=1 of=3 end=DONE")
 
     def _stream(self, c: socket.socket, wid: int, data: bytes, total: int) -> None:
         off = 0
@@ -421,6 +455,7 @@ def test_cli_runs_list_and_fetch(rmind, tmp_path, capsys):
     rows = [ln for ln in out.splitlines() if ln[:1].isdigit() or ln.startswith("b6:")]
     assert len(rows) == 2 and "rear_up_2 stage 2" in rows[0] and rows[0].rstrip().endswith("FELL")
     assert rows[1].startswith("b6:2") and "boot 6 at" in rows[1] and "card" in rows[1]
+    assert "rear_up stage 1 of 3 " in rows[1]  # the stage reached, not the build's 3
     assert cli.main(["walks", "--host", rmind.addr, "--json"]) == 0
     js = json.loads(capsys.readouterr().out)
     assert js[0]["kind"] == "trick" and js[0]["trick"] == "rear_up_2" and js[1]["boot"] == 6

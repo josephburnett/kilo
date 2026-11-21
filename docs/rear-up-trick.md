@@ -414,7 +414,12 @@ build does all three. The log says each step: `remote: rear_up: up to stage
 1 (of 3)`, `rear_up: stage 1 (of 3): A2 to go on`, `rear_up: on to stage 2
 (of 3)`, `rear_up: held stage 1 without A2: coming down`, `rear_up: coming
 down (stage 2 allowed)`; each is also a mark in the trick's flight-recorder
-run (section 6), next to the key that caused it.
+run (section 6), next to the key that caused it. The run list (`kilo runs
+--host`) and the fetched run (`kilo log run FILE`) name the highest stage
+A2 allowed in that run, not the build's: `rear_up stage 1 of 3`, or
+`rear_up stage 2 of 3 (reached 1)` when he came down before stage 2's top.
+(Recordings from before 2026-11-21 show the build's stage: `rear_up_3
+stage 3`.)
 
 The switch is a build option of the mind kernel: build it with the switch
 and update the Pi. For stage 1:

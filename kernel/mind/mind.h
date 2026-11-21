@@ -159,6 +159,9 @@ class Mind final : public LinkListener,
   // remote::TrickNotes
   void refused(const char* trick, const char* why) override { recorder_.trick_refused(trick, why); }
   void trick_mark(const char* line) override { recorder_.note(line); }
+  void trick_stage(uint32_t play, int allowed, int reached, int of) override {
+    recorder_.trick_stage(play, allowed, reached, of);
+  }
   bool rested_mv(uint16_t* mv) override;
   // record::MetricsSource
   uint32_t metric_lines() override;
