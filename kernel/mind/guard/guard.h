@@ -16,15 +16,31 @@
 //    Without a reading for kStaleS there is no range (green), except right
 //    after something very close (under kRedMm): then no echo means
 //    closer than the sensor measures, and the range holds for kCloseHoldS.
-// 2. Zones with hysteresis. RED below kRedMm (left above kRedExitMm); BLUE
-//    below blue_mm(v) (left above it + kBlueExitMm), v the forward walk's
-//    speed: the gap left after the stop (kStopGapMm), the way travelled
-//    while the reading comes in and the quick stop starts (v x kReactS),
-//    and the quick stop's own way (v^2 / 2a, a by gait: stop_way_mm()).
-//    Never below kBlueMinMm (also the threshold when not walking forward).
-// 3. What he does (poll()), with the guard on and nothing in the way
-//    (GuardHost::not_now(): a laptop holds the body, a trick, picked up,
-//    light sleep):
+// 2. Zones with hysteresis. Two sets of thresholds, each tracked with its
+//    own hysteresis on every reading:
+//    - walking forward: RED below kRedMm (left above kRedExitMm); BLUE
+//      below blue_mm(v) (left above it + kBlueExitMm), v the forward walk's
+//      speed: the gap left after the stop (kStopGapMm), the way travelled
+//      while the reading comes in and the quick stop starts (v x kReactS),
+//      and the quick stop's own way (v^2 / 2a, a by gait: stop_way_mm()).
+//      Never below kBlueMinMm. These hold through the guard's own stop and
+//      back-off of a forward walk (at the speed it had when the guard acted);
+//    - not walking forward (standing, sitting, turning in place, walking
+//      backward, after the walk has ended): closer, he does not move into
+//      it. BLUE below kBlueStillMm (left above it + kBlueStillExitMm), RED
+//      below kRedStillMm (left above kRedStillExitMm). The sensor reads down
+//      to about 30 mm (lying it reads the floor at 55-63 mm), so RED at 80 mm
+//      is read, not guessed.
+//    The zone in force (zone(), the eyes, the reactions) is the walking one
+//    while walking forward, else the still one; the walking one at the
+//    speed held (kBlueMinMm when none) is also kept while still (walk_zone()):
+//    a forward key is refused while it is not green (refuses_forward()), so a
+//    walk never starts into something it would stop for at once, and after a
+//    stop for something ahead the hold lasts until the way is clear for
+//    walking, while he may stand (B6) and stays standing.
+// 3. What he does (poll()) in the zone in force, with the guard on and
+//    nothing in the way (GuardHost::not_now(): a laptop holds the body, a
+//    trick, picked up, light sleep):
 //    - walking forward (any gait, also steering): BLUE: the quick stop
 //      (Walker::halt), then sit and the behaviour runner's sitting variant
 //      (GuardHost::sit_and_behave). RED: back off (the walk turns backward
@@ -39,11 +55,13 @@
 //    - sitting: BLUE: he looks at it; RED: he leans back (GuardHost::flinch);
 //    - lying (REST, after A7): the eyes only.
 //    Every RED reaction hisses (hisses()). Then HOLDING: forward keys are
-//    refused (refuses()); turning, backward and the posture keys work. It
-//    releases after kClearS of green.
+//    refused (refuses_forward()); turning, backward and the posture keys
+//    work, and B6 next to what stopped him stands him up for good (only a
+//    new entry into the zone in force makes him react). It releases after
+//    kClearS of green in the walking zone.
 //    The release rule: at most kMaxBacks RED reactions (backing off,
-//    leaning back, a stopped turn) until the zone has been green for
-//    kClearS; after that only the eyes. A hand reaching for him or the floor
+//    leaning back, a stopped turn) until the walking zone has been green
+//    for kClearS; after that only the eyes. A hand reaching for him or the floor
 //    seen with the head down never backs him off over and over.
 // The eyes show the zone; while the zone is green and Kilo is tired they
 // are a dim orange instead (the Mind decides: set_tired()).
@@ -81,10 +99,14 @@ constexpr double kDecelTrotMmS2 = 700;    //   travel from the halt; test_guard 
                                           //   230 13 mm) at least doubled: the floor may need the room
 constexpr double kStopSlackMm = 5;        // ... plus this (the swing that lands, at any speed)
 constexpr double kCrawlStopMm = 20;       // the crawl's: its lean (up to 18 mm fore and aft) as the legs square up
-constexpr double kBlueMinMm = 200;        // BLUE never below this (and standing still)
+constexpr double kBlueMinMm = 200;        // walking forward: BLUE never below this (forward keys need this clear)
 constexpr double kBlueExitMm = 80;        // BLUE is left this far above its threshold
-constexpr double kRedMm = 150;            // RED: back off
+constexpr double kRedMm = 150;            // walking forward: RED, back off
 constexpr double kRedExitMm = 200;
+constexpr double kBlueStillMm = 120;      // not walking forward: BLUE below this (2026-11-21: 190 mm sat him down
+constexpr double kBlueStillExitMm = 40;   //   after B6 each time), left this far above it
+constexpr double kRedStillMm = 80;        // not walking forward: RED below this (the sensor reads to about 30 mm)
+constexpr double kRedStillExitMm = 120;
 constexpr double kBackSpeedMmS = 40;      // backing off: slow ...
 constexpr double kBackS = 2.0;            // ... and short (the reversal and about kBackMm)
 constexpr double kBackMm = 50;
@@ -156,8 +178,10 @@ class DistanceFilter {
   double hold_until_ = 0;
 };
 
-// Step 2: the zone for a filtered range (has false: none) at thresholds blue, red.
-Zone next_zone(Zone now, bool has, double mm, double blue, double red);
+// Step 2: the zone for a filtered range (has false: none) at thresholds blue, red; BLUE is left
+// above blue + blue_exit, RED above red_exit.
+Zone next_zone(Zone now, bool has, double mm, double blue, double red, double blue_exit = kBlueExitMm,
+               double red_exit = kRedExitMm);
 
 // Kilo, when the walker is idle (GuardHost::still()).
 enum class Still : uint8_t { None, Standing, Sitting, Lying };
@@ -199,14 +223,21 @@ class DistanceGuard {
   // Every pass: the actions' steps and the eyes' goal.
   void poll();
 
-  // A remote key would walk forward now (remote.h's rules): refused while
-  // the guard holds or acts. why: the reason for the log.
+  // The guard holds or acts (not watching).
   bool holds() const { return on_ && action_ != Action::Watch; }
+  // A remote key would walk forward now (remote.h's rules): refused while
+  // the guard holds or acts, or the walking zone is not green (something
+  // closer than a forward walk would stop for). why: the reason for the log
+  // ("holding: blue, 110 mm ahead", "175 mm ahead, a forward walk needs 200").
+  bool refuses_forward(char* why, uint32_t n) const;
 
-  Zone zone() const { return zone_; }
+  Zone zone() const { return zone_; }       // the zone in force (the eyes, the reactions)
+  Zone walk_zone() const { return walk_zone_; }  // the zone at the walking thresholds
+  bool walking_thresholds() const { return walking_; }
   Action action() const { return action_; }
   const DistanceFilter& filter() const { return filter_; }
-  double blue_now() const { return blue_; }
+  double blue_now() const { return blue_; }  // the thresholds in force
+  double red_now() const { return red_; }
   double speed_now() const { return v_; }
   // Low battery (the Mind's rule): orange eyes while the zone is green.
   void set_tired(bool tired) { tired_ = tired; }
@@ -249,9 +280,13 @@ class DistanceGuard {
   GuardHost* host_ = nullptr;
   bool on_ = kDefaultOn;
   DistanceFilter filter_;
-  Zone zone_ = Zone::Green;
+  Zone zone_ = Zone::Green;       // in force: walk_zone_ or still_zone_
+  Zone walk_zone_ = Zone::Green;  // at the walking thresholds (blue_walk_, kRedMm)
+  Zone still_zone_ = Zone::Green; // at the still thresholds
+  bool walking_ = false;          // the walking thresholds are in force
   Action action_ = Action::Watch;
-  double blue_ = kBlueMinMm;
+  double blue_ = kBlueStillMm, red_ = kRedStillMm;  // in force
+  double blue_walk_ = kBlueMinMm;
   double v_ = 0;           // the forward walk's speed (held through the guard's actions)
   const char* gait_ = "";  // ... and its gait
   uint64_t action_at_ = 0;
