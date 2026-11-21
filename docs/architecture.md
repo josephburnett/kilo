@@ -1958,8 +1958,7 @@ C++ kernel (docs/fast-boot.md) and those commands were removed on
 - **Acceptance:** H14, H9 while trotting, the IK/gait tests under simavr. WALK,
   TROT and CRAWL start and stop with no visible foot jump on slow-motion video.
   Flash ≤ 30 KB (30720 B; raised from 24 KB on 2026-10-11, §3h).
-- **Then cut over:** delete the legacy firmware (its hex is kept in
-  `mind/firmware/`).
+- **Then cut over:** delete the legacy firmware (done; git history has it).
 - **Status (2026-10-11):** body side done on the host: planar IK
   (`core/ik`), gait generator, STANCE, `SET_GAIT`/`SET_BODY_POSE`, geometric
   balance, bob and wag (`core/gait`, `body_tick`, arbiter, link), host tests
@@ -2463,9 +2462,8 @@ reset circuit.
    from the new firmware with `reset_cause = FLASHED` and `fw_build` equal
    to the image's build.
 
-`mind/firmware/opencat-legacy.hex`, the original firmware (`mind/firmware/README.md`),
-is flashed by hand with avrdude over the Petoi USB adapter. It talks the
-token protocol at 115200 and finds its EEPROM intact.
+The original Petoi firmware and its built image are in git history only. The
+body never writes the EEPROM area that firmware used.
 
 **The Petoi CH343 USB adapter.**
 - It enumerates as `/dev/ttyACM0` or `/dev/ttyUSB0` on Linux (COM9 on the
@@ -2521,7 +2519,7 @@ kernel/                   the mind as a bare-metal C++ kernel for the Pi 2 B (Ci
   circle/                 Circle, a git submodule
 mind/                     the Python side (pip install -e mind): the laptop's `kilo` command, and the
                           reference the C++ mind's golden vectors come from
-  pyproject.toml  README.md  firmware/ (opencat-legacy.hex)
+  pyproject.toml  README.md
   kilo/
     protocol/             VENDORED by protocol/vendor.py: kilo_protocol.py, kilo_link_codec.py
     link/                 codec.py (Codec / Decoder, COBS + CRC)  messages.py (pack/unpack by name)
@@ -2558,7 +2556,7 @@ docs/                     the design (architecture.md), setup (setup.md the dev 
 tools/kilo-hud/           a Claude Code mod that shows Kilo's state beside the chat
 legacy/                   five headers of Petoi's original OpenCat firmware, read by tests and the trick
                           importer, not built (legacy/README.md); the rest of that firmware is in git
-                          history, its rollback image is mind/firmware/opencat-legacy.hex
+                          history
 LICENSE                   MIT, OpenCat's
 ```
 
@@ -2617,7 +2615,7 @@ reference; this table is the overview.
 | H12 | Eyes R/G/B/W per side; BEEP scale | Correct LEDs; clean tones; no ultrasonic degradation while beeping |
 | H13 | Board tilted 0 → 10° pitch and roll | Body within 3° of level after 1 s. **Not met by the P1 joint-space layer (measured 2026-10-11: ≈0.17° body per degree of correction); deferred to P2 IK levelling by the owner.** P2: geometric levelling in STANCE/GAIT on the slope estimate (3f); host plant within 2.5° after 1 s at `kp_q8` 253; on Kilo: `docs/p2-hardware-test.md`. |
 | H14 | Walk 2 m (P2) | Drift < 20 cm **(target)**; 360° turn in place < 20 s; 30 s trot without a fall |
-| H15 | Flash `mind/firmware/opencat-legacy.hex` (on 2026-10-10 with `kilo flash --legacy`, since removed; now by hand with avrdude) | Old `kup`, `kwkF` work with the old calibration |
+| H15 | Flash the original firmware's image (on 2026-10-10 with `kilo flash --legacy`; the command and the image have since been deleted) | Old `kup`, `kwkF` work with the old calibration |
 
 Results so far (docs/p0-hardware-test-results.md):
 - 2026-10-10, from the Pi over the CH343 adapter: **H1 passed** (3 flashes,

@@ -7,7 +7,7 @@
 // invalid and boot falls back to the other one, which is untouched.
 //
 // Why never write the legacy layout: so the original OpenCat firmware
-// (mind/firmware/opencat-legacy.hex), if it is ever flashed again, finds its
+// (in git history), if it is ever flashed again, finds its
 // EEPROM exactly as it left it. The writer can only address the
 // two slots (704..959), and hal/eeprom refuses anything else as well.
 #ifndef KILO_CORE_CONFIG_H

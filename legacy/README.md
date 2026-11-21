@@ -4,7 +4,7 @@ Five files from Petoi's original OpenCat firmware for the Nybble
 (https://github.com/PetoiCamp/OpenCat, by Rongzhong Li), kept unchanged as
 reference data. Nothing here is built. The rest of that firmware
 (`OpenCat.ino` and the top-level `src/`) was deleted on 2026-11-20; git
-history has it, and `mind/firmware/opencat-legacy.hex` is its built image.
+history has it, and its built image.
 
 | File | Read by |
 |---|---|
