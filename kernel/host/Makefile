@@ -68,6 +68,8 @@ TESTS += test_power
 TESTS += test_guard
 # Kilo's sounds (sound/): the renderer, the player, the events' hooks in the Mind, SOUND over the host channel.
 TESTS += test_sound
+# Kilo measures himself (measure/): the script against the Python, its poses' safety, B1 in the Mind.
+TESTS += test_measure
 
 .PHONY: all check bench freestanding clean
 all: $(B)/kilo-mind-host $(B)/walk-demo
@@ -211,6 +213,7 @@ ALLOWED += exp log sin cos sincos
 # float types: the double-planner builds (the vector test's twin, the bench) leave them out
 # (their recipes expand these at run time).
 FLOAT_ONLY := mind/remote/% mind/record/% mind/net/host_% mind/power/% mind/mind.o mind/guard/% mind/behaviour/alive.o \
+              mind/measure/% \
               mind/sound/%
 DBL_OBJS := $(filter-out $(addprefix $(B)/san/,$(FLOAT_ONLY)),$(DBL_OBJS))
 BENCH_DBL_OBJS := $(filter-out $(addprefix $(B)/obj/,$(FLOAT_ONLY)),$(BENCH_DBL_OBJS))

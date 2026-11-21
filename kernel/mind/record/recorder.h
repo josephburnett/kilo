@@ -31,6 +31,12 @@
 //                           stage's top was reached (R 0: none yet)
 //   MARK "end reason=DONE|STOPPED|PREEMPTED|FELL|FAILED|REFUSED elapsed_ms=.. expected_ticks=..
 //                    battery_mv=.. mode=.. [stage=S of=N [reached=R]] why=..", RUN END
+// The self-measurement (B1, measure/measure.h; docs/self-measurement.md): a run of kind TRICK (the
+// host protocol has walks and tricks; its label tells it apart), label "measure=self end=REASON":
+//   RUN BEGIN, MARK "measure id=N format=1 mind_build=.. body_build=.. script=1 tick0=.. ..."
+//   MARK "model ...", "step i=.. exp=.. phase=.. t=.. tick=..", "tip exp=.. seen=.. x=..", "key ..."
+//   MARK "end reason=DONE|STOPPED|FELL|ABORTED ticks=.. sent=.. ... why=..", RUN END
+// The FEET it sent (each tick's feet and the model's attitude) and the TELEMETRY are in the stream.
 // The run's label (WALK_INFO.text): "trick=NAME [stage=S of=N [reached=R]] end=REASON", S the
 // highest stage allowed in the run, reached=R only when the play did not get to S's top.
 // The frames themselves (TELEMETRY: the measured pitch and roll at every
@@ -97,11 +103,14 @@ class Recorder final : public FrameTap, public planner::WalkObserver, public Log
   void key(const char* text);
   // A MARK line into the stream, run or not (the distance guard's zone changes and actions).
   void note(const char* line) { mark_line(line, clock_.now_us()); }
+  // The self-measurement's run (above): opened with its header's fields, closed with its end line.
+  void measure_begin(const char* fields);
+  void measure_end(const char* line, const char* reason, bool ok);
 
   // A run is open or in its post-roll.
-  bool recording() const { return walk_ != 0 || trick_ != 0 || tail_end_us_ != 0; }
-  // Moving now: a walk or a trick run open (the card saver waits).
-  bool in_run() const { return walk_ != 0 || trick_ != 0; }
+  bool recording() const { return walk_ != 0 || trick_ != 0 || measure_ != 0 || tail_end_us_ != 0; }
+  // Moving now: a walk, a trick or a measurement run open (the card saver waits).
+  bool in_run() const { return walk_ != 0 || trick_ != 0 || measure_ != 0; }
   uint64_t last_run_end_us() const { return last_end_us_; }
   uint32_t runs_total() const { return next_id_ - 1; }
   // The oldest run with an id above after (0: the oldest kept), or null.
@@ -151,6 +160,7 @@ class Recorder final : public FrameTap, public planner::WalkObserver, public Log
   uint32_t walk_ = 0;      // the open walk run's id, 0 none
   bool walk_long_ = false;  // ... and it went into the long trot (its label says so)
   uint32_t trick_ = 0;     // the open trick run's id
+  uint32_t measure_ = 0;   // the open self-measurement run's id
   uint64_t tail_end_us_ = 0;  // the latest post-roll's end (0: none running)
   uint64_t last_end_us_ = 0;
   uint64_t last_key_us_ = 0;

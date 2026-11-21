@@ -47,6 +47,8 @@ guard/            the distance guard: the range filtered, zones, stop / back off
 sound/            Kilo's sounds: the player (requests, families, the queue, the gap, volume), the renderer the audio
                   interrupt runs, the output seam (no Python counterpart; docs/sound.md)
 remote/           the IR key map and RemoteControl; client.cpp: BodyClient's posture/balance/look
+measure/          the self-measurement (B1): the script (a port of mind/kilo/measure/script.py) and its run;
+                  docs/self-measurement.md
 mind.h, mind.cpp  Mind: all of the above, the link and the laptop server in one object
 util/dmath, str   double helpers with Python's sums (dmath), string compare (str)
 proto/            vendored by protocol/vendor.py: never edit; run python3 protocol/vendor.py
@@ -602,7 +604,8 @@ behaviour runner (`remote/remote.h` says what each key does):
 | A5 | start the behaviour runner |
 | A2 | off unless built with `KILO_REAR_UP=1`, `2` or `3` (the highest stage allowed): rear up (docs/rear-up-trick.md): up to stage 1 (28 degrees nose up) and hold; A2 again while he holds a stage (4 s) takes him on to the next (40, then 54 degrees), up to the build's; without it he comes down to SIT from there; the top stage holds 2 s and comes down. A2 at another moment, B6 or C7: down at once (1.5 to 2.5 s); refused below 7400 mV at rest (the highest reading of the last 20 s). B2 until 2026-11-17 |
 | B2 | a meow: one of the meow family, picked at random (`sound/`, docs/sound.md); it moves nothing, so it plays at once, also while a walk or the behaviour runs |
-| rows 1-3 but A1, A2 and B2 | nothing (logged as ignored) |
+| B1 | the self-measurement (`measure/`, docs/self-measurement.md): small poses streamed as FEET with the balance off, recorded as a run of its own; any key stops it into STAND |
+| rows 1-3 but A1, B1, A2 and B2 | nothing (logged as ignored) |
 
 The remote's waits are phases of `poll()` and keys that come
 meanwhile queue (4); C7 does not queue: it cancels

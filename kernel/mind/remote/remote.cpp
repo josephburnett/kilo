@@ -225,6 +225,10 @@ void RemoteControl::freeze(const Key& key, uint16_t arg) {
     walker_.halt();
     part("walk: the quick stop");
   }
+  if (measure_ != nullptr && measure_->active()) {  // into STAND (docs/self-measurement.md)
+    measure_->stop(text_);
+    part("measurement stopped: standing");
+  }
   if (behaviour_ != nullptr && behaviour_->active()) {  // its own trick is cancelled as it stops
     behaviour_->stop();
     part("behaviour runner stopped");
@@ -254,6 +258,18 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
     frozen_ = false;
     note_ = "unfrozen, ";
   }
+  if (measure_ != nullptr && measure_->active()) {  // every key stops it first (into STAND)
+    measure_->stop(text_);
+    if (key.kind == Kind::Measure) {
+      done("measurement stopped: standing", false);
+      return;
+    }
+    if (!stop_key(key)) {
+      done("measurement stopped: standing (only B6, A7 and C7 act after it)", false);
+      return;
+    }
+    note_ = "measurement stopped, ";
+  }
   if (behaviour_ != nullptr && behaviour_->active()) {
     if (key.kind == Kind::Behaviour) {
       done("behaviour runner already running", false);
@@ -269,6 +285,7 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
   switch (key.kind) {
     case Kind::Posture:
     case Kind::Behaviour:
+    case Kind::Measure:
       stop_then_act(now);
       return;
     case Kind::Trick:
@@ -619,6 +636,13 @@ void RemoteControl::act() {
       else if (ok) format(what, sizeof what, "behaviour runner started");
       else format(what, sizeof what, "behaviour runner failed: %s", why);
       done(what, !ok);
+      return;
+    }
+    case Kind::Measure: {
+      why = measure_ != nullptr ? measure_->start() : "no self-measurement";
+      if (why == nullptr) format(what, sizeof what, "measuring (about 45 s; any key stops it)");
+      else format(what, sizeof what, "measure refused: %s", why);
+      done(what, why != nullptr);
       return;
     }
     case Kind::Gait:

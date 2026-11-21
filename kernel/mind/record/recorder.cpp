@@ -340,6 +340,37 @@ void Recorder::trick_refused(const char* trick, const char* why) {
   end_trick("REFUSED", why, 0, 0, now);
 }
 
+void Recorder::measure_begin(const char* fields) {
+  if (!attached()) return;
+  uint64_t now = clock_.now_us();
+  if (measure_ != 0) measure_end("end reason=ABORTED why=another measurement began", "ABORTED", false);
+  Run* r = begin_run(KILO_RUN_KIND_TRICK, now);
+  measure_ = r->id;
+  const BodyState& b = link_.state();
+  char line[250];
+  size_t n = format(line, sizeof line, "measure id=%u format=1 mind_build=%08x", (unsigned)r->id, (unsigned)mind_build_);
+  if (b.has_hello) n += format(line + n, sizeof line - n, " body_build=%08x", (unsigned)b.hello.fw_build);
+  format(line + n, sizeof line - n, " %s", fields);
+  mark_line(line, now);
+  set_text(r, "measure=self");
+  r->flags |= KILO_WALK_FLAGS_STREAMED;
+}
+
+void Recorder::measure_end(const char* line, const char* reason, bool ok) {
+  if (measure_ == 0) return;
+  uint64_t now = clock_.now_us();
+  mark_line(line, now);
+  Run* r = run(measure_);
+  if (r != nullptr) {
+    if (ok) r->flags |= KILO_WALK_FLAGS_ENDED_OK;
+    char text[KILO_HOST_WALK_TEXT_MAX + 1];
+    format(text, sizeof text, "measure=self end=%s", reason);
+    set_text(r, text);
+  }
+  end_run(measure_, now);
+  measure_ = 0;
+}
+
 void Recorder::key(const char* text) {
   uint64_t now = clock_.now_us();
   last_key_us_ = now;

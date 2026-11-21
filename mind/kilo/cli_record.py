@@ -155,6 +155,8 @@ def local_id(info: Any) -> int:
 def describe(info: Any) -> dict[str, Any]:
     d = walkrec.info_dict(info)
     d["kind"] = "trick" if info.flags & P.WalkFlags.TRICK else "walk"
+    if "measure" in d:  # the self-measurement (B1): a trick-kind run labelled measure=self
+        d["kind"] = "measure"
     d["boot"] = boot_of(info) or None
     d["run"] = local_id(info)
     d["saved"] = bool(info.flags & P.WalkFlags.SAVED)
@@ -173,7 +175,9 @@ def _row(info: Any, when: float | None) -> str:
     state = "recording" if "RECORDING" in flags else d.get("end") or "-"
     if "TRUNCATED" in flags:
         state += " (TRUNCATED: its start is gone)"
-    if d["kind"] == "trick":
+    if d["kind"] == "measure":
+        what = "self-measurement (B1)"
+    elif d["kind"] == "trick":
         if d.get("of"):  # the stage allowed in the run: "rear_up stage 1 of 3"
             what = trickrec.trick_label(d.get("trick", "?"), d.get("stage"), d.get("of"), d.get("reached"))
         else:  # an older mind: the build's stage
@@ -316,6 +320,13 @@ def fetch_one(hl: HostLink, w: Any, st: Any, rs: Any | None, now: float, out: Pa
 def analysis_text(s: flight.Stream, run: flight.RunSpan | None, kind: str) -> str:
     if run is None:
         return "  (the run's start and end marks are not in the data)"
+    if kind == "measure":
+        from kilo.measure import record
+
+        try:
+            return record.summary(record.run_of(s, run))
+        except record.RecordError as e:
+            return f"  {e}"
     if kind == "trick":
         return trickrec.format_analysis(trickrec.analyze(trickrec.trick_run(s, run)))
     w = flight.walk_of(s, run)

@@ -85,7 +85,12 @@
 //   that crossfade first (Phase::Settle).
 // - B2 meows (Kind::Sound): the Mind asks its sound player (sound/player.h)
 //   and never calls perform() for it.
-// - Rows 1-3 but A1, B2 (and A2 unless switched on) do nothing (Mind::ir_key logs them as ignored).
+// - B1 Kind::Measure, docs/self-measurement.md: the self-measurement routine
+//   (MeasureHook; measure/measure.h), after stopping a walk and a trick as a
+//   posture key does; its refusals (battery, not standing level) fail the
+//   key. While it runs every key stops it first (into STAND): B1 again only
+//   that, B6, A7 and C7 then do their own action, the others nothing more.
+// - Rows 1-3 but A1, B1, B2 (and A2 unless switched on) do nothing (Mind::ir_key logs them as ignored).
 // Every key leaves one log line, "remote <grid> (0x.., <label>): <outcome>".
 // Which keys never reach perform() (repeats, other remotes' keys, rows 1-3,
 // a laptop client holding the body) is the caller's call (Mind::ir_key).
@@ -136,6 +141,19 @@ class BehaviourHook {
   ~BehaviourHook() = default;
 };
 
+// The self-measurement routine, as the remote starts and stops it (the Mind's). Not pure (as BehaviourHook).
+class MeasureHook {
+ public:
+  virtual bool active() { return false; }
+  // Start it: null, or why not.
+  virtual const char* start() { return "no self-measurement"; }
+  // Stop it now (into STAND); why: the key, for its log.
+  virtual void stop(const char* /*why*/) {}
+
+ protected:
+  ~MeasureHook() = default;
+};
+
 // Who hears of a trick the remote refused to start (the flight recorder:
 // a REFUSED trick run). Not pure, as BehaviourHook.
 class TrickNotes {
@@ -163,6 +181,7 @@ class RemoteControl {
   RemoteControl(SerialLink& link, planner::Walker& walker, tricks::TrickPlayer& player, Clock& clock, Log& log);
   void set_behaviour(BehaviourHook* hook) { behaviour_ = hook; }
   void set_trick_notes(TrickNotes* notes) { notes_ = notes; }
+  void set_measure(MeasureHook* hook) { measure_ = hook; }
 
   // Carry out a key's action (now, or after the ones queued; C7 at once).
   // False when the queue is full (the key is dropped, and logged).
@@ -250,6 +269,7 @@ class RemoteControl {
   bool last_failed_ = false;
   uint32_t actions_ = 0, failures_ = 0;
   TrickNotes* notes_ = nullptr;
+  MeasureHook* measure_ = nullptr;
 };
 
 }  // namespace remote

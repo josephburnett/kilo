@@ -20,6 +20,8 @@ what is done on this machine (keys, SD cards, downloaded recordings).
     kilo bench sd   the SD card's write times;   kilo metrics   the session's counters
     kilo power | FILE.krec   light sleep and the battery's trend (kilo.cli_power, docs/power.md)
     kilo sound [status|list|play NAME|on|off|volume N]   Kilo's sounds (kilo.cli_sound, docs/sound.md)
+    kilo measure plan|fit FILE...|fetch|simulate   Kilo's self-measurement, B1 (kilo.cli_measure,
+                                   docs/self-measurement.md)
     kilo log summary|replay|plot|walk|trick|run FILE ...   (walk, trick, run: a .krec from kilo runs --fetch)
     kilo log [--lines N] [--previous [BOOT]] ... --host IP   the mind's log (kilo.cli_host)
     kilo key init [--name NAME] | show   this laptop's key for the mind (kilo.hostkey); --key PATH / $KILO_HOST_KEY
@@ -108,6 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     __import__("kilo.cli_record").cli_record.add_parsers(sub)  # kilo runs (walks), record, bench, metrics
     __import__("kilo.cli_power").cli_power.add_parsers(sub)  # kilo power: light sleep, the battery trend
+    __import__("kilo.cli_measure").cli_measure.add_parser(sub)  # kilo measure: the self-measurement (B1)
 
     s = sub.add_parser("flash", help="build the body firmware and flash it through the mind, or put it on the "
                                      "mind's boot card (--sd)")
@@ -236,6 +239,7 @@ LOCAL_COMMANDS = {
     "record": lambda args: __import__("kilo.cli_record").cli_record.offline(args),
     "find": lambda args: __import__("kilo.cli_find").cli_find.cmd_find(args),
     "power": lambda args: __import__("kilo.cli_power").cli_power.offline(args),
+    "measure": lambda args: __import__("kilo.cli_measure").cli_measure.local(args),
     "card": lambda args: __import__("kilo.cli_card").cli_card.cmd_card(args)}
 
 

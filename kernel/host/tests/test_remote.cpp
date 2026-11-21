@@ -59,10 +59,9 @@ void test_key_table(uint8_t stage) {
     if (k.kind == Kind::Posture) CHECKF(posture_code(k.name) >= 0, "posture %s", k.name);
     if (k.kind == Kind::Gait) CHECKF(planner::find_pattern(k.name) != nullptr, "gait %s", k.name);
     if (k.kind == Kind::Trick) CHECKF(tricks::find_trick(k.name) != nullptr, "trick %s", k.name);
-    // rows 1-3 do nothing, but A1 (the long trot), A2 and B2 (the meow)
+    // rows 1-3 do nothing, but A1 (the long trot), A2, B2 (the meow) and B1 (the self-measurement)
     CHECKF((k.grid[1] <= '3' && std::strcmp(k.grid, "A1") != 0 && std::strcmp(k.grid, "A2") != 0 &&
-            std::strcmp(k.grid, "B2") != 0) ==
-               (k.kind == Kind::Ignore),
+            std::strcmp(k.grid, "B2") != 0 && std::strcmp(k.grid, "B1") != 0) == (k.kind == Kind::Ignore),
            "%s", k.grid);
   }
   CHECK(cmds.size() == 21 && grids.size() == 21);

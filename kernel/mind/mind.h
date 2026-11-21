@@ -13,6 +13,7 @@
 //                with storage from attach_recorder() (record/)
 //   Saver        the recorder onto the SD card at safe moments (attach_saver())
 //   Metrics      the session's counters (METRICS, kilo metrics --host)
+//   Measure      the self-measurement routine (measure/), the remote's B1
 //   SoundPlayer  what Kilo says and when (sound/): B2, waking, the
 //                behaviour's purrs, the guard's hiss; the output from the
 //                platform (MindConfig.sound_output), the sounds the build packed
@@ -52,6 +53,7 @@
 #include "behaviour/runner.h"
 #include "guard/guard.h"
 #include "link/serial_link.h"
+#include "measure/measure.h"
 #include "net/host_server.h"
 #include "perception/percepts.h"
 #include "planner/walker.h"
@@ -100,6 +102,7 @@ class Mind final : public LinkListener,
                    public record::MetricsSource,
                    public guard::GuardHost,
                    public sound::SoundHost,
+                   public measure::MeasureObserver,
                    public CalGate {
  public:
   static constexpr uint64_t kRunnerStallUs = 1000000;       // the runner's last tick at most this old
@@ -175,6 +178,11 @@ class Mind final : public LinkListener,
   // CalGate: no calibration change over the host channel while a walk or trick runs.
   const char* cal_refusal() override;
   void mark(const char* line) override { recorder_.note(line); }  // guard::GuardHost, sound::SoundHost
+  // measure::MeasureObserver: the run into the flight recorder
+  void measure_begin(const char* fields) override { recorder_.measure_begin(fields); }
+  void measure_line(const char* line) override { recorder_.note(line); }
+  void measure_end(const char* line, const char* reason, bool ok) override { recorder_.measure_end(line, reason, ok); }
+  measure::Measure& measure() { return measure_; }
 
   guard::DistanceGuard& guard() { return guard_; }
   sound::SoundPlayer& sound() { return sound_; }
@@ -217,6 +225,17 @@ class Mind final : public LinkListener,
     Mind& m_;
     char what_[48] = {};
   };
+  // the remote's B1 (remote.h MeasureHook)
+  class MeasureHookImpl final : public remote::MeasureHook {
+   public:
+    explicit MeasureHookImpl(Mind& m) : m_(m) {}
+    bool active() override { return m_.measure_.active(); }
+    const char* start() override;
+    void stop(const char* why) override { m_.measure_.stop(why); }
+
+   private:
+    Mind& m_;
+  };
   class NoListener final : public Listener {
    public:
     int32_t accept() override { return -1; }
@@ -250,6 +269,8 @@ class Mind final : public LinkListener,
   behaviour::Runner runner_;
   RunnerHook runner_hook_;
   remote::RemoteControl remote_;
+  measure::Measure measure_;
+  MeasureHookImpl measure_hook_;
   power::Sleep sleep_;  // light sleep after A7 or lying idle (power/sleep.h)
   guard::DistanceGuard guard_;
   behaviour::Alive alive_;

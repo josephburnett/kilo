@@ -567,7 +567,8 @@ def _prepare_flash(args: argparse.Namespace) -> int | None:
 HOST_COMMANDS = {"status": cmd_status, "posture": cmd_posture, "monitor": cmd_monitor, "log": cmd_log,
                  "flash": cmd_flash, "reboot": cmd_reboot, "update": cmd_update, "guard": cmd_guard,
                  **cli_record.HOST_COMMANDS, "power": cli_power.cmd_power, "sound": cli_sound.cmd_sound,
-                 "cal": lambda args, hl: __import__("kilo.cli_cal").cli_cal.cmd_cal_host(args, hl)}
+                 "cal": lambda args, hl: __import__("kilo.cli_cal").cli_cal.cmd_cal_host(args, hl),
+                 "measure": lambda args, hl: __import__("kilo.cli_measure").cli_measure.cmd_host(args, hl)}
 
 
 def parse_log_argv(argv: list[str], host: str | None, key: str | None = None) -> argparse.Namespace:
@@ -599,6 +600,7 @@ def wants_host(args: argparse.Namespace) -> bool:
     return not (args.cmd in LOCAL_ONLY
                 or (args.cmd == "record" and getattr(args, "rec_cmd", None) == "decode")
                 or (args.cmd == "power" and getattr(args, "file", None))
+                or (args.cmd == "measure" and getattr(args, "measure_cmd", None) != "fetch")
                 or (args.cmd == "flash" and getattr(args, "sd", None) is not None))
 
 
