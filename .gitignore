@@ -7,3 +7,14 @@
 */logfile.log
 .claude/worktrees/
 .venv/
+
+# Raw data and recordings stay out of the repository (owner, 2026-11-21): they
+# live in ~/kilo-logs on each machine. Test inputs under mind/tests/fixtures/ are kept.
+kilo-logs/
+kilorec/
+*.krec
+*.krc
+*.kilolog
+*.fit.json
+*.jsonl
+!mind/tests/fixtures/**
