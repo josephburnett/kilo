@@ -1,5 +1,7 @@
 # P2 walking hardware test
 
+*Written for the retired route (the Python mind, over the USB cable or on Raspberry Pi OS); most of its commands, and the serial port they use, no longer exist. What happened when it was run: `docs/p2-hardware-test-results.md`.*
+
 The first run of the IK, STANCE and the gait generator on Kilo
 (docs/architecture.md §3d, "As implemented in P2"; §3f for the geometric
 balance). In order: measure the legs and store them, check the joint signs

@@ -1,5 +1,7 @@
 # P1 balance hardware test
 
+*Written for the retired route (the Python mind, over the USB cable or on Raspberry Pi OS); most of its commands, and the serial port they use, no longer exist. What happened when it was run: `docs/p1-hardware-test-results.md`.*
+
 The first run of the joint-space balance layer (docs/architecture.md §3c
 layer 2, §3f) on Kilo, from the Raspberry Pi. It checks, in this order: that
 the attitude signs are what the firmware assumes, that each leg answers a tilt

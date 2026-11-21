@@ -349,7 +349,8 @@ error telemetry) and the planner.
 
 Code: `mind/kilo/planner/` (model.py, patterns.py, plan.py, errors.py,
 walker.py); the virtual body it is tested on: `mind/kilo/vbody/feet.py`
-and `physics.py`; how to use it: mind/README.md "Walking".
+and `physics.py`; the C++ port that walks Kilo: `kernel/mind/planner/`,
+driven by the remote (`kernel/README.md` "The remote's keys").
 
 **What it computes, every 20 ms tick.** Where each foot is (fore-aft x and
 depth z under its shoulder), which feet are on the ground, and the
@@ -391,8 +392,9 @@ plausible model error, below), shift at most 18 mm, roll 14°, pitch 6°, lift g
 patterns and swing times as in mind/README.md. Replace the masses with the
 per-foot scale readings and the lag with the servo step test.
 
-**The stream's timing.** A thread in the process that walks (the daemon or
-`kilo walk`) wakes every 20 ms. The body's clock is estimated from the
+**The stream's timing.** The walker (in the C++ mind `Walker::poll()` on a
+20 ms deadline grid, `kernel/mind/planner/walker.h`; in the Python reference
+a thread) wakes every 20 ms. The body's clock is estimated from the
 TELEMETRY arrival times (50 Hz while walking): body time = local time + the
 largest (tick x 20 ms - arrival) of the last 2 s, i.e. the least delayed
 frame; the window restarts when five frames in a row are more than a tick
@@ -888,7 +890,7 @@ are within that of each other.
 ### 13.2 Steering
 
 **How.** A forward or backward walk now takes a steer S from -1 to 1 (+
-left; `Planner.set_steer`, `WalkGoal.steer`, `client.walk(..., steer=S)`).
+left; `Planner.set_steer`, `WalkGoal.steer`).
 The left side's stride is the stride less S times it, the right side's the
 stride plus it; when the longer of the two would pass the pattern's longest
 stride (the trot 44 mm, the walk 30, the crawl 50), both are scaled down
@@ -1159,16 +1161,15 @@ goes back to the first tick the body has not played yet (its tick + 2: the
 next FEET may be on the wire), halts from there, and sends those ticks
 again; the body replaces a queued tick with a newer FEET for it. The stop
 starts about 40 ms after the request instead of 100 ms. The Python walker
-(the laptop's daemon) has the halt but not this.
+(`mind/kilo/planner/walker.py`, the reference) has the halt but not this.
 
 **Where it is used.** Everything that asks for a stop on Kilo: B6, A7, C5,
 a trick key while walking, C7 (freeze: now the quick stop, then frozen as
 before), the distance guard's stops (docs/distance-guard.md), and its
 back-offs' ends. **The planned stop stays** where a clean, gradual finish
-matters and nobody is waiting for it: a laptop's scripted walk (`kilo walk
-... --for`, the Python daemon's walker: the recordings that tune the
-planner end the way they walked), and the legs' way home when the gait
-changes into or out of the crawl.
+matters and nobody is waiting for it: the legs' way home when the gait
+changes into or out of the crawl, and the scripted walk of the host tests
+(`kernel/host/walk_demo.cpp`).
 
 ### 14.4 The numbers
 

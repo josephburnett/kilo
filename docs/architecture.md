@@ -1,7 +1,7 @@
 # Kilo architecture: body firmware and mind software
 
 This is the design for rebuilding the firmware and control software of Kilo,
-a Petoi Nybble on a NyBoard V1_2 with a Raspberry Pi 2 Model B as its mind (today in its own enclosure with its own supply, joined by the USB serial cable; riding on Kilo is the goal).
+a Petoi Nybble on a NyBoard V1_2 with a Raspberry Pi 2 Model B as its mind, mounted on the NyBoard's socket. The mind was first a Python package on Raspberry Pi OS; since November 2026 it is a bare-metal C++ kernel (`docs/fast-boot.md`, `kernel/`), and the Python package is the laptop's `kilo` command and the reference the kernel is tested against (§5).
 
 **Status:** revised draft for implementation, 2026-10-10.
 
@@ -32,7 +32,7 @@ operations notes and test tables. The main body links to them.
 
 | Topic | Decision | § |
 |---|---|---|
-| Split | BODY = new NyBoard firmware (real-time, reflexes); MIND = Python on the Pi (goals, personality). The Pi is always onboard. | 2 |
+| Split | BODY = new NyBoard firmware (real-time, reflexes); MIND = the C++ kernel on the Pi (goals, gait planning, personality). The Pi is always onboard. | 2 |
 | Tick | 50 Hz, polled against a fixed `micros()` deadline. Nothing blocks. | 3a |
 | Libraries | Custom UART, polled I2C, PCA9685 and DMP drivers. No HardwareSerial, Wire, I2Cdev, Print or `pulseIn`. Integer maths; float is a sanctioned fallback for IK only. | 3 |
 | Ultrasonic | Echo timed by a pin-change ISR on D6. 80 ms cadence, 25 ms cap. | 3a |
@@ -52,7 +52,7 @@ operations notes and test tables. The main body links to them.
 | Buzzer | **Kept, Pi-driven.** A `BEEP` note queue plus built-in reflex chirps. ISR-toggled on D5. | 3a, 4 |
 | First tricks | Basics: sit, rest, stand, stretch, balance. Social: hi, wash face, check around, sniff, scratch, pee, push-up, butt-up. Athletic tricks (backflip, roll, jump) are not ported. Fall recovery stays a body reflex. | 5 |
 | Behaviour | An in-house behaviour tree under a utility selector over drives, ticked at 10 Hz. | 5 |
-| Testing | Host g++ tests with sanitizers, a virtual body on a pty (Python, cross-checked against the C dispatch), a size/symbol harness, and a HIL checklist. Planned, not done: the same tests under simavr and a virtual body built from the C core. | 6 |
+| Testing | Host g++ tests with sanitizers, a virtual body (Python, cross-checked against the C dispatch) and one built from the C core, a size/symbol harness, and a HIL checklist. Planned, not done: the same tests under simavr. | 6 |
 
 ---
 
@@ -91,10 +91,10 @@ operations notes and test tables. The main body links to them.
 ## 2. System overview
 
 ```
-             +-------------------------- Raspberry Pi 2 B ("MIND", Python) --------------------------+
-             |  perception (camera, later mic)   behaviour tree + drives   trick library + authoring |
-             |  telemetry log      CLI / daemon socket      flash tool (arduino-cli + avrdude)         |
-             |                         kilo.link.SerialLink  (/dev/ttyAMA0, 250000 8N1)              |
+             +------------------- Raspberry Pi 2 B ("MIND", C++ bare-metal kernel on Circle) ----------+
+             |  perception   behaviour tree + drives   walking planner   trick library   IR remote map |
+             |  flight recorder   host channel to the laptop (`kilo --host`)   body flasher (STK500v1) |
+             |                         link/serial_link  (PL011 on GPIO14/15, 250000 8N1)              |
              +---------------------------------------|---------------------------------------------+
                   goals (+epoch): posture, head, body  | pose, eyes, beeps; FEET 50 Hz; trick upload/play; params
                   telemetry 25-50 Hz, events, acks     |                           GPIO4 -> RESET (flashing only)
@@ -117,7 +117,7 @@ operations notes and test tables. The main body links to them.
 | Reflexes (fall, battery, limits, link watchdog) | Body | Must work while the Pi hangs, reboots or is absent. |
 | Ultrasonic ranging | Body | Needs µs echo timing. Only the range goes to the Pi. |
 | Eyes, buzzer | Body executes, Pi decides | Simple actuators. The body adds its own reflex chirps. |
-| Gait planning (every step and the body's lean, from a model of the body), tricks, perception, personality, logging, flashing, calibration UI | Mind | Needs storage, Python and CPU. The plan needs the whole body's mass model and replanning from the measured error (3d, 3f). |
+| Gait planning (every step and the body's lean, from a model of the body), tricks, perception, personality, logging, flashing, calibration UI | Mind | Needs storage and CPU. The plan needs the whole body's mass model and replanning from the measured error (3d, 3f). |
 
 **Latency**
 
@@ -125,7 +125,7 @@ operations notes and test tables. The main body links to them.
 |---|---|
 | IMU sample → PCA9685 write | ≈4 ms within the tick, plus ≤10 ms DMP sample age **(est.)** |
 | Pi goal → applied | ≤2.6 ms on the wire + ≤20 ms tick phase |
-| Body state → Python callback | ≤20 ms + 1.3 ms wire + 1-10 ms Linux tty **(est.)** |
+| Body state → mind | ≤20 ms + 1.3 ms wire + the main loop's pass (a few ms) **(est.)** |
 | Camera percept → head motion | 150-350 ms **(est.)**. Servo mechanics (≈100-150 ms per 60°) usually dominate. |
 
 Rule: anything that must react within about 100 ms runs on the body.
@@ -1389,17 +1389,16 @@ and `protocol/vectors/` (`protocol/README.md`). This section gives the shape;
 Appendix E has every byte layout.
 
 **Link.**
-- 328P USART0 ↔ Pi PL011 on GPIO14/15 (`/dev/ttyAMA0`), 8N1, no flow control,
+- 328P USART0 ↔ Pi PL011 on GPIO14/15, 8N1, no flow control,
   at **250000 baud**.
 - Both ends are exact at that rate: on the 328P at normal speed (U2X off)
   with UBRR = 3 (`body/src/hal/uart.cpp`), and on the PL011 with a 48 MHz
   UARTCLK and divisor 12.000. 115200 has a 2.1% error
   on the 328P. 500000 would halve the main-loop slack for no need.
 - Worst-case load is 21% upstream and 38% downstream (Appendix B; walking: FEET and TELEMETRY at 50 Hz are 4% and 8% of the line).
-- Check `vcgencmd measure_clock uart` reads 48 MHz.
-- During development the Petoi CH343 USB adapter can stand in for the Pi
-  (Appendix F). **Unplug it whenever the Pi drives the UART**, because both
-  drive the same RX line.
+- The Petoi CH343 USB adapter can stand in for the Pi (Appendix F).
+  **Unplug it whenever the Pi drives the UART**, because both drive the same
+  RX line.
 
 **Framing:**
 
@@ -1569,11 +1568,11 @@ interrupt that never runs, drops one). Drops are reported by a rate-limited
 `EVENT TX_DROPPED`.
 
 **Watchdog timing.**
-- The Pi's serial writer thread sends `HEARTBEAT` whenever it has sent nothing
-  for 100 ms. To stop a hung mind from masking itself, **all** traffic the
-  writer generates on its own (heartbeats, the 5 Hz goal refresh, `HELLO_REQ`
-  polling, the `HELLO_REQ` on (re)connect) is sent only while the asyncio loop
-  has proved alive within the last 1 s (§5). Goals and commands the mind
+- The mind's link sends `HEARTBEAT` whenever it has sent nothing for
+  100 ms. To stop a hung mind from masking itself, **all** traffic the link
+  generates on its own (heartbeats, the 5 Hz goal refresh, `HELLO_REQ`
+  polling, the `HELLO_REQ` on (re)connect) is sent only while the mind's main
+  loop has proved alive within the last 1 s (§5). Goals and commands the mind
   issues are sent at once.
 - The body stops motion at 0.5 s and moves to REST at 1.5 s (3g).
 - The Pi treats the body as lost after 300 ms without telemetry, and polls
@@ -1597,67 +1596,63 @@ HELLO build hash) is in Appendix F.
 
 ---
 
-## 5. Mind software design (Python on the Pi)
+## 5. Mind software design
 
-The mind runs on the Pi 2 B: 4 × Cortex-A7 at 900 MHz, 1 GB RAM, Raspbian 13
-with Python 3.13. Dependencies are pyserial, numpy, OpenCV (apt
-`python3-opencv`) and picamera2 (apt). The package is `mind/kilo/`; its layout
-and the CLI are in Appendix G.
+The mind runs on the Pi 2 B (4 × Cortex-A7 at 900 MHz, 1 GB RAM) as a
+bare-metal C++ kernel on Circle: `kernel/` (`kernel/README.md`), its
+portable core in `kernel/mind/` (`kernel/mind/README.md`), the design and
+the reasons in `docs/fast-boot.md`. The same core also builds on Linux
+(`kernel/host/`, `kilo-mind-host`) and runs there against the virtual body.
 
-**Serial link.** `SerialLink` owns `/dev/ttyAMA0` at 250000 with
-`ASYNC_LOW_LATENCY`, and runs three threads:
+The core is a port of the Python mind that ran on Raspberry Pi OS until
+November 2026. The Python package `mind/kilo/` (Appendix G) stays on the
+laptop for three jobs:
 
-- **Reader:** splits on 0x00, decodes COBS, checks the CRC, parses into
-  dataclasses with the generated `struct` formats, and hands the messages to
-  the asyncio loop with `call_soon_threadsafe`.
-- **Writer:** drains an outbound queue and assigns `seq` (starting at a random
-  value). Everything it sends on its own (`HEARTBEAT` after 100 ms of silence,
-  the 5 Hz goal refresh, `HELLO_REQ` polling) is gated on the asyncio loop's
-  liveness stamp being less than 1 s old. A stalled mind therefore trips the
-  body's watchdog instead of being kept alive by the thread.
-- **Logger:** writes every frame with a monotonic timestamp to a rotating file,
-  off the asyncio loop, so disk stalls never delay control.
+- the `kilo` command, which talks to the kernel over its host channel
+  (`kilo --host`, Appendix G "CLI");
+- the reference: its link, planner, tricks, perception and behaviour are
+  what the C++ is checked against. Generators run the Python on the Python
+  tests' cases and write golden vectors that the C++ tests must reproduce
+  (`kernel/host/tests/gen_*_vectors.py`; `kernel/mind/tricks/gen_library.py`
+  and `kernel/mind/behaviour/gen_personality.py` compile the trick library
+  and the personality from the same files);
+- the tools that stay off the robot: the virtual bodies (§6), the log and
+  recording tools, the trick importer and the trick designs
+  (`kilo/tricks/rear_up.py`).
 
-`request()` awaits the data reply (queries, retried with a fresh `seq`) or the
-ACK (other commands, retried with the same `seq`, which the body de-duplicates)
-with a 50 ms timeout and 3 retries.
+**Body link** (`kernel/mind/link/serial_link`, from `kilo/link/serial_link.py`).
+One non-blocking state machine polled from the mind's main loop. It decodes
+frames, handles HELLO, TELEMETRY, EVENT and the reply to the one command in
+flight, and retries that command after 50 ms, up to 3 times: queries with a
+fresh `seq` (answered by their data reply), other commands with the same
+`seq` (the body de-duplicates them). Everything it sends on its own
+(`HEARTBEAT` after 100 ms of silence, the 5 Hz goal refresh, `HELLO_REQ`
+polling) is gated on the main loop's liveness stamp being less than 1 s
+old, so a stalled mind trips the body's watchdog instead of being kept
+alive by the link.
 
-**Desired-state goals and epoch.** `BodyClient` stores the desired posture,
-gait, head, pose, balance and eyes. It sends a goal on change and re-sends all
-active goals at 5 Hz, each stamped with the epoch that was current when it
-was set (never re-stamped).
-Behaviours call methods like:
-
-- `body.walk(stride_mm=30, turn_mm=0, pattern="trot")`, `body.stop_walk()`
-- `body.look(20, -10)`
-- `await body.play("hi", mirror=True)`, which resolves on `TRICK_DONE`
-- `body.beep([...])`
-
-On `FELL`, `WATCHDOG` or `LOW_BATTERY`, and on any epoch change seen in
-TELEMETRY, an EVENT or HELLO, the client **clears the desired motion goals from
-older epochs**, adopts the new epoch, and notifies the behaviour layer. Nothing
-from before the change is replayed.
+**Desired-state goals and epoch.** The link stores the desired goals (posture,
+head, body pose, balance...), one latched goal per type. It sends a goal on
+change and re-sends all active goals at 5 Hz, each stamped with the epoch
+that was current when it was set (never re-stamped). On `FELL`, `WATCHDOG`
+or `LOW_BATTERY`, and on any epoch change seen in TELEMETRY, an EVENT or
+HELLO, it **clears the desired motion goals from older epochs** and adopts
+the new epoch; the walker, the trick player and the behaviours decide
+afresh. Nothing from before the change is replayed.
 
 **Contact.** A body that may just have rebooted must not get the old goals
 (a reboot restarts the epoch at 0, §3c). After every (re)connect, and once
 telemetry has been missing for 300 ms, the link sends and refreshes no
-motion goal (`SET_POSTURE` other than REST/LIMP, a `SET_BALANCE` enable, the
-other epoch goals) and refuses `TRICK_PLAY` until the body is heard on this
-connection: a HELLO that proves a reboot (the goals are cleared first, under
-the lock the writer packs goals under), or a TELEMETRY whose tick has been
-checked for a restart. A reboot clears the motion goals every time; only its
-count is debounced. The behaviour runner forgets its posture/balance cache on
-an epoch, `reboots` or `connected` change. What is left (refreshes sent in
-the first 300 ms of a reboot on a live connection) is refused STALE by
-the body: it boots at a new epoch (§3c "Boot epoch").
+motion goal and refuses `FEET` and `TRICK_PLAY` until the body is heard on
+this connection: a HELLO that proves a reboot (the goals are cleared
+first), or a TELEMETRY whose tick has been checked for a restart. What is
+left (refreshes sent in the first 300 ms of a reboot on a live connection)
+is refused STALE by the body: it boots at a new epoch (§3c "Boot epoch").
 
-**Body state.** `BodyState` holds:
-- the latest telemetry, with time unwrapped;
-- link health;
-- derived values: upright, moving, fallen, filtered distance with approach
-  speed, and battery percentage from a resting 2S curve;
-- the last events;
-- a 10 s numpy ring buffer for detectors.
+**Body state** (`link/body_state`): the latest telemetry with time
+unwrapped, link health, the last events, and derived values: upright,
+moving, fallen, filtered distance with approach speed, and battery
+percentage from a resting 2S curve.
 
 **Behaviour: a minimal behaviour tree under a utility drive selector, ticked at
 10 Hz.**
@@ -1679,8 +1674,10 @@ the body: it boots at a new epoch (§3c "Boot epoch").
   Percepts, personality weights from an editable YAML file, and a little noise
   also feed the scores, with hysteresis. Safety branches (fallen, low battery,
   shutdown) sit above the selector.
-- **Engine.** The engine is in-house, ≈300 lines: Sequence, Selector, Parallel,
-  Cooldown, Timeout, Action and Condition. Each tick's active path is logged.
+- **Engine.** The engine is in-house: Sequence, Selector, Parallel,
+  Cooldown, Timeout, Action and Condition (`kernel/mind/behaviour/`, node
+  for node from `kilo/behaviour/`; the personality YAML is compiled in by
+  `gen_personality.py`). The active path is logged when it changes.
 
 **Tricks.**
 - Tricks are JSON keyframes named by joint, with a model, validation, mirror
@@ -1723,23 +1720,28 @@ the body: it boots at a new epoch (§3c "Boot epoch").
     pitch (`expectedRollPitch[0]` pairs with `ypr[2]`, roll). Mirroring is
     selected by a trailing `R` on the skill name (or at random for `X`);
     there is no mirror token (`m` is the indexed joint move).
-- Uploader and player (P1, implemented; `mind/README.md` "Tricks"):
-  `BodyClient.upload_trick()` (cached: a local record, then `TRICK_COMMIT`
-  alone as the body-side check), `await body.play(name_or_trick, mirror,
-  speed)` resolving on `TRICK_DONE` with its reason (timeout = the expected
-  duration from `kilo/tricks/player.py` + 1 s), `stop_trick()`, and `kilo
-  trick list|show|upload|play|stop`. `play()` releases the latched posture
-  goal: the trick's end posture replaces it.
-- Authoring uses a curses keyframe editor that jogs joints live. G41 servos
-  have no position feedback, so poses cannot be shaped by hand.
+- Uploader and player (`kernel/mind/tricks/player`, from
+  `kilo/tricks/player.py` and the trick part of `kilo/body/client.py`; the
+  library is compiled in from `mind/kilo/tricks/library/*.json`): cached
+  uploads (a local record, then `TRICK_COMMIT` alone as the body-side
+  check), a play that ends on `TRICK_DONE` with its reason (timeout = the
+  expected duration + 1 s), and stop. A play releases the latched posture
+  goal: the trick's end posture replaces it. The IR remote's keys start the
+  tricks (`kernel/mind/remote/`).
+- Authoring: new tricks are designed in Python against a model of the body
+  (`kilo/tricks/rear_up.py`, `docs/rear-up-trick.md`). A live keyframe
+  editor that jogs joints was planned and not built. G41 servos have no
+  position feedback, so poses cannot be shaped by hand.
 
 **Perception.**
 - **Ultrasonic** (12.5 Hz, from telemetry): median of 3, approach speed, and
   `near`, `approaching` and `clear` events.
 - **IMU:** picked up, tap/pet, tilted.
-- **Camera:** runs in its own process. It captures 320×240 Y-plane frames with
-  picamera2 (CSI) or OpenCV V4L2 (USB) and sends detections over a pipe. Rates
-  on a Pi 2 B **(est., measured in P4)**:
+- **Camera (P4, not built).** Planned when the mind ran on Linux: its own
+  process capturing 320×240 Y-plane frames with picamera2 (CSI) or OpenCV
+  V4L2 (USB) and sending detections over a pipe. The bare-metal kernel has
+  neither, so this needs a new design. The rates estimated then for a Pi 2 B
+  **(est.)**:
 
   | Detector | Rate |
   |---|---|
@@ -1754,40 +1756,15 @@ the body: it boots at a new epoch (§3c "Boot epoch").
 
 **Logging.** The C++ mind's flight recorder keeps every frame
 (`kilo record`, `kilo runs --fetch`, which also writes a `.kilolog` per
-walk), replayable through the codec. `kilo log summary|replay|plot`
+walk), replayable through the codec. `kilo log summary|replay|plot|walk|trick|run`
 analyses offline. Together these close the loop for
 learning control: change a gain, walk, plot.
 
 **Flashing tool.** `kilo flash` builds with arduino-cli, runs the size/symbol
 harness and refuses to flash if it fails, embeds the git hash, and sends the
 image to the C++ mind, which resets the body over GPIO4, programs it over
-STK500v1 and verifies by HELLO (docs/fast-boot.md §6). The retired Pi
-daemon's sequence is in Appendix F.
-
-**Mind integration backlog (BodyClient).** What the behaviour layer needs from
-`BodyClient` that it works around today (2026-10-10):
-
-- `beep(notes)`, once the body implements BEEP-from-the-mind; `BodyAdapter`
-  calls it when present and counts it in `unsupported` otherwise. Done:
-  `look(pan, tilt)` (P1), `walk(direction, pattern, speed_mm_s, balance)` /
-  `stop_walk(wait_s)` / `walk_status()` (the planner's FEET stream,
-  `mind/kilo/planner/`; mind/README.md "Walking") and `pose(...)` /
-  `release_pose()` (SET_BODY_POSE, an epoch motion goal). `BodyAdapter.walk/stop_walk` map to them, but
-  no behaviour walks yet: the owner decides when autonomous walking is
-  allowed (explore stays the stand-and-look-around stub).
-- An event callback for epoch change, FELL, WATCHDOG and LOW_BATTERY (and
-  connection changes). Done for now on the runner side without touching
-  `BodyClient`: `kilo.behaviour.body_events.BodyEvents` diffs successive
-  snapshots (epoch, the last 8 EVENTs, connected/alive) and the runner logs
-  `body_event` records and calls `on_body_event`. A real callback
-  (`SerialLink.subscribe("event"/"goals_cleared")` re-exported by
-  `BodyClient`) would remove the 10 Hz polling window.
-- The battery level enum (OK/WARN/LOW/CRITICAL, as in EVENT LOW_BATTERY) and
-  the current posture id in the snapshot, instead of the millivolt percentage
-  and the mode name the behaviours infer them from.
-- A cheap snapshot for 10 Hz polling: `BodyState.snapshot()` builds the full
-  dict (link stats, HELLO fields, events) every call; a slim variant (attitude,
-  mode, epoch, flags, distance, battery, alive) would do for the runner.
+STK500v1 and verifies by HELLO (docs/fast-boot.md §6; the sequence is in
+Appendix F).
 
 ---
 
@@ -1846,6 +1823,12 @@ the real `SerialLink`/`BodyClient`:
 - link retries over a lossy fake transport;
 - the clearing of desired goals on events.
 
+**Mind kernel tests.** `kernel/host/test.sh` builds the mind core for Linux
+and runs its unit tests under the sanitizers, the golden vectors from the
+Python reference (§5), the freestanding build, and `kilo-mind-host` against
+the virtual body built from the C core, driven by the `kilo` command over
+the host channel (kernel/README.md).
+
 **Protocol single source.** `gen.py` output is committed. `protocol/test.sh`
 runs `gen.py --check` and `vendor.py --check` and fails on any diff (there is
 no CI yet; the check runs when the suite is run).
@@ -1885,8 +1868,15 @@ and the results go in the merge commit message. Highlights:
 
 Order: talking and standing under Pi control (P0), today's chosen tricks (P1),
 walking (P2). `OpenCat.ino`
-and `src/` were deleted on 2026-11-20; the six headers the tests read are in
+and `src/` were deleted on 2026-11-20; the five headers the tests read are in
 `legacy/`.
+
+P0 to P3 were built with the Python mind on Raspberry Pi OS, so their
+deliverables and statuses below name its commands (`kilo balance`, `kilo
+trick`, `kilo walk`, the systemd service). That mind was replaced by the
+C++ kernel (docs/fast-boot.md) and those commands were removed on
+2026-11-20; the kernel does the same work, driven by the IR remote and
+`kilo --host`.
 
 **P0: protocol + skeleton body.**
 - **Deliverables:**
@@ -2067,7 +2057,7 @@ correct:     if | |a| − 1 g | < 0.15 g:  θ += (θ_acc − θ) >> 6          /
 - Yaw is not estimated (no magnetometer); the Pi integrates `rate_yaw` if it
   needs heading over short periods.
 - Cost **(est.)**: 0.5 KB flash, 24 B RAM, ≈0.6 ms per tick.
-- The Pi can replay logged IMU_RAW through a Python reference filter to tune α
+- Recorded IMU_RAW can be replayed on the laptop through a Python reference filter to tune α
   and the gate before touching firmware.
 
 ---
@@ -2434,66 +2424,55 @@ SET_POSTURE seq=1     decoded: 10 01 00 03 00 01 b4 f7      wire: 03 10 01 02 03
 
 ## Appendix F: Operations
 
-**Pi configuration.**
-- Serial login shell off, hardware serial on.
-- 1-Wire off. The `w1-gpio` overlay claims GPIO4 and sends 480 µs low reset
-  pulses while scanning the bus, and each one resets the NyBoard.
-- UART clock 48 MHz (`init_uart_clock=48000000` if `vcgencmd` shows less).
-- The I2C switch on the NyBoard stays on "Arduino".
-- GPIO4 is left as an **input** (no pull) when idle: `gpio=4=ip,np`.
+**The Pi.** The mind kernel needs no operating-system setup:
+`kernel/boot/config.txt` is the whole boot configuration. No Linux runs, so
+nothing but the mind's flasher touches GPIO4 (on Raspberry Pi OS the 1-Wire
+overlay's bus scans pulsed it and reset the NyBoard). The PL011
+runs from a 48 MHz UARTCLK, so 250000 baud is exact (§4). The I2C switch on
+the NyBoard stays on "Arduino".
 
-**Reset via GPIO4 (emulated open-drain).** To reset, drive GPIO4 low for
-100 ms (`reset_pulse_ms`), then return it to input. That works whether GPIO4 is AC-coupled to
-RESET (the falling edge resets) or wired directly (the low level holds reset).
-It never drives the line high against the NyBoard's own reset circuit.
+**Reset via GPIO4 (emulated open-drain).** GPIO4 is an input when idle. To
+reset, the mind drives it low for 100 ms (`reset_pulse_ms`), then returns it
+to input (`kernel/src/seams.h` `CircleResetGpio`). That works whether GPIO4
+is AC-coupled to RESET (the falling edge resets) or wired directly (the low
+level holds reset). It never drives the line high against the NyBoard's own
+reset circuit.
 
-**Flash sequence (the retired Pi daemon's `kilo flash`; today the C++ mind flashes, docs/fast-boot.md §6):**
-1. Ask the daemon to release `/dev/ttyAMA0` (the socket's `release_port` op,
-   with a lease; the daemon takes the port back on `reacquire_port`, when the
-   lease runs out, or when the flashing client disconnects). The port's
-   exclusive flock keeps any other process off it. This happens after the
-   build (step 2), so the body stays supervised while it compiles.
-2. `arduino-cli compile --fqbn arduino:avr:uno --output-dir ~/.cache/kilo-build
-   --build-property "compiler.cpp.extra_flags=-mcall-prologues -DKILO_BUILD=0x<hash>"
-   --build-property compiler.c.extra_flags=-mcall-prologues
-   --build-property compiler.c.elf.extra_flags=-Wl,--relax body/`
-   (the size flags of §3h). About 1-3 min on a Pi 2 **(est.)**. The build
-   hash goes in through
-   `-DKILO_BUILD=0x<first 8 hex digits of the commit>`,
-   and the body reports it as `HELLO.fw_build`. A plain arduino-cli build
-   without it reports an FNV-1a hash of the compile date and time instead.
-   The reset record mixes the compile time in either way, so rebuilding a
-   dirty tree still boots as `FLASHED`.
-3. Run the size/symbol harness on that ELF (`body/tools/size_check.sh --elf`):
-   flash ≤ 30720 B (the phase ceiling, §3h), globals ≤ 1540 B, no forbidden symbol, built with the
-   size flags. Stop on failure.
-4. Pulse GPIO4 (`pinctrl`, libgpiod `gpioset`, or sysfs).
-5. Within ≈200 ms, run
-   `avrdude -p m328p -c arduino -P /dev/ttyAMA0 -b 115200 -D -U flash:w:body.ino.hex:i`.
-   Optiboot only starts on an external reset and waits ≈1 s.
-6. Settle the port (three production open/close cycles: link baud, DTR and
-   RTS asserted, HUPCL cleared; mind/README.md "DTR and resets"), have the
-   daemon reacquire it, and expect a HELLO received after the flash with
-   `reset_cause = FLASHED` (any cause over a USB adapter) and `fw_build` equal
-   to the build hash within 8 s (`--verify-timeout`; reset, optiboot, DMP init
-   and the first HELLO take ≈2.2 s on Kilo). Print the HELLO seen either way.
-   Retry once.
+**Flash sequence** (`kilo flash`, `mind/kilo/tools/flash.py`; the mind's side
+`kernel/mind/flash/flasher.h`; docs/fast-boot.md §6):
+1. On the laptop: `arduino-cli compile --fqbn arduino:avr:uno --output-dir ~/.cache/kilo-build`
+   with the size flags of §3h (`body/tools/build_flags.sh`: `-mcall-prologues`
+   for C and C++, `-Wl,--relax` for the link) and
+   `-DKILO_BUILD=0x<first 8 hex digits of the commit>`, which the body
+   reports as `HELLO.fw_build`. A plain arduino-cli build without it reports
+   an FNV-1a hash of the compile date and time instead. The reset record
+   mixes the compile time in either way, so rebuilding a dirty tree still
+   boots as `FLASHED`.
+2. The size/symbol harness on that ELF (`body/tools/size_check.sh --elf`):
+   flash ≤ 30720 B (the phase ceiling, §3h), globals ≤ 1540 B, no forbidden
+   symbol, built with the size flags. Stop on failure.
+3. The HEX becomes `body.bin` (raw flash bytes) and `body.json` (build
+   hash, size, CRC-32), sent to the mind over the host channel, or written
+   to its SD card (`kilo flash --sd`, `kilo card`) for the mind to flash at
+   its next boot if `HELLO.fw_build` differs.
+4. The mind takes the UART from the link, pulses GPIO4 and talks STK500v1 to
+   optiboot at 115200 (it listens about 1 s after an external reset): sync,
+   signature, every 128-byte page written and read back. One retry from a
+   fresh reset.
+5. Back at the link baud, the link restarts and the mind waits for a HELLO
+   from the new firmware with `reset_cause = FLASHED` and `fw_build` equal
+   to the image's build.
 
-`mind/firmware/opencat-legacy.hex` (flashed with avrdude by hand) talks the
+`mind/firmware/opencat-legacy.hex`, the original firmware (`mind/firmware/README.md`),
+is flashed by hand with avrdude over the Petoi USB adapter. It talks the
 token protocol at 115200 and finds its EEPROM intact.
 
-**Development over the CH343 USB adapter.**
-- The Petoi uploader enumerates as `/dev/ttyACM0` or `/dev/ttyUSB0` on Linux
-  (COM9 on the owner's Windows host, passed into WSL2 with usbipd).
-- avrdude resets the board through DTR natively.
-- DTR is AC-coupled to RESET, so every port open that raises DTR resets the
-  328P. The mind clears HUPCL on each open (and again after avrdude, which
-  re-enables it), so DTR stays asserted between opens and only the first open
-  after a replug or a flash resets the body.
-- On a Pi with the adapter plugged in, the mind's port auto-detection picks the
-  adapter over the header UART (whose device node always exists) and warns;
-  `KILO_PORT` or `--port` selects the header UART.
-- The adapter and the Pi header share the 328P's single UART. **Unplug the
+**The Petoi CH343 USB adapter.**
+- It enumerates as `/dev/ttyACM0` or `/dev/ttyUSB0` on Linux (COM9 on the
+  owner's Windows host, passed into WSL2 with usbipd).
+- avrdude resets the board through DTR. DTR is AC-coupled to RESET, so every
+  port open that raises DTR resets the 328P.
+- The adapter and the Pi share the 328P's single UART. **Unplug the
   adapter whenever the Pi drives the UART**, and vice versa.
 
 ---
@@ -2526,10 +2505,11 @@ body/                     the NyBoard firmware (arduino-cli sketch)
   test/hal/               the real hal/ sources on fake AVR registers: fake_avr.h/.cpp, avr/ and
                           util/ header shims, fake_i2c_devices.h, test_*.cpp
   tools/                  host_tests.sh  size_check.sh  stack_check.sh/.py  build_link_harness.sh
+                          build_flags.sh (the size flags, shared with kilo flash)
                           common.sh (shared by the scripts)  gen_trick_library.py
 protocol/                 spec.toml (the single source)  gen.py  vendor.py  vector_cases.py  doc_check.py
                           test.sh  README.md (its own file list)
-  gen/                    kilo_protocol.h  kilo_protocol.py   (generated, committed)
+  gen/                    kilo_protocol.h  kilo_names.h  kilo_protocol.py   (generated, committed)
   c/                      cobs  crc16  kilo_frame  test_protocol.cpp
   py/                     kilo_link_codec.py  test_codec.py
   vectors/                frames.json  cobs.json  host_frames.json   (generated, committed)
@@ -2548,15 +2528,17 @@ mind/                     the Python side (pip install -e mind): the laptop's `k
                           consts.py (type codes, statuses, events, params)  transport.py (raw fd,
                           loopback)  serial_link.py (reader/writer threads, goals, commands)
     body/                 state.py (BodyState)  client.py (BodyClient: postures, balance, head,
-                          tricks, calibration, params, stats; for the virtual bodies and the raw bridge)
+                          tricks, calibration, params, stats; drives the virtual bodies in the tests)
     planner/              walking: body model, patterns and speed, the step planner, error
                           estimates, the FEET stream
     tricks/               trick model, legacy importer, library/*.json (generated), player timing, rear_up
     behaviour/            behaviour tree, drives, utility selector, personality.yaml, runner
     perception/           ultrasonic + IMU detectors, Percepts aggregator, ring buffer
-    logs/                 log reader (JSONL, .kilolog, .kwalk), summary/replay/plot/walk (python -m kilo.logs)
-    vbody/                virtual body on a pty (sim.py; feet.py plays FEET, physics.py walks; core.py:
-                          the body's C core)
+    logs/                 log reader (JSONL, .kilolog, .krec, .kwalk), summary/replay/plot/walk/trick/run
+                          (python -m kilo.logs, kilo log), the flight-recorder format and decode
+    vbody/                virtual bodies: sim.py (a Python model; feet.py plays FEET, physics.py walks),
+                          core.py (the body's real C core, body/test/core_harness.cpp, in-process or
+                          on a pty for kilo-mind-host)
     tools/                flash.py (build, flash through the mind)  body_image.py
     cli.py                the `kilo` command; cli_*.py add one command family each (cal, card, find,
                           host, power, record, sound)
@@ -2574,7 +2556,7 @@ docs/                     the design (architecture.md), setup (setup.md the dev 
                           kilo-eeprom-legacy, firmware-size-report), hardware test procedures and their
                           dated -results.md logs, reviews and outage notes
 tools/kilo-hud/           a Claude Code mod that shows Kilo's state beside the chat
-legacy/                   six headers of Petoi's original OpenCat firmware, read by tests and the trick
+legacy/                   five headers of Petoi's original OpenCat firmware, read by tests and the trick
                           importer, not built (legacy/README.md); the rest of that firmware is in git
                           history, its rollback image is mind/firmware/opencat-legacy.hex
 LICENSE                   MIT, OpenCat's
@@ -2590,10 +2572,11 @@ reference; this table is the overview.
 | Command | Purpose |
 |---|---|
 | `kilo status [--json]`, `kilo monitor` | The mind, HELLO, state, link counters; live telemetry table |
-| `kilo posture limp\|rest\|sit\|stand\|stance\|calib\|zero [--for S]` | Hold a posture (`stance` = the IK standing posture); the mind latches REST after |
-| `kilo cal show\|set JOINT DEG\|nudge JOINT DEG\|save\|revert` | Joint calibration, also over `--host` (the mind relays CAL; docs/calibration.md). *`kilo cal imu`* (IMU offset iteration on the Pi from IMU_RAW) not yet |
+| `kilo posture limp\|rest\|sit\|stand\|stance\|calib\|zero [--transition TICKS] [--for S]` | Hold a posture (`stance` = the IK standing posture); the mind latches REST after |
+| `kilo cal show\|set JOINT DEG\|nudge JOINT DEG\|save\|revert` | Joint calibration through the mind (it relays CAL; docs/calibration.md). *`kilo cal imu`* (IMU offset iteration from IMU_RAW) not yet |
 | `kilo flash [--persist] [--image BIN] \| --sd MOUNT` | Build the body firmware and flash it through the mind, or onto its boot card (docs/fast-boot.md §6) |
-| `kilo log summary\|replay\|plot FILE ...` (`plot --fields pitch,roll`) | Offline log tools (`kilo.logs`) |
+| `kilo log summary\|replay\|plot\|walk\|trick\|run FILE ...` | Offline log tools (`kilo.logs`; walk, trick, run read a `.krec` from `kilo runs --fetch`) |
+| `kilo log --host IP [--lines N] [--previous]` | The mind's log: its history, then live |
 | `kilo guard`, `sound`, `power`, `reboot`, `update`, `runs`, `record`, `bench`, `metrics`, `key`, `find`, `card` | The mind's other services, this laptop's key, finding Kilo, its SD card (`kilo --help`) |
 
 ---
@@ -2624,7 +2607,7 @@ reference; this table is the overview.
 | H2 | Under legacy firmware put Kilo in `kup`; flash the new firmware (the PCA keeps running); `PCA_READ`; then `SET_POSTURE STAND` (`up`) and `PCA_READ` again | Counts identical ±1 per joint; `CAL_VALUES` = legacy CALIB |
 | H3 | Each joint ±10° from STAND | Moves as documented, returns |
 | H4 | Command beyond a limit | JOINTS shows the clamp |
-| H5 | `kill -STOP` the daemon while walking / standing | Motion stops ≤ 0.5 s + one period; lying down ≤ 3.5 s / 2.5 s; LIMP 10 s later; LINK_RESTORED and epoch refusal on resume |
+| H5 | Stall the mind (then: `kill -STOP` the Python daemon) while walking / standing | Motion stops ≤ 0.5 s + one period; lying down ≤ 3.5 s / 2.5 s; LIMP 10 s later; LINK_RESTORED and epoch refusal on resume |
 | H6 | Debug param that hangs the loop | HELLO `WARM_UNEXPECTED` with `last_alive_tick` near the hang; pose held with no jump, then REST |
 | H7 | Tip onto each side | FELL, `rc` mirrored correctly, RECOVERED ≥ 4/5; old goals refused as STALE until the mind re-plans |
 | H8 | Bench supply 8.4 → 6.0 V in 0.1 V / 10 s steps, then back up | Trips and clears within ±0.1 V of the meter; no sag trips while trotting at 7.2 V |
@@ -2634,7 +2617,7 @@ reference; this table is the overview.
 | H12 | Eyes R/G/B/W per side; BEEP scale | Correct LEDs; clean tones; no ultrasonic degradation while beeping |
 | H13 | Board tilted 0 → 10° pitch and roll | Body within 3° of level after 1 s. **Not met by the P1 joint-space layer (measured 2026-10-11: ≈0.17° body per degree of correction); deferred to P2 IK levelling by the owner.** P2: geometric levelling in STANCE/GAIT on the slope estimate (3f); host plant within 2.5° after 1 s at `kp_q8` 253; on Kilo: `docs/p2-hardware-test.md`. |
 | H14 | Walk 2 m (P2) | Drift < 20 cm **(target)**; 360° turn in place < 20 s; 30 s trot without a fall |
-| H15 | `kilo flash --legacy` | Old `kup`, `kwkF` work with the old calibration |
+| H15 | Flash `mind/firmware/opencat-legacy.hex` (on 2026-10-10 with `kilo flash --legacy`, since removed; now by hand with avrdude) | Old `kup`, `kwkF` work with the old calibration |
 
 Results so far (docs/p0-hardware-test-results.md):
 - 2026-10-10, from the Pi over the CH343 adapter: **H1 passed** (3 flashes,

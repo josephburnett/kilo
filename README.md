@@ -25,7 +25,8 @@ that share the work:
   Pi socket.
 - `mind/`: the Python mind, where the kernel's design was first written and
   tested; today it is the laptop's `kilo` command line, which talks to the
-  kernel over the network (`--host`) or updates it through the SD card.
+  kernel over the network (`--host`) or updates it through the SD card, and
+  the reference the kernel's tests are checked against.
 - `protocol/`: the single definition of the messages between the two; the C
   and Python sides are generated from it.
 
@@ -34,7 +35,7 @@ sets up a dev host, `docs/laptop-setup.md` a laptop that updates
 Kilo through his SD card, `mind/README.md` lists the commands, and
 `docs/p*-hardware-test*.md` record what has been tried on Kilo.
 
-Of the original OpenCat firmware only six headers remain, in `legacy/`
+Of the original OpenCat firmware only five headers remain, in `legacy/`
 (`legacy/README.md`): `legacy/InstinctNybble.h` holds the stock postures and
 skills that the new firmware and the trick importer read, and the tests check
 the others against the new code. The rest of the fork was removed (its

@@ -1,7 +1,7 @@
 # Kilo protocol
 
-The body (NyBoard firmware) and the mind (Python on the Pi) talk over a UART
-at 250000 baud using COBS-framed messages with a CRC-16/CCITT-FALSE. The
+The body (NyBoard firmware) and the mind (the C++ kernel on the Pi,
+`kernel/`) talk over a UART at 250000 baud using COBS-framed messages with a CRC-16/CCITT-FALSE. The
 design is in `docs/architecture.md` §4 and Appendix E. **`spec.toml` is the
 single source of truth.** Everything in `gen/` and `vectors/` is generated
 from it and committed, so consumers never need to run the generator.
@@ -55,7 +55,7 @@ PYTHON=~/venv/bin/python protocol/test.sh   # interpreter that has pytest
    table) are up to date; `vendor.py --check`: the body's and mind's copies
    are identical to them; `doc_check.py`: the numbers in docs/architecture.md
    §3b (joint limits), §3f (balance), §3g (battery and watchdog) and
-   mind/README.md (Kp, look() speed) are the spec's.
+   mind/README.md (the look() speed) are the spec's.
 2. Builds the C codec with `-std=c99 -pedantic -Wall -Wextra -Werror` and
    `test_protocol.cpp` with `g++ -std=c++17 -Wall -Wextra -Werror
    -fsanitize=address,undefined`. Runs it against the vectors, then fuzzes the
@@ -82,7 +82,7 @@ stale.
 2. Add at least one case for it in `vector_cases.py`. The generator asserts
    that every message type has a vector.
 3. Run `python3 protocol/gen.py` and `python3 protocol/vendor.py`, then
-   `protocol/test.sh`, `body/tools/host_tests.sh` and the mind's pytest (its
+   `protocol/test.sh`, `body/tools/host_tests.sh`, `kernel/host/test.sh` and `mind/`'s pytest (its
    `tests/test_crosscheck.py` plays every vector through the body's C dispatch
    and the virtual body).
 4. Bump `meta.proto_minor` for additive changes. Bump `proto_major` if a
@@ -102,7 +102,8 @@ be trusted, so a command gets an `ACK` with `BAD_LEN` or `UNKNOWN_TYPE`. Send
 with `kilo_frame_encode()`. On AVR you may define `KILO_CRC16_USE_AVR_LIBC`
 to use `_crc_xmodem_update`.
 
-Python (mind). The mind imports the vendored package `kilo.protocol`
+Python (the `kilo` package: the laptop's CLI, the virtual body and the
+reference implementations). It imports the vendored package `kilo.protocol`
 (`from kilo.protocol import kilo_protocol, kilo_link_codec`); the codec
 imports its sibling. Elsewhere, put `protocol/py` and `protocol/gen` on
 `sys.path`.

@@ -414,29 +414,19 @@ build does all three. The log says each step: `remote: rear_up: up to stage
 1 (of 3)`, `rear_up: stage 1 (of 3): A2 to go on`, `rear_up: on to stage 2
 (of 3)`, `rear_up: held stage 1 without A2: coming down`, `rear_up: coming
 down (stage 2 allowed)`; each is also a mark in the trick's flight-recorder
-run (section 6), next to the key that caused it. The laptop daemon (`kilo
-run --remote`) does not step: there the stage-N trick plays straight
-through, pausing 4 s at each lower stage.
+run (section 6), next to the key that caused it.
 
-- **The mind kernel on the Pi** (what normally runs): build it with the
-  switch and update the Pi. For stage 1:
+The switch is a build option of the mind kernel: build it with the switch
+and update the Pi. For stage 1:
 
-  ```
-  make -C kernel KILO_REAR_UP=1
-  ```
+```
+make -C kernel KILO_REAR_UP=1
+```
 
-  For stage 2, `KILO_REAR_UP=2`; for stage 3, `KILO_REAR_UP=3`. At boot it
-  logs which: `Kilo mind, build ... (rear-up key A2 on: rear_up_2, stage
-  2)`. Built without it (`make -C kernel`), A2 is off again. Any other value
-  stops the build with an error.
-- **The laptop daemon** (`kilo run --remote`), if you use it instead: start
-  it with the switch in its environment:
-
-  ```
-  KILO_REAR_UP=1 kilo run --remote
-  ```
-
-  (or `=2`, `=3`).
+For stage 2, `KILO_REAR_UP=2`; for stage 3, `KILO_REAR_UP=3`. At boot it
+logs which: `Kilo mind, build ... (rear-up key A2 on: rear_up_2, stage 2)`.
+Built without it (`make -C kernel`), A2 is off again. Any other value stops
+the build with an error.
 
 With the switch off, pressing A2 logs `remote A2 (0x10, none): ignored (no
 action on this key)` and nothing moves. With it on, A2 logs `remote A2
@@ -671,9 +661,9 @@ recording keeps it.
 | paws (21.9) | the paws did not come up (the centre of mass too far forward) or Kilo rocked back |
 | up, mid, top | the hold where the model says |
 
-Both minds do this: the C++ mind on the Pi (`kernel/mind/tricks/player.cpp`)
-and the laptop daemon (`kilo.body.client.play`, `kilo.tricks.player.GuardWatch`),
-from the trick's own entry in the library.
+The C++ mind on the Pi does this (`kernel/mind/tricks/player.cpp`), from the
+trick's own entry in the library; `kilo.tricks.player.GuardWatch` is the
+Python reference the C++ is checked against.
 
 ## When it goes wrong
 

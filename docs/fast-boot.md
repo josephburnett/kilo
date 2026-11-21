@@ -19,15 +19,15 @@ Whole boot 38.6 s.
 
 The mind's job on the robot is narrow: one UART to the body, a planner that
 streams `FEET` at 50 Hz, a behaviour tree at 10 Hz, and percepts from what the
-body reports. Its only runtime dependency is `pyserial`. Nothing in it needs
-an operating system.
+body reports. The Python mind's only runtime dependency was `pyserial`.
+Nothing in it needs an operating system.
 
 Goals:
 
 - Power to mind ready in about **1 s (est.)**, bounded by the Pi 2 B's closed
   GPU firmware (`bootcode.bin`, `start.elf`), which cannot be replaced.
-- Less jitter on the 50 Hz stream: today body state reaches Python through
-  the Linux tty layer, 1-10 ms **(est.)** (docs/architecture.md, latency table).
+- Less jitter on the 50 Hz stream: on Linux, body state reached Python through
+  the tty layer, 1-10 ms **(est.)** (docs/architecture.md, latency table).
 - Keep a usable development loop from the laptop over an Ethernet cable.
 
 Non-goals: Wi-Fi (the 2 B has no radio, and a USB Wi-Fi dongle is not
@@ -126,8 +126,7 @@ they exist:
 4. `perception/` (imu, ultrasonic, events, ring)
 5. `behaviour/` (tree, selector, drives, personality, runner) at 10 Hz;
    `personality.yaml` converted on the laptop to a simple format the mind reads
-6. IR remote key map (`ir.py`, `remote.py`); the body already decodes NEC and
-   relays `EVENT IR_KEY`
+6. IR remote key map; the body already decodes NEC and relays `EVENT IR_KEY`
 
 Stays on the laptop: `vbody/`, `logs/`, `cli*.py`, `tricks/import_legacy.py`,
 `tools/` (except the flasher, P4), `tests/`.

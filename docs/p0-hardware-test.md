@@ -1,5 +1,7 @@
 # P0 first hardware test
 
+*Written for the retired route (the Python mind, over the USB cable or on Raspberry Pi OS); most of its commands, and the serial port they use, no longer exist. What happened when it was run: `docs/p0-hardware-test-results.md`.*
+
 The first run of the new body firmware on Kilo, from the laptop (WSL2) over
 the Petoi CH343 USB adapter. It checks that the firmware boots without
 moving anything it should not, follows the watchdog timeline, talks the
