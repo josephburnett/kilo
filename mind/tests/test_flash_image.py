@@ -146,10 +146,8 @@ def test_flash_sd(tmp_path, capsys):
 def test_flash_cli_refusals(capsys):
     assert cli.main(["flash", "--rollback"]) == 1
     assert "not yet" in capsys.readouterr().err
-    assert cli.main(["flash", "--persist"]) == 1
-    assert "for --host or --sd" in capsys.readouterr().err
-    assert cli.main(["flash", "--host", "127.0.0.1:1", "--legacy"]) == 1
-    assert "not with --legacy" in capsys.readouterr().err
+    assert cli.main(["flash", "--sd", "/nonexistent", "--host", "127.0.0.1:1"]) == 1
+    assert "not with --host" in capsys.readouterr().err
 
 
 # ---- kilo flash --host --------------------------------------------------------------------

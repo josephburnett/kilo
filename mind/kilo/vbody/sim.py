@@ -87,8 +87,8 @@ both the same frames and compares the replies:
 
 Two ways to drive it:
 
-- ``start()``: a thread runs the 50 Hz tick and reads the transport (the CLI's
-  ``kilo vbody`` on a pty, integration tests on a loopback);
+- ``start()``: a thread runs the 50 Hz tick and reads the transport (a pty,
+  kernel/host/tests/fake_optiboot.py; integration tests on a loopback);
 - ``process(data, now)``: synchronous and deterministic. Feeds bytes through
   the decoder and handles every frame inline; every reply and event is written
   at once to the transport (if any) and appended to ``sent`` as
@@ -421,8 +421,7 @@ class VirtualBody:
 
     def ir_key(self, command: int, repeat: bool = False) -> None:
         """Simulate the IR remote (the body's NEC decoder on D4): EVENT
-        IR_KEY(command | 0x100 for a held-key repeat). Test and `kilo vbody`
-        key hook; the decoder itself is host-tested in body/test/test_ir.cpp."""
+        IR_KEY(command | 0x100 for a held-key repeat). A test hook; the decoder itself is host-tested in body/test/test_ir.cpp."""
         with self.lock:
             self._event(EV.IR_KEY, (int(command) & 0xFF) | (0x100 if repeat else 0))
         self._say(f"IR key 0x{int(command) & 0xFF:02X}" + (" repeat" if repeat else ""))

@@ -29,9 +29,9 @@ Two clocks:
   that waits on the link's clock with a timeout (``wait_until``,
   ``wait_ready``, ``stop_walk(wait_s)``) never times out while nobody steps;
   use ``run_until`` instead.
-- **real time** (``start_realtime()``; ``open_pty()`` for ``kilo --port``):
+- **real time** (``start_realtime()``; ``open_pty()`` for ``kilo-mind-host --port``):
   a thread runs one tick every 20 ms of wall time, for a mind in another
-  process (the CLI, the daemon) whose clock is ``time.monotonic`` and cannot
+  process (kernel/host's kilo-mind-host, walk-demo) whose clock is ``time.monotonic`` and cannot
   be shared.
 
 Boots (power-on, ``reset()``, an acked REBOOT) take ``boot_s`` (0.3 s, the
@@ -208,7 +208,7 @@ class CoreBody:
 
     def open_pty(self) -> str:
         """Serve the core on a pty (real time: call ``start_realtime()``).
-        Returns the slave path for ``kilo --port``."""
+        Returns the slave path for ``kilo-mind-host --port``."""
         master, slave = os.openpty()
         import tty
 
@@ -494,7 +494,7 @@ class CoreBody:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Serve the real core on a pty in real time: ``kilo --port <path> ...``."""
+    """Serve the real core on a pty in real time: ``kilo-mind-host --port <path> ...``."""
     import argparse
 
     ap = argparse.ArgumentParser(prog="python -m kilo.vbody.core", description=main.__doc__)
@@ -508,7 +508,7 @@ def main(argv: list[str] | None = None) -> int:
     body.start_realtime()
     if args.control:
         body.serve_control(args.control)
-    print(f"real body core on {path}  (kilo --port {path} ...); Ctrl-C to stop", flush=True)
+    print(f"real body core on {path}  (kilo-mind-host --port {path} ...); Ctrl-C to stop", flush=True)
     try:
         while True:
             time.sleep(1)

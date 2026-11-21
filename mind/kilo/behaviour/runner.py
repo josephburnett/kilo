@@ -7,8 +7,7 @@ Each tick:
 2. on an epoch change, a body reboot (``reboots``) or a connection change
    (``connected``) the cached posture/balance goals are forgotten (the body
    or the link dropped them), so behaviours re-assert them. While
-   ``paused()`` is true (the daemon's ``--override``: a CLI hold owns the
-   body) only steps 1-2 run: the running behaviour is halted (a trick is
+   ``paused()`` is true (another owner holds the body) only steps 1-2 run: the running behaviour is halted (a trick is
    stopped), nothing is ticked, and the cache is forgotten again on resume;
 3. body events: ``BodyEvents`` turns the snapshot's epoch, EVENTs and link
    flags into ``body_event`` log records and the ``on_body_event`` callback
@@ -16,8 +15,7 @@ Each tick:
 4. percepts: ultrasonic ones from the snapshot (``near``, ``approaching``,
    using the personality's ``percepts`` thresholds) and a ``startle`` on a new
    fall, overridden by the ``percepts()`` source when there is one (a
-   ``startle`` is kept if either says so). ``run_behaviour`` uses
-   ``PerceptFeed``: ``kilo.perception.Percepts.update(state)`` each tick;
+   ``startle`` is kept if either says so);
 5. drives are advanced by the elapsed time, with the activity of the
    behaviour that ran last tick;
 6. the root (library.build_root) is ticked;
@@ -30,7 +28,8 @@ wind-down branch has asked for poweroff (then ``on_poweroff`` is called; the
 runner itself never powers anything off).
 
 Behaviour percepts (``ctx.percepts`` keys, the selector's percept terms) and
-where ``PerceptFeed`` gets them from ``Percepts.as_dict()``:
+where they come from in ``Percepts.as_dict()`` (the C++ mind maps them so,
+kernel/mind/behaviour/runner.h):
 
 - ``face``: always False until a camera exists (term ``face``; greet);
 - ``pet``: Percepts ``pet``, gentle rocking (term ``pet``; greet; satisfies
@@ -44,9 +43,6 @@ where ``PerceptFeed`` gets them from ``Percepts.as_dict()``:
 - ``tap``, ``tilted``, ``picked_up``, ``clear``: the Percepts flags of the same
   name, in ``ctx.percepts`` and the log, no selector term yet;
 - ``percept_events``: names of the PerceptEvents produced this tick.
-
-``run_behaviour(client, state, stop_event, log_dir)`` is the daemon's entry
-point (``kilo run --behaviour``).
 """
 
 from __future__ import annotations
@@ -294,85 +290,3 @@ class Runner:
             if self._own_logger:
                 await asyncio.get_running_loop().run_in_executor(None, self.logger.close)
         return self.stopped_by or "stop"
-
-
-# ---- the daemon's entry point ------------------------------------------------------------
-
-def behaviour_percepts(d: dict[str, Any]) -> dict[str, Any]:
-    """Map a ``Percepts.as_dict()``/``update()`` result to behaviour percepts
-    (the list in the module docstring)."""
-    out: dict[str, Any] = {
-        "face": False,  # no camera yet
-        "pet": bool(d.get("pet")),
-        "near": bool(d.get("near")),
-        "approaching": bool(d.get("approaching")),
-        "clear": bool(d.get("clear")),
-        "tilted": bool(d.get("tilted")),
-        "tap": bool(d.get("tap")),
-        "picked_up": bool(d.get("picked_up")),
-        "startle": 1.0 if d.get("startle") else 0.0,
-    }
-    evs = d.get("events") or []
-    if evs:
-        out["percept_events"] = [getattr(e, "name", str(e)) for e in evs]
-    return out
-
-
-class PerceptFeed:
-    """The runner's percept source over kilo.perception: ``update(state)``
-    once per tick (a sample already seen is ignored), mapped by
-    ``behaviour_percepts``. ``percepts`` may be shared with the daemon."""
-
-    def __init__(self, state: Any, percepts: Any = None):
-        if percepts is None:
-            from kilo.perception import SharedPercepts
-            percepts = SharedPercepts()
-        self.state = state
-        self.percepts = percepts
-
-    def __call__(self) -> dict[str, Any]:
-        return behaviour_percepts(self.percepts.update(self.state))
-
-
-def run_behaviour(client: Any, state: Any, stop_event: Any, log_dir: str | Path, *,
-                  percepts: Any = None, personality: str | Path | None = None, seed: int | None = None,
-                  hz: float = 10.0, paused: Any = None) -> str:
-    """Run the behaviour layer until ``stop_event`` is set (the daemon's
-    ``kilo run --behaviour`` calls this in its own thread).
-
-    ``client`` is a BodyClient, ``state`` its BodyState, ``stop_event`` a
-    threading.Event, ``log_dir`` where ``behaviour-<time>.jsonl`` goes.
-    ``percepts`` (the daemon's SharedPercepts) is used instead of a private
-    one when given; ``personality`` (else ``$KILO_PERSONALITY``) picks the
-    YAML; ``paused`` (a threading.Event, the daemon's ``--override``) pauses
-    the behaviours while set. Returns why it stopped (``stop``, ``poweroff``...)."""
-    import logging
-    import os
-
-    from .adapter import BodyAdapter
-
-    log = logging.getLogger("kilo.behaviour")
-    cfg = load_personality(personality or os.environ.get("KILO_PERSONALITY") or None)
-    feed = PerceptFeed(state, percepts)
-    body = BodyAdapter(client, percepts=feed.percepts)
-    log_path = Path(log_dir) / time.strftime("behaviour-%Y%m%d-%H%M%S.jsonl")
-    runner = Runner(body, cfg, percepts=feed, seed=seed, hz=hz, log_path=log_path,
-                    on_body_event=lambda ev: log.info("body event %s", ev),
-                    paused=paused.is_set if paused is not None else None)
-    log.info("behaviour runner: log %s, seed %s, personality %s", log_path, runner.seed, cfg.get("name"))
-
-    async def main() -> str:
-        async def watch() -> None:
-            while not stop_event.is_set():
-                await asyncio.sleep(0.05)
-            runner.stop()
-        w = asyncio.ensure_future(watch())
-        try:
-            return await runner.run()
-        finally:
-            w.cancel()
-
-    why = asyncio.run(main())
-    log.info("behaviour runner stopped: %s after %d ticks (unsupported calls: %s)", why, runner.ticks,
-             dict(body.unsupported) or "-")
-    return why

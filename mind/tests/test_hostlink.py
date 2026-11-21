@@ -304,11 +304,9 @@ def test_cli_posture_holds_then_releases(mind, capsys):
     assert pos[0].posture == P.Posture.LIMP
 
 
-def test_cli_unavailable_commands(mind, capsys):
-    assert cli.main(["--host", mind.addr, "pca"]) == 1
-    assert "not available over --host yet" in capsys.readouterr().err
-    assert cli.main(["--host", mind.addr, "posture", "balance"]) == 1
-    assert cli.main(["--host", mind.addr, "monitor", "--passive"]) == 1
+def test_cli_local_commands_refuse_host(mind, capsys):
+    assert cli.main(["--host", mind.addr, "key", "show"]) == 1
+    assert "runs on this machine, not over --host" in capsys.readouterr().err
     assert mind.got == []  # refused here, before any request reached the mind
 
 

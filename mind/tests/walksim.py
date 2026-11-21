@@ -49,7 +49,7 @@ class WalkSim:
         self.vb.telem_div = 1
         self.vb.posture = "STANCE"
         if balance:
-            self.vb.balance.update(enable=1, kp_q8=kp_q8)  # Kp 0.99: the daemon's default on Kilo
+            self.vb.balance.update(enable=1, kp_q8=kp_q8)  # Kp 0.99: the mind's default on Kilo
         self.now = 100.0
         self.link = FakeLink(self)
         self.handovers = 0

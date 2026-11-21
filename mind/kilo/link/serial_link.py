@@ -18,7 +18,7 @@ Threads:
 - **logger**: ``kilo.log.JsonlLogger`` (optional) writes every frame off-thread.
 - **wire_logger**: a ``kilo.logs.kilolog.KilologWriter`` (optional): every
   frame's wire bytes as sent (writer path) and as received (reader path, from
-  the decoder's ``feed_wire``), for ``kilo --kilolog``.
+  the decoder's ``feed_wire``).
 
 Reconnection: the reader thread reopens the port (calls the factory) after a
 failed open or a read/write error, backing off from ``reconnect_min_s`` to
@@ -310,9 +310,8 @@ class SerialLink:
     def mark_alive(self, source: str = "mind") -> None:
         """Called by the mind's main loop each iteration (≥ 1 Hz).
 
-        ``source`` names who stamped (kept in ``alive_stamps``): the daemon's
-        pump stamps as "daemon", so it can tell whether the behaviour runner
-        (which stamps as "mind") is still ticking."""
+        ``source`` names who stamped (kept in ``alive_stamps``), so a
+        caller with several loops can tell which one still ticks."""
         now = self.clock()
         self._mind_alive_at = now
         self.alive_stamps[source] = now
@@ -869,12 +868,7 @@ class SerialLink:
         with self._lock:
             self.state.events.append((now, msg))
             self.state.event_count += 1
-        if code == consts.EV["IR_KEY"]:
-            from kilo import ir
-
-            log.info("event IR_KEY %s epoch=%s", ir.describe(msg.arg), msg.epoch)
-        else:
-            log.info("event %s arg=%s epoch=%s", ev, msg.arg, msg.epoch)
+        log.info("event %s arg=%s epoch=%s", ev, msg.arg, msg.epoch)
         self._log("event", name=ev, code=code, arg=msg.arg, tick=msg.tick, epoch=msg.epoch)
         with self._lock:
             prev_epoch = self.state.epoch

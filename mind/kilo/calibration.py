@@ -158,14 +158,20 @@ def _note(acc: dict, j: int, a: float, by: str) -> None:
         cur[1], cur[3] = a, by
 
 
+# The remote's speed levels (x the gait's spec speed) and steer levels: kernel/mind/remote/remote.cpp
+# kSpeedFactors, kTrotSpeedFactors, kSteerLevels.
+SPEED_FACTORS = (0.4, 0.7, 1.0, 1.15, 1.25)
+TROT_SPEED_FACTORS = (0.4, 0.7, 1.0, 1.3, 1.6)
+STEER_LEVELS = (0.25, 0.5, 1.0)
+
+
 def _gait_cases():
-    from kilo import ir
     for gait in ("walk", "trot", "crawl"):
-        for lv, f in enumerate(ir.speed_factors(gait), start=1):
+        for lv, f in enumerate(TROT_SPEED_FACTORS if gait == "trot" else SPEED_FACTORS, start=1):
             yield gait, "forward", f, 0.0, f"{gait} +{lv}"
             yield gait, "back", f, 0.0, f"{gait} -{lv}"
             yield gait, "left", f, 0.0, f"{gait} turn {lv}"
-            for s in ir.STEER_LEVELS:
+            for s in STEER_LEVELS:
                 yield gait, "forward", f, s, f"{gait} +{lv} steer {s:g}"
                 yield gait, "back", f, -s, f"{gait} -{lv} steer {s:g}"
 

@@ -1,11 +1,5 @@
 """The head goal (SET_HEAD, docs §3c layer 1): BodyClient.look / release_head
-against the virtual body, and `kilo look` end to end on a pty."""
-
-import os
-import subprocess
-import sys
-import time
-from pathlib import Path
+against the virtual body."""
 
 import pytest
 
@@ -13,11 +7,10 @@ from kilo.body.client import HEAD_NOT_HELD, BodyClient
 from kilo.link.serial_link import LinkConfig, SerialLink
 from kilo.link.transport import loopback_pair
 from kilo.protocol import kilo_protocol as P
-from kilo.vbody.sim import VirtualBody, open_pty
+from kilo.vbody.sim import VirtualBody
 
 from conftest import FAST, keep_alive
 
-MIND = Path(__file__).resolve().parents[1]
 HOLD_S = P.HEAD_HOLD_MS / 1000.0
 
 
@@ -76,33 +69,3 @@ def test_look_dropped_by_an_epoch_bump(rig):
     assert client.link.wait_until(lambda: vb.posture == "STAND" and not vb.fallen, 3)
     client.look(-15, 5)
     assert client.link.wait_until(lambda: _held(client), 1)
-
-
-@pytest.fixture
-def vbody_pty():
-    transport, path, slave = open_pty()
-    vb = VirtualBody(transport).start()
-    yield vb, path
-    vb.stop()
-    transport.close()
-    os.close(slave)
-
-
-@pytest.mark.slow
-def test_kilo_look(vbody_pty):
-    vb, path = vbody_pty
-    p = subprocess.Popen([sys.executable, "-m", "kilo.cli", "--direct", "--port", path, "look", "25", "-10",
-                          "--tail", "5", "--for", "1", "--posture", "stand"],
-                         cwd=MIND, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    seen = None
-    deadline = time.monotonic() + 15
-    while p.poll() is None and time.monotonic() < deadline:
-        if vb.head_until is not None:
-            seen = vb.head
-        time.sleep(0.02)
-    out, err = p.communicate(timeout=5)
-    assert p.returncode == 0, err
-    assert "looking at pan 25°, tilt -10°, tail 5° at 120°/s for 1 s" in out and "released" in out, out
-    assert seen == (400, -160, 80) and vb.posture == "STAND"
-    assert vb.head_until is None  # released by the CLI, not by the 2 s lapse
-    assert ("SET_HEAD" in [r[0] for r in vb.received])
