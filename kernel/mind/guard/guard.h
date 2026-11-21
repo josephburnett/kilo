@@ -45,8 +45,12 @@
 //      (Walker::halt), then sit and the behaviour runner's sitting variant
 //      (GuardHost::sit_and_behave). RED: back off (the walk turns backward
 //      at kBackSpeedMmS for kBackS, about kBackMm; no rear sensor, so short
-//      and slow), the quick stop, then as BLUE; the crawl only stops (its
-//      strides turn round at 0.5 mm a tick: 4 s before it would go back);
+//      and slow), the quick stop, then as BLUE; the crawl and the long trot
+//      only stop (their strides turn round at 0.5 and 0.75 mm a tick: 4 s
+//      and 1.5 s before they would go back; the long trot's quick stop has
+//      him still in about 0.6 s). The long trot's BLUE is the trot's
+//      (stop_way_mm: its quick stop moves him 10 mm at most in the planner,
+//      16 in the virtual body, as the trot at 187 to 230 mm/s);
 //    - turning in place: RED only (a hand in his face): the quick stop, then
 //      sit (a wall seen while turning is not a reason to stop turning);
 //    - walking backward: nothing (he is going away; the eyes show it);
