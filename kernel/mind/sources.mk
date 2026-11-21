@@ -9,6 +9,7 @@ MIND_SRCS = \
 	mind/link/names.cpp \
 	mind/link/serial_link.cpp \
 	mind/planner/errors.cpp \
+	mind/planner/longtrot.cpp \
 	mind/planner/model.cpp \
 	mind/planner/patterns.cpp \
 	mind/planner/plan.cpp \

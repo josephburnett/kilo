@@ -64,8 +64,12 @@ struct Pattern {
 // PATTERNS in patterns.py's order: walk, trot, crawl.
 constexpr int kPatterns = 3;
 extern const Pattern kPatternTable[kPatterns];
+// The long trot ("longtrot", remote key A1; planner/longtrot.h): not in the table, as LONG_TROT is
+// not in patterns.py's PATTERNS. Its timing is its own (pattern_timing(), not timing()).
+extern const Pattern kLongTrot;
+inline bool is_long_trot(const Pattern& p) { return &p == &kLongTrot; }
 const Pattern& default_pattern();  // trot
-// By name, ignoring case; null if unknown.
+// By name, ignoring case (the table's three and "longtrot"); null if unknown.
 const Pattern* find_pattern(const char* name);
 
 enum class Direction : uint8_t { Forward, Back, Left, Right, March };

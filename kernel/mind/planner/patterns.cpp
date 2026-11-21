@@ -16,11 +16,18 @@ const Pattern kPatternTable[kPatterns] = {
     {"crawl", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 300, 50, 15, 179, 2550, 0, 4000, true, 0, -1, -1, 0, 0.5},
 };
 
+// longtrot.py LONG_TROT: the trot's pairs, an 8 mm lift at every stride (no taper: its swing is
+// longer), the strides 0.75 mm a tick (the build-up), 144 mm/s by default (the planner's timing
+// for it is longtrot.h's long_timing(); swing_ms, stride_mm and period_ms are its table entry's).
+const Pattern kLongTrot = {"longtrot", 2, 2, {{LF, RB}, {RF, LB}, {0, 0}, {0, 0}}, 160, 52, 8, 205, 360, 20, 250,
+                           false, 0, 144, -1, 0, 0.75};
+
 const Pattern& default_pattern() { return kPatternTable[1]; }
 
 const Pattern* find_pattern(const char* name) {
   for (const Pattern& p : kPatternTable)
     if (str_ieq(name, p.name)) return &p;
+  if (str_ieq(name, kLongTrot.name)) return &kLongTrot;
   return nullptr;
 }
 

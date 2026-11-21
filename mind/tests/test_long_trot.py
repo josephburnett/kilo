@@ -1,6 +1,8 @@
-"""The long trot (kilo.planner.longtrot, docs/walking-and-balance.md §15):
-a prototype, not wired to the remote or the C++ mind. Its plan (reach,
-joints, the build-up, the placement), the fitted pendulum against the floor
+"""The long trot (kilo.planner.longtrot, docs/walking-and-balance.md §15;
+on the remote's A1 since 2026-11-21, the C++ mind's planner checked against
+LongTrotPlanner by the golden vectors). Its plan (reach, joints, the
+build-up, the placement, the stages, the changes to and from the other
+gaits, the stops from every phase), the fitted pendulum against the floor
 recordings, and walks in the virtual body on both physics (Physics and
 kilo.vbody.rocking.RockingPhysics)."""
 
@@ -9,8 +11,8 @@ import math
 import pytest
 
 from kilo.planner import patterns as pat
-from kilo.planner.longtrot import (LONG_TROT, STANCE_PLUS, TROT_FIT, LongTrotConfig, LongTrotPlanner, swing_for,
-                                   timing)
+from kilo.planner.longtrot import (LONG_TROT, STAGES, STANCE_PLUS, STEER_MAX, TROT_FIT, LongTrotConfig,
+                                   LongTrotPlanner, pattern_timing, swing_for, timing)
 from kilo.planner.model import LEGS, BodyModel
 from kilo.planner.plan import Planner
 from kilo.planner.walker import stop_timeout
@@ -27,18 +29,21 @@ def plan(direction="forward", speed=None, ticks=400, **kw):
     return p, [p.next() for _ in range(ticks)]
 
 
-def check(ticks, what):
+def check(ticks, what, trot=True):
+    """In range and reach, the trot's supports (trot False: the walk's and the crawl's too), every
+    joint under BOUND a tick."""
     for t in ticks:
         assert all(-60 <= x <= 60 for x in t.x) and all(30 <= z <= 95 for z in t.z), what
         assert all(M.reachable(t.x[i], t.z[i]) for i in LEGS), what
-        assert t.support in (0b0101, 0b1010, 0b1111), what
+        assert t.support in (0b0101, 0b1010, 0b1111) or (not trot and bin(t.support).count("1") >= 2), what
     worst = max(joint_step_deg(a, b) for a, b in zip(ticks, ticks[1:]))
     assert worst < BOUND, (what, worst)
     return worst
 
 
 def test_the_existing_gaits_do_not_know_it():
-    """A separate pattern object: not among the remote's gaits, the golden vectors' or the walker's."""
+    """A separate pattern object: not among patterns.PATTERNS (the Python walker's gaits and the golden
+    vectors' statics); LongTrotPlanner knows it by name."""
     assert pat.PATTERN_NAMES == ("walk", "trot", "crawl")
     assert "longtrot" not in pat.PATTERNS and LONG_TROT.name == "longtrot"
     with pytest.raises(ValueError):
@@ -168,3 +173,94 @@ def test_it_stops_from_the_long_stride(how):
     check(ticks, how)
     assert n * 0.02 < stop_timeout(LONG_TROT.period_ms) - 1.0
     assert all(abs(x) <= 5 for x in ticks[-1].x)
+
+
+def _script(p, script):
+    out = []
+    for item in script:
+        if item[0] == "run":
+            out += [p.next() for _ in range(item[1])]
+        elif item[0] == "until_done":
+            n = 0
+            while not p.done and n < item[1]:
+                out.append(p.next())
+                n += 1
+        else:
+            getattr(p, item[0])(*item[1:])
+    return out
+
+
+@pytest.mark.parametrize("pattern", ("trot", "walk", "crawl"))
+def test_in_the_other_gaits_it_is_the_planner(pattern):
+    """LongTrotPlanner in the walk, the trot and the crawl plans exactly what Planner plans (the C++
+    mind is one planner for all four)."""
+    script = [("run", 90), ("set_speed", 60.0), ("set_steer", 0.5), ("run", 60), ("set_pattern", "walk"),
+              ("run", 120), ("set_pattern", "crawl"), ("run", 250), ("set_pattern", "trot"), ("run", 300),
+              ("halt",), ("until_done", 400)]
+    a = _script(Planner(M, pattern, "forward", None, tick=7), script)
+    b = _script(LongTrotPlanner(M, "forward", None, tick=7, pattern=pattern), script)
+    assert len(a) == len(b) > 800
+    assert all(x.x == y.x and x.z == y.z and x.support == y.support and x.pitch == y.pitch and x.roll == y.roll
+               for x, y in zip(a, b))
+
+
+def test_the_remotes_stages():
+    """A1 and B7 / B5: 160, 180, 200 mm/s, a swing of 9, 10, 11 ticks, strides 33.6, 41.4, 50.0 mm,
+    each inside the study's top (207 mm/s)."""
+    rows = [timing(v) for v in STAGES]
+    assert [w for w, _, _ in rows] == [9, 10, 11]
+    assert [round(s, 1) for _, s, _ in rows] == [33.6, 41.4, 50.0]
+    assert all(v <= LongTrotConfig().top_mm_s for v in STAGES) and STEER_MAX <= 0.25
+    t = pattern_timing(LONG_TROT, 200.0)
+    assert t.stance_ms == pytest.approx((11 + STANCE_PLUS) * 20) and t.shift_ms == 20
+
+
+def _changed(start, v0, script):
+    p = LongTrotPlanner(M, "forward", v0, tick=0, pattern=start)
+    ticks, names, ws = [], [], []
+    for item in script:
+        if item[0] == "run":
+            for _ in range(item[1]):
+                ticks.append(p.next())
+                names.append(p.pattern.name)
+                ws.append(p.swing_ticks)
+        else:
+            getattr(p, item[0])(*item[1:])
+    return p, ticks, names, ws
+
+
+@pytest.mark.parametrize("start,v0,to,v1", [("trot", 144.0, "longtrot", 160.0), ("trot", 230.4, "longtrot", 160.0),
+                                            ("walk", 80.0, "longtrot", 160.0), ("crawl", 18.0, "longtrot", 160.0),
+                                            ("longtrot", 200.0, "trot", 144.0), ("longtrot", 200.0, "walk", 80.0),
+                                            ("longtrot", 200.0, "crawl", 18.0)])
+def test_changes_into_and_out_of_the_long_trot(start, v0, to, v1):
+    """Every change in reach and under the joint bound; into the long trot the swing starts at 9
+    ticks (one more than the trot's) and grows a tick a step; out of it directly only once the
+    swing is today's 8 again."""
+    p, ticks, names, ws = _changed(start, v0, [("run", 180), ("set_pattern", to), ("set_speed", v1), ("run", 420)])
+    check(ticks[40:], (start, to), trot=start in ("trot", "longtrot") and to in ("trot", "longtrot"))
+    assert names[-1] == to
+    i = names.index(to)
+    if to == "longtrot":
+        assert ws[i] == 9 and ws[-1] == swing_for(v1)
+    elif start == "longtrot" and to != "crawl":
+        assert ws[i - 1] == 8
+    assert i * 0.02 < 180 * 0.02 + (8.0 if "crawl" in (start, to) else 2.0)
+
+
+@pytest.mark.parametrize("how", ("halt", "stop"))
+@pytest.mark.parametrize("steer", (0.0, STEER_MAX))
+def test_every_stop_from_every_phase_stays_under_the_bound(how, steer):
+    """The quick stop and the planned stop asked at every tick of a cycle at the top stage: each
+    square-up step from 45 mm behind the shoulder long enough for its joints (a foot near the leg's
+    reach turns the knee fast)."""
+    for at in range(0, 24):
+        p = LongTrotPlanner(M, "forward", STAGES[-1], tick=0, steer=steer)
+        ticks = [p.next() for _ in range(200 + at)]
+        getattr(p, how)()
+        n = 0
+        while not p.done and n < 400:
+            ticks.append(p.next())
+            n += 1
+        assert p.done and n * 0.02 < (1.3 if how == "halt" else 2.1), (at, n)
+        check(ticks[150:], (how, at))

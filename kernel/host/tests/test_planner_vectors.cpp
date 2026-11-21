@@ -1,6 +1,7 @@
 // The C++ planner against the Python one: replays every scenario of
 // tests/planner_vectors.txt (made by gen_planner_vectors.py from
-// mind/kilo/planner) and compares every planned tick: foot positions and
+// mind/kilo/planner: plan.py's Planner, and longtrot.py's LongTrotPlanner for
+// the long trot and the changes into and out of it) and compares every planned tick: foot positions and
 // support exactly (they are whole mm on the wire), the attitudes within
 // 0.01 deg, the margins within 0.05 mm; and the patterns' timing, the leg
 // IK, the centre of mass, fit_attitude, stability and the ErrorTracker.
@@ -119,6 +120,13 @@ int main(int argc, char** argv) {
       Timing t = v < 0 ? default_timing(pat(f[1])) : timing(pat(f[1]), (real)v);
       const real got[5] = {t.stride_mm, t.shift_ms, t.stance_ms, t.period_ms, t.speed_mm_s};
       for (int i = 0; i < 5; i++) timing_d.see(got[i], num(f[3 + i]), where);
+    } else if (k == "ltm") {  // the long trot's timing (longtrot.py pattern_timing, swing_for)
+      Timing t = pattern_timing(kLongTrot, (real)num(f[1]), dir(f[2]));
+      const real got[5] = {t.stride_mm, t.shift_ms, t.stance_ms, t.period_ms, t.speed_mm_s};
+      for (int i = 0; i < 5; i++) timing_d.see(got[i], num(f[3 + i]), where);
+      flags.see(long_swing_for((real)num(f[1])), num(f[8]), where + " swing");
+    } else if (k == "land") {  // the fitted pendulum's landing (TrotFit.land_x)
+      timing_d.see(fit_land_x(std::atoi(f[1].c_str()), (real)num(f[2])), num(f[3]), where);
     } else if (k == "ik") {
       real t1, t2;
       model.ik(std::atoi(f[1].c_str()), (real)num(f[2]), (real)num(f[3]), &t1, &t2);

@@ -1,8 +1,12 @@
-"""The long trot: a prototype (docs/walking-and-balance.md §15, 2026-11-21).
+"""The long trot (docs/walking-and-balance.md §15, 2026-11-21): the Python
+reference of the C++ mind's long trot (kernel/mind/planner/plan.cpp,
+longtrot.cpp; the remote's A1).
 
-Not wired to anything: no remote key, no C++ port, no golden vectors. The
-gaits in kilo.planner.patterns are untouched; this is a Planner subclass
-with its own pattern object (``LONG_TROT``, not in ``patterns.PATTERNS``).
+The gaits in kilo.planner.patterns are untouched: this is a Planner
+subclass with its own pattern object (``LONG_TROT``, "longtrot", not in
+``patterns.PATTERNS``); in the walk, the trot and the crawl it plans exactly
+what Planner plans. The golden vectors (kernel/host/tests/
+gen_planner_vectors.py) are made from it for the long trot's scenarios.
 
 The trot's stride is limited by the joints: the swing must carry the foot
 a stride and a bit in its fixed 160 ms, and at 44 mm (with the lift down to
@@ -32,13 +36,18 @@ the long trot does about both:
   26. x_c and the effective time are fitted to the floor recordings of the
   trot (``TROT_FIT``), not measured.
 - **Each swing is long enough for the step it carries**: a square-up from
-  a long stride, a stride still growing, a steer's outer side.
+  a long stride, a stride still growing or shrinking, a steer's outer side;
+  and a swing that is not the steady long trot's (a square-up, the way home
+  into the crawl, the swing shortening out of the long trot) long enough
+  for no joint to turn more than ``joint_deg_per_tick`` along its path (a
+  foot 45 mm behind its shoulder after a quick stop is near the leg's
+  reach, where the knee turns fast).
 
 Stopping: the planned stop and the quick stop (halt) are the Planner's; the
-feet step home to 0, each step's swing as long as its distance needs, and a
-stop asked mid-swing keeps that swing's landing. Pattern changes are not
-supported (set_pattern is ignored); directions, steering, speed changes,
-stop and halt are.
+feet step home to 0, each step's swing as long as its distance and its
+joints need, and a stop asked mid-swing keeps that swing's landing.
+Directions, steering, speed changes, stop, halt and pattern changes
+(LongTrotPlanner's docstring) are supported.
 """
 
 from __future__ import annotations
@@ -48,7 +57,7 @@ from dataclasses import dataclass
 
 from kilo.planner import patterns as pat
 from kilo.planner.model import LB, LEFT, LF, RB, RF, BodyModel, G_MM_S2
-from kilo.planner.plan import Planner, PlannerConfig
+from kilo.planner.plan import HALT_HOLD_TICKS, HEIGHT_SLEW_MM, SWITCH_SLACK_MM, Planner, PlannerConfig, smooth
 
 
 @dataclass(frozen=True)
@@ -117,6 +126,11 @@ class LongTrotConfig:
     top_back_mm_s: float = 180.0   # ... and backward (its feet land further forward, where the knee works harder)
     step_mm_per_tick: float = 5.4  # a swing that carries a foot d mm takes at least d / this ticks
     stride_per_tick: float = 4.75  # ... and a side's stride is at most this x the swing's ticks less 0.5 mm
+    # A swing that is not the steady long trot's (a stop's or the quick stop's square-up from a long
+    # stride, the way home into the crawl, the swing shortening out of the long trot) is also as long
+    # as its path needs for no joint to turn more than this a tick (the body's slew is 10, 500 deg/s):
+    # a foot that starts 45 mm behind its shoulder, near the leg's reach, turns the knee fast.
+    joint_deg_per_tick: float = 8.0
     place: bool = True             # land where the falling body will be (False: half a stride ahead, as the trot)
     fit: TrotFit = TROT_FIT
 
@@ -149,75 +163,165 @@ def timing(speed_mm_s: float | None, cfg: LongTrotConfig = LongTrotConfig(), bac
     return w, s, s / stance
 
 
+def pattern_timing(p: pat.Pattern, speed_mm_s: float, direction: str = "forward",
+                   cfg: LongTrotConfig = LongTrotConfig()) -> pat.Timing:
+    """patterns.timing() for the three gaits; for LONG_TROT its own (``timing``: the stride over
+    the swing + STANCE_PLUS ticks on the ground, the swing from ``swing_for``)."""
+    if p is not LONG_TROT:
+        return pat.timing(p, speed_mm_s)
+    w, s, v = timing(speed_mm_s, cfg, back=pat.direction(direction) == "back")
+    st = (w + STANCE_PLUS) * pat.TICK_MS
+    return pat.Timing(s, pat.TICK_MS, st, st + w * pat.TICK_MS, v)
+
+
+def _pattern(name) -> pat.Pattern:
+    return LONG_TROT if (name is LONG_TROT or name == "longtrot") else pat.pattern(name)
+
+
+# The remote's long-trot stages (kernel/mind/remote/remote.cpp kLongTrotStages, key A1 and then B7 /
+# B5; 2026-11-21): forward only, each a swing length of the build-up (9, 10, 11 ticks).
+STAGES = (160.0, 180.0, 200.0)
+STEER_MAX = 0.25  # the remote steers the long trot at its first steer level only
+
+
 class LongTrotPlanner(Planner):
-    """The trot with a swing that grows with the speed and pairs that land where the falling body
-    will be (the module docstring). Planner's interface: next(), set_speed, set_direction,
-    set_steer, stop, halt, observe."""
+    """The planner with the long trot (the module docstring) as a fourth pattern, ``LONG_TROT``
+    ("longtrot"). In the walk, the trot and the crawl it is exactly Planner (tick for tick); in
+    the long trot its swing grows with the speed and its pairs land where the falling body will
+    be. The C++ mind's Planner (kernel/mind/planner/plan.cpp) is this class: the golden vectors
+    (kernel/host/tests/gen_planner_vectors.py) are made from it.
+
+    Pattern changes into and out of the long trot: from and to the walk and the trot directly
+    (both have a fixed cadence), as between those two: the strides go to what both walk at this
+    speed, and the new pattern takes over at a slot start where the strides and the feet allow
+    (Planner._switch_ok) and, out of the long trot, once its swing is back to today's 8 ticks
+    (a tick shorter each step: the build-up undone). Into the long trot its swing then grows a
+    tick a step from 8. To and from the crawl through the legs' way home, as for every change
+    into or out of the crawl."""
 
     def __init__(self, model: BodyModel, direction: str = "forward", speed_mm_s: float | None = None,
                  tick: int = 0, config: PlannerConfig | None = None, long: LongTrotConfig | None = None,
-                 start_height: float | None = None, steer: float = 0.0):
+                 start_height: float | None = None, steer: float = 0.0, pattern: str = "longtrot"):
         self.long = long or LongTrotConfig()
-        self._w = self.long.w_min        # this slot's swing ticks
+        self._w = self.long.w_min        # this slot's swing ticks (w_min while not in the long trot)
         self._w_tgt = self.long.w_min    # the speed's
         self._land = [0.0, 0.0]          # this slot's landing x per side (left, right) ...
         self._slot_s = [0.0, 0.0]        # ... for this stride (the target at the slot's start)
-        super().__init__(model, "trot", direction, speed_mm_s, tick, config, start_height, steer)
-        self.pattern = LONG_TROT
-        self._apply_timing()
-        self.stance_ticks = self.stance_tgt
+        super().__init__(model, _pattern(pattern), direction, speed_mm_s, tick, config, start_height, steer)
+
+    @property
+    def is_long(self) -> bool:
+        return self.pattern is LONG_TROT
 
     # ---- timing ------------------------------------------------------------------------
     @property
     def swing_ticks(self) -> int:
-        return self._w
+        return self._w if self.is_long else super().swing_ticks
 
     def timing(self) -> pat.Timing:
-        w, s, v = timing(self.speed_mm_s, self.long, back=self.direction == "back")
-        st = (w + STANCE_PLUS) * pat.TICK_MS
-        return pat.Timing(s, pat.TICK_MS, st, st + w * pat.TICK_MS, v)
+        if not self.is_long:
+            return super().timing()
+        return pattern_timing(LONG_TROT, self.speed_mm_s, self.direction, self.long)
+
+    def _homing(self) -> bool:
+        """Every leg goes home: a stop, or a change into or out of the crawl."""
+        return self.stopping or (self._pending_pattern is not None and not self._direct_change())
 
     def _apply_timing(self) -> None:
+        pend = self._pending_pattern
+        if not self.is_long:
+            super()._apply_timing()
+            if pend is LONG_TROT and self._direct_change() and not self.stopping:
+                # into the long trot: no stride longer than both walk at this speed (as Planner's
+                # change, with the long trot's own timing)
+                st = min(self.timing().stride_mm, pattern_timing(LONG_TROT, self.speed_mm_s, self.direction,
+                                                                 self.long).stride_mm)
+                self.s_tgt = list(pat.side_strides(self.direction, st, self.steer, cap=st))
+            return
         tm = self.timing()
-        self._w_tgt = swing_for(tm.speed_mm_s, self.long)
+        direct = pend is not None and self._direct_change()
+        # out of the long trot directly: the swing back to today's 8 ticks first
+        self._w_tgt = self.long.w_min if direct else swing_for(tm.speed_mm_s, self.long)
         self.stance_tgt = self._w_tgt + STANCE_PLUS
-        if self.stopping:
+        if self._homing():
             self.s_tgt = [0.0, 0.0]
+        elif direct:
+            st = min(tm.stride_mm, pattern_timing(pend, self.speed_mm_s, self.direction, self.long).stride_mm)
+            self.s_tgt = list(pat.side_strides(self.direction, st, self.steer, cap=st))
         else:
             cap = self.long.stride_per_tick * self._w_tgt - 0.5  # steering: the outer side's stride too
             self.s_tgt = list(pat.side_strides(self.direction, tm.stride_mm, self.steer, cap=cap))
         self._next = None
 
     def _shift_for(self, stance: float) -> int:
-        return 1
+        return 1 if self.is_long else super()._shift_for(stance)
 
     def set_pattern(self, name: str) -> None:
-        """Not supported by the prototype (ignored)."""
-        return
+        super().set_pattern(_pattern(name))
+
+    def _switch_ok(self, p: pat.Pattern) -> bool:
+        if self.is_long and self._w > self.long.w_min:
+            return False  # out of the long trot once its swing is today's again
+        st = pattern_timing(p, self.speed_mm_s, self.direction, self.long).stride_mm
+        return (all(abs(v) <= st + self.pattern.stride_slew_mm for v in self.s_cur)
+                and all(abs(x) <= st / 2 + SWITCH_SLACK_MM for x in self.xg)
+                and abs(self.h - self.model.stance_height(p.body_h_256)) <= HEIGHT_SLEW_MM)
 
     def _start_slot(self) -> None:
-        # this slot's swing: the speed's (while stopping the shortest), at most a tick longer than the
+        hold = self.halting and self.halt_t < HALT_HOLD_TICKS  # the quick stop's hold: no group steps
+        super()._start_slot()
+        if not self.is_long:
+            self._w = self.long.w_min
+            return
+        # this slot's swing: the speed's (going home the shortest), at most a tick longer than the
         # last slot's (the build-up) and at most a tick shorter, but always long enough for the step it
         # carries (a square-up from a long stride, a stride still growing, steering)
-        w = self.long.w_min if self.stopping else min(self._w_tgt, self._w + 1)  # the build-up: a tick a step
-        g_next = self.pattern.groups[(self.k + 1) % len(self.pattern.groups)]
-        for leg in g_next:
+        homing = self._homing()
+        w = self.long.w_min if homing else min(self._w_tgt, self._w + 1)  # the build-up: a tick a step
+        n = len(self.pattern.groups)
+        group = self.pattern.groups[(self.k + 1) % n] if hold else self._group()
+        to = {}
+        for leg in group:
             side = 0 if LEFT[leg] else 1
             sc = self.s_cur[side]
-            to = sc / 2.0 if (self.stopping or not self.long.place) else self._land_for(side)
-            d = abs(to - self.xg[leg]) + abs(sc) / max(1.0, self.stance_ticks)
+            if homing or not self.long.place:
+                to[leg] = sc / 2.0
+            else:
+                # the landing at the target stride, or (slowing: the stride shrinks 0.75 mm a tick,
+                # the swing a tick a step) at the stride now, whichever is further from the foot
+                lt, st = self._land_for(side), self.s_tgt[side]
+                lc = sc / 2.0 - (st / 2.0 - lt) * min(1.0, max(0.0, sc / st)) if abs(st) > 1e-6 else sc / 2.0
+                to[leg] = lc if abs(lc - self.xg[leg]) > abs(lt - self.xg[leg]) else lt
+            d = abs(to[leg] - self.xg[leg]) + abs(sc) / max(1.0, self.stance_ticks)
             w = max(w, int(math.ceil(d / self.long.step_mm_per_tick - 1e-9)))
-        self._w = max(self.long.w_min, min(self.long.w_max + 2, max(w, self._w - 1)))
-        super()._start_slot()
+        w = max(self.long.w_min, min(self.long.w_max + 2, max(w, self._w - 1)))
+        if homing or self._pending_pattern is not None:  # not the steady long trot: the joints checked
+            while w < self.long.w_max + 2 and not all(self._swing_ok(leg, to[leg], w) for leg in group):
+                w += 1
+        self._w = w
         for side in (0, 1):
             self._land[side] = self._land_for(side)
             self._slot_s[side] = self.s_tgt[side]
+
+    def _swing_ok(self, leg: int, to: float, w: int) -> bool:
+        """A swing of ``w`` ticks from where the foot is to ``to`` (the plan's cosine path, the
+        pattern's lift, the height now) turns no joint more than joint_deg_per_tick a tick."""
+        lim = math.radians(self.long.joint_deg_per_tick)
+        x0, h, lift = self.xg[leg], self.h, self.pattern.step_h_mm
+        a = self.model.ik(leg, x0, h)
+        for j in range(1, w + 1):
+            b = self.model.ik(leg, x0 + (to - x0) * smooth(j / w),
+                              h - lift * (1.0 - math.cos(2.0 * math.pi * j / w)) / 2.0)
+            if abs(b[0] - a[0]) > lim or abs(b[1] - a[1]) > lim:
+                return False
+            a = b
+        return True
 
     # ---- placement ------------------------------------------------------------------------
     def _land_for(self, side: int) -> float:
         """Where this side's pair lands at the target stride (mm ahead of its shoulder)."""
         s = self.s_tgt[side]
-        if self.stopping or not self.long.place or abs(s) < 1e-6:
+        if self._homing() or not self.long.place or abs(s) < 1e-6:
             return s / 2.0
         v = s / ((self._w_tgt + STANCE_PLUS) * pat.TICK_MS / 1000.0)
         x = self.long.fit.land_x(self._w_tgt, v)
@@ -226,6 +330,8 @@ class LongTrotPlanner(Planner):
         return min(s / 2.0 + 6.0, max(0.0, x)) if s > 0 else max(s / 2.0 - 6.0, min(0.0, x))
 
     def _target_x(self, leg: int) -> float:
+        if not self.is_long:
+            return super()._target_x(leg)
         side = 0 if LEFT[leg] else 1
         s = self.s_cur[side]
         st = self._slot_s[side]

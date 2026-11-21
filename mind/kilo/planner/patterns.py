@@ -122,7 +122,11 @@ DIRECTIONS = ("forward", "back", "left", "right", "march")
 _ALIASES = {"backward": "back", "backwards": "back"}
 
 
-def pattern(name: str) -> Pattern:
+def pattern(name: "str | Pattern") -> Pattern:
+    """A pattern by name; a Pattern is returned as it is (kilo.planner.longtrot's LONG_TROT, which is
+    not among PATTERNS)."""
+    if isinstance(name, Pattern):
+        return name
     try:
         return PATTERNS[name.lower()]
     except KeyError:
