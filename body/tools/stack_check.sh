@@ -42,9 +42,11 @@ fi
 ELF="$BUILD/body.ino.elf"
 TOOLS=$(ls -d "$HOME"/.arduino15/packages/arduino/tools/avr-gcc/*/bin 2>/dev/null | sort | tail -1)
 read -r data bss < <("$TOOLS/avr-size" -A "$ELF" | awk '$1==".data"{d=$2} $1==".bss"{b=$2} $1==".noinit"{n=$2} END{print d, b+n}')
+. "$BODY/tools/reset_record.sh"
+reset_record_check "$TOOLS/avr-nm" "$ELF" || exit 1
 "$TOOLS/avr-objdump" -d -C "$ELF" > "$BUILD/body.dis"
 shopt -s nullglob
 su=("$LTRANS"/*.su)
 if [ "${#su[@]}" -eq 0 ]; then echo "stack_check: no .su files from the link step in $LTRANS"; exit 1; fi
 exec "$PY" "$BODY/tools/stack_check.py" --disasm "$BUILD/body.dis" --su "${su[@]}" \
-  --globals "$((data + bss))" --min-margin "$MIN_MARGIN"
+  --globals "$((data + bss + ABOVE_STACK))" --min-margin "$MIN_MARGIN"

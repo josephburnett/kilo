@@ -83,5 +83,13 @@ if ! "$BODY/tools/build_link_harness.sh" "$OUT/core_harness" core_harness; then
   echo "core_harness: BUILD FAILED"; fail=$((fail + 1))
 fi
 
+# 5. The reset record's fixed place (hal/sys.h): the linker flags put it
+#    where sys.h says, and reset_record_check (size_check.sh's check of a
+#    built ELF) refuses the layout that broke the boot-16 card flash (the
+#    record in .noinit, moving with the globals) and accepts the fixed one.
+#    A fake nm prints the symbols, so no AVR toolchain is needed.
+echo "== reset record at a fixed address"
+if ! "$BODY/tools/reset_record_test.sh" "$OUT"; then fail=$((fail + 1)); fi
+
 if [ "$fail" -eq 0 ]; then echo "host tests: ALL PASSED"; else echo "host tests: $fail FAILED"; fi
 exit "$fail"

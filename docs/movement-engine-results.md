@@ -230,6 +230,24 @@ none is a three-foot paw trick.
 
 **Confidence.** Measured (timing); not determined (the model check).
 
+**Boot 16 (2026-11-22), the random mode's tricks** [measured, from the
+mind's log; the random mode's tricks are not recorded as runs, so only
+the log's TRICK_DONE times exist]. A5 started the behaviour runner, then
+four more A5 presses asked for check_around, wash_face, stretch and sniff.
+Each played to its end (TRICK_DONE DONE) 4 to 20 ms after its scheduled
+length: check_around 4024 ms (4020 scheduled), wash_face 6135 (6120),
+stretch 4587 (4580), sniff 3955 (3940); the runner's own sit moves alike
+(1959 / 1940, 2370 / 2360, 2469 / 2460, 2474 / 2460, 2187 / 2180). The
+two asked while another move was playing (stretch, then sniff 2 s later)
+waited and played one after the other, as designed. They end in the
+sitting pose; the state estimate said SITTING (pitch -26.5 to -27.0°)
+0.3 s after wash_face and after each sit move, and had no time to settle
+after check_around, stretch and sniff before the next move began. The six righting moves of the same boot played 9 to 14 ms
+over their 2660 ms, their keyframes 31 to 37 ms after the schedule
+(`enginestudy.py tricks`). Nothing odd, except that the distance guard
+saw something 6 to 8 cm from his nose for 1.8 s during sniff (89.1 s:
+eyes red, no action, as designed for a trick).
+
 ## What this changes in the proposal
 
 - The stream's look-ahead can come down from 100 ms to **60 ms** (3

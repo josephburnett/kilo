@@ -36,6 +36,98 @@ Build: ...   Floor: ...   Battery at the start: ... mV   Recording saved to the 
 | 2 | | | | | | |
 | 3 | | | | | | |
 
+## 2026-11-22, boot 16: the first tries on Kilo (from the recording)
+
+Build 7e92703c, kernel with `KILO_RIGHTING=1` (FALL_RC 0). What the owner
+saw has not been written down yet: this is what the IMU recorded
+(`~/kilo-logs/rec-card-b16.krec`, the log `kilo-card-b16.log`). Times are
+seconds after the Pi started. Roll as in docs/righting.md: 0 upright, +90
+on his left side, -90 on his right, 180 on his back. [measured] is the
+recording, [inferred] is a reading of it.
+
+| # | Lying on | Try 1 | Try 2 | Try 3 | Ended | Anything strained? |
+|---|---|---|---|---|---|---|
+| 1 (B1 at 133.9 s) | his back, roll +177 | turned 32° toward his right side, then rolled back | 33°, back | 33°, back | limp on his back; red flashes, gave up | not recorded |
+| 2 (B1 at 147.0 s) | his back, roll +177 | 31°, back | 31°, back | 33°, back | limp on his back; red flashes, gave up | not recorded |
+
+**How he came to be on his back** [measured]:
+
+1. 108.6 s: standing still (B6), roll -0.6°, nothing moving.
+2. 109.9 to 110.4 s: he turned onto his **left side**: roll 0 to 81° in
+   about 0.5 s, fastest 234°/s at 43°, then slower (42°/s) from 64 to 81°,
+   and he settled at 94 to 97°. The body's fall check fired (FELL at
+   110.5 s; with FALL_RC 0 it then laid the legs to rest and let them go
+   limp at 114.1 s). The state estimate said ON_LEFT_SIDE (111.6 s):
+   right. Nothing had been asked of him for 1.5 s, and the roll slowed
+   down before he reached the floor; that reads more like being laid down
+   by hand than a fall [inferred; the owner had been asked to lay him on
+   his side].
+3. 117.7 to 118.3 s: limp, after 3.6 s lying still on his side, he turned
+   onto his **back**: 97 to 177° in 0.6 s, fastest 194°/s. The estimate
+   said ON_BACK (119.1 s): right. Lying still and limp, a turn like that
+   needs a push [inferred: a hand, again]. B1 came 15 s later, so both
+   presses started from his back, never from a side.
+
+**Each try, from his back** [measured; the six are alike within 2°]:
+
+| part of the move | Kilo | the simulator, his fitted outline |
+|---|---|---|
+| start (after "REST first") | 2 to 3° toward his left side | 3° toward his left (+177) |
+| wind-up (1.1 s) | 4° toward his right side | about 0° |
+| kick (0.56 s) | 31 to 33° toward his right side, fastest roll 273 to 307°/s | 63° (roll -117) |
+| rest pose (1 s) | rolled back onto his back, 3 to 4° toward his left | stays on his right side at -124 |
+| settled | on his back | on his right side (what the move is for) |
+
+His nose stayed within 9° of level throughout (pitch -171 to -179°, which
+is 1 to 9° from level when upside down).
+
+**Why it failed, against the simulator** [measured, then inferred]:
+
+- The kick turned him half as far as the simulator says: 32° instead of
+  63°. That is short of where the right legs (in the standing pose) can
+  hold him on his side, so as soon as the last frame folded those legs
+  into the rest pose he rolled back down. The simulator's own variant with
+  the top edges of his back a quarter lower (`top_z` x0.75) is the one
+  that ends like Kilo did: the kick turns him, the rest pose lets him roll
+  back onto his back. That is the same direction as the 2026-11-21 replay
+  of rc (the top corners of his back lower than guessed) [inferred].
+- The variant that is said to "roll him as on Kilo" (the outline fitted
+  to rc's first pose) ends on his right side (-71): it is wrong for this
+  move.
+- The feet may also push less than modelled (slip, or not reaching the
+  floor beyond his back); the recording cannot tell the two apart.
+
+**The repeats.** The mind played the identical move three times per
+press, and each try ended exactly as the one before (within 2°). A
+closed-loop version would, from the IMU it already reads:
+
+1. After the kick, look at the roll before the next frame: if he is not
+   past the angle where the legs underneath can hold him, do not fold
+   those legs into the rest pose (which is what let him roll back); hold,
+   or try something else.
+2. Not repeat a move whose last try ended within a few degrees of the one
+   before: change it (a bigger wind-up, the mirrored move toward his left
+   side, which he already leaned toward, or a second kick timed to the
+   roll back, rocking him like a swing), or stop after the first identical
+   failure and ask for a hand.
+3. Write the peak angle of each try to the log (here 31 to 33°), so that
+   each try is also a measurement of how far the kick turns him.
+
+Not changed today: the move and the retry rule are as built.
+
+**The fall counter.** The session summary says `falls=10 recovered=0`.
+One was the turn onto his left side at 110.5 s. The other nine were the
+body's fall check finding him already on his back each time the legs were
+given a pose again: after each B1's "REST first" (2), after each of the six
+moves (6), and after A7 (1). That is the design (docs/righting.md, "No
+long stall"), but it means `falls` counts "found lying" as well as falls.
+Each of those nine also started a new goal epoch and cleared the mind's
+posture goal; the next move still started on time (1.1 to 1.4 s after).
+
+**After the second give-up.** A7 at 160.1 s; from 162.3 to 164.7 s he
+went from his back over his left side onto his belly (roll -0.7°), limp,
+in 2.4 s: turned over by hand [inferred].
+
 ## 2026-11-22: the simulator against rc, frame by frame (simulation only)
 
 No new recordings; the same six tries on the floor as on 2026-11-21. Added

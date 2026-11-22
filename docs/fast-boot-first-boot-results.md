@@ -3,6 +3,72 @@
 Runs of docs/fast-boot-first-boot.md. Newest first. Copy the block below
 for each run and fill in what you saw; "don't know" is a fine answer.
 
+## 2026-11-22, boot 16: the first floor run of everything merged that day
+
+Build 7e92703c (mind and body), kernel with `KILO_REAR_UP=1
+KILO_RIGHTING=1`, from the SD card. Read from the mind's log
+(`~/kilo-logs/kilo-card-b16.log`) and the whole-boot recording
+(`rec-card-b16.krec`); what the owner saw has not been written down yet.
+Times are seconds after the Pi started. The walk and the trot are in
+walk-trial-results.md, the righting tries in righting-results.md, the
+random mode's tricks in movement-engine-results.md §7.
+
+**The body flash said FAILED, but the body was flashed correctly.** At
+1.6 s the card flash found the body on 4eb35a20 and the card holding
+7e92703c (27536 bytes). It programmed and verified all 216 pages (7.6 s;
+every page read back equal), the body restarted with HELLO build 7e92703c,
+and then the flash reported `FAILED: BAD_RESET_CAUSE` (red flashes and a
+hiss), because the body said its restart was `COLD` (a power-on) instead
+of `FLASHED`. The cause is in the body firmware, not the flash: the body
+tells a flash from a power-on by a 10-byte record it keeps in RAM across
+restarts, and that record sat right after the firmware's other variables,
+so its address moved whenever they changed size. 7e92703c has 2 bytes
+more of initialised variables than 4eb35a20 (`.data` 44 B against 42), so
+it looked for the record at 0x6F9 where the old firmware had left it at
+0x6F7, found no valid record and called it a power-on. Proof from the two
+builds: the new firmware's epoch byte lands at 0x702, just past the old
+firmware's variables, in the free RAM it paints with 0xC5 (197) at every
+start; the epoch it reported was 198, that byte + 1. Earlier card flashes
+(boots 13 to 15) reported FLASHED because their builds happened to have
+the same size of variables. The body itself was healthy: right build,
+verified image, calibration and settings read as OK ("config OK"), and
+the stack never came closer than 157 bytes to the variables (STATS
+`stack_free_min`; the static estimate says 144 B at worst). Fixed the
+same day: the record now sits at a fixed address at the top of RAM
+(docs/architecture.md §3a), checked by `body/tools/size_check.sh`. The
+first flash onto the fixed firmware will report BAD_RESET_CAUSE once more
+(the old firmware left its record at the old place); every flash after it
+should report FLASHED.
+
+**Watchdog 2.** Both were the body noticing the Pi silent for 0.5 s while
+the Pi's main loop waited: at 1.6 s on the SD card (1.5 s) and at 12.2 s
+on the USB scan for Ethernet (1.7 s). Both while he lay limp. Every boot
+since boot 13 has had one or two of these; nothing moved.
+
+**Falls 10, recovered 0.** One fall: at 110.5 s, standing still, he turned
+onto his left side (probably laid there by hand: righting-results.md).
+The other nine are the body's fall check finding him still on his back
+each time the legs were given a pose again during the righting tries (and
+after A7); with FALL_RC 0 it never tries its own get-up, so none can be
+"recovered". Nothing fell during the walks or the trot.
+
+**The eye signals** (the log's `signal` lines, for comparing with what
+was seen):
+
+| time | signal | what the eyes should have shown | why |
+|---|---|---|---|
+| 0.02 s | ready | 3 quick green flashes (and a mew) | the body answered the Pi |
+| 1.61 s | flashing | steady white | the card flash started |
+| 10.57 s | failed | 3 quick red flashes (and a hiss) | the flash's false BAD_RESET_CAUSE |
+| 24.55 s | guard_red | steady red (and a hiss) | something 5.6 cm from his nose as he stood up; he backed off |
+| 110.37 s | saved | 1 long white flash | a recording saved to the card |
+| 145.82 s | gave_up | 3 quick red flashes (and a meow) | the first B1: three tries, he stayed on his back |
+| 158.91 s | gave_up | 3 quick red flashes (and a meow) | the second B1, the same |
+
+Without a `signal` line: blinking white (busy) during each B1 (133.9 to
+145.8 s and 147.0 to 158.9 s), and steady red from the distance guard at
+89.1 to 91.0 s during sniff (something 6 to 8 cm from his nose).
+
 ## 2026-11-16, run 5: the diagonal walk and the faster trot on the floor
 
 Build af5f8920 (rear-up stage 1 on B2) installed with `kilo update --host 192.168.88.8` (back after 10.7 s). The owner ran Kilo by remote with the cable out, then plugged it in with Kilo still on (address now 192.168.88.9); `kilo walks --fetch all` brought eight recordings. Files: `~/kilo-logs/walks/walk-20261116-20*.kwalk` on rtb.
