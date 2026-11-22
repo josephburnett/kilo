@@ -178,12 +178,14 @@ for the cycle less its swing. The code is `kilo/planner/patterns.py`:
 the centre of the foot disc, the floor is 6 mm lower.)
 
 Since 2026-11-22 (docs/walking-and-balance.md §16) the walk is the cat's
-lateral-sequence walk: one leg at a time, a foot down every 240 ms, always
-three feet on the ground (four for one tick between swings), never two, and
-each foot lands half a stride plus the model's centre of mass (7.4 mm) ahead
-of its shoulder, so the feet stay centred under the body's weight: by the
-model the centre of mass never leaves the three feet. It does not lean
-first: it is the gait for 10 to 73 mm/s. (It replaced a walk with diagonal
+lateral-sequence walk: one leg at a time, a foot down every 220 or 260 ms
+(more four-foot time before a back leg lifts, where the weight crosses a
+diagonal; backward every 240 ms), always three feet on the ground, never
+two, each foot landing half a stride plus the model's centre of mass
+(7.4 mm) ahead of its shoulder, and a small sway (1° of roll, 3 mm fore and
+aft) moving the weight away from the foot about to lift: by the model the
+centre of mass stays 1 to 2 mm inside the three feet (§16.8). It does not
+lean first: it is the gait for 11 to 73 mm/s. (It replaced a walk with diagonal
 couplets, 2026-11-16 to 11-22, that stood on two feet a third of the time:
 the stutter of §16.1.) The crawl is the careful gait, statically
 stable, one leg at a time with the lean (below). What limits each top

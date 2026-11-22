@@ -5,14 +5,17 @@ against the old one in the virtual body.
     PYTHONPATH=mind python mind/tests/walkstudy.py floor      # the recorded walks (~/kilo-logs), folded by cycle
     PYTHONPATH=mind python mind/tests/walkstudy.py margins    # the plan's margins from the model, and their sensitivity
     PYTHONPATH=mind python mind/tests/walkstudy.py compare    # old walk against the new, in both physics, with model errors
+    PYTHONPATH=mind python mind/tests/walkstudy.py second     # the walk's second version against its first (§16.8)
+    PYTHONPATH=mind python mind/tests/walkstudy.py drift      # the heading the gyro saw in every straight walk (§16.9)
 
 The old walk (diagonal couplets, 2026-11-16 to 11-22) lives here only, as
-OLD_WALK, as the baseline the evidence is measured against: it is not one of
-the planner's patterns any more. Everything the virtual body says is
-simulation (kilo.vbody: a rigid body on point feet; RockingPhysics is the
-long-trot study's pendulum-on-the-diagonal physics); ``floor`` folds the
-recordings of whichever walk they hold (the old walk's until 2026-11-21,
-the new walk's from boot 16 on, docs/walk-trial-results.md).
+OLD_WALK, and the lateral-sequence walk's first version (boot 16's) as
+FIRST_WALK: the baselines the evidence is measured against, not planner
+patterns any more. Everything the virtual body says is simulation
+(kilo.vbody: a rigid body on point feet; RockingPhysics is the long-trot
+study's pendulum-on-the-diagonal physics); ``floor`` and ``drift`` read
+the recordings of whichever walk they hold (the old walk's until
+2026-11-21, the new walk's from boot 16 on, docs/walk-trial-results.md).
 """
 
 from __future__ import annotations
@@ -43,6 +46,11 @@ OLD_WALK = pat.Pattern("oldwalk", ((LB, RF), (RB, LF)), swing_ms=150.0, stride_m
                        body_h_256=205, period_ms=460.0, shift_min_ms=20.0, stance_max_ms=310.0, lean=False,
                        couple_ms=60.0, default_mm_s=80.0, stride_slew_mm=1.5)
 NEW_WALK = pat.PATTERNS["walk"]
+# The lateral-sequence walk as first built (boot 16's floor run): a 220 ms swing and one tick on four
+# feet before every swing (a footfall every 240 ms), no sway.
+FIRST_WALK = replace(NEW_WALK, name="firstwalk", swing_ms=220.0, shift_min_ms=20.0, stance_max_ms=740.0,
+                     handover_ticks=(), sway_roll_deg=0.0, sway_dx_mm=0.0, swing_long_ms=0.0,
+                     handover_long_ticks=(), long_from_mm_s=0.0, long_stride_mm=0.0)
 
 
 def com_moved(dx: float = 0.0, dy: float = 0.0, base: BodyModel = M) -> BodyModel:
@@ -50,6 +58,12 @@ def com_moved(dx: float = 0.0, dy: float = 0.0, base: BodyModel = M) -> BodyMode
     b = base.body
     k = base.total_g / b.grams
     return replace(base, body=Mass(b.grams, b.x + dx * k, b.y + dy * k, b.z))
+
+
+# What the self-measurement of 2026-11-22 found (docs/self-measurement-results.md; not in the model):
+# the centre of mass 3.1 mm further back (4.3 mm ahead of the shoulders, not 7.4) and the feet 132 mm
+# front to back, not 123.
+MEASURED = replace(com_moved(-3.1), length_mm=132.0)
 
 
 def wide_feet(base: BodyModel = M) -> BodyModel:
@@ -244,15 +258,102 @@ def floor(paths) -> None:
               f"{statistics.mean(rms):.1f}°/s; the plan predicted a flat body (0° of roll)")
 
 
+# ---- the second version (§16.8) ---------------------------------------------------------------------
+
+JUDGES = (("RockingPhysics 10 mm", 10.0, None), ("RockingPhysics 10 mm, measured", 10.0, MEASURED),
+          ("RockingPhysics 3 mm, measured", 3.0, MEASURED))
+
+
+def _second_row(args):
+    name, p, v = args
+    st, sm = plan_stats(p, v), plan_stats(p, v, model=MEASURED)
+    cells = [f"{st['min_margin']:+.1f}", f"{sm['min_margin']:+.1f}", f"{st['fastest']:.0f}°/s"]
+    for _, inset, bm in JUDGES:
+        r = sim_walk(p, v, physics="rocking", inset_mm=inset, body_model=bm)
+        cells.append(f"{r['roll_p2p']:.1f}° / {r['rate_roll_max']:.0f} / {r['rate_rms']:.0f}" + (" FELL" if r["fell"] else ""))
+    return name, v, cells
+
+
+def second() -> None:
+    """The first version against the second, forward at the remote's levels: the plan's least margin
+    by the model and by the measured centre of mass and feet, the fastest joint, and per judge the
+    roll swing per cycle / fastest roll (°/s) / roll and pitch rate rms (°/s); then backward."""
+    from multiprocessing import Pool
+    jobs = [(n, p, v) for v in (23.2, 40.6, 55.0, 58.0, 61.0, 66.7, 72.5) for n, p in (("first", FIRST_WALK),
+                                                                                         ("second", NEW_WALK))]
+    with Pool(min(8, os.cpu_count() or 1)) as pool:
+        rows = pool.map(_second_row, jobs, chunksize=1)
+    print("| walk | speed | least margin, model | measured | fastest joint | " + " | ".join(j[0] for j in JUDGES) + " |")
+    print("|---|---|---|---|---|" + "---|" * len(JUDGES))
+    for name, v, cells in rows:
+        print(f"| {name} | {v} | " + " | ".join(cells) + " |")
+    for v in (23.2, 40.0, 58.0, 72.5):
+        a = [plan_stats(p, v, "back", model=m)["min_margin"] for p in (FIRST_WALK, NEW_WALK) for m in (M, MEASURED)]
+        print(f"backward {v}: first {a[0]:+.1f} / {a[1]:+.1f}, second {a[2]:+.1f} / {a[3]:+.1f} (model / measured)")
+
+
+# ---- the heading (§16.9) ----------------------------------------------------------------------------
+
+def drift(paths) -> None:
+    """The gyro's yaw rate (TELEMETRY rate_yaw, the raw gyro about the body's up axis; + = the nose
+    turning left) over every straight stretch of every recorded walk, after its first second, less the
+    gyro's resting offset (the median of that file's still ticks)."""
+    from kilo.logs import flight
+    from kilo.logs import walkrec as W
+    seen = set()
+    print("| recording | gait | direction | speed | steer | seconds | heading change | °/s |")
+    print("|---|---|---|---|---|---|---|---|")
+    for path in paths:
+        try:
+            s = flight.load(path)
+        except Exception:  # noqa: BLE001 - not a recording
+            continue
+        still = [m.rate_yaw / 16 for _, m in s.telemetry()
+                 if abs(m.rate_roll) < 8 and abs(m.rate_pitch) < 8 and abs(m.rate_yaw) < 48]
+        if len(still) < 20:
+            continue
+        bias = statistics.median(still)
+        for run in s.runs:
+            if run.kind != "walk":
+                continue
+            w = flight.walk_of(s, run)
+            segs = [(int(m.fields["tick"]), m.fields.get("pattern"), m.fields.get("dir"), m.fields.get("speed"),
+                     m.fields.get("steer", "0"), m.fields.get("pending")) for m in w.marks if m.word in ("stream", "timing")]
+            segs += [(int(m.fields["tick"]), None, None, None, None, None) for m in w.marks if m.word == "stop"]
+            segs.sort()
+            tel, last = {}, None
+            for f in w.frames:
+                if f.direction == "rx" and isinstance(f.msg, P.Telemetry):
+                    last = W._unwrap(f.msg.tick, last if last is not None else f.msg.tick)
+                    tel[last] = f.msg
+            for i, sg in enumerate(segs):
+                if sg[1] is None or sg[5] or sg[2] not in ("forward", "back"):
+                    continue
+                end = segs[i + 1][0] if i + 1 < len(segs) else max(tel, default=0)
+                ks = [k for k in range(sg[0] + 50, end) if k in tel]
+                if len(ks) < 50 or (sg[0], len(ks)) in seen:
+                    continue
+                seen.add((sg[0], len(ks)))
+                yaw = sum((tel[k].rate_yaw / 16 - bias) * 0.02 for k in ks)
+                T = len(ks) * 0.02
+                print(f"| {os.path.basename(path)} | {sg[1]} | {sg[2]} | {float(sg[3]):.1f} | {sg[4]} | {T:.1f} "
+                      f"| {yaw:+.1f}° | {yaw / T:+.2f} |")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("what", choices=("floor", "margins", "compare"))
+    ap.add_argument("what", choices=("floor", "margins", "compare", "second", "drift"))
     ap.add_argument("files", nargs="*", help="recordings for floor (default: ~/kilo-logs, from-server too)")
     ap.add_argument("--no-errors", action="store_true", help="compare: the nominal model only")
     a = ap.parse_args(argv)
     if a.what == "floor":
         h = os.path.expanduser("~/kilo-logs")
         floor(a.files or sorted(glob.glob(h + "/*.krec") + glob.glob(h + "/from-server/**/*.krec", recursive=True)))
+    elif a.what == "drift":
+        h = os.path.expanduser("~/kilo-logs")
+        drift(a.files or sorted(glob.glob(h + "/*.krec") + glob.glob(h + "/from-server/**/*.krec", recursive=True)))
+    elif a.what == "second":
+        second()
     elif a.what == "margins":
         margins()
     else:

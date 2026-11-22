@@ -214,7 +214,7 @@ def test_a_turn_in_place_then_straight_steering_then_stop(pattern):
     a gait change (the walk and the trot directly), B5 into backward, then
     the planned stop: all in one walk, up, near the plan, the straight walk
     reached within 1.4 s of B7 (the trot, its strides 0.75 mm a tick; the
-    walk: 1.6 s), and the stop inside stop_timeout."""
+    walk: 1.7 s), and the stop inside stop_timeout."""
     from kilo.planner.walker import stop_timeout
     sim = WalkSim(pattern, "left")
     other = "trot" if pattern == "walk" else "walk"
@@ -238,7 +238,7 @@ def test_a_turn_in_place_then_straight_steering_then_stop(pattern):
             p.stop()
     n = sim.run(1400, each=each)
     assert sim.stream.ended == "stopped" and sim.stream.ok and not sim.fell()
-    assert reached["fwd"] * 20 < (1600 if pattern == "walk" else 1400) and sim.planner.pattern.name == other
+    assert reached["fwd"] * 20 < (1700 if pattern == "walk" else 1400) and sim.planner.pattern.name == other
     assert (n - 850) * 0.02 < stop_timeout(sim.planner.timing().period_ms) - 1.0
     # the trot into the walk through the way home (2026-11-22) with the trot's slower strides: 4.5 in
     # the virtual body, within the trot's straight-walk bound (5)

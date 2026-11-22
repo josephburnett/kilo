@@ -68,6 +68,24 @@ side up, leaning to the left, the outside of the right turn), fastest roll 69°/
 earlier floor number for this trot at its top speed with steering to set
 it against.
 
-Not known: how it looked, whether a foot scraped or slipped, whether he
-walked straight. The side video of walk-trial.md was not taken (or has
-not arrived).
+**What the owner saw** (told the same day): "The walk and trot both
+looked REALLY good! I feel like maybe the walk was going slightly left.
+I pressed right and he was then going straight." No video.
+
+**The heading [measured]** (`walkstudy.py drift`; the gyro's yaw rate
+less its resting offset of -0.58°/s, after each stretch's first second):
+walking forward 58 mm/s he turned **2.0°/s to the left** (3.1 s), at
+72.5 mm/s **3.6°/s to the left** (2.9 s), steady every cycle; after C6
+(steer -0.25) at 72.5 mm/s 0.6°/s to the right for 7.1 s: the owner's
+"then going straight". The old walk went straight within ±0.5°/s on
+the same robot. The turn comes as he rolls back off his left front
+corner, which he drops onto further than onto his right one; that left
+front weakness shows in every gait and in the self-measurement, so it is
+the robot's, not the walk's (walking-and-balance.md §16.9).
+
+Not known: whether a foot scraped or slipped, how far he went off a
+straight line in distance (the gyro sees the turn, not a slide).
+
+**What followed** (simulation only): the walk's second version
+(walking-and-balance.md §16.8), and the next try in walk-trial.md,
+including a 2 m straight-line test at two speeds.

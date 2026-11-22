@@ -1595,7 +1595,12 @@ model says about a plan, **[virtual body]** the simulators. The new walk's
 first floor run (boot 16, 2026-11-22) is in docs/walk-trial-results.md:
 it rocks about as far as the old walk (4.3 to 4.9° a cycle against 4.8°)
 but half as fast (21°/s rms against 36), as RockingPhysics with 10 mm
-predicted (16.5).
+predicted (16.5). The owner liked it ("the walk and trot both looked
+REALLY good") and saw it drift left. Its second version (16.8, the same
+day) keeps the order and the speeds and moves the weight away from the
+edge of the feet before each lift; 16.9 is the drift: the robot's, not
+the gait's. Sections 16.3 to 16.5 describe the first version as it was
+tried on boot 16.
 
 ### 16.1 What the stutter is, in numbers
 
@@ -1859,3 +1864,225 @@ with a side video. Its recording settles 16.5: `walkstudy.py floor` folds
 the new walk's cycles by its own 48-tick cycle as it folds the old one's
 (the same roll swing, fastest roll and rate rms), so the two walks can be
 compared on the floor number for number.
+
+### 16.8 The second version: the weight off the edge (2026-11-22)
+
+The task: get his weight about 3 mm inside the three feet holding him up
+(what the recordings and the self-measurement say he needs to stay level:
+docs/movement-engine-results.md, docs/self-measurement-results.md),
+judged with the measured centre of mass and feet as well as the model,
+with RockingPhysics at 10 mm as the judge, without changing the walk's
+character. `walkstudy.py second` makes the numbers below ([model] and
+[virtual body]; nothing here has been tried on Kilo).
+
+**Why the first version sat on the edge** [R]. With LF up he stands on
+LB, RF, RB; with RB up (next) on LB, LF, RF. Both triangles share the
+diagonal from LB to RF, and those two feet do not move between the two
+swings. So his weight must be on RB's side of that line until LF lands
+and on LF's side once RB lifts: it has to cross the line in the
+four-foot time between the two swings (likewise from RF to LB across the
+line LF to RB). The margin there is at most half of how far the weight
+moves across the line in that time. In the first version that time was
+20 ms (about 1 mm of walking), hence 0 to 0.6 mm at those two hand-overs
+and about 6 mm elsewhere. The other two hand-overs (a back leg to the
+front leg on the same side) change diagonal and have room to spare.
+3 mm on both sides of the crossing needs the weight to move about 6 mm
+across the line in the four-foot time: at 58 mm/s about 220 ms on four
+feet at each crossing, which only the crawl has.
+
+**What was tried** (about 9000 plans searched on the model, about 50
+taken to the judges): the swing 8 to 11 ticks; the four-foot ticks split
+unevenly between the two kinds of hand-over; a roll sway once a cycle
+(amplitude and phase); a fore-aft sway twice a cycle; the front and back
+feet's landing points moved separately.
+
+- **The sway, re-examined.** The first version dropped it because it
+  made things worse; that sway went through the planner's lean, which
+  the walk's one-tick shifts could not carry. As a smooth roll once a
+  cycle (the right side down while the left legs step) and a fore-aft
+  shift twice a cycle (forward while a back leg steps, back while a front
+  leg steps), together with more four-foot time at the crossings, it
+  helps. More of it buys more margin but shows directly in the roll: a 3°
+  roll sway with a 4 mm surge reached +3.3 mm by the model and +4.1 by
+  the measured values, and rocked as much as the first version in the
+  judges (5.4 to 5.9°). A 1.5° roll sway was best in RockingPhysics 10 mm
+  (3.3 to 3.9°) but three times worse than 1° in the 3 mm physics. 1° was
+  the balance.
+- **The four-foot time where it is needed**: 3 ticks before each back
+  leg's swing (the crossings), 1 before each front leg's, the swing 10
+  ticks. An even split (2 and 2) rocked twice as much in the 3 mm
+  physics. 6 and 0 with a 9-tick swing gave +5.8 mm, but footfalls 180
+  and 300 ms apart (lateral couplets: another character) and joints at 480
+  to 500°/s.
+- **Moving the front and back feet's landings** apart or together: under
+  0.5 mm and inconsistent; not used.
+
+**The walk as built** (patterns.py `PATTERNS["walk"]`, C++
+`kPatternTable[0]`; the planner's `_handover`, `_latch_swing`, `_sway`):
+
+| | first version (boot 16) | second version |
+|---|---|---|
+| order | LB, LF, RB, RF | the same |
+| cycle | 960 ms | the same |
+| four feet before a back leg's swing / a front leg's | 20 / 20 ms | 60 / 20 ms (above 63 mm/s: 40 / 0) |
+| swing | 220 ms | 200 ms; 220 above 63 mm/s and for a side stride over 48 mm (a steer's outer side): the footfalls stay where they are, the lift starts a tick earlier |
+| footfalls | every 240 ms | 220 ms after a back foot, 260 after a front foot |
+| sway | none | a roll of 1° (the right side down at its most at tick 9 of the cycle, late in LB's swing; the left side late in RB's) and a fore-aft shift of 3 mm (the body ahead of its feet early in each back leg's swing), scaled with the stride: none standing, stopping or turning in place; the fore-aft one smaller below the default speed |
+| backward | | the first version's walk (a 220 ms swing, every 240 ms, no sway): with the second version's timing the slowest backward walk with the servos' pure 140 ms delay went past the virtual-body test's 6° |
+| speeds | 11 to 73 mm/s, default 58 | the same; the remote's levels unchanged |
+| fastest joint | 436°/s | 452°/s; 471 backward steering at the full (the body's slew limit is 500) |
+
+Forward: the plan's least margin with a leg up, and the three judges
+(roll swing per cycle / fastest roll °/s / roll and pitch rate rms °/s;
+8 s of walking; "measured": the centre of mass 3.1 mm back and the feet
+132 mm long in the virtual body, the plan still made on the model):
+
+| speed | walk | least margin, model | measured | RockingPhysics 10 mm | RP 10 mm, measured | RP 3 mm, measured |
+|---|---|---|---|---|---|---|
+| 23.2 | first | -0.1 | -0.9 | 5.9° / 64 / 27 | 7.4° / 83 / 32 | 4.2° / 45 / 17 |
+| 23.2 | second | +0.4 | -0.1 | 6.1° / 71 / 30 | 6.1° / 80 / 27 | 2.7° / 49 / 13 |
+| 40.6 | first | +0.4 | -0.5 | 6.1° / 62 / 29 | 6.4° / 67 / 30 | 4.4° / 62 / 18 |
+| 40.6 | second | +1.1 | +0.4 | 4.9° / 92 / 25 | 6.0° / 95 / 29 | 0.7° / 6 / 5 |
+| 55 | first | +0.4 | -0.2 | 6.3° / 94 / 30 | 6.0° / 80 / 30 | 5.2° / 48 / 19 |
+| 55 | second | +1.5 | +0.8 | 4.2° / 98 / 24 | 3.8° / 74 / 22 | 0.8° / 8 / 5 |
+| 58 | first | +0.4 | -0.5 | 5.9° / 80 / 29 | 6.0° / 78 / 29 | 5.4° / 44 / 18 |
+| 58 | second | +1.5 | +1.0 | 3.6° / 106 / 23 | 4.1° / 98 / 23 | 1.1° / 6 / 6 |
+| 61 | first | +0.6 | -0.2 | 6.4° / 104 / 30 | 6.8° / 85 / 32 | 5.4° / 48 / 18 |
+| 61 | second | +1.8 | +1.3 | 3.3° / 101 / 21 | 6.5° / 90 / 30 | 1.0° / 8 / 6 |
+| 66.7 | first | +0.4 | -0.0 | 6.4° / 84 / 28 | 6.4° / 90 / 30 | 4.4° / 53 / 16 |
+| 66.7 | second | +1.5 | +0.6 | 3.2° / 87 / 22 | 4.3° / 99 / 23 | 1.2° / 10 / 6 |
+| 72.5 | first | +0.6 | -0.3 | 3.3° / 58 / 22 | 4.2° / 83 / 24 | 4.5° / 52 / 18 |
+| 72.5 | second | +1.6 | +0.9 | 3.0° / 79 / 20 | 3.8° / 80 / 22 | 1.2° / 11 / 7 |
+
+Backward is unchanged (the first version's): least margin -2.6 mm at
+23 mm/s, -4.1 at the distance guard's 40, -5.7 at 58, -6.7 at 73 (the
+measured values 0.3 to 0.6 mm worse). A forward sway backward bought
+about 1 mm there but failed the servo-delay case above.
+
+**How to read it** [R]:
+
+- **The margin.** By the model +1.1 to +1.8 mm from 40 mm/s up (+0.4 at
+  the slowest level), by the measured values +0.4 to +1.3 (-0.1 at the
+  slowest): from on the edge to 1 to 2 mm inside, **not the 3 mm
+  asked**. 3 mm needs either the bigger sway (which rocks as much as
+  before) or lateral couplets (another rhythm). The design does not
+  depend on which centre of mass is right: it gains about 1 mm with
+  either, so nothing in it needs the model changed.
+- **RockingPhysics 10 mm** (the judge): the roll swing per cycle drops
+  from 5.9-6.4° to 3.2-4.9° between 40 and 67 mm/s (58: 5.9 to 3.6), and
+  the rate rms from 28-30 to 21-25°/s; at the slowest level no better
+  (5.9 to 6.1°). **Its fastest roll got worse** at most levels (58: 80 to
+  106°/s; 40.6: 62 to 92). In this physics a three-foot phase never holds
+  (it needs the weight 10 mm inside), so the body rocks on a diagonal all
+  the time and its fastest roll is a one-tick event that varies by ±20°/s
+  between neighbouring speeds (55, 58, 61) in either version.
+- **RockingPhysics 3 mm with the measured centre of mass** reproduces
+  boot 16's floor run better than the judge does: for the first version
+  5.4° / 44 / 18 at 58 mm/s and 4.5 / 52 / 18 at 72.5, against the
+  floor's 4.9 / 41 / 21 and 4.3 / 47 / 21 (RockingPhysics 10 mm: 5.9 /
+  80 / 29 and 3.3 / 58 / 22). That is "3 mm needed, -0.5 mm there" (the
+  recordings and the self-measurement) in one simulator. In it the second
+  version rocks 0.7 to 1.2° from 40 mm/s up, 4 to 5 times less, its
+  fastest roll 6 to 11°/s; at 23 mm/s 2.7°. One match on two speeds, not
+  a validation.
+- **What is visible**: the roll sway alone is 2° from side to side, the
+  fore-aft sway 6 mm, the body's speed over the ground varying by about
+  ±35 mm/s twice a cycle at the default speed (less below it). That is
+  the part of the character that changed; if the owner sees a surge,
+  `sway_dx_mm` is the number to halve.
+
+### 16.9 The left drift (boot 16)
+
+The owner: "I feel like maybe the walk was going slightly left. I
+pressed right and he was then going straight."
+
+**What the gyro says** (`walkstudy.py drift`, [measured]). TELEMETRY's
+`rate_yaw` is the raw gyro about the body's up axis (+ = the nose
+turning left). Less its resting offset (boot 16: -0.56 to -0.60°/s from
+his still ticks; about -0.6 since boot 14, about -0.06 before), over the
+straight stretches after their first second:
+
+| walk | speed | steer | seconds | heading |
+|---|---|---|---|---|
+| boot 16, this walk | 58 | none | 3.1 | +6.1°: **2.0°/s to the left** (1.7 to 2.5° each cycle) |
+| boot 16, this walk | 72.5 | none | 2.9 | +10.5°: **3.6°/s to the left** (3.6 and 4.0° each cycle) |
+| boot 16, this walk | 72.5 | C6 once (-0.25) | 7.1 | -4.4°: 0.6°/s to the right |
+| boot 16, this walk | 23.2 | none | 1.4 | +1.2°/s (one cycle) |
+| the old walk (boots 6 to 11) | 80 | none | 1.5 to 3.2 each | -0.5 to +0.4°/s (5 stretches) |
+| the old walk (boot 8) | 80 | -0.25 | 5.8 | 12.9°/s to the right |
+| the trots (boots 2 to 14) | 144 to 200 | none | | -3.6 to +2.0°/s, no steady side |
+
+So the left turn is real, steady (every cycle), grows with the stride,
+and came with the new walk: the old walk went straight to within half a
+degree a second on the same robot. One C6 press (steer -0.25) more than
+cancelled it at 72.5 mm/s, as the owner saw. Steering is weaker in this
+walk than in the old one (-0.25 moved the heading by 4°/s here, 12 in
+the old walk).
+
+What the IMU can and cannot tell [R]: the gyro sees how fast the heading
+turns, to about ±0.05°/s (the spread of its resting offset) and within
+about 20 % in scale (its roll rate against the attitude's change: slope
+0.8, correlation 0.96); the body's tilt (±3°) adds under 0.06°/s. It
+cannot see the heading itself (no compass: integrating drifts a few
+degrees a minute), a sideways slide without a turn, or how far he
+walked (the feet may slip). "2°/s" is "about 35° a metre" only if he
+walked his commanded 58 mm/s.
+
+**Where in the cycle** [measured, the boot-16 walk folded by its 48-tick
+cycle, a one-off analysis of the same recording]: the heading turns left
+mostly from the left front foot's landing to the right back foot's lift
+(+2.6° at 58 mm/s, +4.8° at 72.5) and right from the right front foot's
+landing to the left back foot's lift (-2.4°, -2.7°); the back legs'
+quarters add little. The two front quarters should cancel; the left one
+is larger. The roll at the same moments: 3.0° left side down in the left
+front leg's swing, 1.6 to 1.9° right side down in the right front leg's.
+He drops further onto his left front corner than onto his right one, and
+the turn comes as he rolls back off it.
+
+**The candidates:**
+
+- **The sequence** [R]: not it. LB, LF, RB, RF mirrored left for right
+  is RB, RF, LB, LF: the same sequence half a cycle later. Every left
+  foot's stride, timing and landing equal its right partner's half a
+  cycle later (the second version's sway and timing too). A cycle
+  starting on the left gives at most a one-off turn while the strides
+  build up, not 2 to 4° every cycle.
+- **A sideways centre of mass** [measured]: not it. The self-measurement
+  puts it 0.7 ± 0.6 mm to the right, which would turn him the other way.
+- **The 0.3° IMU roll offset feeding the board's balance correction**
+  [measured]: not it. While walking the board corrects only the
+  difference from the plan's prediction less the steady offset the
+  walker learns (boot 16: 1.5° of roll); its roll correction averaged
+  0.02°. The owner's spirit level (boot 17) says the sensor itself sits
+  3.4° nose down on the frame: the attitude the board sees is tilted,
+  and the walker's learned offset takes that out the same way.
+- **Unequal slip from the rolling** [inferred]: the mechanism, not the
+  cause. The turn comes with the roll back off a front corner, so the
+  side that drops further turns him further.
+- **The robot's left side** [measured; the likely cause]: in every
+  recorded gait he rolls further toward his left front corner than his
+  right when that leg lifts, beyond the plan: the crawl (whose lean keeps
+  the weight 14 mm inside) +2.5 to +3.2° with LF up against -0.1 to -0.7
+  with RF up (boots 11 and 14); this walk +1.6 against -0.7. In the
+  self-measurement, lifting LF leaned him 1.8° at once (1.5° of it to the
+  left), lifting RF 0.1°. On boot 17 the rear-up tipped him left twice,
+  "the left leg didn't keep up with the right". The old walk lifted LF
+  together with RB, which hid this; this walk lifts LF alone with its
+  weight near the edge.
+
+**So: the robot's, not the gait's.** Nothing in the gait was changed for
+it. What would fix it: a check of the left legs, the left front first:
+their calibration (the joint zeros: docs/calibration.md, `kilo cal`) and
+whether a servo gives or lags under load (a lifted-foot test per leg).
+The second version should turn him less anyway, since his weight is
+further from the edge when LF lifts [inferred: the simulators have no
+yaw].
+
+**A steering trim** (a stored "straight" offset added to the steer)
+would be an honest stopgap only as a named, visible correction of the
+robot (beside the model's corrections in protocol/spec.toml, not inside
+the walk's pattern), and measured on the floor for the walk as it is
+now: boot 16's number (between 0 and -0.25, different at 58 and
+72.5 mm/s) belongs to the first version. Not built: first the floor try
+of docs/walk-trial.md (straight along a line, two speeds), then the leg
+check.

@@ -20,7 +20,7 @@ def top(pattern: str) -> float:
     return pat.timing(pattern, stopsim.level_speed(pattern, 5)).speed_mm_s
 
 
-# the walk (since 2026-11-22: one leg at a time, a 240 ms beat): still within 1.3 s, its legs square up
+# the walk (since 2026-11-22: one leg at a time, a 220 to 260 ms beat): still within 1.3 s, its legs square up
 # in its own beat and the body settles a few mm with each (the old walk's was 0.45 s); its roll
 # 4.5 deg beyond the walk's own (the square-up's steps on three feet)
 @pytest.mark.parametrize("pattern,limit_s,att_deg", [("trot", 0.6, 3.0), ("walk", 1.3, 4.5), ("crawl", 3.3, 3.0)])

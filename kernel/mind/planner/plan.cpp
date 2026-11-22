@@ -271,6 +271,7 @@ void Planner::start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tic
   direction_ = d;
   steer_ = m_max((real)-1.0, m_min((real)1.0, steer));
   speed_mm_s_ = speed_mm_s < 0 ? default_speed(p) : speed_mm_s;
+  ws_ = round_i(swing_at(p, speed_mm_s_, d == Direction::Back) / kTickMs);  // the walk: this slot's swing (latch_swing)
   pending_ = nullptr;
   for (int leg = 0; leg < kLegs; leg++) {
     xg_[leg] = 0;
@@ -318,15 +319,68 @@ void Planner::start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tic
 int Planner::shift_for(real stance) const {
   if (trot()) return 1;  // the trot: one tick on four feet at every speed
   real n = pattern_->n_groups;
-  real w = pattern_->swing_ms;
-  int st = round_i(((stance * kTickMs + w) / n - pattern_->span_ms()) / kTickMs);
+  real w = (real)swing_ticks() * kTickMs;
+  real span = pattern_->span_ms() - pattern_->swing_ms + w;
+  int st = round_i(((stance * kTickMs + w) / n - span) / kTickMs);
+  if (pattern_->n_handover > 0 && k_ >= 0) {  // the walk: this slot's share, around the speed's mean
+    int sum = 0;
+    for (int i = 0; i < pattern_->n_handover; i++) sum += handover(i);
+    st += handover(k_) - round_i((real)sum / n);
+  }
   return st > 0 ? st : 0;
+}
+
+// plan.py _handover: the walk's four-foot ticks before slot i's swing for this slot's swing (the long
+// swing's with it); backward their mean every slot.
+int Planner::handover(int i) const {
+  const Pattern& p = *pattern_;
+  const uint8_t* ho = (real)swing_ticks() * kTickMs > p.swing_ms ? p.handover_long : p.handover;
+  if (direction_ == Direction::Back) {
+    int sum = 0;
+    for (int j = 0; j < p.n_handover; j++) sum += ho[j];
+    return sum / p.n_handover;
+  }
+  return ho[i];
+}
+
+// plan.py _sway: the walk's roll once a cycle and fore-aft shift twice a cycle, scaled with the
+// stride walked now against the speed's (the fore-aft shift also against the default speed's
+// stride); walking forward only. False: none this tick.
+bool Planner::sway(Lean* out) const {
+  const Pattern& p = *pattern_;
+  if (p.n_handover == 0 || trot() || (p.sway_roll_deg == 0 && p.sway_dx_mm == 0)) return false;
+  real s = (s_cur_[0] + s_cur_[1]) / (real)2.0;
+  if (s <= 0) return false;  // backward the first version's walk (fading out as the strides pass 0)
+  real f = m_min((real)1.0, s / m_max((real)1e-6, timing().stride_mm));
+  real fx = f * m_min((real)1.0, s / default_timing(p).stride_mm);
+  int W = swing_ticks();
+  int phi = t_, cyc = 0;
+  for (int i = 0; i < p.n_handover; i++) {
+    int len = handover(i) + W;
+    if (i < k_) phi += len;
+    cyc += len;
+  }
+  real roll = p.sway_roll_deg * m_cos(2 * kPi * ((real)phi - p.sway_roll_at) / (real)cyc);
+  real dx = p.sway_dx_mm * m_cos(4 * kPi * ((real)phi - p.sway_dx_at) / (real)cyc);
+  *out = Lean{dx * fx, 0, roll * f};
+  return true;
 }
 
 int Planner::swing_ticks() const {
   if (trot()) return lw_;
+  if (pattern_->swing_long_ms > 0) return ws_;  // the walk: this slot's (latch_swing)
   int w = round_i(pattern_->swing_ms / kTickMs);
   return w > 2 ? w : 2;
+}
+
+// plan.py _latch_swing: at a slot's start, its swing for the speed now, kept to its end; the long
+// one also for a side stride past long_stride_mm (a steer's outer side).
+void Planner::latch_swing() {
+  real sw = swing_at(*pattern_, speed_mm_s_, direction_ == Direction::Back);
+  if (pattern_->swing_long_ms > 0 && m_max(m_fabs(s_tgt_[0]), m_fabs(s_tgt_[1])) > pattern_->long_stride_mm)
+    sw = pattern_->swing_long_ms;
+  int w = round_i(sw / kTickMs);
+  ws_ = w > 2 ? w : 2;
 }
 
 int Planner::couple_ticks() const { return round_i(pattern_->couple_ms / kTickMs); }
@@ -397,7 +451,8 @@ void Planner::apply_timing() {
   }
   real shift = cfg_.fixed_shift ? cfg_.shift_ms : tm.shift_ms;
   real n = pattern_->n_groups;
-  stance_tgt_ = (n * (shift + pattern_->span_ms()) - pattern_->swing_ms) / kTickMs;
+  real sw = swing_at(*pattern_, speed_mm_s_, direction_ == Direction::Back);  // the walk: long at its top speeds, backward
+  stance_tgt_ = (n * (shift + pattern_->span_ms() - pattern_->swing_ms + sw) - sw) / kTickMs;
   if (stopping_ || (pending_ != nullptr && !direct_change())) {
     s_tgt_[0] = s_tgt_[1] = 0;
   } else if (pending_ != nullptr) {  // changing directly: no stride longer than the new pattern's (a steer's outer side too)
@@ -607,6 +662,7 @@ void Planner::start_slot_base() {
     apply_timing();
     stance_ticks_ = stance_tgt_;
   }
+  latch_swing();
   if (halting_ && halt_t_ < kHaltHoldTicks) {  // the quick stop's hold: four feet down, the strides to 0, the lean held
     t_ = 0;
     held_ = 0;
@@ -924,8 +980,10 @@ const TickPlan& Planner::next() {
   }
 
   real xs[kLegs], zs[kLegs], xi[kLegs], zi[kLegs];
-  for (int leg = 0; leg < kLegs; leg++) xs[leg] = xg_[leg] - lean_.dx;
-  leg_lengths(model_, xs, h_, lean_.pitch, lean_.roll, zs);
+  Lean lean = lean_, sw;
+  if (sway(&sw)) lean = Lean{lean.dx + sw.dx, lean.pitch + sw.pitch, lean.roll + sw.roll};
+  for (int leg = 0; leg < kLegs; leg++) xs[leg] = xg_[leg] - lean.dx;
+  leg_lengths(model_, xs, h_, lean.pitch, lean.roll, zs);
   TickPlan& out = last_;
   uint8_t support = 0;
   for (int leg = 0; leg < kLegs; leg++) {
