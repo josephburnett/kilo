@@ -415,7 +415,8 @@ MODEL_KEYS = {"foot_r_mm", "reach_frac", "knee_max_deg", "stand_com_x_mm", "body
 # numbers; [model.about] has [what, unit, source] for every number and view (Python only).
 MODEL_TABLES = {
     "correction": {"com_dx_mm": 0, "com_dy_mm": 0, "com_dz_mm": 0, "sag_deg_per_kg_cm": 0, "leg_dz_mm": 4,
-                   "imu_pitch_deg": 0, "imu_roll_deg": 0},
+                   "imu_pitch_deg": 0, "imu_roll_deg": 0, "servo_lag_d_ms": 16, "servo_tau_d_ms": 16,
+                   "servo_give": 16},
     "servo": {"czp": 16, "reseated_rb_shoulder_czp": 0},
     "tail": {"pivot_x_mm": 0, "pivot_z_mm": 0, "len_mm": 0, "droop_deg": 0, "axis_deg": 0, "sign": 0, "g": 0,
              "com_frac": 0},

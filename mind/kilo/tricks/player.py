@@ -107,12 +107,18 @@ class GuardWatch:
       inside the window and every |roll| stay within roll_max; decided
       GUARD_EARLY_TICKS before the hold ends. No reading there: stop.
     - Trick.roll_max: |roll| past it on two readings in a row: stop.
+    - A Guard's push_roll: from the start of its frame's move to its
+      window, the roll moved more than that from the last reading before
+      the move, on two readings in a row: stop.
     kernel/mind/tricks/model.cpp GuardWatch does the same; the same cases
     test both (mind/tests/test_rear_up.py test_guard_watch,
     kernel/host/tests/test_tricks.cpp test_guard_watch)."""
     trick: object
     speed: int = SPEED_UNITY
     windows: list = field(default_factory=list, init=False)  # (guard, t_from, t_decide)
+    pushes: list = field(default_factory=list, init=False)   # (guard index, t_move): where push_roll watches
+    roll0: dict = field(default_factory=dict, init=False)    # guard index -> the roll before its move
+    push_over: dict = field(default_factory=dict, init=False)
     sums: dict = field(default_factory=dict, init=False)     # guard index -> [sum, n]
     done: set = field(default_factory=set, init=False)
     over: int = field(default=0, init=False)
@@ -124,8 +130,10 @@ class GuardWatch:
         starts = []
         acc = 0
         order = play_order(len(frames), t.loop_start, t.loop_end, t.repeats, max_plays=1)
-        first_hold = {}
+        first_hold, first_move = {}, {}
         for f in order:
+            if f not in first_move:
+                first_move[f] = acc
             acc += phase_ticks(frames[f].dur, self.speed)
             if f not in first_hold:
                 first_hold[f] = acc
@@ -135,6 +143,9 @@ class GuardWatch:
             h = phase_ticks(frames[g.frame].hold, self.speed)
             self.windows.append((g, (h0 + h / 2) * TICK_S, (h0 + h - GUARD_EARLY_TICKS) * TICK_S))
             self.sums[i] = [0.0, 0]
+            if g.push_roll:
+                self.pushes.append((i, first_move[g.frame] * TICK_S))
+                self.push_over[i] = 0
 
     def feed(self, t_s: float, nose_up: float, roll: float) -> str | None:
         if self.fired is not None:
@@ -143,6 +154,16 @@ class GuardWatch:
         self.over = self.over + 1 if rm and abs(roll) > rm else 0
         if self.over >= 2:
             return self._fire(f"roll {roll:+.1f} deg past {rm:g}")
+        for i, t_move in self.pushes:
+            g, t_from, _ = self.windows[i]
+            if t_s < t_move:
+                self.roll0[i] = roll
+            elif t_s < t_from:
+                r0 = self.roll0.setdefault(i, roll)
+                self.push_over[i] = self.push_over[i] + 1 if abs(roll - r0) > g.push_roll else 0
+                if self.push_over[i] >= 2:
+                    return self._fire(f"guard {g.name or g.frame}: roll {roll:+.1f} deg, {roll - r0:+.1f} while "
+                                      f"it moved (limit {g.push_roll:g})")
         for i, (g, t_from, t_dec) in enumerate(self.windows):
             if i in self.done:
                 continue

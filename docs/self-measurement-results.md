@@ -253,6 +253,17 @@ new centre of mass.
    level (or a phone's level app) on a flat part of the frame while he
    stands on a flat floor. Frame level: it is the sensor's mounting; frame
    nose down: it is the legs (their calibration).
+   **First reading (2026-11-22, provisional).** The owner put a phone's
+   level app on his back while he stood on a level floor: the back about
+   1 degree LOWER AT THE REAR (tail end down, nose up), against the IMU's
+   2.4 degrees nose DOWN in the same stand. If that holds, the body is not
+   leaning nose down at all: the sensor is mounted about 3.4 degrees nose
+   down on the frame, and the correction is the sensor's mounting (the
+   first route below, `IMU_OFFSETS_SET`), not the legs. The owner doubts
+   this one reading (the floor or the phone may have been off by about a
+   degree) and will measure again both ways round (the phone turned end
+   for end on the same spot, and Kilo turned round), so it does not settle
+   the question yet. Nothing is corrected until it does.
    - **The sensor's mounting** belongs on the board, where the attitude is
      made, so that the board's balance loop, the telemetry and the mind
      all see a level body as level. Today there is no board parameter for

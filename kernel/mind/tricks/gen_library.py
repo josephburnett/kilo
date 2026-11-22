@@ -83,7 +83,8 @@ def render() -> tuple[str, str, int]:
         if t.guards:
             c.append(f"const TrickGuard {ident(name)}Guards[] = {{")
             for g in t.guards:
-                c.append(f'    {{{g.frame}, {a16(g.nose_up[0])}, {a16(g.nose_up[1])}, {a16(g.roll_max)}, "{g.name}"}},')
+                push = f", {a16(g.push_roll)}" if g.push_roll else ""
+                c.append(f'    {{{g.frame}, {a16(g.nose_up[0])}, {a16(g.nose_up[1])}, {a16(g.roll_max)}, "{g.name}"{push}}},')
             c.append("};")
             guards = f"{ident(name)}Guards, {len(t.guards)}"
         rows.append(f'    {{"{name}", "{legacy}", {b.n_frames}, {b.loop_start}, {b.loop_end}, {b.repeats}, '

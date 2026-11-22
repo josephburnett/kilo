@@ -340,6 +340,7 @@ class Mind final : public LinkListener,
   // The righting experiment's param on the body: FALL_RC 0 (no rc) is set after every HELLO.
   bool fall_rc_off_ = false;      // the body acknowledged FALL_RC 0 since its last HELLO
   bool fall_rc_asked_ = false;
+  bool fall_rc_refused_ = false;  // the body's ACK refused FALL_RC 0 since its last HELLO (an older body)
   uint8_t fall_rc_seq_ = 0;
   void fall_rc_step();
   intent::Cmd prior_ = intent::Cmd::None;  // intent_cmd() when no SET_POSTURE goal is latched

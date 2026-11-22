@@ -409,6 +409,7 @@ void Mind::on_connection(bool connected, bool alive) {
 
 void Mind::on_hello(const kilo_hello_t& hello, bool solicited) {
   fall_rc_off_ = false;  // a body that (re)booted has FALL_RC 1 again: set it once more
+  fall_rc_refused_ = false;
   if (tap_ != nullptr) tap_->on_hello(hello, solicited);
 }
 
@@ -451,20 +452,31 @@ void Mind::intent_gave_up_down() {
 // ---- the righting experiment (docs/righting.md) --------------------------------------------
 
 // With it on, the body's param FALL_RC goes to 0 (live, not persisted) after every HELLO: its fall reflex
-// then never plays rc, and takes the mind's FALL_OK righting move instead.
+// then never plays rc, and takes the mind's FALL_OK righting move instead. Only the body's ACK refusing it
+// is a refusal (B1 refused until the next HELLO); no answer (the link's request timed out, e.g. while the
+// main loop waited for the SD card or the USB scan at boot, boot 17) or our request no longer in the slot
+// just asks again.
 void Mind::fall_rc_step() {
   if (!cfg_.righting) return;
   const Request& r = link_.req();
-  if (fall_rc_asked_ && !(r.type == KILO_MSG_PARAM_SET && r.seq == fall_rc_seq_ && r.state == RequestState::Waiting)) {
+  bool ours = r.type == KILO_MSG_PARAM_SET && r.seq == fall_rc_seq_;
+  if (fall_rc_asked_ && !(ours && r.state == RequestState::Waiting)) {
     fall_rc_asked_ = false;
-    bool ok = r.type == KILO_MSG_PARAM_SET && r.seq == fall_rc_seq_ && r.state == RequestState::Done &&
-              r.status == KILO_ACK_STATUS_OK;
-    fall_rc_off_ = ok;
-    logf(log_, ok ? LogLevel::Info : LogLevel::Warn, "righting: the body's fall reflex %s",
-         ok ? "will not play rc (FALL_RC 0): B1 rights him" : "did not take FALL_RC 0 (an older body?): B1 is refused");
+    if (ours && r.state == RequestState::Done && r.status == KILO_ACK_STATUS_OK) {
+      fall_rc_off_ = true;
+      logf(log_, LogLevel::Info, "righting: the body's fall reflex will not play rc (FALL_RC 0): B1 rights him");
+    } else if (ours && r.state == RequestState::Done) {
+      fall_rc_refused_ = true;
+      logf(log_, LogLevel::Warn, "righting: the body refused FALL_RC 0 (status %u; an older body?): B1 is refused",
+           (unsigned)r.status);
+    } else {
+      logf(log_, LogLevel::Debug, "righting: no answer to FALL_RC 0 yet: asking again");
+    }
   }
   const BodyState& b = link_.state();
-  if (fall_rc_off_ || fall_rc_asked_ || !b.has_hello || b.proto_ok != 1 || b.hello.proto_minor < 1) return;
+  if (fall_rc_off_ || fall_rc_refused_ || fall_rc_asked_ || !b.has_hello || b.proto_ok != 1 ||
+      b.hello.proto_minor < 1)
+    return;
   kilo_param_set_t p = {(uint8_t)KILO_PARAM_FALL_RC, 0, 0};
   if (link_.request(KILO_MSG_PARAM_SET, (const uint8_t*)&p, sizeof p)) {
     fall_rc_asked_ = true;

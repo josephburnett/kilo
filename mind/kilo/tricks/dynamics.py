@@ -44,13 +44,19 @@ FITTED, and what it says about Kilo (2026-11-21):
   pitches up, which moves the centre of mass further back over the hind
   feet, which loads them more. A rigid model's margin is eaten by it: the
   second design's "gather" had 15 mm in the rigid model and rocked back.
-- the centre of mass is about 5.5 mm further back and 5 mm further RIGHT
-  than kilo.planner.model's (the lift_r knife edge ties the two: back or
-  right both put it over the diagonal; 3 of 7 went over, so it sits on it);
+- the centre of mass is about 5.5 mm further back than kilo.planner.model's
+  (the lift_r knife edge: 3 of 7 went over, so it sits on it). The fit
+  also put it 5 mm right (back or right both put it over that diagonal);
+  the self-measurement of 2026-11-22 found it in the middle (-0.7 +- 0.6
+  mm): the rear-up uses the model's 0 (rear_up.MODEL), the view keeps -5
+  for the intent moves and the righting until they are re-checked;
 - the tail droops 16 deg, not 18 (the pitch on the tail);
 - the IMU reads +2 deg of roll (left side down) in every trick pose where
   the model is level: an offset or a left leg 2 mm short, which the data
-  cannot tell apart; taken as an offset.
+  cannot tell apart; kept as an offset (imu_roll). The self-measurement
+  found the sensor's own offset 0.3, so it is mostly the body sitting
+  lower on the left when the hind legs carry him (servo_give and
+  servo_lag_d per joint are where a measured cause would go).
 
 Not separated by the data: com_dx, com_dz and sag trade against each other
 at gather (``bands`` has the ends of that line); com_dy against a left /
@@ -123,6 +129,11 @@ class Params:
     tail_sign: float = BODY.tail.sign  # +1: a positive tail angle swings the tip LEFT. NOT KNOWN
     belly_z: float = BODY.outline.belly_z_mm  # the frame's underside at its rear corner (an ESTIMATE)
     offsets: tuple = ()          # (joint, deg): the joint really sits this far off what it is sent
+    # each servo's own performance (the body model's [model.correction] servo_*): (joint, value) for the
+    # servos that differ from the others; empty = all alike, the model as it was
+    lag_d: tuple = ()            # (joint, ms): this servo starts later than lag_ms
+    tau_d: tuple = ()            # (joint, ms): ...answers slower than tau_ms
+    give: tuple = ()             # (joint, x): ...gives this many times sag
     # TELEMETRY nose up minus the model's, deg (STAND reads -1.9): the "tricks" view's, the tricks' default too
     imu_pitch: float = -view_numbers("tricks")["imu_pitch_deg"]
     imu_roll: float = 0.0
@@ -138,7 +149,9 @@ class Params:
         d = dict(com_dx=body.com_dx_mm, com_dy=body.com_dy_mm, com_dz=body.com_dz_mm, sag=body.sag_deg_per_kg_cm,
                  lag_ms=body.servo_lag_ms, tau_ms=body.servo_tau_ms, czp=body.czp_reseated,
                  tail_len=body.tail.len_mm, tail_droop_deg=body.tail.droop_deg, belly_z=body.outline.belly_z_mm,
-                 imu_pitch=-body.imu_pitch_deg, imu_roll=body.imu_roll_deg)
+                 imu_pitch=-body.imu_pitch_deg, imu_roll=body.imu_roll_deg,
+                 lag_d=_per_joint(body.servo_lag_d_ms, 0.0), tau_d=_per_joint(body.servo_tau_d_ms, 0.0),
+                 give=_per_joint(body.servo_give, 1.0))
         d.update(kw)
         return cls(**d)
 
@@ -152,10 +165,16 @@ class Params:
         return T.Geometry3(g=g, czp=self.czp, com_dy=self.com_dy, imu_pitch=self.imu_pitch)
 
 
+def _per_joint(by_id: Sequence[float], alike: float) -> tuple:
+    """(joint name, value) for the driven joints whose value (by legacy id) is not ``alike``."""
+    return tuple((M.JOINT_NAMES[j], float(by_id[j])) for j in M.CANONICAL if by_id[j] != alike)
+
+
 NOMINAL = Params()
 # Fitted to the recorded plays (``validate``; the module's docstring).
 # The numbers are the body model's "tricks" view (protocol/spec.toml [model.views.tricks]: the
-# centre of mass 5.5 mm back and 5 mm right, sag 4, the tail's droop 16, an IMU roll offset of 2):
+# centre of mass 5.5 mm back and 5 mm right, sag 4, the tail's droop 16, an IMU roll offset of 2; the
+# rear-up reads the model's sideways centre of mass instead, kilo.tricks.rear_up MODEL):
 # they disagree with the model's own and stay the tricks' until a self-measurement settles them.
 FITTED = Params.of(BODY.view("tricks"))
 
@@ -409,9 +428,13 @@ def simulate(frames, p: Params = FITTED, start: Mapping = STAND, settle_s: float
     n_ticks = len(cmd)
     fr_all = as_frames(frames)
     gwin = {}  # guard frame -> (first tick, end tick, guard): the second half of its hold
+    pwin = {}  # guard frame -> (its move's first tick, guard) for a push_roll
     for gd in guards:
         st = sum(d + h for _, d, h, _ in fr_all[:gd.frame]) + fr_all[gd.frame][1]
         gwin[gd.frame] = (st + fr_all[gd.frame][2] / 2, st + fr_all[gd.frame][2], gd)
+        if gd.push_roll:
+            pwin[gd.frame] = (st - fr_all[gd.frame][1], gd)
+    roll0: dict = {}
     gstate: dict = {}
     start_c = np.array([kin.clamp(start)[k] for k in JOINTS])
     sent = _sent(kin, cmd, start_c)
@@ -419,6 +442,18 @@ def simulate(frames, p: Params = FITTED, start: Mapping = STAND, settle_s: float
     tau = max(p.tau_ms / 1000.0, 1e-4)
     jidx = {k: i for i, k in enumerate(JOINTS)}
     sag_v = np.array([p.sag if k.endswith(("shoulder", "knee")) else 0.0 for k in JOINTS])
+    for name, x in p.give:
+        sag_v[jidx[name]] *= x
+    # each servo its own dead time and time constant (only when one differs: else the scalars, as before)
+    per_servo = bool(p.lag_d or p.tau_d)
+    if per_servo:
+        lag_j = np.full(len(JOINTS), lag)
+        tau_j = np.full(len(JOINTS), tau)
+        for name, d in p.lag_d:
+            lag_j[jidx[name]] = max(lag + d / 1000.0, 0.0)
+        for name, d in p.tau_d:
+            tau_j[jidx[name]] = max(tau + d / 1000.0, 1e-4)
+        cols = np.arange(len(JOINTS))
     off_v = np.zeros(len(JOINTS))
     for name, d in p.offsets:
         off_v[jidx[name]] += d
@@ -467,9 +502,14 @@ def simulate(frames, p: Params = FITTED, start: Mapping = STAND, settle_s: float
     for step in range(steps):
         t = t0 + step * dt
         # the servo: the command lag s ago, through the first-order response, plus the compliance
-        tk = int(math.floor((t - lag) / TICK_S))
-        u = start_c if tk < 0 else sent[min(tk, n_ticks - 1)]
-        q = q + (u - q) * (dt / tau)
+        if per_servo:
+            tkj = np.floor((t - lag_j) / TICK_S).astype(int)
+            u = np.where(tkj < 0, start_c, sent[np.clip(tkj, 0, n_ticks - 1), cols])
+            q = q + (u - q) * (dt / tau_j)
+        else:
+            tk = int(math.floor((t - lag) / TICK_S))
+            u = start_c if tk < 0 else sent[min(tk, n_ticks - 1)]
+            q = q + (u - q) * (dt / tau)
         if step % KIN_EVERY == 0:
             qd = dict(zip(JOINTS, q + defl + off_v))
             P, c, I = kin.state(qd)
@@ -550,7 +590,7 @@ def simulate(frames, p: Params = FITTED, start: Mapping = STAND, settle_s: float
                 torque_t[more] = t
             if p.sag:
                 target = np.clip(load * sag_v, -25.0, 25.0)
-                defl = defl + (target - defl) * (dt * KIN_EVERY / tau)
+                defl = defl + (target - defl) * (dt * KIN_EVERY / (tau_j if per_servo else tau))
         if t >= next_sample - 1e-9:
             pitch, roll = T.attitude(R)
             tk_now = int(math.floor(t / TICK_S))
@@ -582,6 +622,14 @@ def simulate(frames, p: Params = FITTED, start: Mapping = STAND, settle_s: float
                     nu, ro = pitch + p.imu_pitch, roll + p.imu_roll
                     if roll_max is not None and abs(ro) > roll_max:
                         stopped_by = (t, f"roll {ro:+.1f} past {roll_max:g}")
+                    for gk, (ms, gd) in pwin.items():
+                        if tk_now < ms:
+                            roll0[gk] = ro
+                        elif tk_now < gwin[gk][0]:
+                            r0 = roll0.setdefault(gk, ro)
+                            if abs(ro - r0) > gd.push_roll and stopped_by is None:
+                                stopped_by = (t, f"guard {gd.name}: roll {ro:+.1f}, {ro - r0:+.1f} while it moved "
+                                                 f"(limit {gd.push_roll:g})")
                     for gk, (gs, ge, gd) in gwin.items():
                         if gs <= tk_now < ge:
                             gstate.setdefault(gk, []).append((nu, ro))

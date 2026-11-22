@@ -16,8 +16,8 @@ paws up. What is new is the way there, and the model that judges it.
 
 What the plays of 2026-11-19..21 taught (kilo.tricks.dynamics, fitted to
 them): Kilo's leg servos give about 4 deg per kg cm under load, and his
-centre of mass is about 5.5 mm further back and 5 mm further right than the
-planner's model. So on four feet with the hind feet forward he rocks back
+centre of mass is about 5.5 mm further back than the planner's model (the
+fit's 5 mm to the right is gone: the self-measurement of 2026-11-22). So on four feet with the hind feet forward he rocks back
 onto his tail by himself (the second design's "gather", every time, +23
 deg), and on three feet near a diagonal he goes over it (its "lift_r", 3 of
 7 times). A rigid model's margin is not a margin: every check here runs in
@@ -33,10 +33,12 @@ The way up (the owner's idea: flex the knees and push him back):
   onto the frame's rear corners and the tail (on purpose; guarded);
 - paw_l, paws: the paws fold up in front, the left one first;
 - up: the hind legs lengthen and lift the hips until the tail tip carries
-  the rear: the tripod, stage 1, held. The left hind leg is 2.5 mm
-  shorter than the right (RIGHT_DROP): he leans left by that, against the
-  rightward centre of mass, which otherwise rolls him 2 to 18 deg onto
-  his right side on the compliant legs.
+  the rear: the tripod, stage 1, held. Both hind legs alike: the left was
+  once made 2.5 mm shorter against a centre of mass fitted 5 mm right of
+  the middle; the self-measurement of 2026-11-22 put it in the middle, and
+  that lean tipped him left twice (docs/rear-up-trick-results.md).
+  While the hind legs push, the mind watches the roll grow
+  (Guard.push_roll) and stops him early, before the tip gathers speed.
 
 Stages 2 and 3 go on on the tripod (rise, mid; climb, top: the hind legs
 straighten and draw the feet in as the centre of mass comes back over the
@@ -105,12 +107,17 @@ SIT_FRAME = J(30, 60, -80, 45, -60, 10, -20)  # the trick's last frame: SIT with
 
 # ---- the calibration the design needs, and Kilo's as recorded ---------------------------------
 # The right hind shoulder's servo zero after re-seating its upper leg (docs section 2).
-# The plays since 2026-11-19 read as re-seated (dynamics: SIT and the tail rolls), not confirmed.
+# The plays since 2026-11-19 read as re-seated (dynamics: SIT and the tail rolls), and those of
+# 2026-11-22 rule the old zero out (it would roll him 29 deg at "back"; he rolled 3 to 4).
 DESIGN_CZP = D.DESIGN_CZP
 DESIGN = T.Geometry3(czp=DESIGN_CZP)
 # Kilo before the re-seat (the EEPROM dump of 2026-10-10: the right hind shoulder stops at -57):
-# the rigid model's fit of 2026-11-17, and the trick must stop itself safely on it.
+# the rigid model's fit of 2026-11-17 (the history: test_rear_up).
 AS_RECORDED = T.Geometry3(czp=T.KILO_CZP, com_dy=PM.view_numbers("tricks_rigid")["com_dy_mm"])
+# The model the trick is judged in: the tricks' fitted dynamics (dynamics.FITTED), with the centre of
+# mass sideways where the body model has it (0): the self-measurement of 2026-11-22 found it there
+# (-0.7 +- 0.6 mm), not 5 mm right as the "tricks" view still says for the other tricks.
+MODEL = D.FITTED.with_(com_dy=D.BODY.com_dy_mm)
 REACH_MARGIN = 2.0  # deg: every angle at least this far inside what the servo reaches (DESIGN)
 MIN_KNEE_BEND = 25.0  # the hind knee stays bent at least this much (the leg at most 98 % of its length)
 
@@ -214,7 +221,6 @@ def solve(spec: Spec, g: S.Geometry | None = None) -> dict:
 HIND_X0 = -68.0
 FRONT_GAP = 128.0
 TUCK = (-15.0, -25.0)    # the paws folded up in front (the left front knee's pulse ends at -32)
-RIGHT_DROP = 2.5         # mm: on the tripod the left hind leg is this much shorter than the right
 
 
 def on_feet(name: str, ahead: float, h: float, phi: float, gap: float = FRONT_GAP, head=(0.0, 0.0)) -> Spec:
@@ -226,13 +232,10 @@ def on_feet(name: str, ahead: float, h: float, phi: float, gap: float = FRONT_GA
     return Spec(name, phi=phi, h=h, hind_dx=ahead, front=HIND_X0 + gap - fx, head=head)
 
 
-def on_tail(name: str, phi: float, ahead: float, head=(0.0, 0.0), paws=TUCK, drop: float = RIGHT_DROP) -> Spec:
+def on_tail(name: str, phi: float, ahead: float, head=(0.0, 0.0), paws=TUCK) -> Spec:
     """On the tripod at pitch ``phi``: the hips where the tail tip meets the
-    floor, the hind feet ``ahead`` mm in front of the axles, the left one
-    ``drop`` mm higher (its leg that much shorter: he leans left by that),
-    the paws up."""
-    return Spec(name, phi=phi, h=None, hind_dx=ahead, front=None, paws=paws, left=(ahead, drop),
-                right=(ahead, 0.0), head=head)
+    floor, both hind feet ``ahead`` mm in front of the axles, the paws up."""
+    return Spec(name, phi=phi, h=None, hind_dx=ahead, front=None, paws=paws, head=head)
 
 
 @dataclass(frozen=True)
@@ -240,7 +243,8 @@ class Step:
     """One keyframe of the way up: its pose, its move (ticks; or ``rate``,
     deg/s, the largest joint's average speed), its hold, a guard (the
     window of TELEMETRY nose up the mind accepts over the hold's second
-    half, and the |roll| limit), and ``tuck``: the paws tucked only on
+    half, the |roll| limit, and optionally the push_roll watched over its
+    move: model.Guard), and ``tuck``: the paws tucked only on
     that side ("l", "r") or both (None: as the pose says)."""
     spec: Spec
     dur: int = 0
@@ -261,6 +265,13 @@ STEP_HOLD = 200   # ticks at a lower stage's top in a higher stage (4 s): the re
 RISE_DPS = 30.0   # on the tripod above stage 1: the tail tip slides forward as Kilo rises
 GUARD_ROLL = 6.0  # deg: the guards' |roll| limit (TELEMETRY, which reads about +2 where Kilo is level)
 PLAY_ROLL_MAX = 8.0
+# deg: while the hind legs push him up onto the tripod ("up"), the roll may change by at most this
+# much from what he brought into the move (Guard.push_roll). On 2026-11-22 it grew 3 deg in the
+# first 0.2 s of the tip and 9 by the stop at 8 deg absolute. Every band must stay PUSH_PAD under it:
+# the roll's spread from hold to hold on Kilo (0.3 deg sd, the self-measurement of 2026-11-22); the
+# worst band (softer, 3 mm right) moves it 3.0.
+PUSH_ROLL = 3.5
+PUSH_PAD = 0.3
 
 # The guards' windows are the compliant model's readings over every band (check() prints them,
 # and holds every band at least GUARD_PAD inside): see docs/rear-up-trick.md section 8.
@@ -271,7 +282,7 @@ UP = (
     Step(on_feet("paw_l", 85, 42, 5, gap=112, head=(0, -10)), dur=12, tuck="l"),
     Step(on_feet("paws", 85, 42, 5, gap=112, head=(0, -15)), dur=12, hold=GUARD_HOLD, tuck="lr",
          guard=(2.5, 12.0, GUARD_ROLL)),
-    Step(on_tail("up", 28, 78, head=(0, -25)), dur=25, hold=HOLD, guard=(19.5, 27.0, GUARD_ROLL)),
+    Step(on_tail("up", 28, 78, head=(0, -25)), dur=25, hold=HOLD, guard=(19.5, 27.0, GUARD_ROLL, PUSH_ROLL)),
     Step(on_tail("rise", 34, 68, head=(0, -30)), rate=RISE_DPS),
     Step(on_tail("mid", 40, 64, head=(0, -30)), rate=RISE_DPS, hold=HOLD,
          guard=(33.0, 41.0, GUARD_ROLL)),
@@ -400,7 +411,7 @@ def predicted(st=1) -> tuple:
     each keyframe (its move and its hold: where he settles), exported with
     the library as "predicted_pitch_deg" for kilo log trick."""
     fr = frames(st)
-    pr = D.simulate(_play_frames(fr), D.FITTED, stop_ticks=stage(st).stop_ticks)
+    pr = D.simulate(_play_frames(fr), MODEL, stop_ticks=stage(st).stop_ticks)
     out = []
     for te in frame_starts(fr)[1:]:
         m = pr.window(te - 0.06, te)
@@ -412,14 +423,15 @@ def build(g: S.Geometry | None = None, st=1) -> Trick:
     st = stage(st)
     fr = frames(st, g)
     pred = list(predicted(st.number))
-    guards = tuple(Guard(frame=i, nose_up=(f.guard[0], f.guard[1]), roll_max=f.guard[2], name=f.name)
+    guards = tuple(Guard(frame=i, nose_up=(f.guard[0], f.guard[1]), roll_max=f.guard[2], name=f.name,
+                         push_roll=f.guard[3] if len(f.guard) > 3 else 0.0)
                    for i, f in enumerate(fr) if f.guard and f.hold >= GUARD_HOLD)
     top = UP[st.top]
     return Trick(
         name=st.name, frames=tuple(keyframe(f.joints, f.dur, f.hold) for f in fr), end_posture=END,
         stop_ticks=st.stop_ticks, guards=guards, roll_max=PLAY_ROLL_MAX,
         source={"kind": "authored", "design": "kilo.tricks.rear_up", "doc": "docs/rear-up-trick.md",
-                "stage": st.number, "design_version": 3, "model": "kilo.tricks.dynamics FITTED",
+                "stage": st.number, "design_version": 3, "model": "kilo.tricks.rear_up MODEL",
                 "requires": "the right hind shoulder (joint 10) reaching -78 deg: calibration offset +7..+25 "
                             "(kilo cal show), docs/rear-up-trick.md section 2",
                 "keyframes": [f.name for f in fr], "predicted_pitch_deg": pred},
@@ -452,11 +464,6 @@ FEET = HIND + FRONT
 ALLOWED = set(FEET) | {T.TAIL, "butt_l", "butt_r", "lf_knee", "rf_knee", "lb_knee", "rb_knee"}
 
 
-def as_recorded() -> D.Params:
-    """Kilo before the right hind upper leg was re-seated: it stops at -57 deg."""
-    return D.FITTED.with_(czp=T.KILO_CZP)
-
-
 @dataclass
 class Run:
     """One play (or one cut-short) in one band."""
@@ -467,6 +474,7 @@ class Run:
     max_nose_up: float = 0.0
     max_roll: float = 0.0            # |roll|, TELEMETRY
     guards: dict = field(default_factory=dict)   # guard name -> (mean nose up, max |roll|) over its window
+    push: dict = field(default_factory=dict)     # guard name -> largest |roll change| over its move (push_roll)
     hold: dict = field(default_factory=dict)     # at the stage's top: loads (g) and the roll
     tripod_at: float | None = None   # s: on the hind feet and the tail, the front feet off, from then on
     paws_at: float | None = None     # s: both front feet off the floor from then on
@@ -503,6 +511,12 @@ def judge(pr: D.Prediction, trick: Trick, band: str, kind: str = "play") -> Run:
         m = pr.window(a, b)
         if m.any() and b <= t_stop + 0.05:
             r.guards[gd.name] = (float(pr.nose_up[m].mean()), float(np.abs(pr.roll[m]).max()))
+        if gd.push_roll:
+            m0 = st[gd.frame]
+            before = pr.t < m0
+            mm = pr.window(m0, a)
+            if before.any() and mm.any():
+                r.push[gd.name] = float(np.abs(pr.roll[mm] - pr.roll[before][-1]).max())
     top = top_frame(trick)
     hb = st[top + 1]
     ha = hb - fr[top].hold * TICK_MS / 1000 / 2
@@ -557,6 +571,9 @@ def judge(pr: D.Prediction, trick: Trick, band: str, kind: str = "play") -> Run:
                                  f"{gd.nose_up[0]:g}..{gd.nose_up[1]:g}")
                     if ro > gd.roll_max - GUARD_PAD:
                         p.append(f"guard {gd.name}: |roll| {ro:.1f} within {GUARD_PAD:g} of its limit {gd.roll_max:g}")
+                if gd.push_roll and r.push.get(gd.name, 0.0) > gd.push_roll - PUSH_PAD:
+                    p.append(f"guard {gd.name}: the roll moves {r.push[gd.name]:.1f} while it pushes, within "
+                             f"{PUSH_PAD:g} of its limit {gd.push_roll:g}")
             if r.max_roll > PLAY_ROLL_MAX - GUARD_PAD and not may_stop:
                 p.append(f"rolls {r.max_roll:.1f} deg (the limit {PLAY_ROLL_MAX:g})")
             for k in HIND:
@@ -605,39 +622,34 @@ STOP_BANDS = ("fitted", "stiffer, further back", "softer, further right", "slow 
 @dataclass
 class Report:
     runs: list = field(default_factory=list)
-    recorded: Run | None = None      # Kilo before the re-seat: stopped by a guard, or played safely
 
     @property
     def problems(self) -> list[str]:
-        out = [f"{r.band} / {r.kind}: {p}" for r in self.runs for p in r.problems]
-        if self.recorded is not None:
-            out += [f"as recorded / play: {p}" for p in self.recorded.problems
-                    if not p.startswith(("stopped", "not on the tripod"))]
-        return out
+        return [f"{r.band} / {r.kind}: {p}" for r in self.runs for p in r.problems]
 
 
 def check(trick: Trick | None = None, bands: Sequence | None = None, stops: Sequence[str] | None = STOP_BANDS,
           workers: int | None = None) -> Report:
-    """The play in every band (default dynamics.bands()), with the mind's
+    """The play in every band (default bands()), with the mind's
     guards; every cut-short in the bands ``stops``; the fitted play from SIT
-    (A1 while he sits); the play on Kilo before the re-seat (it must stop
-    itself safely, or play safely)."""
+    (A1 while he sits). (Kilo before the right hind shoulder's re-seat is
+    no longer checked: the plays of 2026-11-22 rule it out, the model
+    rolls him 29 deg at "back" with it and he rolled 3 to 4.)"""
     trick = trick or build()
-    bands = list(bands if bands is not None else D.bands())
+    bands = list(bands if bands is not None else D.bands(MODEL))
     jobs = [(trick, b, p, "play", None) for b, p in bands]
     for b, p in bands:
         if stops and b in stops:
             jobs += [(trick, b, p, kind, tick) for kind, tick in stop_points(trick)]
     if any(b == "fitted" for b, _ in bands):  # A1 while he sits (after a stop): the trick starts from SIT
-        jobs.append((trick, "fitted, from SIT", D.FITTED, "play", None, SIT))
-    jobs.append((trick, "as recorded", as_recorded(), "play", None))
+        jobs.append((trick, "fitted, from SIT", MODEL, "play", None, SIT))
     n = workers or os.cpu_count() or 1
     if n > 1 and len(jobs) > 1:
         with ProcessPoolExecutor(max_workers=n) as ex:
             runs = list(ex.map(_sim, jobs, chunksize=1))
     else:
         runs = [_sim(j) for j in jobs]
-    return Report(runs=runs[:-1], recorded=runs[-1])
+    return Report(runs=runs)
 
 
 def summary(rep: Report, trick: Trick) -> str:
@@ -660,7 +672,8 @@ def summary(rep: Report, trick: Trick) -> str:
     plays = [r for r in rep.runs if r.kind == "play"]
     L.append("plays (TELEMETRY nose up / roll; loads at the top's hold, g; s from the start):")
     for r in plays:
-        gs = "  ".join(f"{k} {v[0]:+.1f}/{v[1]:.1f}" for k, v in r.guards.items())
+        gs = "  ".join(f"{k} {v[0]:+.1f}/{v[1]:.1f}" for k, v in r.guards.items()) + \
+            "".join(f"  push {k} {v:.1f}" for k, v in r.push.items())
         h = r.hold
         top = (f"top {h['nose_up']:+.1f}/{h['roll']:+.1f} lb {h['lb_foot']:.0f} rb {h['rb_foot']:.0f} "
                f"tail {h[T.TAIL]:.0f}") if h else "-"
@@ -681,12 +694,7 @@ def summary(rep: Report, trick: Trick) -> str:
         L.append(f"cut short: {len(stops)} runs; largest roll {w.max_roll:.1f} ({w.band} / {w.kind}); highest "
                  f"nose up {max(r.max_nose_up for r in stops):.1f}; all end sitting: "
                  f"{all(not any('end sitting' in p for p in r.problems) for r in stops)}")
-    if rep.recorded is not None:
-        a = rep.recorded
-        L.append(f"Kilo before the re-seat (right hind shoulder stops at -57): "
-                 f"{'stopped: ' + a.stopped if a.stopped else 'played to the top'}; max |roll| {a.max_roll:.1f}, "
-                 f"ends {_fmt_loads(a.end)}")
-    L.append(f"{len(rep.runs) + (rep.recorded is not None)} runs, {len(rep.problems)} problems")
+    L.append(f"{len(rep.runs)} runs, {len(rep.problems)} problems")
     L += ["  " + p for p in rep.problems[:40]]
     return "\n".join(L)
 
@@ -702,7 +710,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.stage is not None and st.number != args.stage:
             continue
         trick = build(None, st)
-        rep = check(trick, bands=D.bands()[:1] if args.quick else None, stops=None if args.quick else STOP_BANDS)
+        rep = check(trick, bands=D.bands(MODEL)[:1] if args.quick else None, stops=None if args.quick else STOP_BANDS)
         print(summary(rep, trick), flush=True)
         print()
         path = path_for(st.name)

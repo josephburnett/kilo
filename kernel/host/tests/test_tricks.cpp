@@ -326,6 +326,25 @@ void test_guard_watch() {
   CHECK(feed_until(w, 120, [](double) { return 12.0; }, [](double) { return 0.0; }, &at) == nullptr);
 }
 
+// test_rear_up.py test_guard_watch_push_roll, the same cases
+const TrickGuard kGuardPush[] = {{1, 10 * 16, 14 * 16, 3 * 16, "mid", 2 * 16}};
+
+void test_guard_watch_push_roll() {
+  Trick t = {"g", "", 3, 0, 0, 0, 0x0004, 0, KILO_POSTURE_STAND, 0, 0, kGuardFrames, 0, kGuardPush, 1, 8 * 16};
+  uint64_t at = 0;
+  GuardWatch w;
+  w.reset(t, kSpeedUnity);
+  const char* why = feed_until(w, 60, [](double) { return 12.0; }, [](double x) { return x < 0.9 ? 2.0 : 5.5; }, &at);
+  CHECKF(why != nullptr && std::strcmp(why, "guard mid: roll 5.5 deg, 3.5 while it moved (limit 2.0)") == 0 &&
+             at == 960000,
+         "%s at %u", why ? why : "-", (unsigned)at);
+  w.reset(t, kSpeedUnity);
+  CHECK(feed_until(w, 60, [](double) { return 12.0; }, [](double x) { return x < 0.8 ? 1.0 : 2.5; }, &at) == nullptr);
+  w.reset(t, kSpeedUnity);
+  CHECK(feed_until(w, 60, [](double) { return 12.0; }, [](double x) { return x > 0.99 && x < 1.01 ? 4.5 : 0.0; },
+                   &at) == nullptr);
+}
+
 int main() {
   test_library_matches_python();
   test_timing();
@@ -334,5 +353,6 @@ int main() {
   test_play_timeout_stops_the_trick();
   test_stop_while_uploading();
   test_guard_watch();
+  test_guard_watch_push_roll();
   return report("tricks");
 }

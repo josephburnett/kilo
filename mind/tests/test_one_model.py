@@ -16,6 +16,8 @@ import math
 import re
 import shutil
 import subprocess
+import tomllib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -91,6 +93,8 @@ def test_the_consumers_read_the_model():
         v["imu_roll_deg"])
     assert f == D.NOMINAL.with_(com_dx=f.com_dx, com_dy=f.com_dy, sag=f.sag, tail_droop_deg=f.tail_droop_deg,
                                 imu_roll=f.imu_roll)
+    # the rear-up reads the model's sideways centre of mass, not the view's (the self-measurement settled it)
+    assert RU.MODEL == f.with_(com_dy=M.com_dy_mm)
     assert RU.AS_RECORDED.com_dy == PM.view_numbers("tricks_rigid")["com_dy_mm"]
     # the trot's pendulum is the "trot" view
     v = PM.view_numbers("trot")
@@ -241,6 +245,33 @@ def test_model_changes_from_the_first_run_and_from_a_script_2_fit():
     assert new["model"]["about"]["correction.com_dx_mm"][2] == "self-measurement test, applied today"
     assert new["model"]["about"]["correction.com_dz_mm"] == old["model"]["about"]["correction.com_dz_mm"]
     assert new["model"]["views"] == old["model"]["views"]  # a view is deleted by hand, never by a fit
+
+
+def test_each_servo_is_the_robots_until_measured_and_apply_sets_one():
+    """[model.correction] servo_*: by legacy joint id, all alike by default (the model and the
+    tricks' dynamics as before); a fit's "KIND:joint" numbers land at that joint's id."""
+    from kilo import cli_model as CM
+    from kilo.tricks import dynamics as D
+
+    m = PM.BodyModel()
+    assert m.servos_alike and len(m.servo_give) == len(m.servo_lag_d_ms) == len(m.servo_tau_d_ms) == 16
+    assert all(m.joint_lag_ms(j) == m.servo_lag_ms and m.joint_tau_ms(j) == m.servo_tau_ms for j in range(16))
+    assert (D.FITTED.lag_d, D.FITTED.tau_d, D.FITTED.give) == ((), (), ())
+    spec = (REPO / "protocol" / "spec.toml").read_text()
+    fit = {"parameters": {
+        "lag_d_ms:lb_knee": {"value": 38.4, "sd": 9.0, "model": 0.0, "fitted": True, "significant": True},
+        "give:lb_shoulder": {"value": 1.62, "sd": 0.2, "model": 1.0, "fitted": True, "significant": True},
+        "give:rb_shoulder": {"value": 1.05, "sd": 0.2, "model": 1.0, "fitted": True, "significant": False},
+        "give:no_such": {"value": 2.0, "sd": 0.2, "model": 1.0, "fitted": True, "significant": True}}}
+    ch = {c.fit: c for c in CM.plan_changes(fit, spec)}
+    lb_knee, lb_sh = 15, 11  # legacy ids (kilo.tricks.model.JOINT_IDS)
+    assert ch["lag_d_ms"].new[lb_knee] == 38.0 and sum(ch["lag_d_ms"].new) == 38.0
+    assert ch["give"].new[lb_sh] == 1.62 and ch["give"].new[10] == 1.0  # not significant: left as it is
+    new = tomllib.loads(CM.edit_spec(spec, list(ch.values()), "test"))["model"]["correction"]
+    assert new["servo_lag_d_ms"][lb_knee] == 38.0 and new["servo_give"][lb_sh] == 1.62
+    b = replace(m, servo_give=tuple(new["servo_give"]), servo_lag_d_ms=tuple(new["servo_lag_d_ms"]))
+    assert not b.servos_alike and b.joint_lag_ms(lb_knee) == m.servo_lag_ms + 38.0
+    assert D.Params.of(b).give == (("lb_shoulder", 1.62),) and D.Params.of(b).lag_d == (("lb_knee", 38.0),)
 
 
 @pytest.mark.slow

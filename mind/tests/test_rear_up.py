@@ -367,8 +367,8 @@ def test_each_stage_goes_the_same_way_up_as_the_one_below():
 def test_fast_and_cat_like():
     """Paws up within about 2 s and the stage-1 hold by about 3 s (the
     second design: 12.5 s); the head comes up first; a pause before the
-    rock back; one paw before the other; the left hind leg 2.5 mm shorter
-    on the tripod (the centre of mass is right of centre)."""
+    rock back; one paw before the other; both hind legs alike on the tripod
+    (the centre of mass is in the middle: the self-measurement of 2026-11-22)."""
     t = RU.build(None, 1)
     names = t.source["keyframes"]
     fr = {n: RU.joints_of(f) for n, f in zip(names, t.frames)}
@@ -381,12 +381,13 @@ def test_fast_and_cat_like():
     assert (fr["paw_l"]["lf_knee"], fr["paw_l"]["rf_knee"]) == (fr["paws"]["lf_knee"], fr["back"]["rf_knee"])
     # the hind feet stay where STAND put them on the way to the rear (they never leave the floor: check())
     up = RU.UP[RU.stage(1).top].spec
-    assert up.left[1] - up.right[1] == RU.RIGHT_DROP == 2.5
+    assert up.left is None and up.right is None
+    assert (fr["up"]["lb_shoulder"], fr["up"]["lb_knee"]) == (fr["up"]["rb_shoulder"], fr["up"]["rb_knee"])
 
 
 def _check(st, bands, stops):
     t = RU.build(None, st)
-    return t, RU.check(t, bands=[(b, p) for b, p in D.bands() if b in bands] if bands else None, stops=stops)
+    return t, RU.check(t, bands=[(b, p) for b, p in D.bands(RU.MODEL) if b in bands] if bands else None, stops=stops)
 
 
 @pytest.mark.slow
@@ -398,8 +399,7 @@ def test_stage_1_in_every_band_and_every_stop():
     least a degree inside its window, the roll within 7 deg, the hind feet
     never leaving the floor and sliding under 25 mm, back down sitting on
     its feet; cut short half way into and at the end of every keyframe
-    (fitted), it comes down sitting; on Kilo before the right hind
-    shoulder's re-seat a guard stops it and he sits."""
+    (fitted), it comes down sitting."""
     t, rep = _check(1, None, ("fitted",))
     assert rep.problems == []
     plays = [r for r in rep.runs if r.kind == "play"]
@@ -410,7 +410,6 @@ def test_stage_1_in_every_band_and_every_stop():
     pred = t.source["predicted_pitch_deg"][RU.top_frame(t)]
     assert fit.band == "fitted" and fit.hold["nose_up"] == pytest.approx(pred, abs=1.0)
     assert len([r for r in rep.runs if r.kind != "play"]) == 2 * (len(t.frames) - 1)
-    assert rep.recorded.stopped and not rep.recorded.fell
 
 
 @pytest.mark.slow
@@ -462,6 +461,25 @@ def test_guard_watch():
     assert feed_all(w, [(i * 0.04, 12.0, 0.0) for i in range(120)]) is None
     with pytest.raises(Exception):
         Trick("g", frames=(Keyframe.from_joints({"tail": 0}, dur=10),), guards=(Guard(0, (1, 2), 3),)).validate()
+
+
+def test_guard_watch_push_roll():
+    """push_roll watches the guarded frame's move (frame 1: ticks 40..50,
+    then up to its window at 65): the roll may move 2 deg from the last
+    reading before the move, two readings in a row past that stop."""
+    kf = Keyframe.from_joints({"tail": 0}, dur=10, hold=30)
+    t = Trick("g", frames=(kf, kf, kf), guards=(Guard(1, (10.0, 14.0), 3.0, "mid", push_roll=2.0),),
+              roll_max=8.0).validate()
+    assert Trick.from_json(t.to_json()).guards == t.guards
+    grows = [(i * 0.04, 12.0, 2.0 if i * 0.04 < 0.9 else 5.5) for i in range(60)]
+    t_fire, why = feed_all(GuardWatch(t), grows)
+    assert why == "guard mid: roll +5.5 deg, +3.5 while it moved (limit 2)" and t_fire == pytest.approx(0.96)
+    # what he brings into the move is the reference: steady at 2.5, then 1.5 more, is no stop
+    assert feed_all(GuardWatch(t), [(i * 0.04, 12.0, 1.0 if i * 0.04 < 0.8 else 2.5) for i in range(60)]) is None
+    # one reading alone does not stop it; nor does the change after the window opens (the guard's own roll there)
+    assert feed_all(GuardWatch(t), [(i * 0.04, 12.0, 4.5 if i == 25 else 0.0) for i in range(60)]) is None
+    # no push_roll in the JSON when it is 0: the other tricks' files are unchanged
+    assert "push_roll" not in guard_trick().to_json()
 
 
 def test_guards_round_trip_through_json():

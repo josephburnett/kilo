@@ -1238,6 +1238,14 @@ servo_tau_ms = 70
 #                      is +t/2 on LF and RB, -t/2 on RF and LB)
 #   imu_*_deg          what TELEMETRY reads standing level (pitch nose down +,
 #                      roll right side up +)
+# Each servo's own performance, by legacy joint id 0..15 (as [model.servo] czp;
+# ids 3..7 are not driven). Nothing measured per servo yet: every servo is
+# taken as the whole robot's (servo_lag_ms, servo_tau_ms, sag_deg_per_kg_cm),
+# which is what the defaults below say. docs/movement-engine.md "Each servo".
+#   servo_lag_d_ms     this servo starts moving this much later than servo_lag_ms
+#   servo_tau_d_ms     ...and closes the gap this much slower than servo_tau_ms
+#   servo_give         it gives under load this many times sag_deg_per_kg_cm
+#                      (1 = like the others; 1.5 = half as stiff again)
 [model.correction]
 com_dx_mm = 0.0
 com_dy_mm = 0.0
@@ -1246,6 +1254,9 @@ sag_deg_per_kg_cm = 0.0
 leg_dz_mm = [0.0, 0.0, 0.0, 0.0]
 imu_pitch_deg = 0.0
 imu_roll_deg = 0.0
+servo_lag_d_ms = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+servo_tau_d_ms = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+servo_give = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
 # The servo zeros of Kilo's calibration, by legacy joint id 0..15 (the EEPROM
 # dump of 2026-10-10, kept byte for byte in body/test/test_kilo_eeprom.cpp): servo angle at joint angle 0. They decide where each
@@ -1326,6 +1337,15 @@ clamp_deg = 2.3
 # (mind/tests/fixtures/rear_up_2026_11_21.json; docs/rear-up-trick.md).
 # imu_pitch_deg in TELEMETRY's sense (nose down +): STAND reads 1.9 nose down
 # (2026-11-17 and the walks); it is the tricks' default too, not only the fit's.
+# imu_roll_deg 2.0: TELEMETRY reads about +2 (left side down) in the trick poses
+# that load the hind legs where the model is level. The self-measurement of
+# 2026-11-22 found the sensor's own roll offset 0.29, so most of it is the body
+# sitting lower on the left under that load (docs/rear-up-trick-results.md),
+# not the sensor; kept here as what TELEMETRY reads. com_dy_mm -5: the same
+# self-measurement found the centre of mass in the middle (-0.7 +- 0.6 mm).
+# The rear-up reads the model's (0) instead (kilo.tricks.rear_up MODEL: its
+# lean against this one tipped him left); the intent moves and the righting
+# experiment still use this one until their owners re-check them on 0.
 [model.views.tricks]
 com_dx_mm = -5.5
 com_dy_mm = -5.0
@@ -1362,6 +1382,9 @@ servo_tau_ms = ["...and then closes 63 % of the gap in this time", "ms", "fitted
 "correction.leg_dz_mm" = ["each leg longer than commanded (left front, right front, right back, left back)", "mm", "nothing applied yet"]
 "correction.imu_pitch_deg" = ["what the tilt sensor reads nose-down when he stands level", "deg", "nothing applied yet"]
 "correction.imu_roll_deg" = ["...and rolled (right side up +)", "deg", "nothing applied yet"]
+"correction.servo_lag_d_ms" = ["each servo (joint id 0..15) starts this much later than servo_lag_ms", "ms", "nothing measured per servo yet"]
+"correction.servo_tau_d_ms" = ["...and closes the gap this much slower than servo_tau_ms", "ms", "nothing measured per servo yet"]
+"correction.servo_give" = ["...and gives under load this many times sag_deg_per_kg_cm", "", "nothing measured per servo yet"]
 "servo.czp" = ["each servo's zero, by joint id 0..15", "servo deg", "Kilo's EEPROM, read 2026-10-10"]
 "servo.reseated_rb_shoulder_czp" = ["the right hind shoulder's zero after it was re-seated", "servo deg", "read from the plays since 2026-11-19, not confirmed"]
 "tail.pivot_x_mm" = ["the tail's pivot, forward of the shoulders' middle", "mm", "the owner's ruler, 2026-11-16"]

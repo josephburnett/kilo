@@ -22,6 +22,154 @@ Floor: ...   Foam or cardboard over the Pi: yes / no   Tail straight back in sta
 
 Anything else:
 
+## 2026-11-22, boot 17: stage 1 twice, tipped left both times
+
+Build 7e92703c, `KILO_REAR_UP=1` (A1 plays stage 1). Battery 7659 mV at the
+first start, 7476 mV lowest. Recordings (not in git):
+`~/kilo-logs/run-b17-146s-trick-2.krec`, `run-b17-157s-trick-3.krec`, the
+boot's log `kilo-card-b17.log`.
+
+What you said: "Both times it looked good but the left leg didn't keep up
+with the right and he tipped left."
+
+### What the recordings show (measured)
+
+The two plays are the same to within a degree. TELEMETRY's roll is +
+when the left side is down; nose up is +. Times from the start of the play.
+
+| | play 1 | play 2 | the model (as built) |
+|---|---|---|---|
+| standing before (pitch, roll) | -2.4, +0.1 | -2.1, -0.4 | -1.9, +2.0 |
+| "back", end of its hold (1.5 s) | +10.4, **+4.2** | +10.2, **+3.3** | +7.1, +1.8 |
+| "paws", end of its hold (2.4 s) | +11.4, +2.2 | +11.2, +1.5 | +6.4, +1.8 |
+| "up" starts (2.46 s) | nothing moves until 2.70 s | the same | the pitch rises from 2.50 s |
+| the roll starts growing | 2.70 s, before the pitch (2.78) | 2.72 s, pitch 2.80 | (no roll) |
+| roll at 2.90 / 3.00 s | +6.1 / +8.6 | +5.3 / +8.1 | +1.4 / +1.6 |
+| stopped by the roll limit | 3.06 s at **+11.3**, growing 36 deg/s | 3.04 s at **+9.9**, 35 deg/s | |
+| nose up when stopped | +19.2 (the model: +23.3) | +18.9 | |
+| after the stop | rolled on to +30 at 3.6 s (on his left side), then sat: roll +3.9 at 5 s | the same, +30.6, then +3.9 | |
+
+The roll grew smoothly, 20 to 40 degrees a second, from the first moment
+the hind legs pushed: a tip over the left side, not a slip (no jump in the
+pitch or the roll), and it did not slow down by itself.
+
+### Why: the trick told the left hind leg to stay shorter
+
+**The commanded legs were not symmetric.** In "up" the left hind leg was
+sent to shoulder -56 / knee -48, the right to -52 / -52: by design, the left
+leg 2.5 mm shorter than the right (`RIGHT_DROP`, docs/rear-up-trick.md
+section 7). The design leaned him left on purpose, against a centre of mass
+that the fit of 2026-11-21 put 5 mm right of the middle. Seen from behind,
+a left leg told to stay shorter is exactly "the left leg didn't keep up
+with the right". Every other frame was symmetric, and the body applies each
+servo's own calibration, so left and right reach the same angles. Before
+"up" the commands were the same on both sides.
+
+**The centre of mass is not 5 mm right.** The self-measurement of
+2026-11-22 (docs/self-measurement-results.md) found it -0.7 +- 0.6 mm,
+i.e. in the middle, and the sensor's own roll offset 0.29 degrees, not the
+2 degrees the trick's model assumed. In the trick's model with those two
+measured numbers (simulated):
+
+| the model, at the moment of the stop (3.06 s) | roll |
+|---|---|
+| as built (the left leg 2.5 mm shorter) | +4.3, settling at +4.6 |
+| both hind legs alike | +0.3 |
+| as built, and something more on the left side, worth the centre of mass 5 to 6 mm left | +8.8 to +10.3, still growing |
+
+So the lean the trick asked for explains about 40 % of the roll by itself
+(alone it would have held him at +4.6 on the tripod, a degree and a half from the "up" guard's 6). On
+the tripod a millimetre of leg or of centre of mass is worth about one
+degree of roll, and the legs' give makes it grow: a lean of a few degrees
+turns into a tip.
+
+**And the robot has a left side that sits lower under load.** At "back",
+where both hind legs were told the same, he already rolled +3.3 to +4.2
+(the model: level), and it came back to +1.5..+2.2 when the paws came up.
+The fit of 2026-11-21 saw the same "+2 in every trick pose" and took it for
+the sensor; the sensor is now measured at 0.3, so it is the body. What it
+is, the data cannot say. It looks the same as any of: the left hind servo
+giving more under load (a weaker servo, or its horn slipping on the spline),
+the left hind leg a few degrees off in its calibration only where it is
+bent far, the right hind shoulder falling a few degrees short of -76 (a
+partial version of the 2026-11-17 clamp: the model says a reach of about
+-72 gives +4 at "back"; the full clamp of 2026-11-17 would have rolled him
+29, so the re-seat is confirmed), or the centre of mass a few mm left only
+when he sits back. Standing, none of it shows: the self-measurement found
+no twist (0.00 +- 0.08 mm) and level poses within 0.3 degrees.
+
+- (a) a weak or slow left hind servo: possible; nothing per servo has ever
+  been measured (the lag of about 120 ms is the whole robot's). The
+  self-measurement's tips do lean 1.2 to 2.1 degrees at once when the left
+  front or the right back foot is lifted (the right-front-to-left-back
+  diagonal holds him less firmly), which a soft left hind leg would do, but
+  so would the centre of mass near that diagonal.
+- (b) calibration: not the gross clamp (ruled out above); a few degrees on
+  one hind joint remains possible.
+- (c) the design: yes, certainly a cause: it commanded the lean, and the
+  tripod is that sensitive.
+- (d) the floor or a foot slipping: no sign of it (smooth growth, no jumps).
+- The servos' lag: the pitch began to rise 0.25 s after the model's,
+  on both sides alike; this does not separate left from right.
+
+**The left front leg, too.** The walk's study of the same day (agent
+"walk2", its left drift) finds him dropping onto his left front corner
+about 3 degrees against 1.6 to 1.9 on the right, in every recorded gait.
+The rear-up agrees where the front legs carry him: the +3.3 to +4.2 at
+"back" (both front feet down) fell to +1.5..+2.2 exactly while "paw_l"
+lifted the LEFT paw (1.74 to 1.86 s, the roll rate -15 deg/s), i.e. once
+the left front leg no longer carried anything. So that part of the lean
+is most likely the left front leg giving (or set a little short). It
+cannot explain the tip itself: in "up" both paws are in the air, and there
+the commanded lean and, perhaps, the left hind leg are what is left. Both
+legs have their place in the model (`servo_give` and `servo_lag_d_ms` at
+joint ids 8 and 12, left front shoulder and knee; 11 and 15, left hind)
+for when they are measured.
+
+**One look settles (a) against (b)**: a slow-motion phone video from
+directly behind, at the height of his hips, of one play of the new stage 1
+(it is symmetric now, below). If the left hip rises later or less than the
+right while both are told the same, it is the left hind leg (a); then put
+him in the calibration pose (C5) and look at both hind legs from behind: if
+they are not mirror images, it is calibration (b), else the servo itself.
+
+### What changed
+
+- Both hind legs alike on the tripod (`RIGHT_DROP` deleted); the trick is
+  now judged with the centre of mass in the middle, the body model's and the
+  self-measurement's (`kilo.tricks.rear_up.MODEL`). The "tricks" view in
+  `protocol/spec.toml` keeps its 5 mm right for now: the intent layer's
+  stand-to-rest moves and the righting experiment are checked on it, and on
+  0 the REST moves would stop shipping (their margin in that view drops to
+  2.6 mm); whoever owns those re-checks them, then the view's number goes.
+- **The push watch** (`Guard.push_roll`, 3.5 degrees on "up"): while the
+  hind legs push him onto the tripod, the Pi watches how far the roll moves
+  from what he brought into the move; past 3.5 degrees on two readings in a
+  row it stops the trick at once, instead of waiting for 8 degrees. On
+  today's two plays it would have stopped him at 2.94 and 2.96 s, at +6.9,
+  growing at about 20 degrees a second, instead of +11 at 36. The log says
+  `trick rear_up: guard up: roll +X deg, +Y while it moved (limit 3.5):
+  stopping`.
+- The trick's check no longer plays the "right hind shoulder not re-seated"
+  case: today's plays rule it out.
+- The body model has a place for each servo's own lag, time constant and
+  give (docs/movement-engine.md, "Each servo"); all are the robot's until
+  measured.
+
+All of this is simulated, not tried on Kilo.
+
+### Also in the log: "B1 is refused" at boot was a false alarm
+
+At 5.3 s the log said `righting: the body's fall reflex did not take
+FALL_RC 0 (an older body?): B1 is refused`, and 53 ms later `will not play
+rc (FALL_RC 0): B1 rights him`. The Pi had asked the body for FALL_RC 0
+right after its HELLO, then its main loop waited 1.5 s for the SD card and
+1.7 s for the USB scan; the request ran out of time unanswered, and the Pi
+read "no answer" as "refused". It then asked again at once, and the body
+said yes. Fixed: only the body's own refusal is reported as one (and then
+the Pi stops asking until the body's next HELLO); no answer just asks again
+quietly.
+
 ## 2026-11-21, tries 1-3: the second design, stopped by its own checks every time
 
 Build: mind and body f3020d5e, `KILO_REAR_UP=3` (A2 played `rear_up_3`, which

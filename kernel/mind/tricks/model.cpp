@@ -124,11 +124,14 @@ void GuardWatch::reset(const Trick& t, uint8_t speed_q6) {
     sum_[i] = 0;
     count_[i] = 0;
     done_[i] = false;
+    have_roll0_[i] = false;
+    push_over_[i] = 0;
     uint8_t g = t.guards[i].frame < t.n_frames ? t.guards[i].frame : 0;
-    uint32_t acc = 0, h0 = 0;
+    uint32_t acc = 0, h0 = 0, m0 = 0;
     bool found = false;
     auto visit = [&](uint8_t f) {
       if (found) return;
+      m0 = acc;
       acc += phase_ticks(t.frames[f].dur, speed_q6);
       if (f == g) {
         h0 = acc;
@@ -143,6 +146,7 @@ void GuardWatch::reset(const Trick& t, uint8_t speed_q6) {
     for (uint32_t f = t.loop_end + 1u; f < t.n_frames; f++) visit((uint8_t)f);
     uint32_t h = phase_ticks(t.frames[g].hold, speed_q6);
     from_us_[i] = ticks_to_us(2u * h0 + h) / 2;  // h0 + h / 2 ticks
+    move_us_[i] = ticks_to_us(m0);
     decide_us_[i] = ticks_to_us(h0 + h - (h > kEarlyTicks ? kEarlyTicks : h));
   }
 }
@@ -159,6 +163,27 @@ const char* GuardWatch::feed(uint64_t t_us, int16_t pitch_a16, int16_t roll_a16)
     }
   } else {
     over_ = 0;
+  }
+  for (uint8_t i = 0; i < n_; i++) {
+    const TrickGuard& g = t_->guards[i];
+    if (g.push_a16 <= 0) continue;
+    if (t_us < move_us_[i]) {
+      roll0_[i] = roll_a16;
+      have_roll0_[i] = true;
+    } else if (t_us < from_us_[i]) {
+      if (!have_roll0_[i]) {
+        roll0_[i] = roll_a16;
+        have_roll0_[i] = true;
+      }
+      int d = (int)roll_a16 - roll0_[i];
+      push_over_[i] = (d > g.push_a16 || -d > g.push_a16) ? (uint8_t)(push_over_[i] + 1) : (uint8_t)0;
+      if (push_over_[i] >= 2) {
+        fired_ = true;
+        format(why_, sizeof why_, "guard %s: roll %s deg, %s while it moved (limit %s)", g.name, deg(a, roll_a16),
+               deg(b, (int16_t)d), deg(c, g.push_a16));
+        return why_;
+      }
+    }
   }
   for (uint8_t i = 0; i < n_; i++) {
     if (done_[i]) continue;
