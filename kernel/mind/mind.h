@@ -244,6 +244,7 @@ class Mind final : public LinkListener,
     bool start(const char** what) override;
     void stop() override;
     bool yields(const remote::Key& key) override;
+    bool trick(const char** what) override;
 
    private:
     Mind& m_;

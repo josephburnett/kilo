@@ -8,7 +8,7 @@
 namespace kilo {
 namespace tricks {
 
-constexpr uint32_t kLibrarySize = 16;
+constexpr uint32_t kLibrarySize = 26;
 // In kilo.tricks.library.names() order: the first version, then the authored tricks.
 extern const Trick kLibrary[kLibrarySize];
 

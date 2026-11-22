@@ -115,7 +115,7 @@ def test_upload_is_cached(rig):
     t = library.load("hi")
     tid, uploaded = client.upload_trick(t)
     assert uploaded and tid == trick_id_for(t)
-    assert len(_received(vb, "TRICK_FRAMES")) == 2 and vb.trick.state == "ready"
+    assert len(_received(vb, "TRICK_FRAMES")) == -(-len(t.frames) // 4) == 3 and vb.trick.state == "ready"
     assert vb.trick.crc == t.crc16()
     # known to this client: nothing sent
     n = len(vb.received)

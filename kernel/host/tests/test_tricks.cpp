@@ -24,7 +24,7 @@ uint32_t timer_ticks(const Trick& t, uint8_t speed) {
 }
 
 void test_library_matches_python() {
-  CHECK(kLibrarySize == 16);  // the 13 first-version tricks, then the authored rear_up's three stages
+  CHECK(kLibrarySize == 26);  // the 13 first-version tricks, the authored rear_up's three stages, the random mode's 10
   for (uint32_t i = 0; i < kLibrarySize; i++) {
     const Trick& t = kLibrary[i];
     const char* p = trick_problem(t);
@@ -167,17 +167,17 @@ void test_upload_is_cached_and_plays_to_done() {
   CHECK(play == 1 && r.player.busy());
   r.body.sent.clear();
   CHECK(r.run_until([&] { return r.body.count(KILO_MSG_TRICK_PLAY) == 1; }, 400));
-  std::vector<uint8_t> want = {KILO_MSG_TRICK_COMMIT, KILO_MSG_TRICK_BEGIN, KILO_MSG_TRICK_FRAMES,
+  std::vector<uint8_t> want = {KILO_MSG_TRICK_COMMIT, KILO_MSG_TRICK_BEGIN,  KILO_MSG_TRICK_FRAMES, KILO_MSG_TRICK_FRAMES,
                                KILO_MSG_TRICK_FRAMES, KILO_MSG_TRICK_COMMIT, KILO_MSG_TRICK_PLAY};
   CHECK(r.commands() == want);
-  // what went out is the library trick: header, frames in two chunks, CRC
+  // what went out is the library trick: header, frames in three chunks (its loop unrolled: 10 frames), CRC
   std::vector<Sent> begin = r.body.of(KILO_MSG_TRICK_BEGIN);
   kilo_trick_begin_t b;
   std::memcpy(&b, begin[0].payload.data(), sizeof b);
-  CHECK(b.n_frames == 6 && b.loop_start == 2 && b.loop_end == 3 && b.repeats == 3 && b.trick_id == trick_id_for(*hi));
+  CHECK(b.n_frames == 10 && b.loop_start == 0 && b.loop_end == 0 && b.repeats == 0 && b.trick_id == trick_id_for(*hi));
   std::vector<uint8_t> frames;
   for (const Sent& s : r.body.of(KILO_MSG_TRICK_FRAMES)) frames.insert(frames.end(), s.payload.begin() + 2, s.payload.end());
-  CHECK(frames.size() == 6 * 14 && kilo_crc16(frames.data(), (uint16_t)frames.size()) == trick_crc16(*hi));
+  CHECK(frames.size() == 10 * 14 && kilo_crc16(frames.data(), (uint16_t)frames.size()) == trick_crc16(*hi));
   kilo_trick_commit_t c;
   std::memcpy(&c, r.body.of(KILO_MSG_TRICK_COMMIT)[1].payload.data(), sizeof c);
   CHECK(c.crc16 == trick_crc16(*hi));
