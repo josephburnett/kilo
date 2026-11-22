@@ -206,7 +206,8 @@ B6 (stand) or A7 (rest), or pick him up.
 
 **Part 1: the estimate only. Any build from 2026-11-21 on, no switch.**
 
-1. Flat floor, battery charged. Power on. Leave him lying a few seconds.
+1. Flat floor, battery charged. Power on. Leave him lying until his eyes
+   have given three quick green flashes (ready; `docs/signals.md`).
 2. B6 (stand). Wait until he stands still. A7 (rest). B6 again.
 3. With him standing: tip him gently onto his left side with your hand and
    hold him there for two or three seconds. He will try to get up by himself
@@ -233,7 +234,8 @@ The estimate changes nothing he does; this part is only for the log.
 kilo card /mnt/e KILO_INTENT=1
 ```
 
-1. Flat floor, about 30 cm clear around him. Power on; he lies limp.
+1. Flat floor, about 30 cm clear around him. Power on; he lies limp. Wait
+   for his eyes' three quick green flashes (ready).
 2. **B6.** He should first tighten into his rest pose (the servos come on),
    pause for a second or two, then get up: **rear first, then the front**.
    Look: does the nose dip as the rear comes up? Does any foot slide or

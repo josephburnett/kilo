@@ -58,11 +58,11 @@ struct CLinkWatch : kilo::LinkListener
 	unsigned m_nOverruns = 0;		// TELEMETRY with the OVERRUN flag, current second
 };
 
-// The boot-time flash from the SD card hears through this: its sounds (the
-// Mind's player) and a walk to stop first.
+// The boot-time flash from the SD card hears through this: its signals (the
+// Mind's eyes and sounds) and a walk to stop first.
 struct CCardFlashHost : kilo::CardFlashHost
 {
-	void card_sound (const char *pName, const char *pWhy) override;
+	void card_signal (kilo::signals::Signal Signal, const char *pWhy) override;
 	void card_before_flash (void) override;
 
 	kilo::Mind *m_pMind = 0;

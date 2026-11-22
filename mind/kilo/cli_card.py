@@ -354,9 +354,13 @@ def next_boot_text(plan: Plan, built_kernel: bool) -> list[str]:
     if plan.body is not None:
         m = plan.body[1]
         out.append(f"- about 3 s in, the mind compares body.json (build {m.build:08x}) with the build the body "
-                   "reports. If they differ it flashes the body: the Pi's green ACT light gives two short flashes "
-                   "a second for about 10-20 s while Kilo's board restarts, then Kilo trills (done) or hisses "
-                   "(failed, or refused: battery low, or the files damaged). The same build: nothing happens.")
+                   "reports. If they differ it flashes the body: Kilo's eyes turn steady white and the Pi's "
+                   "green ACT light gives two short flashes a second for about 10-20 s while Kilo's board "
+                   "restarts, then his eyes give three quick flashes: green done, red failed. Three purple "
+                   "flashes (no white) mean refused: battery low, or the files damaged. White that stays, with "
+                   "the ACT light blinking slowly, means the board has no working firmware: read the card. "
+                   "The same build: only the ready flashes (green). A sound as well only if a speaker is "
+                   "connected (docs/signals.md).")
         out.append(f"- either way the mind writes what happened to {RESULT_FILE} on the card. Afterwards put the "
                    "card back in this laptop and run: kilo card PATH --status")
     return out

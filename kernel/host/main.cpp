@@ -165,11 +165,11 @@ int usage() {
   return 64;
 }
 
-// The boot-time flash check's sounds and the walk it stops (as the Circle kernel's CCardFlashHost).
+// The boot-time flash check's signals and the walk it stops (as the Circle kernel's CCardFlashHost).
 class CardHost final : public CardFlashHost {
  public:
   explicit CardHost(Mind& mind) : mind_(mind) {}
-  void card_sound(const char* name, const char* why) override { mind_.say(name, why, true); }
+  void card_signal(signals::Signal s, const char* why) override { mind_.signal(s, why); }
   void card_before_flash() override { mind_.walker().abort(); }
 
  private:

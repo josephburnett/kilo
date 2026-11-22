@@ -17,6 +17,9 @@
 //   SoundPlayer  what Kilo says and when (sound/): B2, waking, the
 //                behaviour's purrs, the guard's hiss; the output from the
 //                platform (MindConfig.sound_output), the sounds the build packed
+//   Signals      what Kilo tells the owner (signal/, docs/signals.md): one call,
+//                signal(), shows it on the eyes and plays its sound; the eyes'
+//                SET_EYES (the guard's colour, busy, asleep, the one-shots)
 //   Estimator    the state estimate (intent/estimate.h): STANDING, SITTING,
 //                RESTING, on a side, ... from every TELEMETRY; it always runs
 //                and only reads (a log line, a MARK and a counter per change)
@@ -72,6 +75,7 @@
 #include "record/recorder.h"
 #include "record/saver.h"
 #include "remote/remote.h"
+#include "signal/signal.h"
 #include "sound/player.h"
 #include "tricks/player.h"
 #include "util/logring.h"
@@ -193,7 +197,7 @@ class Mind final : public LinkListener,
   // measure::MeasureObserver: the run into the flight recorder
   void measure_begin(const char* fields) override { recorder_.measure_begin(fields); }
   void measure_line(const char* line) override { recorder_.note(line); }
-  void measure_end(const char* line, const char* reason, bool ok) override { recorder_.measure_end(line, reason, ok); }
+  void measure_end(const char* line, const char* reason, bool ok) override;
   measure::Measure& measure() { return measure_; }
   // intent::IntentHost
   void intent_moves() override;
@@ -216,6 +220,11 @@ class Mind final : public LinkListener,
   // Ask for a sound (the events' hooks): not while a trick plays (but the alive layer's small sitting moves) or a
   // laptop holds the body, unless always. why: for the log ("wake", "guard red").
   uint8_t say(const char* name, const char* why, bool always = false);
+  // Tell the owner (signal/signal.h, docs/signals.md): the eyes' pattern and the signal's sound, if it has
+  // one (played as say(..., always)), from this one call. why: for the log and the sound's why.
+  void signal(signals::Signal s, const char* why);
+  signals::EyeLanguage& eyes() { return eyes_; }
+  const signals::EyeDriver& eye_driver() const { return eye_driver_; }
   behaviour::Alive& alive() { return alive_; }
   // The behaviour runner's sitting variant (the guard started it): every stand the tree asks for is a sit.
   bool sitting_variant() const { return sitting_variant_; }
@@ -342,6 +351,15 @@ class Mind final : public LinkListener,
   uint64_t floor_seen_us_ = 0;    // ... last at
   bool hello_said_ = false;       // the first HELLO's mew
   uint32_t hisses_said_ = 0;      // the guard's RED reactions hissed at
+  signals::EyeLanguage eyes_;     // what the eyes show (signal/)
+  signals::EyeDriver eye_driver_;  // ... sent as SET_EYES
+  uint32_t key_failures_seen_ = 0;  // the remote's refused or failed keys signalled
+  uint32_t run_saves_seen_ = 0;     // the saver's saves with a run's end in them signalled
+  bool righting_on_ = false;        // B1's righting intent runs (its end: done or failed)
+  uint32_t righting_cancels_ = 0;   // ... the intents' cancelled count when it started
+  bool gave_up_said_ = false;       // ... it gave up on the floor (GaveUp already signalled)
+  void signal_events();             // the remote's refusals, B1's righting, the saves: once a pass
+  void eyes_step();
   bool head_centred_ = false;     // the head held straight ahead for a walk (head_for_walk)
   bool flinch_pending_ = false;   // the guard's lean back, once the sitting move it stopped has ended
   void head_for_walk();

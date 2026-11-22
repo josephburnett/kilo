@@ -405,6 +405,7 @@ void Saver::next_save_part() {
   }
   job_ = Job::None;
   last_save_us_ = clock_.now_us();
+  if (rec_.last_run_end_us() > last_run_saved_us_) run_saves_++;  // a run's end is on the card now
   last_run_saved_us_ = rec_.last_run_end_us();
   save_now_ = false;
   failures_ = 0;

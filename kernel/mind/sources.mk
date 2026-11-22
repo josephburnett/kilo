@@ -90,6 +90,10 @@ MIND_SRCS += \
 	mind/sound/render.cpp \
 	mind/sound/player.cpp
 
+# What Kilo tells the owner (signal/, docs/signals.md): the eye language and its SET_EYES, one call with the sound.
+MIND_SRCS += \
+	mind/signal/signal.cpp
+
 # Kilo measures himself (measure/, docs/self-measurement.md): the remote's B1.
 MIND_SRCS += \
 	mind/measure/script.cpp \

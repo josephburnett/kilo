@@ -126,6 +126,8 @@ class Saver {
   bool scanned() const { return phase_ != Phase::Scan && phase_ != Phase::NoCard; }
   uint32_t boot() const { return boot_; }
   uint32_t writes() const { return writes_; }
+  // Saves that put a run's end on the card (its post-roll included): the eyes' long white flash.
+  uint32_t run_saves() const { return run_saves_; }
   uint32_t write_max_us() const { return write_max_us_; }
   uint32_t slow_writes() const { return slow_; }
   uint32_t errors() const { return errors_; }
@@ -184,6 +186,7 @@ class Saver {
   uint64_t backoff_us_ = 0;
   uint32_t failures_ = 0;
   uint32_t writes_ = 0, write_max_us_ = 0, slow_ = 0, errors_ = 0;
+  uint32_t run_saves_ = 0;
   bool file_open_ = false;
   bool safe_ = false;          // the last poll()'s: reads wait for it too
 

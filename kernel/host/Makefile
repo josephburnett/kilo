@@ -68,6 +68,8 @@ TESTS += test_power
 TESTS += test_guard
 # Kilo's sounds (sound/): the renderer, the player, the events' hooks in the Mind, SOUND over the host channel.
 TESTS += test_sound
+# What Kilo tells the owner (signal/): the eye language, its priorities over the guard, SET_EYES, the Mind's call sites.
+TESTS += test_signal
 # Kilo measures himself (measure/): the script against the Python, its poses' safety, C5 twice in the Mind.
 TESTS += test_measure
 # The state estimate and the intents (intent/): the Python reference's vectors, the tables, B6 and A7 in the Mind.

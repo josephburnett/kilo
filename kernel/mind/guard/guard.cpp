@@ -531,23 +531,8 @@ bool DistanceGuard::eyes_driven() const {
 }
 
 void DistanceGuard::eyes_step() {
+  // the colour only: the Mind's eye language (signal/signal.h) shows it, or a signal over it
   eyes_ = zone_ == Zone::Red ? Eyes::Red : zone_ == Zone::Blue ? Eyes::Blue : tired_ ? Eyes::Orange : Eyes::Green;
-  if (!eyes_driven()) {
-    eyes_sent_ = false;
-    return;
-  }
-  const Goal* g = link_.goal(KILO_MSG_SET_EYES);
-  uint8_t want[KILO_SET_EYES_LEN] = {0x3F, 0, 0, 0};  // the mask, then r, g, b
-  if (eyes_ == Eyes::Orange) {
-    want[1] = kEyeLevel;
-    want[2] = kOrangeGreen;
-  } else {
-    want[1 + (eyes_ == Eyes::Red ? 0 : eyes_ == Eyes::Green ? 1 : 2)] = kEyeLevel;
-  }
-  bool same = g != nullptr && g->len == sizeof want;
-  for (uint32_t i = 0; same && i < sizeof want; i++) same = g->payload[i] == want[i];
-  if (same) return;
-  eyes_sent_ = link_.set_goal(KILO_MSG_SET_EYES, want, sizeof want);
 }
 
 void DistanceGuard::fill(kilo_host_guard_status_t& s) const {

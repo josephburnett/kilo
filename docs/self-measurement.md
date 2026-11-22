@@ -25,21 +25,31 @@ What you need to do, in short:
 2. Battery charged (he refuses below 7.4 V, as for the rear-up).
 3. Press **C5** (he takes the calibration posture), then **C5** again
    whenever you are ready: he stands, and once he has been still for about
-   a second and a half the routine starts by itself. Any other key pressed
-   between the two C5s makes the next C5 a first press again (the
-   calibration posture). (B1 started it until 2026-11-22.)
+   a second and a half the routine starts by itself. From the second C5 on
+   his eyes **blink white slowly** (busy: hands off) until it ends. Any
+   other key pressed between the two C5s makes the next C5 a first press
+   again (the calibration posture). (B1 started it until 2026-11-22.) If
+   his eyes give **three quick purple flashes** instead, it was refused
+   (below: the battery, USB power, not still); he just stands.
 4. Watch. It is longer than before: **75 to 90 seconds**. Stop him
    whenever you like (below). Picking him up is fine: he stops and stands.
+   When it ends his eyes give **three quick green flashes** (done: it ran
+   to its end) or **three quick red flashes** (it stopped by itself: too
+   tilted, a fall, the link). Stopped by your key: the white blink just
+   ends. (The eye signals are listed in `docs/signals.md`.)
    **One thing to note while you watch**: each time a foot comes up
    (twelve times: the order is in the table below), does it visibly leave
    the floor? "Yes", "no" or "don't know" per foot is a real help: a foot
    that does not clear is the one thing the recording cannot tell from
    legs that give.
 5. On the laptop, either:
-   - by the card: switch Kilo off, card into the laptop, then
+   - by the card: wait for **one long white flash** of his eyes (a few
+     seconds after the end: the recording is saved on the card), then
+     switch Kilo off, card into the laptop, then
      `kilo card CARD --fetch` and `kilo measure fit FILE` with the
      `run-...krec` it names for the measurement (it needs saving on: a
-     kernel built with `KILO_RECORD_SAVE=1`, or `kilo record save on`);
+     kernel built with `KILO_RECORD_SAVE=1`, or `kilo record save on`;
+     without it there is no white flash and nothing on the card);
    - over the network: `kilo measure fetch --host kilo.local`.
    Write what you saw and the table it prints in
    `docs/self-measurement-results.md`.
@@ -153,7 +163,8 @@ the routine is asked to start every moment from 1.5 s on. It will not start
 at rest; he is on USB power; he is still tilted more than 10 degrees, or
 moving more than 3 degrees within a second, 6 s after the second C5
 (settling, in a hand, on a slope). A key pressed while he settles cancels
-it. While the behaviour runner (A5) runs, C5 is ignored: B6 first. The
+it. While the behaviour runner (A5) runs, C5 is ignored: B6 first. A
+refusal shows as three quick purple flashes of his eyes; the
 remote's log line says why (`kilo log --host ...`): `remote C5 (0x90,
 calibration posture): standing, measure refused: ...`.
 

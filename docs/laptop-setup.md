@@ -172,16 +172,29 @@ the card route.
 4. **Eject the card** (the file manager's eject button, or
    `udisksctl unmount -b /dev/sdX1` with the name `lsblk` showed), then
    put it back in the Pi.
-5. **Switch Kilo on and watch.** The Pi's green light (ACT) is steady while
-   it starts, then blinks slowly until Kilo's board answers. If the board
-   runs another firmware than the card's, the Pi flashes it: the green
-   light gives **two short flashes a second** for about 10 to 20 seconds
-   (an estimate: never timed on Kilo) and Kilo's board restarts, as when he
-   is switched on. Then Kilo **trills** if it worked, or **hisses** if the
-   flash failed or was refused (battery too low, or the files on the card
-   damaged). With the same firmware already on the board, nothing happens
-   and there is no sound. Afterwards the light blinks twice a second: the
-   board is talking to the Pi.
+5. **Switch Kilo on and watch his eyes** (the lights on his head; every
+   colour is in `docs/signals.md`). The Pi's green light (ACT) is steady
+   while it starts, then blinks slowly until Kilo's board answers. When it
+   answers, his eyes give **three quick green flashes** (ready) and stay
+   green. If the board runs another firmware than the card's, the Pi
+   flashes it: his eyes turn **steady white**, the Pi's green light gives
+   **two short flashes a second** for about 10 to 20 seconds (an estimate:
+   never timed on Kilo), and Kilo's board restarts, as when he is switched
+   on. Then his eyes give:
+   - **three quick green flashes**: it worked;
+   - **three quick red flashes**: the flash failed (the board still runs
+     its old firmware);
+   - **three quick purple flashes** (without the white first): refused,
+     because the battery is too low or the files on the card are damaged.
+
+   If the eyes stay white and the Pi's green light goes back to blinking
+   slowly (one second on, one off), the flash failed and the board has no
+   working firmware: go on to step 6. With the same firmware already on the
+   board, only the ready flashes come. Afterwards the Pi's light blinks
+   twice a second: the board is talking to the Pi. If a speaker is
+   connected, Kilo also trills (worked) or hisses (failed, refused). With
+   the board's firmware from before 2026-11-17 the eyes stay dark: that
+   firmware has no eyes; the Pi's green light is the only sign then.
 6. **Read what happened** whenever convenient: switch Kilo off, card into
    the laptop, then
 
@@ -253,8 +266,9 @@ strangely on Kilo. The laptop's simulated Pi is built separately and does
 not show this kind of fault.
 
 **After any new kernel, check before trusting it:** power on with Kilo
-lying on the floor. He should mew, stay lying until a key is pressed, and
-answer keys. Back in the laptop, `kilo card CARD --status` should show a
+lying on the floor. His eyes should give three quick green flashes (ready;
+a mew too if a speaker is connected) and stay green, he should stay lying
+until a key is pressed, and answer keys. Back in the laptop, `kilo card CARD --status` should show a
 saved log for that boot naming the new build.
 
 **Who holds the card holds Kilo.** Whoever has Kilo's SD card in hand can

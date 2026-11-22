@@ -153,7 +153,8 @@ keyframe: he ends sitting on his feet every time (section 7).
 - The pitch never goes past 55 degrees; the fall detector (75 degrees)
   stays armed.
 - A1 refuses to start below 7400 mV on the battery at rest (the highest
-  reading of the last 20 seconds).
+  reading of the last 20 seconds); his eyes then give three quick purple
+  flashes (`docs/signals.md`).
 
 ### Your photo: Kilo standing by itself at 54 degrees (2026-11-16)
 
@@ -690,7 +691,8 @@ top by its guard's name (`up`, `mid`, `top`).
 
 - **A1 does nothing, the log says "A1 (0x42, none): ignored"**: the switch
   is off (section 3).
-- **A1 says "refused: battery ... mV at rest"**: charge the battery (the
+- **Three purple flashes of his eyes, the log says "refused: battery ...
+  mV at rest"**: charge the battery (the
   reading at rest, not the moment after a walk, is what counts).
 - **He came down from stage 1 when you wanted stage 2**: press A1 while he
   holds (the log says `rear_up: stage 1 (of 3): A1 to go on`); a press

@@ -30,7 +30,7 @@ Copy the block for each session.
 
 Build: ...   Floor: ...   Battery at the start: ... mV   Recording saved to the card: yes / no
 
-| # | Laid on (left side / right side / back) | Try 1 | Try 2 | Try 3 | Ended (standing / on his belly / limp, meowed) | Anything strained? |
+| # | Laid on (left side / right side / back) | Try 1 | Try 2 | Try 3 | Ended (standing / on his belly / limp after red flashes) | Anything strained? |
 |---|---|---|---|---|---|---|
 | 1 | | | | | | |
 | 2 | | | | | | |

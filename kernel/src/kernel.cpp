@@ -527,9 +527,9 @@ void CKernel::BootFlash (void)
 	}
 }
 
-void CCardFlashHost::card_sound (const char *pName, const char *pWhy)
+void CCardFlashHost::card_signal (kilo::signals::Signal Signal, const char *pWhy)
 {
-	m_pMind->say (pName, pWhy, true);	// no one is connected: the owner hears how it went
+	m_pMind->signal (Signal, pWhy);	// no one is connected: the owner sees (and hears) how it went
 }
 
 // A walk the remote started in the first seconds ends before the flasher

@@ -28,7 +28,8 @@ well:
 | Ethernet | on | kept on while a cable is in (the laptop can still fetch recordings). With no cable, the PHY (the chip's cable driver) powers down and wakes by itself when a cable brings a signal; every 10 s it is fully on for 3 s, in case the laptop's port is asleep in the same way. |
 | The Pi's green LED (ACT) | as awake | off, but a short flash every 5 seconds, so that asleep does not look like dead. |
 | The flight recorder | recording | keeps recording (every TELEMETRY: the battery trace is the measurement). If saving to the card is on, it saves what it holds before he sleeps, and goes on saving while asleep. Nothing is lost by sleeping. |
-| Sound | as awake | stopped; the mew when he wakes |
+| His eyes | as awake (green) | dark, but a short dim green blink every 5 seconds (`docs/signals.md`); three quick green flashes when he wakes |
+| Sound | as awake | stopped; the mew when he wakes (only heard with a speaker connected) |
 
 The servos go off whether or not a laptop is connected. The Pi's part waits
 while one is: a laptop needs the full-speed loop.
@@ -86,7 +87,8 @@ sleeps began by lying idle.
   does: B6 stands him up. Keys that do nothing (rows 1-3, a held key, C7)
   only wake the Pi; the servos stay off, A7 still holds, so 30 seconds
   later he sleeps again. B2 (the meow) is one of those too: it wakes him,
-  and the wake's mew is what you hear (docs/sound.md).
+  and the wake's signal is what you get: his eyes' three quick green
+  flashes (and the mew, with a speaker: docs/sound.md).
 - A walk, a turn, a trick or the behaviour key (A4, B4, C4, A6, C6, A1,
   A5) first powers the servos back to REST (a trick cannot start while
   limp), then does its job. B6 and C5 go to their posture directly.
@@ -174,8 +176,9 @@ the battery itself, and the laptop reads it whenever you come back.
 **Test B: light sleep**
 
 1. Charge the battery full again. Switch Kilo on, no cable in.
-2. Press A7. After 30 seconds the green LED on the Pi goes out and
-   flashes once every 5 seconds: he is asleep.
+2. Press A7. After 30 seconds his eyes go dark and blink dim green once
+   every 5 seconds, and the green LED on the Pi goes out and flashes once
+   every 5 seconds: he is asleep.
 3. Leave him for at least 30 minutes.
 4. Plug the cable in (he stays asleep until the laptop connects), then
    the same three commands as in Test A.

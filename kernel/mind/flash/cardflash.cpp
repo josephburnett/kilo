@@ -130,10 +130,22 @@ void CardFlash::poll(bool card_free) {
       decide();
       return;
     }
-    case Step::Flashing:
+    case Step::Announce:
+      if (now - flash_us_ < kAnnounceUs) return;
+      if (!card_free || flasher_.busy()) return;  // a laptop's flash or an update came in between: wait
+      start_flash();
+      return;
+    case Step::Flashing: {
       if (flasher_.busy() || !card_free) return;
+      // A failed flash: up to kHelloWaitUs for the body's HELLO (the link asks again), so the result file
+      // says what it runs now and the eyes can show the failure (a body without firmware never answers).
+      const BodyState& b = link_.state();
+      if (ended_us_ == 0) ended_us_ = now;
+      bool hello = b.has_hello && b.hello_at_us >= flash_us_;
+      if (flasher_.status().phase == KILO_FLASH_PHASE_FAILED && !hello && now - ended_us_ < kHelloWaitUs) return;
       finish_flash();
       return;
+    }
   }
 }
 
@@ -278,7 +290,7 @@ void CardFlash::decide() {
       logf(log_, LogLevel::Warn, "boot flash check: %s, %s: NOT flashing:", body, card);
       logf(log_, LogLevel::Warn, "boot flash check: %s", why_);
       record(CardOutcome::Refused, why_);
-      say("hiss", "card flash refused");
+      tell(signals::Signal::Refused, "card flash refused");
       step_ = Step::Done;
       return;
     case CardAction::Same:
@@ -310,10 +322,18 @@ void CardFlash::decide() {
     logf(log_, LogLevel::Info, "boot flash check: %s, %s, battery %u mV: flashing", body, card, (unsigned)f.batt_mv);
   else
     logf(log_, LogLevel::Info, "boot flash check: %s, %s, no battery reading: flashing", body, card);
+  tell(signals::Signal::Flashing, "card flash");  // the eyes white, sent while the link is still ours
+  flash_us_ = clock_.now_us();
+  step_ = Step::Announce;
+}
+
+// kAnnounceUs after Flashing: the walk stopped, then the flasher takes the UART.
+void CardFlash::start_flash() {
   if (host_ != nullptr) host_->card_before_flash();
   flash_us_ = clock_.now_us();
   if (!flasher_.start(image_, false)) {  // poll() checked it is not busy: not expected
     logf(log_, LogLevel::Warn, "boot flash check: the flasher is busy: not flashing");
+    tell(signals::Signal::Failed, "card flash not started");
     image_.clear();
     step_ = Step::Done;
     return;
@@ -327,12 +347,12 @@ void CardFlash::finish_flash() {
     format(why_, sizeof why_, "flashed build %08x; the body's HELLO after it reports build %08x reset %s",
            (unsigned)s.build, (unsigned)s.fw_build, reset_cause_name(s.reset_cause));
     record(CardOutcome::Flashed, why_);
-    say("trill", "card flash done");
+    tell(signals::Signal::Done, "card flash done");
   } else {
     format(why_, sizeof why_, "the flash FAILED: %s (STK500 command %02x, attempt %u of %u)", flash_error_name(s.error),
            (unsigned)s.stk_cmd, (unsigned)s.attempt, (unsigned)Flasher::kAttempts);
     record(CardOutcome::Failed, why_);
-    say("hiss", "card flash failed");
+    tell(signals::Signal::Failed, "card flash failed");
   }
   image_.clear();
   step_ = Step::Done;
@@ -440,8 +460,8 @@ bool CardFlash::write_result() {
   return card_.sync() == KernelStore::Result::Ok;
 }
 
-void CardFlash::say(const char* sound, const char* why) {
-  if (host_ != nullptr) host_->card_sound(sound, why);
+void CardFlash::tell(signals::Signal s, const char* why) {
+  if (host_ != nullptr) host_->card_signal(s, why);
 }
 
 }  // namespace kilo

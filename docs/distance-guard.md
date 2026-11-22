@@ -5,7 +5,9 @@ the eyes, and the module has six small RGB lights (WS2812) around them.
 The distance guard uses the range so that Kilo does not walk into a wall
 and reacts to a hand in front of his face, and the eyes show what it sees:
 green clear (or nothing seen), blue too close, red very close, dim orange
-clear but the battery is low ("Low battery: orange" below).
+clear but the battery is low ("Low battery: orange" below). "Hisses" in
+the tables below is heard only once a speaker is connected (none is, as
+of 2026-11-22: `docs/sound.md`); the red eyes show it either way.
 
 The code is `kernel/mind/guard/guard.h` (the thresholds are all at its top)
 and `guard.cpp`; the mind wires it in (`kernel/mind/mind.cpp`).
@@ -51,7 +53,9 @@ the others listed below) is refused while something is closer than a
 forward walk stops for (20 cm, and once it was that close, until it is
 more than 28 cm away). The log says `remote A4 (0x68, trot): refused
 (distance guard 150 mm ahead, a forward walk needs 200 (clear above 280);
-turn, back up or B6)`. Turning and backing up work.
+turn, back up or B6)`. Turning and backing up work. The eyes say it with
+three quick purple flashes (refused) once they are green; while they are
+blue or red, that colour is the answer.
 
 How fast: in the host test (`kernel/host/tests/test_guard.cpp`, a hand put
 in front of him at 180 or 100 mm) the guard acts 0.10 to 0.14 s after the
@@ -297,6 +301,14 @@ socket G4; the legacy firmware's `RgbUltrasonic(6, 7)` in
 The new body firmware drives them from the mind's `SET_EYES`
 (`body/src/hal/eyes.cpp`): green 0x30, blue 0x30 or red 0x30 on all six,
 or for orange red 0x30 with green 0x10.
+
+The eyes also say other things: ready, busy, done, refused, failed, light
+sleep (`docs/signals.md`, the one table of every colour and flash). The
+guard's blue and red win over all of them, also while he walks and in
+the middle of a flash: what is in front of his face always shows. A flash
+that comes while the eyes are blue or red waits until they are green
+again (at most 3 seconds). The guard only names its colour; the mind's
+eye language (`kernel/mind/signal/signal.h`) sends it.
 
 What it costs the body: 124 bytes of program memory, no RAM (the body has
 3 bytes of RAM left, so it stores nothing: every 5 Hz refresh of the colour

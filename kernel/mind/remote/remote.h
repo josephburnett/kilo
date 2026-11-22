@@ -230,6 +230,8 @@ class RemoteControl {
   void key_seen(const Key& key);
   void poll();
   bool busy() const { return phase_ != Phase::Idle || n_ > 0; }
+  // The second C5's stand: waiting for him to be still before the self-measurement starts (the eyes: busy).
+  bool measure_pending() const { return phase_ == Phase::MeasureStand; }
 
   const char* pattern() const { return pattern_->name; }
   int level() const { return level_; }

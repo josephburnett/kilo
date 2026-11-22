@@ -941,8 +941,10 @@ second after a reset) on the body link's UART, resetting it with GPIO4.
 4. **Check**: back at the link's baud, the new firmware's HELLO must
    report the image's build and the reset cause FLASHED. Through the
    network, `kilo flash` prints it (`verified: HELLO build 3d441ec0 reset
-   FLASHED`); from the card, `body-result.txt` records it and Kilo trills
-   (or hisses on a failure or a refusal).
+   FLASHED`); from the card, `body-result.txt` records it and Kilo's eyes
+   give three quick green flashes (three red on a failure, three purple on
+   a refusal; `docs/signals.md`), with a trill or a hiss if a speaker is
+   connected.
 
 **From the laptop**, `kilo flash --host IP [--persist]`: `HostServer`
 fills a 32 KB image from `FLASH_BEGIN`/`FLASH_DATA`, starts the flasher at
@@ -1008,10 +1010,17 @@ log:
 ```
 
 The mind reads back only `outcome:` and `image:`; `kilo card PATH --status`
-prints the rest. The sounds tell someone with no laptop how it went:
-**trill** after a good flash, **hiss** after a failed one or a refusal,
-nothing for same or not retried (the player is paused while the flasher has
-the UART, so nothing plays during the flash). A card that cannot be written
+prints the rest. The eyes tell someone with no laptop how it went
+(`docs/signals.md`): **steady white** from a sixth of a second before the
+flasher takes the UART (`CardFlash::kAnnounceUs`, so the colour reaches
+the body; the body cannot drive its lights while it is reprogrammed, and
+they keep the white), then **three green flashes** after a good flash,
+**three red** after a failed one (sent once the body's HELLO comes again,
+or 3 s after the flasher ended: a body with no firmware left keeps the
+white), **three purple** after a refusal, nothing for same or not retried.
+With a speaker connected (none is, as of 2026-11-22) the same moments
+play a **trill** or a **hiss** (the player is paused while the flasher
+has the UART, so nothing plays during the flash). A card that cannot be written
 (write-protected) is logged (`boot flash check: body-result.txt is NOT on
 the card`) and the flash happens anyway. The battery rule is the mind's
 own: the network flash path checks no battery; neither needs the servos
@@ -1374,7 +1383,8 @@ mount and the 31 KB read take (the log lines), FatFs writing body.bin and
 body.json and the laptop then reading them; the boot flash check with a
 matching build, another build and no HELLO (never run on the Pi at all),
 its `body-result.txt` written through FatFs and read back by `kilo card
---status` on a laptop, the trill and hiss after it, the battery refusal
+--status` on a laptop, the eyes' white and flashes after it (and the trill
+and hiss with a speaker), the battery refusal
 against a real reading, `kilo card` on a real card in a laptop's reader;
 `--persist`; the LED's double flash; the USB scan waiting for the go-ahead
 (`pl011` build). Kernel
