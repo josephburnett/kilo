@@ -2,14 +2,14 @@
 
 Kilo's "eyes" are the six small coloured lights around the distance
 sensor on his head. They are how he tells you what is going on: that he
-is ready, busy, done, or that something did not work.
+is ready, busy, done, or that something did not work. This page is the
+one place where every colour and flash is listed; the other documents
+point here.
 
 **Ready is the one to know: after switching him on his eyes stay dark,
 and when they turn steady green he is ready.** Ready means his board
 answers the Pi, any reprogramming of his board from the SD card is over,
-and the remote's keys are acted on. This page is the one
-place where every colour and flash is listed; the other documents point
-here.
+and the remote's keys are acted on.
 
 He can also play a sound for most of these (a mew, a trill, a hiss), but
 **the speaker is not wired up** (the owner's report, 2026-11-22), so the
