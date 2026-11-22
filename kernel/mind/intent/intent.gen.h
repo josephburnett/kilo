@@ -21,22 +21,25 @@ constexpr int kRowCount = 3;
 // The upright states as the body model predicts them (TELEMETRY's a16) and their tolerance.
 extern const Row kRows[kRowCount];
 
-constexpr int kMoveCount = 4;
-// The moves planned and checked from the model (mind/kilo/intent/moves/), as tricks.
-extern const tricks::Trick kMoves[4];
+constexpr int kMoveCount = 6;
+// The moves planned and checked from the model (mind/kilo/intent/moves/), then the righting
+// experiment's (mind/kilo/intent/righting/), as tricks.
+extern const tricks::Trick kMoves[6];
 // What Python computes for each kMoves entry, for the tests (as tricks::TrickCheck).
 struct MoveCheck {
   uint16_t crc16;
   uint8_t trick_id;
   uint16_t total_ticks;
 };
-extern const MoveCheck kMoveCheck[4];
+extern const MoveCheck kMoveCheck[6];
 
-constexpr int kEdgeCount = 11;
+constexpr int kEdgeCount = 14;
 extern const Edge kEdges[kEdgeCount];
 // The first step from a state (row, State order) to a goal (column: Standing, Sitting, Resting):
 // an index into kEdges, -1 for none (already there, moving, or no way).
 extern const int8_t kNext[kStates][kGoals];
+// The same with the righting experiment (Intent::set_righting): the Right edges for the WaitReflex ones.
+extern const int8_t kNextRighting[kStates][kGoals];
 
 }  // namespace intent
 }  // namespace kilo

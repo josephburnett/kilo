@@ -61,8 +61,9 @@ void test_key_table(uint8_t stage) {
     if (k.kind == Kind::Posture) CHECKF(posture_code(k.name) >= 0, "posture %s", k.name);
     if (k.kind == Kind::Gait) CHECKF(planner::find_pattern(k.name) != nullptr, "gait %s", k.name);
     if (k.kind == Kind::Trick) CHECKF(tricks::find_trick(k.name) != nullptr, "trick %s", k.name);
-    // rows 1-3 do nothing, but A1 (the rear-up) and B2 (the meow)
-    CHECKF((k.grid[1] <= '3' && std::strcmp(k.grid, "A1") != 0 && std::strcmp(k.grid, "B2") != 0) ==
+    // rows 1-3 do nothing, but A1 (the rear-up), B1 (the righting experiment) and B2 (the meow)
+    CHECKF((k.grid[1] <= '3' && std::strcmp(k.grid, "A1") != 0 && std::strcmp(k.grid, "B1") != 0 &&
+            std::strcmp(k.grid, "B2") != 0) ==
                (k.kind == Kind::Ignore),
            "%s", k.grid);
   }
@@ -80,7 +81,7 @@ void test_key_table(uint8_t stage) {
               {"A1", rear_up ? Kind::Trick : Kind::Ignore, kStageTrick[stage]},  // A2 until 2026-11-22
               {"B2", Kind::Sound, "meow"},  // the rear-up key until 2026-11-17; a meow since 2026-11-19 (docs/sound.md)
               {"A2", Kind::Ignore, ""},     // the rear-up until 2026-11-22
-              {"B1", Kind::Ignore, ""}};    // the self-measurement until 2026-11-22 (now C5 twice)
+              {"B1", Kind::Righting, "righting"}};  // the righting experiment (the self-measurement until 2026-11-22, now C5 twice)
   for (const auto& w : want) {
     const Key* k = action_for(cmd_of(w.grid));
     CHECKF(k != nullptr && k->kind == w.kind && std::strcmp(k->name, w.name) == 0, "%s", w.grid);

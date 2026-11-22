@@ -111,7 +111,9 @@ def test_kin_lying_has_a_head_that_moves_and_hips():
     i = kin.labels.index("muzzle_l")
     j = kin.labels.index("ear_l")
     P2, c2, _ = kin.state(dict(q, head_pan=60.0))
-    assert P2[i][1] - P[i][1] > 20.0 and c2 == pytest.approx(c)       # the muzzle swings left; the mass stays put
+    assert P2[i][1] - P[i][1] > 20.0                                  # the muzzle swings left...
+    assert 0.3 < c2[1] - c[1] < 3.0 and c2[0] < c[0]                  # ...and the head's mass with it
+    assert kin.internal and not D.Kin(D.FITTED).__dict__.get("internal", False)
     P3, _, _ = kin.state(dict(q, head_tilt=-70.0))
     assert P3[i][2] < P[i][2] - 20.0 and P3[j][0] > P[j][0]          # nose down, ears forward
     # the feet, knees and tail are dynamics.Kin's own
@@ -194,3 +196,50 @@ def test_the_verdict_today():
     # the leg servos' load stays far under the stall estimate (3 kg cm)
     assert max(r.torque for r in rs) < 2.0
     assert "upright" in R.table(rs)
+
+
+def test_the_phases_today():
+    """docs/righting-results.md, pinned (2026-11-22): with the fitted numbers rc's first frame leaves
+    him on his side where Kilo rolled onto his back, and the model gets none of the four up."""
+    rows = R.phases()
+    assert len(rows) == 6
+    sides = [r for r in rows if abs(r["kilo"][0]) > 150 and "side" in next(
+        t["start_lying"] for f in R.fixture()["falls"] for t in f["tries"]
+        if f"{f['file'].replace('rec-card-', '').replace('.krec', '')}@{f['uptime_s']:.0f}s try {t['n']}" == r["try"])]
+    assert len(sides) == 3                                     # Kilo: from a side onto his back, 3 of 3
+    assert all(abs(r["model"][0]) < 140 for r in sides)       # the model: still on his side
+    assert "Kilo after frame" in R.phases_table(rows)
+
+
+# ---- the righting experiment (kilo.intent.righting) -----------------------------------------------
+def test_the_righting_moves_are_what_the_report_says():
+    from kilo.intent import righting as RT
+    from kilo.tricks.model import Posture
+    rep = RT.load_report()
+    assert set(rep["moves"]) == set(RT.NAMES)
+    for name in RT.NAMES:
+        t = RT.load_move(name).validate()
+        r = rep["moves"][name]
+        assert t.name == "intent_" + name and t.fall_ok and t.end_posture == Posture.REST and t.roll_max == 0
+        assert r["shipped"] and r["ok"] >= RT.SHIP_FRACTION * r["runs"] and r["max_torque_kg_cm"] <= RT.TORQUE_MAX
+        assert t.to_json() == RT.build(name, rep["moves"]).to_json()   # the files are this code's
+        fn = RT.MOVES[name][0]
+        kin = R.KinLying(D.FITTED)
+        for frame, js, _, _ in fn():
+            assert js["head_pan"] == 0.0 and js["tail"] == 0.0     # their signs are not known: left alone
+            if frame != "rest":                                    # (REST is the body's own: its left front knee clamps)
+                assert kin.clamp(js) == pytest.approx(js, abs=1.0)  # inside every joint's reach
+    side = rep["moves"]["righting_side"]
+    assert side["ok"] >= 85 and side["runs"] == 95
+
+
+def test_no_single_pose_rolls_him_over_statically():
+    """The reasoning's step 1: on his side, rolled toward his back, he lies in a dip of the centre of
+    mass's height whatever the legs do (a few poses here; --static tries 3675)."""
+    from kilo.intent import righting as RT
+    for js in (RT.side_move()[0][1], RT.side_move()[1][1], dict(D.STAND)):
+        u = RT.profile(js)
+        assert RT.downhill(u, -120) < -75                         # still on his side or his back
+    # the kick and throw together in the dynamics: onto his belly from his right side
+    end, torque, _ = RT.play(RT.side_move(), D.STAND, -120.0, D.FITTED, R.Lying())
+    assert abs(end) < 50 and torque < RT.TORQUE_MAX

@@ -199,6 +199,7 @@ boolean CKernel::Initialize (void)
 	Config.behaviour = KILO_BEHAVIOUR != 0;
 	Config.rear_up_key = (uint8_t) KILO_REAR_UP;
 	Config.intent = KILO_INTENT != 0;
+	Config.righting = KILO_RIGHTING != 0;
 	Config.balance_kp = BalanceKp;
 	// The behaviour RNG's seed: 32 bits, so that the logged seed (the
 	// runner logs it as %u) replays the same choices.

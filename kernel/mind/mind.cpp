@@ -42,6 +42,7 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
       measure_hook_(*this),
       intent_(link_, clock, log_, player_, walker_, estimator_),
       posture_hook_(*this),
+      righting_hook_(*this),
       sleep_(link_, walker_, clock, log_),
       guard_(link_, walker_, clock, log_),
       alive_(link_, player_, log_, cfg.seed, personality(cfg)),
@@ -58,6 +59,8 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
   measure_.set_observer(this);
   intent_.set_host(this);
   if (cfg.intent) remote_.set_posture_hook(&posture_hook_);  // B6, A7: be(STANDING), be(RESTING)
+  intent_.set_righting(cfg.righting);
+  remote_.set_righting(&righting_hook_);
   recorder_.set_metrics(&metrics_);
   host_.attach_metrics(*this);
   host_.attach_guard(guard_);
@@ -141,6 +144,9 @@ void Mind::start() {
        "state estimate on; intents %s (docs/intent.md)",
        cfg_.intent ? "ON: stand, sit and rest are moves planned from the model (B6, A7, the behaviour, the guard)"
                    : "off: postures change as before (KILO_INTENT=1 turns them on)");
+  logf(log_, LogLevel::Info, "righting experiment %s (docs/righting.md)",
+       cfg_.righting ? "ON: B1 rights him from a side or his back; the body's rc is off (FALL_RC 0)"
+                     : "off: the body's fall reflex rights him (KILO_RIGHTING=1 turns it on)");
   logf(log_, LogLevel::Info,
        "distance guard %s (walking forward BLUE from %d mm, RED below %d mm; otherwise BLUE below %d, RED below %d; "
        "docs/distance-guard.md)",
@@ -191,6 +197,7 @@ void Mind::poll() {
   // the command slot's answer, to its owner, before anyone sends another
   player_.collect();
   stats(now);
+  fall_rc_step();
   walker_.poll();
   if (measure_.active() && host_controls()) measure_.stop("a laptop client taking the body");
   measure_.poll();
@@ -343,6 +350,7 @@ void Mind::on_connection(bool connected, bool alive) {
 }
 
 void Mind::on_hello(const kilo_hello_t& hello, bool solicited) {
+  fall_rc_off_ = false;  // a body that (re)booted has FALL_RC 1 again: set it once more
   if (!hello_said_) {  // the first HELLO after boot: ready
     hello_said_ = true;
     say("mew", "ready", true);
@@ -380,6 +388,48 @@ void Mind::estimate_step(const kilo_telemetry_t& t) {
 }
 
 void Mind::intent_moves() { percepts_.notify_self_motion(seconds(this), kPostureMoveS); }
+
+void Mind::intent_gave_up_down() { say("meow", "righting gave up", true); }
+
+// ---- the righting experiment (docs/righting.md) --------------------------------------------
+
+// With it on, the body's param FALL_RC goes to 0 (live, not persisted) after every HELLO: its fall reflex
+// then never plays rc, and takes the mind's FALL_OK righting move instead.
+void Mind::fall_rc_step() {
+  if (!cfg_.righting) return;
+  const Request& r = link_.req();
+  if (fall_rc_asked_ && !(r.type == KILO_MSG_PARAM_SET && r.seq == fall_rc_seq_ && r.state == RequestState::Waiting)) {
+    fall_rc_asked_ = false;
+    bool ok = r.type == KILO_MSG_PARAM_SET && r.seq == fall_rc_seq_ && r.state == RequestState::Done &&
+              r.status == KILO_ACK_STATUS_OK;
+    fall_rc_off_ = ok;
+    logf(log_, ok ? LogLevel::Info : LogLevel::Warn, "righting: the body's fall reflex %s",
+         ok ? "will not play rc (FALL_RC 0): B1 rights him" : "did not take FALL_RC 0 (an older body?): B1 is refused");
+  }
+  const BodyState& b = link_.state();
+  if (fall_rc_off_ || fall_rc_asked_ || !b.has_hello || b.proto_ok != 1 || b.hello.proto_minor < 1) return;
+  kilo_param_set_t p = {(uint8_t)KILO_PARAM_FALL_RC, 0, 0};
+  if (link_.request(KILO_MSG_PARAM_SET, (const uint8_t*)&p, sizeof p)) {
+    fall_rc_asked_ = true;
+    fall_rc_seq_ = link_.req().seq;
+  }
+}
+
+const char* Mind::RightingHookImpl::start() {
+  Mind& m = m_;
+  if (!m.cfg_.righting) return "the righting experiment is not built in (KILO_RIGHTING=1, docs/righting.md)";
+  const BodyState& b = m.link_.state();
+  if (b.has_hello && b.hello.proto_minor < 1) return "the body firmware is older than protocol 2.1 (no FALL_RC): flash it";
+  if (!m.fall_rc_off_) return "the body has not taken FALL_RC 0 yet";
+  intent::State st = m.estimator_.state();
+  if (st != intent::State::OnLeftSide && st != intent::State::OnRightSide && st != intent::State::OnBack) {
+    format(why_, sizeof why_, "he is %s: B1 rights him only from a side or his back", intent::state_name(st));
+    return why_;
+  }
+  const char* why = nullptr;
+  if (!m.intent_.be(intent::State::Standing, -1, "remote B1", &why)) return why != nullptr ? why : "refused";
+  return nullptr;
+}
 
 // A posture by name (mind.h): an intent when they are on and the name is one of the three states.
 bool Mind::posture(const char* name, int8_t balance, const char* who) {
@@ -525,6 +575,8 @@ void Mind::ir_key(const kilo_event_t& e) {
   metrics_.keys_acted++;
   guard_.key_took_over();  // a key the guard lets through overrides what it was doing (it keeps holding)
   recorder_.key(text);  // into a trick or walk run: which key stopped it
+  if (intent_.active() && intent_.righting() && intent::fallen(estimator_.state()) && key->kind != remote::Kind::Righting)
+    intent_.cancel("a key was pressed while righting");  // any other key stops the experiment
   remote_.perform(*key, arg);
 }
 

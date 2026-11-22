@@ -34,13 +34,13 @@ void test_remote_through_the_mind() {
   CHECK(r.log.has("remote A7 (0xA2, sleep) repeat: ignored") && r.log.has("remote ? (0x45): ignored"));
   CHECK(r.log.has("remote B3 (0x18, none): ignored (no action on this key)") &&
         r.log.has("remote A2 (0x10, none): ignored (no action on this key)"));
-  // A1 with the rear-up key off (the default, MindConfig::rear_up_key): like rows 1-3; B1 too (kept
-  // for the righting experiment)
+  // A1 with the rear-up key off (the default, MindConfig::rear_up_key): like rows 1-3; B1 without the
+  // righting experiment (MindConfig::righting): refused, saying so
   r.body.event(KILO_EVENT_IR_KEY, 0x42);
   r.body.event(KILO_EVENT_IR_KEY, 0x4A);
   r.run_ms(40);
   CHECK(r.log.has("remote A1 (0x42, none): ignored (no action on this key)") && r.body.count(KILO_MSG_TRICK_BEGIN) == 0);
-  CHECK(r.log.has("remote B1 (0x4A, none): ignored (no action on this key)"));
+  CHECK(r.log.has("remote B1 (0x4A, right himself): righting refused: the righting experiment is not built in"));
   r.body.event(KILO_EVENT_IR_KEY, 0xA2);  // A7: rest
   r.run_ms(40);
   CHECK(r.posture_goal() == KILO_POSTURE_REST);

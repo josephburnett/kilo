@@ -360,6 +360,42 @@ static void test_gating_and_tricks() {
   CHECK(body_trick_play(b, stale) == KILO_ACK_STATUS_STALE);
 }
 
+// FALL_RC 0 (the mind's righting, docs/righting.md): no rc, FAILED once still;
+// a FALL_OK trick takes the joints from the reflex, any other is refused, and
+// with FALL_RC 1 even a FALL_OK one is.
+static void test_fall_rc_off() {
+  reset();
+  stand();
+  CHECK(param_ok(KILO_PARAM_FALL_RC, 0) && !param_ok(KILO_PARAM_FALL_RC, 2) && PARAM(FALL_RC) == 1);
+  CHECK(upload_trick(9, 0xFF07, KILO_TRICK_FLAGS_FALL_OK, 20) == KILO_ACK_STATUS_OK);
+  att(-110, 0, 0);
+  tick(FALL_SAMPLES + FALL_STILL_TICKS);
+  CHECK(b.fall.state == FS_RC);  // the default: rc
+  CHECK(play(9) == KILO_ACK_STATUS_REFUSED_FALLEN);
+  reset();
+  stand();
+  PARAM(FALL_RC) = 0;
+  CHECK(upload_trick(9, 0xFF07, KILO_TRICK_FLAGS_FALL_OK, 20) == KILO_ACK_STATUS_OK);
+  att(-110, 0, 0);
+  tick(FALL_SAMPLES);
+  CHECK(b.fall.state == FS_FALLEN && count(EV_FELL, -1) == 1);
+  tick(FALL_STILL_TICKS);
+  CHECK(b.fall.state == FS_FAILED && b.fall.tries == 0 && count(EV_RECOVERY_FAILED) == 1);
+  CHECK(arbiter_idle_posture(b.arb) == POSTURE_REST && body_mode(b) == KILO_MODE_FALLEN);
+  CHECK(upload_trick(8, 0xFF07, 0, 20) == KILO_ACK_STATUS_OK);
+  CHECK(play(8) == KILO_ACK_STATUS_REFUSED_FALLEN);  // not FALL_OK
+  CHECK(upload_trick(9, 0xFF07, KILO_TRICK_FLAGS_FALL_OK, 20) == KILO_ACK_STATUS_OK);
+  tick(5);
+  CHECK(play(9) == KILO_ACK_STATUS_OK);
+  CHECK(b.fall.state == FS_UPRIGHT && b.holder == RH_NONE && !b.arb.reflex_active && b.kf.run);
+  tick(100);  // still on his side: no fall while it plays
+  CHECK(b.kf.run && count(EV_FELL) == 1);
+  body_trick_stop(b, 0);
+  tick(FALL_SAMPLES + FALL_STILL_TICKS + 30);  // he is still down once it ends: the reflex, FAILED again
+  CHECK(count(EV_FELL) == 2 && b.fall.state == FS_FAILED && count(EV_RECOVERY_FAILED) == 2);
+  PARAM(FALL_RC) = 1;
+}
+
 // Goals: old epoch STALE; current epoch FALLEN except LIMP, which ends the
 // reflex; after RECOVERED, goals with the new epoch work.
 static void test_goals_while_fallen() {
@@ -542,6 +578,7 @@ int main() {
   test_retries_and_failure();
   test_pitch_fall();
   test_gating_and_tricks();
+  test_fall_rc_off();
   test_goals_while_fallen();
   test_watchdog_takes_over();
   test_head();

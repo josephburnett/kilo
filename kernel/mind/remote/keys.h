@@ -15,14 +15,18 @@
 //   A1 0x42 rear up (trick rear_up, rear_up_2 or rear_up_3 by the stage;
 //           again: down), only with the rear-up key on (below); A2 until
 //           2026-11-22, B2 until 2026-11-17
+//   B1 0x4A the righting experiment (Kind::Righting, docs/righting.md):
+//           lying on a side or his back, he rights himself by moves planned
+//           on the body model; refused (a log line) when he is not lying
+//           there or the mind is built without KILO_RIGHTING=1; 2026-11-22
 //   A3 0x30, B3 0x18, C3 0x7A, A2 0x10, C2 0x5A,
-//   B1 0x4A, C1 0x52: nothing (logged as ignored)
+//   C1 0x52: nothing (logged as ignored)
 //
 // C5 pressed twice with no key between: the calibration posture, then the
 // self-measurement (remote.h; docs/self-measurement.md).
 //
 // Row 1 holds the owner's experiments, one a key, the owner calling A1 "A"
-// and B1 "B": A1 the rear-up, B1 kept for the righting experiment, C1 free.
+// and B1 "B": A1 the rear-up, B1 the righting experiment, C1 free.
 //
 // The rear-up key is OFF unless switched on (docs/rear-up-trick.md, the
 // switch): until the owner has done the staged, hand-supported trials,
@@ -43,7 +47,7 @@ namespace remote {
 
 constexpr uint16_t kRepeat = 0x100;
 
-enum class Kind : uint8_t { Ignore, Posture, Gait, Speed, Turn, Freeze, Behaviour, Trick, Sound };
+enum class Kind : uint8_t { Ignore, Posture, Gait, Speed, Turn, Freeze, Behaviour, Trick, Sound, Righting };
 
 struct Key {
   uint8_t command;     // NEC command byte

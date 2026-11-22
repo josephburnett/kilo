@@ -54,6 +54,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import zlib
 from collections import deque
 from pathlib import Path
 from typing import Any, Callable
@@ -76,7 +77,9 @@ def build_harness(out: Path | str | None = None) -> Path:
     """Build body/test/core_harness.cpp (cached: rebuilt when a body source
     is newer than the binary). Needs g++/gcc. Returns the binary's path."""
     if out is None:
-        out = Path(tempfile.gettempdir()) / f"kilo-core-harness-{os.getuid()}" / "core_harness"
+        # one per checkout: worktrees side by side must not run each other's body
+        tag = zlib.crc32(str(BODY).encode()) & 0xFFFFFFFF
+        out = Path(tempfile.gettempdir()) / f"kilo-core-harness-{os.getuid()}-{tag:08x}" / "core_harness"
     out = Path(out)
     srcs = [*BODY.glob("src/core/*"), *BODY.glob("src/proto/*"), *BODY.glob("test/*.cpp"),
             *BODY.glob("test/*.h"), BUILD_SCRIPT]

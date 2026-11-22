@@ -58,7 +58,7 @@ def test_hello_is_protocol_2_and_feet_are_never_acked():
     vb = VirtualBody(None)
     vb._boot()
     hello = [P.decode_payload(t, p) for t, _, p in vb.take_sent() if t == M.HELLO][0]
-    assert (hello.proto_major, hello.proto_minor) == (2, 0)
+    assert (hello.proto_major, hello.proto_minor) == (2, 1)  # 2.1: FALL_RC (docs/righting.md)
     b = Body()
     out = b.feet(3)
     assert out == []  # no ACK, no event

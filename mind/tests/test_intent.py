@@ -212,8 +212,25 @@ def test_graph_first_steps():
                 cur = es[G.next_edge(cur, g, es)].dst
                 n += 1
                 assert n <= 3
-    # the righting move's slot is one entry
-    assert G.RIGHTING == (G.Kind.WAIT_REFLEX, "", S.STANDING)
+    # without the righting experiment the fallen states wait for the body's reflex
+    assert G.REFLEX == (G.Kind.WAIT_REFLEX, "", S.STANDING)
+    # with it: a side by the side move (mirrored from the left) to RESTING, the back onto the right side,
+    # nose or tail down nothing; the rest of the table is the same
+    for g in G.GOALS:
+        r = lambda s: es[G.next_edge(s, g, es, righting=True)]  # noqa: E731
+        assert (r(S.ON_RIGHT_SIDE).kind, r(S.ON_RIGHT_SIDE).move, r(S.ON_RIGHT_SIDE).mirror) == (G.Kind.RIGHT, "righting_side", False)
+        assert (r(S.ON_LEFT_SIDE).move, r(S.ON_LEFT_SIDE).mirror, r(S.ON_LEFT_SIDE).dst) == ("righting_side", True, S.RESTING)
+        assert (r(S.ON_BACK).move, r(S.ON_BACK).dst) == ("righting_back", S.ON_RIGHT_SIDE)
+        assert G.next_edge(S.ON_END, g, es, righting=True) == -1
+        for s in S:
+            if s not in E.FALLEN:
+                assert G.next_edge(s, g, es, righting=True) == G.next_edge(s, g, es)
+        for s in (S.ON_RIGHT_SIDE, S.ON_LEFT_SIDE, S.ON_BACK):  # up within four steps
+            cur, n = s, 0
+            while cur != g:
+                cur = es[G.next_edge(cur, g, es, righting=True)].dst
+                n += 1
+                assert n <= 4
 
 
 def test_without_shipped_moves_the_bodys_own_change_is_the_fallback():

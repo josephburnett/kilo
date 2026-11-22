@@ -31,7 +31,7 @@ extern "C" {
 
 /* ---- Versions and link constants ---- */
 #define KILO_PROTO_MAJOR 2u
-#define KILO_PROTO_MINOR 0u
+#define KILO_PROTO_MINOR 1u
 #define KILO_BAUD 250000UL
 #define KILO_MAX_PAYLOAD 60u
 #define KILO_HEADER_BYTES 2u
@@ -826,7 +826,7 @@ KILO_STATIC_ASSERT(sizeof(kilo_trick_commit_t) == 3, kilo_sa_trick_commit_size);
 KILO_STATIC_ASSERT(offsetof(kilo_trick_commit_t, trick_id) == 0, kilo_sa_trick_commit_trick_id);
 KILO_STATIC_ASSERT(offsetof(kilo_trick_commit_t, crc16) == 1, kilo_sa_trick_commit_crc16);
 
-/* 0x23 TRICK_PLAY: command, epoch. Play the committed trick with speed (64 = 1x; scales dur and hold) and mirror (L/R swap, pan, tail and expected roll negated). STALE on an epoch mismatch, NO_TRICK if trick_id is not committed, BAD_ARG for speed < 16 or unknown flags, BUSY while a trick plays, under a reflex, or in LIMP or CALIB, REFUSED_LOW_BATT, UNCALIBRATED. Ends with EVENT TRICK_DONE. */
+/* 0x23 TRICK_PLAY: command, epoch. Play the committed trick with speed (64 = 1x; scales dur and hold) and mirror (L/R swap, pan, tail and expected roll negated). STALE on an epoch mismatch, NO_TRICK if trick_id is not committed, BAD_ARG for speed < 16 or unknown flags, BUSY while a trick plays, under a reflex, or in LIMP or CALIB, REFUSED_FALLEN while the fall reflex holds the joints (but with param FALL_RC 0 a FALL_OK trick takes them from it), REFUSED_LOW_BATT, UNCALIBRATED. Ends with EVENT TRICK_DONE. */
 #define KILO_TRICK_PLAY_LEN 4u
 typedef struct KILO_PACKED kilo_trick_play_s {
     uint8_t epoch;
@@ -1354,8 +1354,9 @@ enum kilo_param_id {
     KILO_PARAM_LEG_W_MM = 16, /* mm: Left-right foot track, foot centre to foot centre (roll lever arm). Kilo: 65 (measured 2026-10-11). */
     KILO_PARAM_LEG_SH_ZERO_DEG = 17, /* deg: Upper link angle from straight down (+ = foot forward) at joint angle 0 (the calibration posture). Petoi: upper leg vertical = 0; verify on Kilo. */
     KILO_PARAM_LEG_KN_ZERO_DEG = 18, /* deg: Knee bend relative to the upper link at joint angle 0 (the calibration posture). Petoi: lower leg at 90 deg; verify on Kilo. */
+    KILO_PARAM_FALL_RC = 19, /* bool: 1: after a roll fall the fall reflex plays rc (up to three tries). 0: it never does: once he is still, FAILED at once (REST, EVENT RECOVERY_FAILED, LIMP), and while the reflex holds the joints TRICK_PLAY of a FALL_OK trick is accepted and ends the reflex (the mind's righting, docs/righting.md). Set live, never persisted, by a mind built with KILO_RIGHTING=1. */
 };
-#define KILO_PARAM_COUNT 19u
+#define KILO_PARAM_COUNT 20u
 #define KILO_PARAM_WD_STOP_MS_DEFAULT 500
 #define KILO_PARAM_WD_STOP_MS_MIN 100
 #define KILO_PARAM_WD_STOP_MS_MAX 5000
@@ -1413,6 +1414,9 @@ enum kilo_param_id {
 #define KILO_PARAM_LEG_KN_ZERO_DEG_DEFAULT 90
 #define KILO_PARAM_LEG_KN_ZERO_DEG_MIN 30
 #define KILO_PARAM_LEG_KN_ZERO_DEG_MAX 150
+#define KILO_PARAM_FALL_RC_DEFAULT 1
+#define KILO_PARAM_FALL_RC_MIN 0
+#define KILO_PARAM_FALL_RC_MAX 1
 /* Initializer for an int16_t [KILO_PARAM_COUNT][3] table of {min, max, default}, in id order. */
 #define KILO_PARAM_TABLE_INIT { \
     {100, 5000, 500}, /* WD_STOP_MS */ \
@@ -1434,9 +1438,10 @@ enum kilo_param_id {
     {30, 150, 65}, /* LEG_W_MM */ \
     {-45, 45, 0}, /* LEG_SH_ZERO_DEG */ \
     {30, 150, 90}, /* LEG_KN_ZERO_DEG */ \
+    {0, 1, 1}, /* FALL_RC */ \
 }
 /* Initializer for an int16_t [KILO_PARAM_COUNT] array of defaults, in id order. */
-#define KILO_PARAM_DEFAULTS_INIT { 500, 1500, 10, 10, 25, 160, 6500, 6700, 6200, 6600, 6000, 2, 4, 45, 50, 123, 65, 0, 90 }
+#define KILO_PARAM_DEFAULTS_INIT { 500, 1500, 10, 10, 25, 160, 6500, 6700, 6200, 6600, 6000, 2, 4, 45, 50, 123, 65, 0, 90, 1 }
 
 /* ---- Shared defaults and limits (spec [gait], [[joints]], [balance], [head], [battery], [model]) ---- */
 #define KILO_GAIT_STANCE_H_256 205 /* STANCE's body height, /256 of L1 + L2 */

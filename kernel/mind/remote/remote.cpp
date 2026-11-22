@@ -280,6 +280,7 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
       stop_then_act(now);
       return;
     case Kind::Behaviour:
+    case Kind::Righting:
       stop_then_act(now);
       return;
     case Kind::Trick:
@@ -655,6 +656,13 @@ void RemoteControl::act() {
       else if (ok) format(what, sizeof what, "behaviour runner started");
       else format(what, sizeof what, "behaviour runner failed: %s", why);
       done(what, !ok);
+      return;
+    }
+    case Kind::Righting: {
+      why = righting_ != nullptr ? righting_->start() : "no righting";
+      if (why == nullptr) format(what, sizeof what, "righting (the experiment; any key but B1 stops it)");
+      else format(what, sizeof what, "righting refused: %s", why);
+      done(what, why != nullptr);
       return;
     }
     case Kind::Gait:

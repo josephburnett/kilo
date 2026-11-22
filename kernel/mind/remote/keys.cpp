@@ -24,7 +24,7 @@ const Key kKeyTable[kKeys] = {
     {0x38, "B2", "push-up", Kind::Sound, "meow", "meow"},  // a meow (docs/sound.md); nothing before 2026-11-19
     {0x5A, "C2", "pee", Kind::Ignore, "", "none"},
     {0x42, "A1", "wash face", Kind::Trick, "rear_up", "rear up"},  // A2 until 2026-11-22, B2 until 2026-11-17
-    {0x4A, "B1", "butt-up", Kind::Ignore, "", "none"},  // the righting experiment's key
+    {0x4A, "B1", "butt-up", Kind::Righting, "righting", "right himself"},  // docs/righting.md; the experiment, 2026-11-22
     {0x52, "C1", "last skill", Kind::Ignore, "", "none"},
 };
 

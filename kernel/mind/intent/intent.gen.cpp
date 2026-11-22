@@ -26,6 +26,19 @@ const kilo_keyframe_t kRestToStand[] = {
     {45, 5, 0x01, {0, 0, 0, 60, 60, -30, -30, -45, -45, -30, -30}},
     {42, 10, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
 };
+// righting_side: 4 frames, end REST, FALL_OK; the righting experiment: ends on his belly in 89 of 95 simulated runs (variants x starts), leg servos at most 1.13 kg cm
+const kilo_keyframe_t kRightingSide[] = {
+    {30, 25, 0x01, {0, 30, 0, -90, -90, 90, 90, 0, 70, -70, 0}},
+    {3, 15, 0x01, {0, -75, 0, 30, -90, 90, -30, 30, 0, 0, -30}},
+    {8, 10, 0x01, {0, -75, 0, 30, -90, 90, -30, 30, 90, -90, -30}},
+    {25, 25, 0x01, {0, -80, 0, 60, 60, -60, -60, -45, -45, 45, 45}},
+};
+// righting_back: 3 frames, end REST, FALL_OK; the righting experiment: ends on his right side in 68 of 76 simulated runs (variants x starts), leg servos at most 1.06 kg cm
+const kilo_keyframe_t kRightingBack[] = {
+    {30, 25, 0x01, {0, 0, 0, -90, 30, -30, 90, 70, 30, -30, -70}},
+    {3, 25, 0x01, {0, 0, 0, -90, 30, -30, 90, 0, 30, -30, 0}},
+    {25, 25, 0x01, {0, -80, 0, 60, 60, -60, -60, -45, -45, 45, 45}},
+};
 
 }  // namespace
 
@@ -35,36 +48,43 @@ const Row kRows[kRowCount] = {
     {State::Resting, 0, -143, 190, 190},  // pitch +0.0 roll -8.9 deg, +-11.9 / 11.9; the model: margin 10.3 mm on lf_foot, rb_foot, rf_foot
 };
 
-const tricks::Trick kMoves[4] = {
+const tricks::Trick kMoves[6] = {
     {"intent_stand_to_sit", "", 1, 0, 0, 0, 0xFF07, 0x00, 2, 0, -30, kStandToSit, 40, nullptr, 0, 400},
     {"intent_stand_to_rest", "", 2, 0, 0, 0, 0xFF07, 0x00, 1, 0, 0, kStandToRest, 40, nullptr, 0, 400},
     {"intent_sit_to_stand", "", 1, 0, 0, 0, 0xFF07, 0x00, 3, 0, 0, kSitToStand, 40, nullptr, 0, 400},
     {"intent_rest_to_stand", "", 2, 0, 0, 0, 0xFF07, 0x00, 3, 0, 0, kRestToStand, 40, nullptr, 0, 400},
+    {"intent_righting_side", "", 4, 0, 0, 0, 0xFF07, 0x02, 1, 0, 0, kRightingSide, 25, nullptr, 0, 0},
+    {"intent_righting_back", "", 3, 0, 0, 0, 0xFF07, 0x02, 1, 0, 0, kRightingBack, 25, nullptr, 0, 0},
 };
 
-const MoveCheck kMoveCheck[4] = {
+const MoveCheck kMoveCheck[6] = {
     {0xB8AF, 13, 52},  // stand_to_sit
     {0x613F, 178, 102},  // stand_to_rest
     {0x3867, 117, 52},  // sit_to_stand
     {0x1464, 168, 102},  // rest_to_stand
+    {0x5DCA, 187, 141},  // righting_side
+    {0xAC0F, 163, 133},  // righting_back
 };
 
 const Edge kEdges[kEdgeCount] = {
-    {State::Standing, State::Sitting, EdgeKind::Move, &kMoves[0], 0},  // 0
-    {State::Standing, State::Resting, EdgeKind::Move, &kMoves[1], 0},  // 1
-    {State::Sitting, State::Standing, EdgeKind::Move, &kMoves[2], 0},  // 2
-    {State::Resting, State::Standing, EdgeKind::Move, &kMoves[3], 0},  // 3
-    {State::OnLeftSide, State::Standing, EdgeKind::WaitReflex, nullptr, 0},  // 4
-    {State::OnRightSide, State::Standing, EdgeKind::WaitReflex, nullptr, 0},  // 5
-    {State::OnBack, State::Standing, EdgeKind::WaitReflex, nullptr, 0},  // 6
-    {State::OnEnd, State::Standing, EdgeKind::WaitReflex, nullptr, 0},  // 7
-    {State::Unknown, State::Standing, EdgeKind::Posture, nullptr, 3},  // 8
-    {State::Unknown, State::Sitting, EdgeKind::Posture, nullptr, 2},  // 9
-    {State::Unknown, State::Resting, EdgeKind::Posture, nullptr, 1},  // 10
+    {State::Standing, State::Sitting, EdgeKind::Move, &kMoves[0], 0, false},  // 0
+    {State::Standing, State::Resting, EdgeKind::Move, &kMoves[1], 0, false},  // 1
+    {State::Sitting, State::Standing, EdgeKind::Move, &kMoves[2], 0, false},  // 2
+    {State::Resting, State::Standing, EdgeKind::Move, &kMoves[3], 0, false},  // 3
+    {State::OnLeftSide, State::Standing, EdgeKind::WaitReflex, nullptr, 0, false},  // 4
+    {State::OnRightSide, State::Standing, EdgeKind::WaitReflex, nullptr, 0, false},  // 5
+    {State::OnBack, State::Standing, EdgeKind::WaitReflex, nullptr, 0, false},  // 6
+    {State::OnEnd, State::Standing, EdgeKind::WaitReflex, nullptr, 0, false},  // 7
+    {State::OnRightSide, State::Resting, EdgeKind::Right, &kMoves[4], 0, false},  // 8
+    {State::OnLeftSide, State::Resting, EdgeKind::Right, &kMoves[4], 0, true},  // 9
+    {State::OnBack, State::OnRightSide, EdgeKind::Right, &kMoves[5], 0, false},  // 10
+    {State::Unknown, State::Standing, EdgeKind::Posture, nullptr, 3, false},  // 11
+    {State::Unknown, State::Sitting, EdgeKind::Posture, nullptr, 2, false},  // 12
+    {State::Unknown, State::Resting, EdgeKind::Posture, nullptr, 1, false},  // 13
 };
 
 const int8_t kNext[kStates][kGoals] = {
-    {8, 9, 10},  // UNKNOWN
+    {11, 12, 13},  // UNKNOWN
     {-1, -1, -1},  // MOVING
     {-1, 0, 1},  // STANDING
     {2, -1, 2},  // SITTING
@@ -73,6 +93,18 @@ const int8_t kNext[kStates][kGoals] = {
     {5, 5, 5},  // ON_RIGHT_SIDE
     {6, 6, 6},  // ON_BACK
     {7, 7, 7},  // ON_END
+};
+
+const int8_t kNextRighting[kStates][kGoals] = {
+    {11, 12, 13},  // UNKNOWN
+    {-1, -1, -1},  // MOVING
+    {-1, 0, 1},  // STANDING
+    {2, -1, 2},  // SITTING
+    {3, 3, -1},  // RESTING
+    {9, 9, 9},  // ON_LEFT_SIDE
+    {8, 8, 8},  // ON_RIGHT_SIDE
+    {10, 10, 10},  // ON_BACK
+    {-1, -1, -1},  // ON_END
 };
 
 }  // namespace intent

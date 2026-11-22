@@ -1,251 +1,214 @@
-# Getting up after a fall: can it be planned from the model?
+# Getting up after a fall: the righting experiment
 
-**Short answer (2026-11-21): not yet.** The model that the rear-up trick was
-designed in cannot tell a getting-up that works from one that does not. It
-was put to the test against every fall in Kilo's recordings and it failed
-the test that was set for it beforehand. So no new getting-up move has been
-designed: a move designed in a model that gets the old one wrong would be a
-guess. What is missing is not cleverness but measurements: the shape of
-Kilo's head and sides, which the model has never needed before, and a
-handful of recorded falls where it is known that no hand touched him. Both
-are listed below, as things you can do when you like.
+**Short answer (2026-11-22).** There is now a getting-up that the mind
+works out from the body model instead of the fixed sequence in Kilo's
+body. It is an **experiment**, off unless you build it in, and nothing of
+it has been tried on Kilo. It was checked only in the simulator, and that
+simulator still cannot reproduce the getting-ups recorded on Kilo (see
+"How much to trust it" below). So the first try is the real test: on a
+soft floor, with you watching.
 
-Until then Kilo gets up the way he does today: the move stored in his body.
+Without the experiment Kilo gets up as before: the body's own fixed move.
+You reported on 2026-11-22 that this built-in getting-up "didn't work 100%
+of the time" (your words; no count was given).
 
 ## Words used here
 
 - **The fall reflex**: when Kilo is tilted more than 75 degrees for a tenth
-  of a second, his body (the NyBoard) takes the legs away from whatever was
-  moving them, chirps, waits until he lies still, and plays a fixed
-  getting-up move. Nothing on the Pi is involved.
-- **rc**: that fixed move's name in the old firmware ("recover"). Three
-  poses played one after the other, 1.8 seconds in all. It is a table of
-  joint angles copied from the original Petoi firmware, not something
-  planned.
-- **A try**: one play of rc. If Kilo is not upright a second later, the body
-  waits until he is still and tries again, mirrored left to right, up to
-  three times. Then it gives up, lies him down and lets the legs go limp.
-- **Mirrored**: the same move with left and right swapped. The body picks
-  the side from the way he lies.
-- **The model / the simulator**: the program on the laptop that plays a move
-  on a made-up Kilo (his weight, his legs, the floor's friction, servos that
-  lag and give a little) and says what would happen. The rear-up trick was
-  designed in it (`mind/kilo/tricks/dynamics.py`).
-- **On his back, on his side**: said of how the tilt sensor reads. In the
-  recordings Kilo never lies flat on a side: he lies on a side rolled 26 to
-  40 degrees further toward his back, propped on the shoulder servos and the
-  top edge of his body.
+  of a second, his body (the NyBoard) takes the legs over, chirps, waits
+  until he lies still, and then (as before) plays **rc**.
+- **rc**: the body's fixed getting-up move ("recover"), three poses in 1.8
+  seconds, copied from the original Petoi firmware. Not planned from
+  anything.
+- **The model / the simulator**: the program on the laptop that plays a
+  move on a made-up Kilo (his weights, his legs, his outline, the floor's
+  friction, servos that lag and give) and says what would happen
+  (`mind/kilo/tricks/dynamics.py`, lying down: `mind/kilo/tricks/righting.py`).
+- **Roll angle**: how far he is turned about his long axis: 0 upright on
+  his feet, -90 on his right side, +90 on his left, 180 on his back. In the
+  recordings he never lies flat on a side: he lies 26 to 40 degrees further
+  over toward his back, propped on the shoulder servos and his back.
+- **The state estimate**: the mind's opinion of where he is (standing, on
+  his left side, on his back, ...: docs/intent.md).
+- **FALL_RC**: a new switch in the body. 1 (always, unless the mind says
+  otherwise): the fall reflex plays rc. 0: it never plays rc; it lies him
+  down and lets go of the legs, and takes the mind's righting move instead.
+  It is never saved: the body starts with 1 every time it is switched on.
+- **Stall**: a servo pushing against something it cannot move. It heats up
+  and draws a lot of current. That is the risk of a getting-up.
 
-## What the recordings show
+## How the move was worked out
 
-Every recording on the laptop (17 to 21 November, the flight recorder's
-files from the card) was searched for falls. There are nine. The older
-ones, from October, were recorded on the Pi's old system and are not on the
-laptop; your one report of a getting-up you watched (11 October, "got up on
-its own") is among those.
+All from the body model (`mind/kilo/intent/righting.py`, which says the
+same at more length).
 
-| When | What he was doing | How he lay | What rc did |
-|---|---|---|---|
-| 17 Nov, twice | the first rear-up design went over | on his back, nose a little up | got him up at the first try, both times |
-| card boot 3, three falls | a crawl stopped with C7, then standing | on his back or his left side | **in a hand** (see below) |
-| card boot 8, first | sitting, tapped | on his right side | got him up at the first try |
-| card boot 8, second | standing | on his left side | first try: nearly up, fell back onto his back. Second try (mirrored the other way): ended on his left side again. Third try: got him up |
-| card boot 8, third | standing | nose or tail down | no try: the body does not try from there, it gives up at once |
-| 21 Nov | drowsy | upright again before rc began | **in a hand** |
+1. **He rolls about his long axis.** In every recorded fall and every try
+   of rc his nose stayed within about 10 degrees of level. So the question
+   is simple: for a pose of the joints, how high is his centre of mass at
+   each roll angle? He rolls downhill.
+2. **No pose on its own can do it.** His legs swing only forward and back
+   (there is no sideways joint). Lying on a side, the legs underneath can
+   push only toward his back or toward his belly. The model tried 3,675
+   poses of the legs and head, each in 19 versions of the uncertain
+   numbers: in none (at best 1 of the 19 versions) does he roll from where
+   he lies on a side down onto his belly. The legs underneath can lift him
+   only to about 15 degrees past his side, and there his centre of mass is
+   still on the back side of the shoulder servo he pivots on.
+3. **So it has to be a throw**, as rc is. The move, for his right side down
+   (mirrored for the left side):
+   1. **Wind up** (slowly, 0.6 s, then a 0.5 s pause): the legs underneath
+      go forward and back along his body with the knees bent, feet clear
+      of the floor; the legs on top reach toward his back; the head lifts.
+   2. **Kick and throw** (as fast as the servos turn, about 0.2 s): the
+      knees underneath straighten, so those feet hit the floor beyond his
+      back and push it away, which turns him toward his belly; at the same
+      moment the legs on top swing over to the standing pose (their weight
+      goes toward his belly) and the head tucks.
+   3. **Fold**: the legs underneath straight along his body, out of the way
+      of the roll.
+   4. **Rest**: the lying-down pose. From there the model-planned "rest to
+      stand" of docs/intent.md stands him up.
 
-`python -m kilo.tricks.righting --falls` prints the list with the numbers;
-the recordings' tilt readings through each try are kept in
-`mind/tests/fixtures/falls_2026_11.json`.
+   In the simulator the kick alone gets him over in 27 of 95 runs, the throw
+   alone in 12, both together in **89 of 95**.
+4. **From his back**: the left legs wind up the same way and kick at the
+   floor beyond his back, lifting his left side; the right legs stay as for
+   standing, so he stops on his right side. Then the side move follows. In
+   the simulator he ends on his right side in **68 of 76 runs**.
+5. **Left alone**: the head's turn and the tail. Which way a positive angle
+   turns them is not known, so the moves keep them straight.
 
-**In a hand.** The recordings do not say whether you were holding him. Two
-things do, indirectly. First, around four of the nine falls the Pi's own
-"picked up" detector fired (it watches the tilt sensor for the way a lift
-feels). Second, in every try that began with Kilo upright, he stayed within
-8 degrees of level all through rc, and rc's second pose lifts both legs of
-one side off the floor: a Kilo standing free cannot stay level through
-that. So those tries are read as "held", and they say nothing about the
-floor. That is an inference from the recordings, not something you
-reported.
+"Runs" are each move from several lying positions (on a side 110 to 130
+degrees, sitting or standing or resting legs; on his back 172 to 180), each
+in 19 versions of the numbers the model is unsure of: his centre of mass 10
+mm higher or lower or 3 mm to either side, softer legs, each guessed size
+of his outline a quarter bigger or smaller, the outline that makes rc's
+first pose behave as it did on Kilo, the tail turning the other way, a
+slippery and a grippy floor, slow servos.
 
-That leaves **six tries on the floor**: four that got him up and two that
-did not. Two of the six began the same way to within one degree (on his
-left side, the second fall of boot 8) and ended differently. From there rc
-is on a knife edge.
+Where it fails in the simulator: with his centre of mass 10 mm higher than
+the model has it (the kick then throws him onto his back instead, every
+time), and from his back when the top of his back is a quarter higher or
+lower than guessed. The leg servos carry at most 1.1 kg cm in any run; they
+are thought to stall at about 3.
 
-What rc does, read off those six: lying on a side, its first pose rolls him
-onto his back; its second pose rolls him from his back over one side
-(always the side whose legs it folds away); its third pose is the standing
-pose, which pushes him the last 45 degrees onto his feet. Both tries that
-failed were mirrored ones (he was to go over his left side); the three that
-were not mirrored all worked. Six tries are too few to call that a pattern,
-but it is worth knowing: Kilo is not the same on both sides (his right hind
-shoulder had less travel until it was re-seated).
+## How much to trust it
 
-## The test the model was put to
+Not much, yet. The same simulator was asked to replay rc against the six
+recorded tries on the floor. With what was added today (the head's weight
+moving with the head, the legs' and head's own swing turning the body, the
+tail's direction as an unknown) it still gets **none** of the four
+getting-ups right. It goes wrong in three different places, one per pose of
+rc, and each points at a part of Kilo that has never been measured: the
+shape of his back with the Pi on it, and his head
+(docs/righting-results.md has the numbers). The getting-up designed today
+was checked across those unknowns, which is the best that can be done
+without measuring them; but the simulator it was checked in is known to be
+wrong about lying down.
 
-Before the first run in the simulator the test was written down
-(`mind/kilo/tricks/righting.py`, "THE CRITERION"). The model would be
-trusted for designing a getting-up only if all of this held, with nothing
-adjusted to make it come out:
+What is on the safe side whatever the simulator gets wrong:
 
-1. **It lies the way Kilo lay.** Put down in each recorded position, the
-   made-up Kilo stays within 15 degrees of it.
-2. **It gets the outcomes right.** It gets up in every try where Kilo got
-   up, and does not in the tries where he did not. And for the knife-edge
-   start, its answer flips somewhere inside the range of the numbers we are
-   unsure of.
-3. **It moves the way Kilo moved.** In the tries that worked, it passes
-   through "on his side" within a quarter of a second of when Kilo did, and
-   stays within 30 degrees of his tilt on average.
+- **Bounded.** At most three tries per press of B1. Each try lasts 2.7
+  seconds. After the third, or when nothing more can be done, the mind lets
+  every servo go (limp), logs `righting gave up: he is left LIMP on the
+  floor, he needs a hand`, and Kilo **meows** once.
+- **No long stall.** After each try the body's own fall check comes back;
+  if he is still down it lies him down and lets the legs go limp 2 seconds
+  later, whether the Pi is there or not.
+- **Loads checked**: no leg servo over 2.4 kg cm in any simulated run (it
+  came out at 1.1).
+- **Any other key stops it** (the move stops and lies him down). Or pick
+  him up.
 
-One change was made to the test after the first run, and it is written
-there with the reason: the tries "in a hand" were taken out, once the first
-run had shown that a free-standing Kilo cannot do what those recordings
-show.
+## How it is switched on
 
-To lie down at all, the simulator needed things it never had: a start in
-any position, a head that the two head servos move, and how far the
-shoulder and knee servos stick out sideways. **None of those sizes has been
-measured.** They are estimates, and three of them (how far the shoulder
-servos stick out, how high the ears are, how high the top edge is) were set
-so that point 1 comes out right. So point 1 is not a test any more; points
-2 and 3 are.
+1. A kernel built with `KILO_RIGHTING=1`. Without it (the default) B1 does
+   nothing but log that the experiment is not built in, and the body's fall
+   reflex works as always.
+2. The body firmware of the same build (protocol 2.1: it knows FALL_RC).
+   `kilo card` writes both; the mind flashes the body at its next boot.
+3. With both, at every start the mind sets FALL_RC to 0: from then on a
+   fall no longer plays rc. **He does not get up by himself any more**: he
+   lies down where he fell and goes limp. B1 gets him up.
+4. To go back: write a card without the switch. The next start has rc
+   again.
 
-## The result
+B1 acts only when the state estimate says he is on his left side, his
+right side or his back. Otherwise it is refused, with a line in the log
+such as `righting refused: he is STANDING: B1 rights him only from a side
+or his back`. Nose or tail down: nothing (the intent gives up at once).
 
-`python -m kilo.tricks.righting --bands` (a minute or two):
+## First try (no step is timed)
 
-| | Needed | Got |
-|---|---|---|
-| 1. Lies as Kilo lay | within 15 degrees | within 11 degrees (after setting three sizes on it) |
-| 2. Outcomes | up in all 4 that worked, not in the 2 that did not | **up in 0 of the 4**; not up in the 2 |
-| 2b. The knife edge flips | somewhere in the range | it does: in 6 of 44 variations |
-| 3. Moves as Kilo moved | all 4 | **none of the 4** |
+Before: a charged battery; a rug or a folded blanket on the floor with a
+hand's width of space all round.
 
-**The model fails.** In it, rc does not get Kilo up from any recorded
-start. What it gets right and wrong, try by try:
+1. Build and write the card, on the laptop, with the card in:
 
-- From his right side (boot 8, the first fall) the model follows the real
-  roll closely: it goes through "on his side" at 1.34 seconds, Kilo at
-  1.36. Then, 45 degrees from upright, the made-up Kilo stops, and falls
-  back. The real one stood up.
-- From his back (17 November) the model rolls him the wrong way. On his back
-  Kilo rests on his ears, and what turns him over is mostly his head
-  pushing sideways on the floor. The model's head is a guessed box, and it
-  is not even known which way a positive head turn goes.
-- Which tries the model gets up in changes with the guesses: with the
-  shoulder servos sticking out a quarter less, the top edge a quarter
-  higher or wider, the head turning the other way, the centre of mass 3 mm
-  to the left or 10 mm lower, two or three of the six flip. The floor's
-  friction, the servos' speed and the legs' give flip none.
+   ```
+   make mount
+   kilo card /mnt/e KILO_RIGHTING=1 KILO_RECORD_SAVE=1
+   ```
 
-So the outcome hangs on numbers nobody has measured. That is why no move
-was designed.
+   (`KILO_RECORD_SAVE=1` saves the flight recorder to the card, so the try
+   can be read afterwards.)
+2. Card into Kilo, switch on. The first start after a new card also
+   updates the body's program: wait until he has trilled (the update is
+   done) and mewed (ready).
+3. Press **B6** (column B, sixth row from the bottom): he stands.
+4. Lay him gently on the blanket on his **right side**, and take your hands
+   away. He chirps, lies down (legs fold) and a little later goes limp.
+   That is the new behaviour: no rc.
+5. Press **B1** (column B, bottom row). Hands off. Watch:
+   - the legs underneath go forward and back, the top legs reach back, the
+     head lifts; a short pause;
+   - a sudden kick: does he roll onto his belly? onto his back? not at all?
+   - then the legs fold; if he is on his belly he stands up rear first.
+6. If he is down again he tries again by himself, up to three times in
+   all, then goes limp and meows. That is the end of it; nothing more
+   happens until you press a key.
+7. Stand him up by hand if needed, press B6, and do the same on his **left
+   side**, then once **on his back**. As many times as you have patience
+   for; two each way already tells a lot.
+8. Stop at any moment by pressing B6 or A7, or by picking him up. If a leg
+   is caught under him or a servo buzzes loudly, pick him up at once.
 
-One more thing the model says, for what it is worth: the leg servos carry
-about 1.1 kg cm at most during rc, well under the 3 kg cm they are thought
-to stall at. The head and tail servos' loads are not worked out, and on his
-back the head carries a good part of him.
+## What to tell Claude
 
-## What would make it trustworthy
+For each try, one line: which side, what each try did (rolled onto his
+belly / onto his back / did not move / something else), how it ended
+(standing / on his belly / limp and meowed), anything that looked strained
+(a buzzing servo, a leg bent under him). "Don't know" is fine. Then switch
+him off, card into the laptop, `make mount`, `kilo card /mnt/e --fetch`, and
+tell me: the log lines starting `intent:` and `righting` and the recording
+show the roll angle through every try, which is what the simulator needs.
 
-Two things, both yours to do when you like. Neither is urgent: he gets up
-as he always has.
+## What would make the simulator trustworthy
 
-### 1. Measure him (a ruler; ten minutes; Kilo switched off)
-
-Write the numbers in `docs/righting-results.md`. Millimetres; "about" is
-fine; "don't know" is fine.
-
-| What | How |
-|---|---|
-| Width across the front shoulder servos | outer face to outer face, the widest point |
-| Width across the back shoulder servos | the same |
-| Width across the knees | with the legs in the standing pose, the widest point of the knee servos |
-| The top edge he lies against | lay him on his side on the table: what touches at the top (the Pi's corner? the frame?), how far is that point above the line through the shoulder axles, and how far from his middle |
-| The head | from the front shoulder axles to where the neck turns; neck to the tip of the nose; the head's width; how far the ear tips are above the shoulder axles with the head straight |
-| Which way the head turns | not a measurement: when he looks to his left, note it against the remote key or pose that did it (I will give you one pose to try when you are ready) |
-
-A photo from above, one from the side and one from the front, each with the
-ruler in the picture, would do as well as the table.
-
-### 2. Record falls with your hands off (a soft floor; whenever)
-
-The recordings above cannot say whether you were holding him. These will.
-
-What is needed first: a card whose kernel saves the flight recorder (ask me
-for it: `kilo card` with `KILO_RECORD_SAVE=1`).
-
-1. Kilo on a rug or a folded blanket on the floor, a hand's width of space
-   around him. Press **B6** (column B, sixth row from the bottom): he
-   stands.
-2. Tip him over gently onto his **left side** and take your hands away at
-   once. He chirps. Do not touch him until he is standing again or has gone
-   limp (up to three tries, about ten seconds).
-3. Write one line in `docs/righting-results.md`: which side, hands off
-   before the chirp (yes/no), what he did at each try (rolled onto his back?
-   got up? fell back?), and where he ended.
-4. If he ended limp or lying down: stand him up by hand and press B6 again.
-5. Do the same onto his **right side**, and once more leaving him **on his
-   back**. Then again, in any order, as many times as you have patience
-   for. Five each way would settle it; even two each way would tell a lot.
-6. Switch him off, put the card in the laptop, and tell me. I will read
-   the falls off the card (`kilo card /mnt/e --fetch`, then
-   `python -m kilo.tricks.righting --extract`).
-
-No step is timed. If something looks wrong (a leg caught under him, a
-servo buzzing loudly), pick him up: he goes on playing in your hand and
-then stands; note that it happened.
-
-## What Kilo's body would need for the Pi to do the getting-up
-
-For when a move planned on the Pi exists. Read from the code; nothing here
-is built.
-
-**Today.** Once fallen, the body holds the legs itself until he is upright
-or it has given up. It refuses every command from the Pi with "fallen",
-except "go limp" (the Pi's emergency stop), which ends the reflex. A trick
-cannot be started while he is fallen, nor from limp. Tricks have a flag,
-"a fall is fine" (`FALL_OK`), that switches the fall reflex off while the
-trick plays; nothing uses it yet.
-
-**The smallest change** (body firmware, `body_trick_play` in
-`body/src/core/body.cpp`): let the Pi start a trick that carries `FALL_OK`
-while he is fallen; the reflex lets go of the legs and the trick plays.
-About 20 to 40 bytes of the body's program (an estimate: 27,472 of 30,720
-bytes are used) and none of its memory (which is the tight one: 18 bytes
-to spare above the stack's minimum). No new message; the protocol's text
-for "play a trick" changes, so its minor version goes up.
-
-With that, a fall goes: the body reports FELL and waits until he lies
-still (0.4 to 1.4 seconds in the recordings); in that time the Pi sends
-its getting-up trick for the way he lies and starts it; when it ends, the
-body's fall check is on again, and if he is still down it reports FELL
-again and the Pi chooses again. If the Pi is not there, or too slow, the
-body plays rc as today. That keeps today's behaviour until the Pi's move
-has been seen to work on Kilo.
-
-**Then**, once it has: rc can go from the body (you said he needs no
-fallback: "If he's asleep or off, he's just asleep or off"). That frees
-about 40 bytes of table and an estimated 150 to 250 bytes of code, and 3
-bytes of memory.
-
-**Not possible without a change**: "go limp", then a posture, then the
-trick works on paper, but the fall check comes back on as soon as he leaves
-limp and trips again within a tenth of a second unless the trick has
-already started. It would work some of the time.
-
-**Nose or tail down**: the body does not try at all (it lies him down and
-goes limp). The one recorded case ended that way. A move for it would be
-new; nothing is known about it.
+Measuring him (a ruler, Kilo switched off): the widths across the front and
+back shoulder servos and across the knees; lying on his side, what touches
+at the top (the Pi's corner? a connector?) and how high above the shoulder
+axles; the head's length, width and the ear tips' height; and which way he
+looks for a positive head turn. Write them in docs/righting-results.md.
+Photos from above, the side and the front with a ruler in each do as well.
+The first try above gives the other half: falls and getting-ups recorded
+with your hands off.
 
 ## Where things are
 
-- `mind/kilo/tricks/righting.py`: the lying-down additions to the
-  simulator, rc as the body plays it, the test and its verdict, and
-  `--extract` to read falls out of a recording.
-- `mind/tests/fixtures/falls_2026_11.json`: the nine falls.
-- `mind/tests/test_righting.py`: checks of the above (fast; the full
-  replay is the `--bands` command).
-- `docs/righting-results.md`: for your measurements and the hands-off
-  falls.
+- `mind/kilo/intent/righting.py`: the reasoning, the two moves and their
+  check; `mind/kilo/intent/righting/*.json` its results.
+- `mind/kilo/tricks/righting.py`: Kilo lying in the simulator, rc replayed
+  against the recorded falls (`--phases`, `--bands`), `--extract` to read
+  falls from a recording; `mind/tests/fixtures/falls_2026_11.json` the
+  recorded falls.
+- The mind: `kernel/mind/intent/` (the Right steps, at most three, limp at
+  the end), B1 in `kernel/mind/remote/`, FALL_RC set in `kernel/mind/mind.cpp`.
+- The body: FALL_RC in `body/src/core/body.cpp` (64 bytes of program, 2 of
+  memory).
+- Tests: `mind/tests/test_righting.py`, `mind/tests/test_intent.py`,
+  `kernel/host/tests/test_intent.cpp`, `body/test/test_reflex.cpp`, and
+  `kernel/host/test.sh` "righting" (B1 against the real body logic on the
+  laptop: FALL_RC, the moves, three tries, limp).
+- `docs/righting-results.md`: what the simulator reproduces, your
+  measurements and tries.

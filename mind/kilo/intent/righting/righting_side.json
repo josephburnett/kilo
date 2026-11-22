@@ -1,0 +1,53 @@
+{
+  "name": "intent_righting_side",
+  "source": {
+    "kind": "authored",
+    "design": "kilo.intent.righting",
+    "doc": "docs/righting.md",
+    "frames": [
+      "wind",
+      "kick and throw",
+      "fold",
+      "rest"
+    ],
+    "summary": "ends on his belly in 89 of 95 simulated runs (variants x starts), leg servos at most 1.13 kg cm",
+    "check": {
+      "runs": 95,
+      "ok": 89,
+      "max_torque_kg_cm": 1.13,
+      "shipped": true,
+      "failed": [
+        "com_dz +10 (rest, right side -120: ends at -180)",
+        "com_dz +10 (sit, right side -116: ends at -180)",
+        "com_dz +10 (stand, right side -110: ends at -180)",
+        "com_dz +10 (stand, right side -120: ends at -180)",
+        "com_dz +10 (stand, right side -130: ends at -180)",
+        "top_y x1.25 (stand, right side -110: ends at -111)"
+      ]
+    }
+  },
+  "notes": [
+    "the righting EXPERIMENT (docs/righting.md): reasoned on the lying model, which does not reproduce the body's rc on the recorded falls; nothing here has been seen on Kilo",
+    "his right side down; the mind plays it mirrored from his left side",
+    "FALL_OK: the body's fall check is off while it plays; it ends in REST"
+  ],
+  "expected": {
+    "roll": 0,
+    "pitch": 0
+  },
+  "loop": {
+    "start": 0,
+    "end": 0,
+    "repeats": 0
+  },
+  "balance": false,
+  "fall_ok": true,
+  "end_posture": "REST",
+  "stop_ticks": 25,
+  "frames": [
+    {"dur": 30, "hold": 25, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": 30, "tail": 0, "lf_shoulder": -90, "rf_shoulder": -90, "rb_shoulder": 90, "lb_shoulder": 90, "lf_knee": 0, "rf_knee": 70, "rb_knee": -70, "lb_knee": 0}},
+    {"dur": 3, "hold": 15, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -75, "tail": 0, "lf_shoulder": 30, "rf_shoulder": -90, "rb_shoulder": 90, "lb_shoulder": -30, "lf_knee": 30, "rf_knee": 0, "rb_knee": 0, "lb_knee": -30}},
+    {"dur": 8, "hold": 10, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -75, "tail": 0, "lf_shoulder": 30, "rf_shoulder": -90, "rb_shoulder": 90, "lb_shoulder": -30, "lf_knee": 30, "rf_knee": 90, "rb_knee": -90, "lb_knee": -30}},
+    {"dur": 25, "hold": 25, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -80, "tail": 0, "lf_shoulder": 60, "rf_shoulder": 60, "rb_shoulder": -60, "lb_shoulder": -60, "lf_knee": -45, "rf_knee": -45, "rb_knee": 45, "lb_knee": 45}}
+  ]
+}

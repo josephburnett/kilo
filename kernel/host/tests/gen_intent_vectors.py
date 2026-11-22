@@ -11,9 +11,11 @@ current). Lines:
     c PITCH ROLL CMD PREV -> STATE CONF ERRP ERRR   classify() for one attitude, prior and state before
     seq NAME                                        a fresh estimator; then for every sample
     s T_US PITCH ROLL RP RR RY MODE CMD -> CHANGED STATE CONF SINCE_US ERRP ERRR
-    edge I FROM TO KIND POSTURE MOVE                the edges ("-" for no move)
+    edge I FROM TO KIND POSTURE MOVE MIRROR         the edges ("-" for no move)
     next STATE I0 I1 I2                             the first step to STANDING, SITTING, RESTING
-    move NAME CRC16 TRICK_ID TOTAL_TICKS            each shipped move as the trick player uploads it
+    nextr STATE I0 I1 I2                            ...with the righting experiment
+    move NAME CRC16 TRICK_ID TOTAL_TICKS            each shipped move, then each righting move, as the trick
+                                                    player uploads it
 
 States, priors and kinds are their numbers (estimate.py State and Cmd, graph.py Kind).
 """
@@ -30,6 +32,7 @@ from kilo.body.client import trick_id_for  # noqa: E402
 from kilo.intent import estimate as E  # noqa: E402
 from kilo.intent import graph as G  # noqa: E402
 from kilo.intent import moves as M  # noqa: E402
+from kilo.intent import righting as RT  # noqa: E402
 from kilo.protocol import kilo_protocol as P  # noqa: E402
 
 
@@ -133,11 +136,14 @@ def main() -> int:
                        f"-> {int(ch)} {int(e.state)} {e.confidence} {e.since_us} {e.err_pitch} {e.err_roll}")
     edges = G.edges()
     for i, e in enumerate(edges):
-        out.append(f"edge {i} {int(e.src)} {int(e.dst)} {int(e.kind)} {e.posture} {'intent_' + e.move if e.move else '-'}")
+        out.append(f"edge {i} {int(e.src)} {int(e.dst)} {int(e.kind)} {e.posture} {'intent_' + e.move if e.move else '-'} "
+                   f"{int(e.mirror)}")
     for s, row in zip(E.State, G.next_table(edges)):
         out.append(f"next {int(s)} " + " ".join(str(v) for v in row))
-    for name in M.shipped():
-        t = M.load_move(name)
+    for s, row in zip(E.State, G.next_table(edges, righting=True)):
+        out.append(f"nextr {int(s)} " + " ".join(str(v) for v in row))
+    for name in M.shipped() + list(RT.NAMES):
+        t = RT.load_move(name) if name in RT.NAMES else M.load_move(name)
         out.append(f"move {t.name} {t.crc16()} {trick_id_for(t)} {t.duration_ticks or 0}")
     sys.stdout.write("\n".join(out) + "\n")
     return 0

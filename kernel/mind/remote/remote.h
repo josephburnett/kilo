@@ -94,8 +94,12 @@
 //   that crossfade first (Phase::Settle).
 // - B2 meows (Kind::Sound): the Mind asks its sound player (sound/player.h)
 //   and never calls perform() for it.
-// - Rows 1-3 but B2 (and A1 unless switched on) do nothing (Mind::ir_key logs them as ignored). Row 1
-//   holds the owner's experiments, one a key (A1 the rear-up; B1 kept for the righting experiment).
+// - B1 Kind::Righting, docs/righting.md: the righting experiment
+//   (RightingHook: the Mind's intent "be standing" from a side or his back
+//   by the righting moves); its refusals (not lying there, not built in)
+//   fail the key.
+// - Rows 1-3 but B1, B2 (and A1 unless switched on) do nothing (Mind::ir_key logs them as ignored). Row 1
+//   holds the owner's experiments, one a key (A1 the rear-up; B1 the righting experiment; C1 free).
 // Every key leaves one log line, "remote <grid> (0x.., <label>): <outcome>".
 // Which keys never reach perform() (repeats, other remotes' keys, rows 1-3,
 // a laptop client holding the body) is the caller's call (Mind::ir_key).
@@ -176,6 +180,16 @@ class MeasureHook {
   ~MeasureHook() = default;
 };
 
+// The righting experiment, as B1 starts it (the Mind's: docs/righting.md).
+class RightingHook {
+ public:
+  // Start it: null, or why not (he is not lying on a side or his back, it is not built in).
+  virtual const char* start() = 0;
+
+ protected:
+  ~RightingHook() = default;
+};
+
 // Who hears of a trick the remote refused to start (the flight recorder:
 // a REFUSED trick run). Not pure, as BehaviourHook.
 class TrickNotes {
@@ -204,6 +218,7 @@ class RemoteControl {
   void set_behaviour(BehaviourHook* hook) { behaviour_ = hook; }
   void set_trick_notes(TrickNotes* notes) { notes_ = notes; }
   void set_measure(MeasureHook* hook) { measure_ = hook; }
+  void set_righting(RightingHook* hook) { righting_ = hook; }
   // The posture keys' action goes to hook (null, the default: the remote's own SET_POSTURE).
   void set_posture_hook(PostureHook* hook) { posture_hook_ = hook; }
 
@@ -299,6 +314,7 @@ class RemoteControl {
   uint32_t actions_ = 0, failures_ = 0;
   TrickNotes* notes_ = nullptr;
   MeasureHook* measure_ = nullptr;
+  RightingHook* righting_ = nullptr;
   bool calib_held_ = false;    // C5's calibration posture was the last action: C5 again measures
   bool measure_next_ = false;  // this C5 is the second: stand, then the self-measurement
   uint64_t measure_from_ = 0;  // Phase::MeasureStand: when STAND went out
