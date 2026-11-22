@@ -53,8 +53,9 @@
 //
 // Timing and choice come from a seeded RNG (the runner's seed): a pause of
 // 1.5-6 s between standing moves, never the same move twice in a row, the
-// sizes and sides drawn each time; the tricks' choice and timing from a
-// second one, so the moves' sequence is the one it was. All of it stops at
+// sizes and sides drawn each time; the tricks' choice and timing (and the
+// pause after one) from a second one, so the moves draw what they drew
+// before the tricks came. All of it stops at
 // once with the runner (the remote's B6, A7, C7: stop()): the pose goes back
 // to level, a move's trick or the trick is stopped.
 #ifndef KILO_MIND_BEHAVIOUR_ALIVE_H

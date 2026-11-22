@@ -184,7 +184,8 @@ bool Alive::play_trick(double now) {
   tricks::total_ticks(*t, q6, &ticks);
   double end = now + ticks * kTickS;
   trick_at_ = every > 0 ? end + every * trick_rng_.uniform(0.5, 1.5) : 0;
-  next_at_ = end + (standing ? rng_.uniform(kPauseMinS, kPauseMaxS) : rng_.uniform(kSitPauseMinS, kSitPauseMaxS));
+  next_at_ = end + (standing ? trick_rng_.uniform(kPauseMinS, kPauseMaxS)
+                              : trick_rng_.uniform(kSitPauseMinS, kSitPauseMaxS));
   if (standing) {  // the body pose back to level; STANCE again once the trick is done (in STAND)
     n_steps_ = 0;
     if (cur_.pitch != 0 || cur_.roll != 0 || cur_.dh != 0 || cur_.xs != 0) send_pose({0, 0, 0, 0});
@@ -454,7 +455,7 @@ void Alive::poll(double now, bool running, bool calm, double head_pan) {
         leave();
         return;
       }
-      next_at_ = now + kSettleS + rng_.uniform(kPauseMinS, kPauseMaxS);
+      next_at_ = now + kSettleS + trick_rng_.uniform(kPauseMinS, kPauseMaxS);
       if (trick_at_ > 0 && trick_at_ < next_at_) trick_at_ = next_at_;
       return;
     }
