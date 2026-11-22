@@ -48,6 +48,21 @@ struct Pattern {
   real stride_slew_mm;   // the strides move at most this much a tick (a speed, direction or steer change)
   // patterns.py centre_com: the strides centred under the model's centre of mass (the walk)
   bool centre_com;
+  // patterns.py handover_ticks: the four-foot ticks before each group's swing (n_handover 0: every
+  // slot the same; the walk: more before a hind leg's swing, where the weight crosses the diagonal)
+  uint8_t n_handover;
+  uint8_t handover[4];
+  // patterns.py sway_*: the walk's roll once a cycle and fore-aft shift twice a cycle
+  real sway_roll_deg;
+  real sway_roll_at;
+  real sway_dx_mm;
+  real sway_dx_at;
+  // patterns.py swing_long_ms, handover_long_ticks, long_from_mm_s: faster than long_from_mm_s the
+  // swing is swing_long_ms with handover_long (swing_long_ms 0: swing_ms at every speed)
+  real swing_long_ms;
+  uint8_t handover_long[4];
+  real long_from_mm_s;
+  real long_stride_mm;  // ...and for a slot whose longer side's stride is past this (a steer)
 
   bool in_group(int k, int leg) const {
     for (int i = 0; i < group_size; i++)
@@ -87,6 +102,14 @@ struct Timing {
 };
 
 real shift_min_ms(const Pattern& p);
+// patterns.py is_long / swing_at: the long swing above long_from_mm_s and backward, and the swing
+// time at a speed.
+inline bool is_long(const Pattern& p, real speed_mm_s, bool back = false) {
+  return p.swing_long_ms > 0 && (back || m_fabs(speed_mm_s) > p.long_from_mm_s);
+}
+inline real swing_at(const Pattern& p, real speed_mm_s, bool back = false) {
+  return is_long(p, speed_mm_s, back) ? p.swing_long_ms : p.swing_ms;
+}
 // Speed from the stride alone, the cycle fixed (the patterns without a lean).
 inline bool fixed_cadence(const Pattern& p) { return !p.lean; }
 // The pattern's default speed: its table's, or its stride over its default stance.

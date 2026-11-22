@@ -86,15 +86,18 @@ def test_pattern_tables_and_default_timing():
     assert t.speed_mm_s == pytest.approx(144.0, abs=0.1)
     assert pat.PATTERNS["trot"].groups == ((LF, RB), (RF, LB)) and pat.PATTERNS["trot"].couple_ms == 0
     # the walk (since 2026-11-22): the lateral sequence one leg at a time, the strides centred under
-    # the centre of mass, the lift tapering from 8 mm at a 40 mm stride to 6 at 54
+    # the centre of mass, the lift tapering from 8 mm at a 40 mm stride to 6 at 54; its second
+    # version: a 200 ms swing, 3 ticks on four feet before a hind swing and 1 before a fore swing,
+    # a 1 deg roll and 3 mm fore-aft sway
     wp = pat.PATTERNS["walk"]
     assert wp.groups == ((LB,), (LF,), (RB,), (RF,)) and wp.couple_ms == 0 and wp.centre_com
+    assert wp.handover_ticks == (3, 1, 3, 1) and (wp.sway_roll_deg, wp.sway_dx_mm) == (-1.0, 3.0)
     assert [pat.step_height(wp, s) for s in (30, 40, 47, 54)] == [8, 8, 7, 6]
     assert pat.PATTERNS["crawl"].groups == ((LB,), (LF,), (RB,), (RF,))
-    assert [pat.PATTERNS[p].swing_ms for p in ("trot", "walk", "crawl")] == [160, 220, 300]
+    assert [pat.PATTERNS[p].swing_ms for p in ("trot", "walk", "crawl")] == [160, 200, 300]
     assert not pat.PATTERNS["walk"].lean and not pat.PATTERNS["trot"].lean and pat.PATTERNS["crawl"].lean
     w = pat.timing("walk")
-    assert (round(w.stride_mm, 1), round(w.period_ms), w.shift_ms) == (42.9, 960, 20)
+    assert (round(w.stride_mm, 1), round(w.period_ms), w.shift_ms) == (44.1, 960, 40)
     assert w.speed_mm_s == pytest.approx(58.0, abs=0.1)
     c = pat.timing("crawl")
     assert (c.stride_mm, round(c.period_ms)) == (50, 2550) and c.speed_mm_s == pytest.approx(22.2, abs=0.1)
@@ -104,7 +107,11 @@ def test_pattern_tables_and_default_timing():
     assert ranges["trot"] == pytest.approx((42.1, 207.0), abs=0.1)
     assert pat.step_height(pat.PATTERNS["trot"], 50) == 8 and pat.step_height(pat.PATTERNS["crawl"], 50) == 15
     assert [pat.PATTERNS[n].stride_slew_mm for n in ("walk", "trot", "crawl")] == [1.0, 0.75, 0.5]
-    assert ranges["walk"] == pytest.approx((10.8, 73.0), abs=0.1)
+    assert ranges["walk"] == pytest.approx((10.5, 73.0), abs=0.1)
+    # above 63 mm/s (and for a side stride past 48 mm) the walk's swing is 220 ms, its four-foot
+    # ticks 2 and 0: the footfalls stay where they were
+    assert (pat.swing_at(wp, 63), pat.swing_at(wp, 63.1)) == (200, 220) and wp.handover_long_ticks == (2, 0, 2, 0)
+    assert pat.timing("walk", 72.5).shift_ms == 20 and pat.timing("walk", 72.5).period_ms == 960
     assert ranges["crawl"][1] == pytest.approx(26.9, abs=0.1)
 
 
@@ -115,7 +122,9 @@ def test_timing_clamps(name):
     for v in (lo, hi, (lo + hi) / 2):
         t = pat.timing(name, v)
         assert t.speed_mm_s == pytest.approx(v, rel=1e-6)
-        assert t.shift_ms >= pat.shift_min_ms(p) - 1e-6 and t.stance_ms <= p.stance_max_ms + 1e-6
+        # (the walk's long swing at its top speeds takes its extra tick from the four-foot time)
+        long_ms = pat.swing_at(p, v) - p.swing_ms
+        assert t.shift_ms >= pat.shift_min_ms(p) - long_ms - 1e-6 and t.stance_ms <= p.stance_max_ms + 1e-6
     assert pat.timing(name, hi * 3).speed_mm_s == pytest.approx(hi)  # capped
     slow = pat.timing(name, lo / 3)
     assert slow.stride_mm == pat.STRIDE_MIN_MM and slow.speed_mm_s == pytest.approx(lo)
@@ -125,10 +134,11 @@ def test_timing_clamps(name):
         assert pat.timing(name, lo).shift_ms == pat.timing(name, hi).shift_ms == 20
         assert pat.timing(name, lo).period_ms < pat.timing(name, hi).period_ms
     elif pat.fixed_cadence(p):
-        # the walk: one cycle at every speed, the stride alone changes (its four-foot phase stays
-        # one tick: the body's balance loop never acts in it, §12)
+        # the walk: one cycle at every speed, the stride alone changes (its four-foot phases stay
+        # 1 to 3 ticks, 2 on average, 1 with the long swing at the top: the body's balance loop,
+        # which holds for two ticks after a touchdown, barely acts in them, §12, §16)
         assert pat.timing(name, lo).period_ms == pat.timing(name, hi).period_ms
-        assert pat.timing(name, lo).shift_ms == pat.timing(name, hi).shift_ms == 20
+        assert (pat.timing(name, lo).shift_ms, pat.timing(name, hi).shift_ms) == (40, 20)
         assert pat.timing(name, lo).stride_mm < pat.timing(name, hi).stride_mm == pytest.approx(p.stride_mm)
     else:
         # the crawl: the swing never changes with the speed, the shift does
@@ -139,8 +149,9 @@ def test_the_crawl_shift_covers_the_lean_move():
     # the move (300 ms), the lift 60 ms before its end
     assert pat.shift_min_ms(pat.PATTERNS["crawl"]) == 240
     assert pat.timing("crawl", 1e6).shift_ms == pytest.approx(240)
-    for name in ("trot", "walk"):  # one tick on four feet (and the swing's last tick: its foot is down)
-        assert pat.shift_min_ms(pat.PATTERNS[name]) == 20
+    # the trot: one tick on four feet (and the swing's last tick: its foot is down); the walk two on
+    # average (3 before a hind swing, 1 before a fore swing)
+    assert pat.shift_min_ms(pat.PATTERNS["trot"]) == 20 and pat.shift_min_ms(pat.PATTERNS["walk"]) == 40
 
 
 def test_side_strides():
@@ -198,10 +209,11 @@ def fast_bound(name: str, v: float, steer: float = 0.0) -> float:
     trot above its 8-tick swing (150 mm/s) and steering at any speed (its
     outer side takes the longer stride): 9.7 (485 deg/s, test_trot.py
     BOUND), under the body's 10 deg/tick slew, 0.1 of it for FEET's 1 mm
-    rounding at its long strides. The walk (since 2026-11-22): 9.3 (465
-    deg/s), its 54 mm stride in a 220 ms swing asks up to 448 at its top."""
+    rounding at its long strides. The walk (since 2026-11-22): 9.5 (475
+    deg/s), its 54 mm stride in a 220 ms swing with the 3 mm fore-aft sway
+    asks up to 452 at its top, 471 backward with the steer at its full."""
     if name == "walk":
-        return 9.3
+        return 9.5
     return 9.7 if name == "trot" and (v > 150.0 or steer) else 8.3
 
 
@@ -251,8 +263,8 @@ def test_steering_bends_the_path_inside_the_reach_and_the_slew(name, direction):
 def test_a_turn_in_place_goes_straight_within_a_second(name, to):
     """The remote's B7 / B5 while turning in place (2026-11-17): the strides
     move 0.75 mm a tick in the trot (its build-up), so the turn becomes a
-    straight trot in under 1.4 s; the walk (1.0 mm a tick, strides up to 43
-    mm at 1x) in under 1.6 s, under two of its cycles; every foot in reach
+    straight trot in under 1.4 s; the walk (1.0 mm a tick, strides up to 44
+    mm at 1x) in under 1.7 s, under two of its cycles; every foot in reach
     and every joint inside the bound."""
     p = Planner(M, name, "left", tick=0)
     ticks = [p.next() for _ in range(150)]
@@ -261,7 +273,7 @@ def test_a_turn_in_place_goes_straight_within_a_second(name, to):
     while any(abs(a - b) > 1e-9 for a, b in zip(p.s_cur, p.s_tgt)):
         ticks.append(p.next())
         n += 1
-    assert n * 20 < (1600 if name == "walk" else 1400), n
+    assert n * 20 < (1700 if name == "walk" else 1400), n
     ticks += [p.next() for _ in range(100)]
     check_ticks(ticks, (name, to))
     assert max(joint_step_deg(a, b) for a, b in zip(ticks, ticks[1:])) < fast_bound(name, 0)
@@ -270,12 +282,15 @@ def test_a_turn_in_place_goes_straight_within_a_second(name, to):
 @pytest.mark.parametrize("direction", ("forward", "back"))
 def test_the_walk_is_the_lateral_sequence_evenly_spaced(direction):
     """The walk (since 2026-11-22): one leg at a time, LB, LF, RB, RF (the
-    cat's lateral sequence; backward too), a foot every 240 ms (the
-    footfalls evenly spaced: the old walk's came 60 and 180 ms apart), never
-    fewer than three feet down; walking forward the centre of mass inside the
-    three feet at every tick with a leg up, at every speed (from the model:
-    it was up to 7.5 mm outside them in the old walk; walking backward it is
-    outside, as in the old walk: docs/walking-and-balance.md §16.6)."""
+    cat's lateral sequence; backward too), the footfalls nearly evenly spaced
+    (220 ms from a hind foot to its fore foot, 260 from a fore foot to the
+    other side's hind foot: the extra four-foot time where the weight crosses
+    the diagonal; the old walk's came 60 and 180 ms apart), never fewer than
+    three feet down; walking forward the centre of mass at least 0.3 mm inside
+    the three feet at every tick with a leg up, at every speed but the slowest
+    (from the model; 1 to 2 mm from 40 mm/s up: docs/walking-and-balance.md
+    §16.8; it was up to 7.5 mm outside them in the old walk); walking backward
+    it is outside (2 to 7 mm: backward the walk is its first version, §16.8)."""
     order = (LB, LF, RB, RF)
     lo, hi = pat.speed_range("walk")
     for v in (lo * 2, pat.default_speed("walk"), hi):
@@ -288,10 +303,14 @@ def test_the_walk_is_the_lateral_sequence_evenly_spaced(direction):
                 seen.append(t.lifting[0])
         i = seen.index(order[0])
         assert tuple(seen[i:i + 4]) == order
-        downs = [t.tick for a, t in zip(ticks, ticks[1:]) if bin(t.support).count("1") > bin(a.support).count("1")]
-        assert {b - a for a, b in zip(downs, downs[1:])} == {12}  # 240 ms
+        downs = [(t.tick, a.lifting[0]) for a, t in zip(ticks, ticks[1:])
+                 if bin(t.support).count("1") > bin(a.support).count("1")]
+        gaps = {(leg, b - a) for (a, leg), (b, _) in zip(downs, downs[1:])}
+        # forward 220 ms after a hind foot, 260 after a fore foot; backward evenly, 240 ms
+        want = {(LB, 11), (LF, 13), (RB, 11), (RF, 13)} if direction == "forward" else {(leg, 12) for leg in order}
+        assert gaps == want, gaps
         worst = min(t.margin for t in ticks if t.lifting)
-        assert worst > (-0.5 if direction == "forward" else -8.0), (v, worst)
+        assert worst > ((0.3 if v > lo * 2 else 0.2) if direction == "forward" else -7.5), (v, worst)
 
 
 @pytest.mark.parametrize("name", ("crawl",))

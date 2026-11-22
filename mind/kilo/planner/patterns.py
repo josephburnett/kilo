@@ -72,6 +72,29 @@ class Pattern:
     # centre of mass (BodyModel.stance_com, mm ahead of the shoulders' middle) ahead of its
     # shoulder, so the feet's polygon is centred on it (the walk, since 2026-11-22).
     centre_com: bool = False
+    # The four-foot ticks before each group's swing (the walk, since its second version of
+    # 2026-11-22: more before a hind leg's swing, where the weight crosses the diagonal the
+    # fore leg before it and the hind leg share; fewer before a fore leg's). Their mean is
+    # shift_min_ms; () = every slot the same.
+    handover_ticks: tuple = ()
+    # The sway (the walk): the body's own move in time with the cycle, scaled with the stride
+    # (none standing, stopping or turning in place). A roll once a cycle, sway_roll_deg x
+    # cos(2 pi (phase - sway_roll_at) / cycle) (negative: the right side down at sway_roll_at),
+    # and a fore-aft shift of the body over its feet twice a cycle, sway_dx_mm x cos(4 pi (phase
+    # - sway_dx_at) / cycle) (+: the body ahead of its feet); the phase in ticks from the start
+    # of the first group's slot (the four-foot ticks before LB's swing).
+    sway_roll_deg: float = 0.0
+    sway_roll_at: float = 0.0
+    sway_dx_mm: float = 0.0
+    sway_dx_at: float = 0.0
+    # Faster than long_from_mm_s the swing is swing_long_ms with handover_long_ticks (the walk: its
+    # longest strides in a 220 ms swing keep every joint under 460 deg/s; the footfalls stay where
+    # they are, the lift starts a tick earlier); backward always, its four-foot ticks evenly spread
+    # and no sway (the first version's walk). 0: swing_ms at every speed.
+    swing_long_ms: float = 0.0
+    handover_long_ticks: tuple = ()
+    long_from_mm_s: float = 0.0
+    long_stride_mm: float = 0.0  # ...and for a slot whose longer side's stride is past this (a steer)
 
     @property
     def span_ms(self) -> float:
@@ -85,13 +108,17 @@ class Pattern:
 #   LF, RB, RF, statically stable: before each lift the body moves over the
 #   three feet that stay down (the lean). 9 to 27 mm/s.
 # - walk (since 2026-11-22, §16): the cat's lateral-sequence walk, LB, LF,
-#   RB, RF one at a time, the footfalls evenly spaced: a 220 ms swing, then
-#   one tick on four feet (a 240 ms beat, a 960 ms cycle, duty factor 0.77).
-#   No lean and no couplets: three feet down (four for a tick), never two.
-#   With the strides centred under the centre of mass (centre_com) the plan
-#   keeps the centre of mass inside the three feet at every tick (closest,
-#   0.5 mm, at the hand-over from a fore leg to the other side's hind leg).
-#   Backward the same order (§16.6). Fixed cadence; speed from the
+#   RB, RF one at a time, a 960 ms cycle. Its second version (§16.8): 3
+#   ticks on four feet before a hind leg's swing (where the weight crosses
+#   the diagonal the fore leg before it shares with it) and 1 before a fore
+#   leg's, a 200 ms swing (220 ms with 2 and 0 above 63 mm/s and for a
+#   side stride over 48 mm), so a footfall 220 ms after a hind foot's and
+#   260 after a fore foot's; a 1 deg roll and 3 mm fore-aft sway
+#   (sway_*). No lean and no couplets: three feet down, never two. With the
+#   strides centred under the centre of mass (centre_com) the plan keeps
+#   the centre of mass 1 to 2 mm inside the three feet from 40 mm/s up
+#   (0.4 at the slowest). Backward the same order, the first version's
+#   timing (a 220 ms swing every 240 ms, no sway; §16.6). Fixed cadence; speed from the
 #   stride, 11 to 73 mm/s (8 to 54 mm). It replaced the walk with diagonal
 #   couplets (LB, then RF 60 ms later; 150 ms swings; 460 ms cycle; 26 to 97
 #   mm/s), which stood on two feet 80 ms of every step and had the centre
@@ -117,10 +144,12 @@ class Pattern:
 # them: in 4 to 8-tick four-foot phases it caught the tip of one diagonal
 # and put it into the next, the rocking of §11.
 PATTERNS: dict[str, Pattern] = {
-    "walk": Pattern("walk", ((LB,), (LF,), (RB,), (RF,)), swing_ms=220.0, stride_mm=54.0, step_h_mm=8.0,
-                    body_h_256=205, period_ms=960.0, shift_min_ms=20.0, stance_max_ms=740.0, lean=False,
+    "walk": Pattern("walk", ((LB,), (LF,), (RB,), (RF,)), swing_ms=200.0, stride_mm=54.0, step_h_mm=8.0,
+                    body_h_256=205, period_ms=960.0, shift_min_ms=40.0, stance_max_ms=760.0, lean=False,
                     default_mm_s=58.0, step_h_long_mm=6.0, taper_from_mm=40.0, stride_slew_mm=1.0,
-                    centre_com=True),
+                    centre_com=True, handover_ticks=(3, 1, 3, 1), sway_roll_deg=-1.0, sway_roll_at=9.0,
+                    sway_dx_mm=3.0, sway_dx_at=6.0, swing_long_ms=220.0, handover_long_ticks=(2, 0, 2, 0),
+                    long_from_mm_s=63.0, long_stride_mm=48.0),
     # the trot's swing_ms, stride_mm and period_ms are its table entry's (its timing is TrotConfig's)
     "trot": Pattern("trot", ((LF, RB), (RF, LB)), swing_ms=160.0, stride_mm=52.0, step_h_mm=8.0,
                     body_h_256=205, period_ms=360.0, shift_min_ms=20.0, stance_max_ms=250.0, lean=False,
@@ -219,9 +248,23 @@ def shift_min_ms(p: Pattern) -> float:
     return p.shift_min_ms
 
 
-def _stance_limits(p: Pattern) -> tuple[float, float]:
+def is_long(p: Pattern, speed_mm_s: float, back: bool = False) -> bool:
+    """The pattern swings swing_long_ms at this speed (Pattern.long_from_mm_s), and always backward
+    (the walk backward is its first version's: docs/walking-and-balance.md §16.8)."""
+    return p.swing_long_ms > 0 and (back or abs(speed_mm_s) > p.long_from_mm_s)
+
+
+def swing_at(p: Pattern, speed_mm_s: float, back: bool = False) -> float:
+    """The swing time (ms) at a speed: swing_ms, or swing_long_ms above long_from_mm_s and backward."""
+    return p.swing_long_ms if is_long(p, speed_mm_s, back) else p.swing_ms
+
+
+def _stance_limits(p: Pattern, swing_ms: float | None = None) -> tuple[float, float]:
+    """(shortest, longest) stance; with ``swing_ms`` (a long swing) the cycle stays the same."""
     n = len(p.groups)
     lo = n * (shift_min_ms(p) + p.span_ms) - p.swing_ms
+    if swing_ms is not None:
+        lo -= swing_ms - p.swing_ms
     return lo, max(lo, p.stance_max_ms)
 
 
@@ -246,6 +289,8 @@ def speed_range(p: Pattern | str) -> tuple[float, float]:
     lo, hi = _stance_limits(p)
     if fixed_cadence(p):
         hi = lo
+    if p.swing_long_ms > 0:  # the top speed on the long swing
+        lo = _stance_limits(p, p.swing_long_ms)[0]
     return STRIDE_MIN_MM / hi * 1000.0, p.stride_mm / lo * 1000.0
 
 
@@ -260,8 +305,9 @@ def timing(p: Pattern | str, speed_mm_s: float | None = None, direction_name: st
         st = (w + STANCE_PLUS) * TICK_MS
         return Timing(s, TICK_MS, st, st + w * TICK_MS, v)
     n = len(p.groups)
-    st_lo, st_hi = _stance_limits(p)
     v = default_speed(p) if speed_mm_s is None else abs(float(speed_mm_s))
+    sw = swing_at(p, v, direction(direction_name) == "back")
+    st_lo, st_hi = _stance_limits(p, sw if sw != p.swing_ms else None)
     if fixed_cadence(p):
         stance = st_lo
         stride = min(p.stride_mm, max(STRIDE_MIN_MM, v * stance / 1000.0))
@@ -272,8 +318,8 @@ def timing(p: Pattern | str, speed_mm_s: float | None = None, direction_name: st
             stance = st_hi
             stride = max(STRIDE_MIN_MM, v * st_hi / 1000.0)
         stance = max(stance, st_lo)
-    period = stance + p.swing_ms
-    return Timing(stride, period / n - p.span_ms, stance, period, stride / stance * 1000.0)
+    period = stance + sw
+    return Timing(stride, period / n - (p.span_ms - p.swing_ms + sw), stance, period, stride / stance * 1000.0)
 
 
 def step_height(p: Pattern, stride: float) -> float:

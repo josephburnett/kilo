@@ -265,6 +265,7 @@ class Planner:
         self.direction = pat.direction(direction)
         self.steer = max(-1.0, min(1.0, float(steer)))  # forward / back: the path bends, + left (side_strides)
         self.speed_mm_s = pat.default_speed(self.pattern) if speed_mm_s is None else abs(float(speed_mm_s))
+        self._ws = int(round(pat.swing_at(self.pattern, self.speed_mm_s, self.direction == "back") / pat.TICK_MS))  # the walk: this slot's swing (_latch_swing)
         self._pending_pattern: pat.Pattern | None = None
         self.xg = [0.0] * 4          # foot x in the gait frame (no lean shift)
         self.h = model.stance_height(P.GAIT_STANCE_H_256) if start_height is None else float(start_height)
@@ -320,7 +321,18 @@ class Planner:
     def swing_ticks(self) -> int:
         if self.is_trot:
             return self._w
+        if self.pattern.swing_long_ms > 0:  # the walk: this slot's (_latch_swing)
+            return self._ws
         return max(2, int(round(self.pattern.swing_ms / pat.TICK_MS)))
+
+    def _latch_swing(self) -> None:
+        """At a slot's start: its swing for the speed now (patterns.swing_at), kept to its end; the
+        long one also for a side stride longer than Pattern.long_stride_mm (a steer's outer side)."""
+        p = self.pattern
+        sw = pat.swing_at(p, self.speed_mm_s, self.direction == "back")
+        if p.swing_long_ms > 0 and max(abs(self.s_tgt[0]), abs(self.s_tgt[1])) > p.long_stride_mm:
+            sw = p.swing_long_ms
+        self._ws = max(2, int(round(sw / pat.TICK_MS)))
 
     @property
     def couple_ticks(self) -> int:
@@ -354,7 +366,8 @@ class Planner:
             return
         shift = tm.shift_ms if self.cfg.shift_ms is None else self.cfg.shift_ms
         n = len(self.pattern.groups)
-        self.stance_tgt = (n * (shift + self.pattern.span_ms) - self.pattern.swing_ms) / pat.TICK_MS
+        sw = pat.swing_at(self.pattern, self.speed_mm_s, self.direction == "back")  # the walk: long at its top speeds, backward
+        self.stance_tgt = (n * (shift + self.pattern.span_ms - self.pattern.swing_ms + sw) - sw) / pat.TICK_MS
         if self.stopping or (self._pending_pattern is not None and not self._direct_change()):
             self.s_tgt = [0.0, 0.0]
         elif self._pending_pattern is not None:
@@ -542,6 +555,7 @@ class Planner:
             self.k = -1
             self._apply_timing()
             self.stance_ticks = self.stance_tgt
+        self._latch_swing()
         if self.halting and self.halt_t < HALT_HOLD_TICKS:
             # the quick stop's hold: four feet down, the strides going to 0, the lean as it is
             self.t = 0
@@ -685,8 +699,25 @@ class Planner:
         if self.is_trot:
             return 1
         n = len(self.pattern.groups)
-        w = self.pattern.swing_ms
-        return max(0, int(round(((stance * pat.TICK_MS + w) / n - self.pattern.span_ms) / pat.TICK_MS)))
+        w = self.swing_ticks * pat.TICK_MS
+        span = self.pattern.span_ms - self.pattern.swing_ms + w
+        s = int(round(((stance * pat.TICK_MS + w) / n - span) / pat.TICK_MS))
+        ho = self._handover()
+        if ho and self.k >= 0:  # the walk: this slot's share (Pattern.handover_ticks), around the speed's mean
+            s += ho[self.k] - int(round(sum(ho) / n))
+        return max(0, s)
+
+    def _handover(self) -> tuple:
+        """The walk's four-foot ticks before each slot's swing for this slot's swing
+        (Pattern.handover_ticks, or handover_long_ticks with the long swing); walking backward
+        evenly spaced (their mean every slot: the uneven split is made for the forward
+        walk's crossing of the diagonal, and backward it rocked more in the virtual body)."""
+        p = self.pattern
+        ho = p.handover_long_ticks if self.swing_ticks * pat.TICK_MS > p.swing_ms else p.handover_ticks
+        if ho and self.direction == "back":
+            m = sum(ho) // len(ho)
+            return (m,) * len(ho)
+        return ho
 
     def _side_speed(self, leg: int) -> float:
         """mm per tick a foot on the ground slides back."""
@@ -946,6 +977,9 @@ class Planner:
                 self.lean = Lean(self.lean_to.dx, self.lean_to.pitch, self.lean_to.roll)
 
         lean = self.lean
+        sw = self._sway()
+        if sw is not None:
+            lean = Lean(lean.dx + sw.dx, lean.pitch + sw.pitch, lean.roll + sw.roll)
         xs = [self.xg[leg] - lean.dx for leg in LEGS]
         zs = leg_lengths(self.model, xs, self.h, lean.pitch, lean.roll)
         xi = [int(round(min(X_RANGE[1], max(X_RANGE[0], xs[leg])))) for leg in LEGS]
@@ -984,6 +1018,29 @@ class Planner:
                                            Lean(self.lean_to.dx, self.lean_to.pitch, self.lean_to.roll), h)
             self._run_job(self._next, LEAN_UNITS_PER_TICK)
         return out
+
+    def _sway(self) -> Lean | None:
+        """The walk's sway this tick (patterns.Pattern.sway_*): a roll once a cycle and a fore-aft
+        shift twice a cycle, in step with the slots, scaled with the stride walked now against the
+        speed's (walking forward only: none in a turn in place or backward, nothing once the strides
+        are 0: standing, stopped), and for the fore-aft shift also against the default speed's
+        stride (slower, less: the body never moves back over its feet)."""
+        p = self.pattern
+        if not p.handover_ticks or self.is_trot or (p.sway_roll_deg == 0 and p.sway_dx_mm == 0):
+            return None
+        s = (self.s_cur[0] + self.s_cur[1]) / 2.0
+        if s <= 0.0:  # forward only (backward the first version's walk: fading out as the strides pass 0)
+            return None
+        tm = self.timing()
+        f = min(1.0, s / max(1e-6, tm.stride_mm))
+        fx = f * min(1.0, s / pat.timing(p).stride_mm)
+        W = self.swing_ticks
+        lens = [h + W for h in self._handover()]
+        phi = sum(lens[:self.k]) + self.t
+        cyc = float(sum(lens))
+        roll = p.sway_roll_deg * math.cos(2.0 * math.pi * (phi - p.sway_roll_at) / cyc)
+        dx = p.sway_dx_mm * math.cos(4.0 * math.pi * (phi - p.sway_dx_at) / cyc)
+        return Lean(dx * fx, 0.0, roll * f)
 
     def _lagged(self) -> tuple[float, float]:
         """The planned attitude the servos' dead time ago (linear between ticks)."""

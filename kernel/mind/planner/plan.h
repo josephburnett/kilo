@@ -282,6 +282,9 @@ class Planner {
  private:
   bool leaning() const { return pattern_->lean && cfg_.lean; }
   int shift_for(real stance) const;
+  bool sway(Lean* out) const;  // plan.py _sway
+  void latch_swing();          // plan.py _latch_swing
+  int handover(int i) const;   // plan.py _handover
   int span() const;            // a slot's ticks from the first lift to the last touchdown
   int offset(int leg) const;   // the tick after the shift at which this leg of the slot's group lifts
   bool direct_change() const;  // the change under way goes straight over (both patterns fixed cadence)
@@ -364,6 +367,7 @@ class Planner {
   PlannerStats stats_ = {};
   // the trot (plan.py Planner): this slot's swing ticks (kTrotWMin while not in it), the speed's,
   // and this slot's landing per side (left, right) for the target stride at its start
+  int ws_ = 10;  // the walk: this slot's swing ticks (latch_swing)
   int lw_ = kTrotWMin;
   int lw_tgt_ = kTrotWMin;
   real land_[2] = {};
