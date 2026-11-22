@@ -1,9 +1,12 @@
 # One movement engine: a proposal
 
-Written 2026-11-22. A design proposal, nothing built. Numbers marked
-**(est.)** are estimates; every other number is read from the code, the
-docs or the recordings named next to it. Nothing here has been tried on
-Kilo.
+Written 2026-11-22. A design proposal, nothing built; the owner's four
+decisions on it are at the end. Numbers marked **(est.)** are estimates;
+every other number is read from the code, the docs or the recordings
+named next to it, most of them from
+[movement-engine-results.md](movement-engine-results.md) (the old walk,
+trot, long trot and crawl of 2026-11-17 to 11-21). Nothing here has been
+tried on Kilo.
 
 ## Summary (half a page)
 
@@ -17,95 +20,97 @@ can be interrupted, re-timed or adapted by the others.
 
 The proposal: **one engine in the mind** that is given a goal ("be standing",
 "walk there at this pace", "lick the left paw", "get up") and every 20 ms
-works out where every foot and joint should be from the model and what the
-sensors say right now. A movement is no longer a recording to replay but a
+works out the poses Kilo should take next from the model and what the
+board reports right now. A movement is no longer a recording to replay but a
 small set of wishes (which feet carry him, where his weight goes, where a
 paw goes, at what tempo) that the engine re-solves every tick from where
 Kilo actually is. Tempo is a dial, not a property of a recording. Getting
 up is steered by the measured roll, not played blind.
 
-The body keeps what must be fast or must work without the mind: the 50 Hz
-servo loop, the small balance correction, slew and joint limits, the
-watchdog, and fall *detection* (hold soft, report; no rc). It loses the
-trick player, rc and the FEET-only format: **one stream message** replaces
-FEET and the five TRICK messages, which frees an estimated 300 B of the
-body's RAM (it has almost none spare today) and 1.5-2 KB of flash **(est.)**.
+**The board is not a puppet.** In the owner's words: "We absolutely need to
+be clear on the role of the board. It's not a puppet. It's an independent
+layer responsible for assuming a series of poses and automatically
+correcting error and surfacing that as a stream of data for high level
+planning." So the mind sends the board **poses to assume, each with the
+time to reach it**; the board gets there by itself (slew and joint limits,
+its 50 Hz servo loop), corrects the error it measures on its own (the
+balance correction), keeps working toward the last pose and holding it if
+the mind goes quiet, and reports, every tick, what it corrected, what it
+could not do and the error left over. The mind plans from that report. The
+board loses the trick player, rc and the FEET-only format: **one pose
+message** replaces FEET and the five TRICK messages, which frees an
+estimated 300 B of the board's RAM (it has almost none spare today) and
+1.5-2 KB of flash **(est.)**.
 
 The way there is six steps, each tried on the floor and each deleting what
-it replaces. **Before step 1, a short list of things to find out** with the
-software as it is, most of which an agent can do today from the recordings
-in `~/kilo-logs`.
+it replaces. Part one says what the recordings already settled and what
+only the floor can.
 
-## Part one: what to learn from what we have, before building
+## Part one: what to learn first
 
-**A. Can be analysed today from the recordings (no robot).** The flight
-recorder keeps every link frame both ways with the mind's clock
-(`kernel/mind/record/recorder.h`), so these need only a study script in
-`mind/tests/` like `walkstudy.py`.
+**A. Learned from the recordings (done 2026-11-22;
+[results](movement-engine-results.md), `mind/tests/enginestudy.py all`
+recomputes it after new floor runs).** All from the old gaits and builds
+of 2026-11-17 to 11-21.
 
-1. **How late is everything on the link?** From each walk: when the mind
-   sent each FEET, for which body tick, and when each TELEMETRY for a tick
-   arrived; the body's `feet_queued` minimum. Already known: FEET reached the
-   body 80-108 ms before its tick with a 100 ms target, queue 1-4 ticks, no
-   underruns (docs/walking-and-balance.md §16.1). *Answers:* how short the
-   look-ahead (now `feet_lookahead_ticks = 5`, 100 ms) can be, and so how
-   fast a decision in the mind can reach the servos. That number decides
-   what feedback may live in the mind (part 2, "balance").
-2. **Does the model's support margin predict rocking?** For every recorded
-   walk, crawl and trot: the planned margin each tick (the PLAN records)
-   against the measured roll rate. The old walk ran 4.8-7.5 mm outside three
-   feet and rocked 4.8° a cycle; the crawl plans +14 mm. *Answers:* how far
-   inside three feet the weight must be before the third foot really holds
-   it (the open "inset" question of §16.5: 3 mm or 10 mm), which sets the
-   margin the engine must keep.
-3. **How much does the body's balance loop actually do?** `corr_pitch`,
-   `corr_roll` and `BALANCE_HELD` over all runs. The walk study says the
-   loop never acted during the walk. *Answers:* whether the body loop
-   matters only when standing and on slopes (likely) or also in gaits.
-4. **Servo lag against the battery.** Predicted attitude (in FEET) against
-   measured, lag fitted per run against `batt_mv`. The model has 50 ms dead
-   time + 70 ms time constant; the self-measurement fitted 70 ± 12 and 69 ±
-   15 ms (docs/self-measurement-results.md). *Answers:* whether the engine
-   can use one fixed lead or must track it live.
-5. **How good is the state estimate?** `python -m kilo.intent.replay` over
-   every `.krec`, and the nine falls in `mind/tests/fixtures/falls_2026_11.json`:
-   agreement, false changes, time to settle. *Answers:* whether the
-   estimate is good enough to choose actions from (righting, "from any
-   pose"), or needs more than attitude (e.g. what the legs were told).
-6. **How fast does he roll in a get-up?** The six floor tries of rc
-   (`python -m kilo.tricks.righting --phases`): roll speed per pose, how
-   long until still (0.4-1.4 s seen). *Answers:* the time budget of a
-   closed-loop get-up: how often the mind can look and change its action.
-7. **Do tricks play on schedule, and does the IMU follow the model?** Trick
-   runs: `elapsed_ms` against `expected_ticks`, and measured pitch/roll
-   against `tricks/model.cpp`'s prediction. *Answers:* whether the model is
-   good enough off a plain stance to check a paw-lifting goal.
+1. **The link is steady and early.** Every FEET reached the body at least
+   77 ms before its tick with the 100 ms look-ahead (17 852 ticks, 0
+   late, 0 underruns); TELEMETRY arrives within 2.7 ms of its slot. A
+   **60 ms look-ahead (3 ticks)** would have kept 25 ms in hand on every
+   recorded tick. A reading reaches a changed command through the mind in
+   about 75 ms then (110-120 ms now).
+2. **Three feet hold the weight from about 0-2 mm inside**, not 10: over
+   681 single-leg swings the tilt toward the lifted foot is +3.4° with the
+   weight 2-6 mm outside, +1.7° at 0-2 mm inside, +0.1-0.3° at 2-6 mm
+   inside (inferred, medium confidence: those swings are short). The
+   engine keeps **3 mm**. The new walk (+0.4 mm at the hand-over) should
+   rock a little there, far less than the old walk.
+3. **The body's correction is small and mostly frozen in gaits** (held 64 %
+   of GAIT ticks; median 0.75°), and standing it is largely a steady 0.5°
+   lean against the IMU's 2.4° mounting offset, which it takes for real
+   tilt. It does not shape the gait.
+4. **The servo lag does not follow the battery**: 105-127 ms (median 123)
+   at 6.6-7.7 V, no trend over 10 runs. One fixed lead.
+5. **The state estimate is right upright** (99.7-100 % over 38 000 judged
+   frames, 2 brief wrong stretches); lying it is untested (65 still frames
+   after falls).
+6. **Getting up**: rc got him up at the first try in 4 of 6 floor falls,
+   once at the third, once not at all (tail down: no try). Rolls come in
+   bursts of 0.1-0.8 s (median 0.16 s, up to 175°), at up to 580°/s.
+7. **Tricks keep time** (keyframes within 8-41 ms of schedule, 48
+   keyframes). Whether the IMU follows the model off a stance is not known:
+   every recorded trick is a replaced rear-up design.
 
-**B. Needs Kilo on the floor** (with the keys as they will be after the
-pending merges; no step is timed).
+**B. Needs Kilo on the floor** (keys after the pending merges: C4 walk,
+A4 the trot, C5 twice the self-measurement, A1 rear-up, B1 the righting
+experiment in a `KILO_RIGHTING` build, A5 the random mode; no step is
+timed). No trial is needed for the link delay or the battery lag (A1, A4).
 
 8. **The new walk** (C4 at each level, B7/B5; docs/walk-trial.md, with a
-   side video). The model gives it +0.4 mm of margin at the hand-over.
-   *Answers* item 2 on the floor: does a margin near 0 hold or rock?
+   side video), then `walkstudy.py floor` and `enginestudy.py margin`.
+   *Answers* item 2 for the new walk itself: the recordings say a margin
+   near 0 rocks a little; this says how much.
 9. **Self-measurement v2** (C5 twice), two or three runs on the same floor.
    *Answers:* the centre of mass height (the first run hit the fit's limit),
-   the feet rectangle, sag under load, and how much these vary between runs,
-   which tells how much the engine should adapt them live.
+   the feet rectangle, sag under load, the IMU's offset (which must then
+   reach the board, item 3), and how much these vary between runs, which
+   tells how much the engine should adapt them live.
 10. **The trot** (A4, B7 up to level 5) with video: slip on the long stride.
     *Answers:* whether slipping is common enough to need detecting.
 11. **Tricks in the random mode** (A5, then A5 again for each trick): do
-    they look right at the original timing? *Answers:* which moves are
-    worth keeping as goals, and whether timing (tempo) is what makes them
-    look cat-like.
-12. **Falls with hands off**, both get-ups: the built-in rc (a build
-    without the righting switch) and the B1 experiment (with it), on each
-    side and the back, filmed. *Answers:* which phase of a get-up fails, and
-    whether a few model-suggested actions chosen from the measured roll can
-    do it.
+    they look right at the original timing? Let one rear-up (A1) run to
+    its end. *Answers:* which moves are worth keeping as goals, and, with
+    today's library in the recordings, the IMU against the model (item 7).
+12. **Falls with hands off**, before step 1 deletes rc: the built-in rc (a
+    build without the righting switch) and B1 (with it), on each side, the
+    back and once nose or tail down, filmed. Leave him lying still for a
+    few seconds once before touching anything. *Answers:* which phase of a
+    get-up fails, whether a few actions chosen from the measured roll can
+    do it, and the estimate's lying states (item 5).
 13. **A slope and a push**: standing (B6) with a book under the two left
     feet, then a gentle push from the side; the same while walking (C4).
-    *Answers:* how big the residual is that the body loop leaves, and how big
-    the disturbance must be before a step has to change.
+    *Answers:* how big the residual is that the board's correction leaves,
+    and how big the disturbance must be before a step has to change.
 
 ## Part two: the architecture
 
@@ -114,8 +119,9 @@ pending merges; no step is timed).
 ```
 behaviour, remote, guard   -> GOALS        (a few per second)
 engine: goal -> TASK       -> what must hold: support, weight, paw, tempo
-engine: tick solver, 50 Hz -> one POSE per tick, a few ticks ahead
-body, 50 Hz                -> slew, limits, balance residual, servos
+engine: tick solver, 50 Hz -> POSES with the time to reach each, a few ticks ahead
+board, 50 Hz               -> assumes the poses: slew, limits, its own balance
+                              correction; reports corrections, limits hit, residual
 observer (mind, every TELEMETRY) -> state, errors, contact guesses -> back to the engine
 ```
 
@@ -131,11 +137,11 @@ observer (mind, every TELEMETRY) -> state, errors, contact guesses -> back to th
     clock (below) or from the goal (three feet for a paw trick);
   - a **weight target**: where the centre of mass must be, as a margin
     inside the support the contact plan leaves (from the model,
-    `BodyModel` / `model.h`);
+    `model.h`): 3 mm inside three feet (results item 2);
   - **body targets**: height, pitch, roll, fore-aft shift;
   - **end-effector targets** for free limbs: a paw at a point relative to
     the head, the head and tail angles;
-  - **limits**: joint speed (the body's 500°/s slew), the servos' load from
+  - **limits**: joint speed (the board's 500°/s slew), the servos' load from
     the model (as the rear-up and righting checks do now).
 - **Tick solver** (`engine/solve.cpp`): each tick, from the task and the
   observer's estimate, the body pose and the four feet, then the joint
@@ -162,72 +168,87 @@ observer (mind, every TELEMETRY) -> state, errors, contact guesses -> back to th
   (a swinging foot comes down when he tips 7° toward it) becomes "this
   foot's contact comes early". Both already exist in `plan.cpp`; they become
   properties of the clock that every movement gets, including tricks.
-- **Tricks use the same clock**: "lick a paw" is: contact plan three feet,
-  weight 10 mm **(est.)** inside their triangle, the free paw to a point under
-  the chin, head tilted down to meet it, a small paw stroke at the tempo.
-  "Stretch" is: front feet forward, body low in front, hold. Because these
-  are wishes, they are valid from any pose the solver can reach: from
-  sitting, a paw trick needs no three-foot shift; from standing it does,
-  and the engine makes it.
+- **Tricks use the same clock**: "lift a paw and wash the face" (the first
+  trick rebuilt, decision 4) is: contact plan three feet, weight 3 mm inside
+  their triangle, the free paw to a point under the chin, head tilted down
+  to meet it, a small paw stroke at the tempo. "Stretch" is: front feet
+  forward, body low in front, hold. Because these are wishes, they are
+  valid from any pose the solver can reach: from sitting, a paw trick needs
+  no three-foot shift; from standing it does, and the engine makes it.
 
-### Balance: what stays on the body, and why
+### Balance: the board's layer, and what the mind does above it
 
-The body loop is about 4 ms from IMU to servo command plus up to 10 ms of
-IMU sample age **(est.)** (docs/architecture.md §2). A loop through the mind
-adds: up to 20 ms of tick phase, the TELEMETRY on the wire (1.6 ms), the
-mind's own pass, the FEET on the wire, and the look-ahead the stream keeps
-against jitter (100 ms today) **(est. in total, 40-130 ms more; item 1
-measures it)**. The servos themselves take 50 + 70 ms (model). A tip grows
-with an e-folding time of about 65-112 ms (self-measurement, one timed tip).
+The board corrects in its own tick: about 4 ms from IMU to servo command
+plus up to 10 ms of IMU sample age **(est.)** (docs/architecture.md §2). A
+loop through the mind is, measured: 5 ticks between the reading the mind
+had and the tick its command plays (100 ms look-ahead), plus 5-15 ms
+inside the board's tick; about 75 ms with the 60 ms look-ahead this
+proposal takes. The servos themselves take about 120 ms (measured 105-127
+ms in the walks). A tip grows with an e-folding time of about 65-112 ms
+(self-measurement, one timed tip).
 
 So:
 
-- **On the body, unchanged in kind**: the residual balance loop (its
-  reference is the engine's predicted attitude, so it only sees model
-  error), slew and joint limits, the watchdog's hold, settle and rest,
-  battery limits, fall detection. These act in the first 100 ms.
+- **On the board, as its own layer** (decided 2026-11-22): the balance
+  correction (its reference is the engine's predicted attitude, so it only
+  sees model error), slew and joint limits, the watchdog's hold, settle
+  and rest, battery limits, fall detection. These act in the first 100 ms
+  and need nothing from the mind in that time. Today the correction is
+  small (median 0.75°) and held while any foot is up, so it does not shape
+  a gait; it must be given the IMU's measured offset, or it keeps leaning
+  against a tilt that is not there (results item 3).
+- **The board reports what it did**, every tick: the correction it carries,
+  the reference it held to, the residual (attitude minus reference), on or
+  frozen, the feet it corrected through, and, new, which limits cut the
+  pose it was given and the joint angles it commanded. The observer reads
+  this as data, not as an echo of what was sent.
 - **In the mind**: everything that changes the *plan*: where the next foot
   lands, waiting or hurrying a phase, leaning uphill on a slope, widening
   the stance after a push, slowing on a low battery. These act over the next
-  step (200-500 ms), where the link delay is small against the servos'.
-- **To decide with data** (item 1): whether the catch must move to the
-  body. Recommendation: leave it in the mind unless the measured mind loop
-  is longer than about one tip e-folding time.
+  step (200-500 ms), where the 75 ms through the mind is small against the
+  servos'. The catch (a swinging foot down early) stays in the mind: its
+  loop is shorter than one tip's growth plus the servos.
 
 ### Contact and support without foot sensors
 
 Kilo has no foot switches and no servo position feedback. Contact is
 therefore a belief: the plan says which feet are down; the observer checks
-it against the attitude. A measured tilt toward a foot the plan says is
-down means that foot is not carrying (a slip, a hole, a soft floor); a
-steady offset means a slope or a model error (the self-measurement's 2.4°
-nose-down is one). The existing error estimator (`planner/errors.cpp`:
-offset and lag from the telemetry) becomes the observer's, and its
-results feed the engine live, within bounds: a learned centre-of-mass
-offset shifts the weight target, a learned lag shifts the lead. Slipping
-forward can also show in the distance sensor when facing a wall (80 ms
-cadence), as progress smaller than commanded; that is a later addition.
+it against the attitude and the board's report. A measured tilt toward a
+foot the plan says is down means that foot is not carrying (a slip, a
+hole, a soft floor); a steady offset means a slope or a model error (the
+self-measurement's 2.4° nose-down is one). The existing error estimator
+(`planner/errors.cpp`: offset and lag from the telemetry) becomes the
+observer's, and its results feed the engine live, within bounds: a learned
+centre-of-mass offset shifts the weight target. The servo lead is one
+fixed number from the self-measurement: it did not change with the battery
+(results item 4). Slipping forward can also show in the distance sensor
+when facing a wall (80 ms cadence), as progress smaller than commanded;
+that is a later addition.
 
 ### Lying down and getting up
 
 The lying simulator reproduces none of the four recorded rc get-ups
 (docs/righting-results.md), so no open-loop sequence designed in it can be
-trusted. Proposal:
+trusted. rc itself got him up at the first try in 4 of 6 floor falls.
+Proposal:
 
 - A few **actions** the model suggests, each a task like any other: "kick
   with the legs underneath", "throw the legs on top over", "tuck the head",
   "fold", "push up to the belly" (the righting branch's kick and throw are
   the first two).
 - A **policy in the mind**, ticked at 50 Hz on the measured roll and roll
-  rate: which action for this roll band and side; switch when the roll stops
-  improving for a set time (from item 6, roughly 200-300 ms **(est.)**);
-  give up after three tries (as the experiment does: limp and a meow).
+  rate: which action for this roll band and side; switch when the roll has
+  not improved for 0.3 s (the recorded rolls come in bursts of 0.1-0.8 s,
+  median 0.16 s); give up after three tries (as the experiment does: limp
+  and a meow). The board must stream TELEMETRY at 50 Hz while lying (25 Hz
+  today outside a walk).
 - **Learning from each try**: log (start roll band, action, outcome). After
   enough falls the policy prefers what worked on Kilo, not what worked in
   the simulator. The simulator only ranks the first candidates and screens
   servo loads.
-- **No permanent body reflex**, as decided 2026-11-21: the body detects
-  the fall, holds the legs soft and reports; getting up is a goal.
+- **No body reflex**, as decided 2026-11-21 and 2026-11-22: the board
+  detects the fall, holds the legs soft and reports; getting up is a goal.
+  rc is deleted at step 1.
 
 ## Part three: what it replaces and deletes
 
@@ -241,34 +262,46 @@ Deleted outright once its step lands (git keeps it):
 - Mind, Python references: `mind/kilo/planner/{patterns,plan,walker}.py`,
   `mind/kilo/intent/{graph,moves}.py` and `moves/`, `mind/kilo/tricks/{library,legacy,import_legacy,player,rear_up}.py`
   and `library/`; their vector generators and vector files under
-  `kernel/host/tests/`. Kept as analysis tools: `dynamics.py`, `righting.py`
-  (the simulators), `measure/` (the fit).
+  `kernel/host/tests/`. The engine is written once, in C++, and tested in
+  the laptop build of the kernel (decision 3). Kept in Python as tools:
+  `dynamics.py`, `righting.py` (the simulators), `measure/` (the fit), the
+  study scripts.
 - Protocol: `FEET`, `TRICK_BEGIN`, `TRICK_FRAMES`, `TRICK_COMMIT`,
-  `TRICK_PLAY`, `TRICK_STOP`, `FALL_RC`. Replaced by one `POSE` stream: per
+  `TRICK_PLAY`, `TRICK_STOP`, `FALL_RC`. Replaced by one `POSE` message: a
+  pose for the board to assume and **the tick by which to reach it**; per
   leg either a foot position (x, z in mm, wider ranges than FEET's ±60 and
   30-95) or two joint angles (for a paw above the body), the head and tail
-  angles, the predicted pitch and roll, the support bits: about 20 B
-  payload **(est.)**, under 10 % of the line at 50 Hz.
-- Body: `core/keyframe.cpp` (1176 B of flash in the 2026-10-11 size report,
+  angles, the attitude the engine expects there (the board's balance
+  reference) and the feet that should carry him: about 22 B payload
+  **(est.)**, under 10 % of the line at 50 Hz. The board moves toward the
+  newest pose by its tick, slew-limited, and once there holds it with its
+  correction on; a late or missing POSE therefore costs nothing but
+  freshness, and the mind may send poses further apart where nothing needs
+  every tick (a hold, a slow stretch). TELEMETRY gains a "limited" flag per
+  leg (a joint or slew limit cut the pose) and, while a pose stream runs,
+  the commanded joint angles at a low rate.
+- Board: `core/keyframe.cpp` (1176 B of flash in the 2026-10-11 size report,
   and its 24-frame store, 336 B plus header of RAM); rc and the recovery
   states in `reflex`/`body.cpp` (150-250 B of code and about 40 B of table,
   docs/righting.md's estimate); the trick dispatch in `link.cpp`; the
   joint-space balance gains for SIT if every pose is streamed. `feet.cpp`
-  grows a little (joint mode). **Net (est.)**: about 300 B of RAM and
-  1.5-2 KB of flash freed, against about 1 B of RAM and 3 KB of flash
-  spare reported after the righting branch.
+  grows a little (joint mode, reach-by-tick). **Net (est.)**: about 300 B
+  of RAM and 1.5-2 KB of flash freed, against about 1 B of RAM and 3 KB of
+  flash spare reported after the righting branch.
 
 ## Part four: the path
 
 Every step is tried on the floor with keys he already has, and deletes
 what it replaces.
 
-1. **One stream.** `POSE` replaces FEET and the TRICK messages; the body
-   trick player and rc go. The mind's existing walker sends POSE in foot
-   mode; the existing tricks and intent moves are sampled in the mind and
-   sent in joint mode. Floor try: every key looks as before; tricks at the
-   same timing (compare the recordings of item 11). *Why first*: every
-   later step needs it, it gives the body back the RAM the rest needs, and
+1. **One stream.** `POSE` replaces FEET and the TRICK messages; the board's
+   trick player and rc go. The look-ahead drops to 60 ms. The mind's
+   existing walker sends POSE in foot mode; the existing tricks and intent
+   moves are sampled in the mind and sent in joint mode. Floor try: every
+   key looks as before; tricks at the same timing (compare the recordings
+   of item 11); after a fall he lies soft and reports, and B1 runs the
+   righting experiment's moves through the new stream. *Why first*: every
+   later step needs it, it gives the board back the RAM the rest needs, and
    it changes no movement, so a difference on the floor is the transport's
    fault and easy to find.
 2. **Gait clock and solver.** Walk, trot and crawl become offsets on one
@@ -279,42 +312,43 @@ what it replaces.
    the solver; `intent/` moves and the graph go. Floor try: B6, A7, the
    random mode's sitting and lying down, from odd starts.
 4. **Tricks as goals.** The kept tricks (item 11) rewritten as tasks with a
-   tempo; the keyframe library goes. First the paw lift on three feet.
-   Floor try: A5 twice, A1 (rear up as "nose up to N degrees").
+   tempo; the keyframe library goes. First the paw lift on three feet and
+   the face wash. Floor try: A5 twice, A1 (rear up as "nose up to N
+   degrees").
 5. **Closed-loop getting up.** The policy of part two; the righting
    experiment goes. Floor try: B1 from each side and the back, then the
    same as a goal the engine sets itself after a fall.
-6. **Live adaptation.** The observer's offsets and lag feed the engine
-   within bounds; slope lean; a changed step after a push. Floor try: item
-   13 again, before and after.
+6. **Live adaptation.** The observer's offsets feed the engine within
+   bounds; slope lean; a changed step after a push. Floor try: item 13
+   again, before and after.
 
-**Main risks.** The mind now owns every movement: a kernel stall becomes a
-held pose on the body (the watchdog handles it, but tricks would freeze
-mid-air, so the look-ahead must cover stalls). The solver replaces tuned,
-floor-tested code (the walk, the quick stop) and will at first be worse at
-something. RAM on the body stays tight until step 1 lands, so nothing can
-be added there before it.
+**Main risks.** The mind now plans every movement: a kernel stall becomes
+the board finishing its last pose and holding it with its correction on
+(the watchdog then settles him), so a stall mid-trick leaves him in that
+pose rather than mid-fall; the solver must only send poses that are safe
+to hold. The solver replaces tuned, floor-tested code (the walk, the quick
+stop) and will at first be worse at something. RAM on the board stays
+tight until step 1 lands, so nothing can be added there before it. Between
+step 1 and step 5 he does not get up by himself (decision 1).
 
-**Honest unknowns.** How far inside three feet the weight must be (items 2,
-8). The mind's real loop delay (item 1). Whether a few actions and a policy
-can get him up at all, since nothing we have can predict a get-up (item
-12). Whether hobby servos with no feedback follow wishes smoothly enough to
-look cat-like, or need the tempo kept low.
+**Honest unknowns.** Whether 3 mm inside three feet holds on the floor for
+the new walk (item 8; the recordings say so only for the old gaits).
+Whether a few actions and a policy can get him up at all, since nothing we
+have can predict a get-up (item 12). Whether the IMU follows the model off
+a plain stance (item 11). Whether hobby servos with no feedback follow
+wishes smoothly enough to look cat-like, or need the tempo kept low.
 
-## The owner's decisions
+## The owner's decisions (2026-11-22)
 
-1. **Should he stop getting up by himself from step 1 (rc deleted), until
-   step 5 brings the new get-up?** Recommendation: yes, with B1 still
-   running the righting experiment's moves through the new stream. It
-   matches your 2026-11-21 "no fallback" and avoids keeping rc for one more
-   step.
-2. **Should the small balance correction stay on the body?** Recommendation:
-   yes; move the catch there only if item 1 shows the mind is too slow.
-3. **Keep writing every engine piece twice (Python reference and C++,
-   checked by vector files), or write it once in C++ and test it in the
-   laptop build of the kernel?** Recommendation: once, in C++. The Python
-   reference made sense when the mind was Python; the simulators and the fit
-   stay in Python as tools.
-4. **Which cat-like goal should prove the engine at step 4?**
-   Recommendation: lifting a front paw on three feet and washing the face
-   with it, at a tempo the random mode can vary.
+1. **rc, the board's built-in get-up, is deleted at step 1.** Until step 5
+   brings the new get-up he does not get up by himself; B1 runs the
+   righting experiment's moves through the new stream.
+2. **The balance correction stays on the board, "for sure".** The board is
+   an independent layer: it assumes the poses it is given, corrects error
+   by itself and reports what it corrected as a data stream the mind plans
+   from (the owner's words are in the summary).
+3. **The engine is written once, in C++**, tested in the laptop build of
+   the kernel; no Python reference twin. Python stays for the simulators,
+   the measurement fit and the study scripts.
+4. **The first trick rebuilt as a goal: lifting a front paw on three feet
+   and washing the face with it**, at a tempo the random mode can vary.
