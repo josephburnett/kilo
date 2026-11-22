@@ -24,7 +24,7 @@ uint32_t timer_ticks(const Trick& t, uint8_t speed) {
 }
 
 void test_library_matches_python() {
-  CHECK(kLibrarySize == 16);  // the 13 first-version tricks, then the authored rear_up's three stages
+  CHECK(kLibrarySize == 26);  // the 13 first-version tricks, the authored rear_up's three stages, the random mode's 10
   for (uint32_t i = 0; i < kLibrarySize; i++) {
     const Trick& t = kLibrary[i];
     const char* p = trick_problem(t);
