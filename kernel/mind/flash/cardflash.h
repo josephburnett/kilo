@@ -27,7 +27,8 @@
 //      checked again at the next boot (charge it first). On USB power, or
 //      with no TELEMETRY (no firmware), there is no reading and no refusal.
 //   6. otherwise FLASH: then FLASHED (the HELLO after the reset reports the
-//      image's build) or FAILED (the flasher's error).
+//      image's build) or FAILED (the flasher's error; recorded once the
+//      body's HELLO comes again, or kHelloWaitUs after the flasher ended).
 // A flash attempt is never repeated within a boot, and nothing here reboots
 // anything, so there is no loop.
 //
@@ -36,9 +37,14 @@
 // FLASHED or SAME for this image (so a good flash's record, with its log,
 // stays until the next image). See format_card_result() for the layout.
 //
-// The sounds (CardFlashHost::card_sound): "trill" after a good flash,
-// "hiss" after a failed one or a refusal. Nothing while the flash runs: the
-// main loop pauses everything on the link meanwhile, the sound player too.
+// The signals (CardFlashHost::card_signal, signal/signal.h, docs/signals.md):
+// before a flash Flashing (the eyes steady white), then kAnnounceUs for the
+// Mind to send it before the flasher takes the line (the body cannot drive
+// its lights while it is reprogrammed: they keep that white); after it Done
+// (three green flashes, the trill) or Failed (three red, the hiss); Refused
+// (three purple, the hiss) for a refusal. Nothing else while the flash
+// runs: the main loop pauses everything on the link meanwhile, the sound
+// player too.
 #ifndef KILO_MIND_FLASH_CARDFLASH_H
 #define KILO_MIND_FLASH_CARDFLASH_H
 #include <stdint.h>
@@ -46,6 +52,7 @@
 #include "flash/image.h"
 #include "link/serial_link.h"
 #include "platform.h"
+#include "signal/signal.h"
 #include "util/logring.h"
 
 namespace kilo {
@@ -86,10 +93,10 @@ enum class CardAction : uint8_t { Nothing, Refuse, Same, NotRetried, Flash };
 // The rules above. *why: a static string for the log and the result file.
 CardAction decide_card_flash(const CardFacts& f, const char** why);
 
-// Who hears of the outcome: the sounds, and a walk to stop before the flash.
+// Who hears of the outcome: the signals (the eyes and the sounds), and a walk to stop before the flash.
 class CardFlashHost {
  public:
-  virtual void card_sound(const char* name, const char* why) = 0;
+  virtual void card_signal(signals::Signal s, const char* why) = 0;
   // Right before the flasher takes the UART (a walk the remote started in the first seconds ends first).
   virtual void card_before_flash() {}
 
@@ -106,6 +113,7 @@ class CardFlash {
   static constexpr uint32_t kResultMax = 9216;
   static constexpr uint32_t kManifestMax = 1024;
   static constexpr uint32_t kRecordReadMax = 1024;      // the result file's head: its key lines
+  static constexpr uint64_t kAnnounceUs = 150000;       // Flashing signalled this long before the flasher starts
 
   // card: the FAT partition (the kernel updater's store: the same files
   // next to kernel7.img). image: a 32 KB image of its own (not the laptop's).
@@ -132,16 +140,17 @@ class CardFlash {
   const char* result_text() const { return text_; }
 
  private:
-  enum class Step : uint8_t { Idle, Waiting, Flashing, Done };
+  enum class Step : uint8_t { Idle, Waiting, Announce, Flashing, Done };
 
   void decide();
   void load(CardFacts& f);
   int32_t read_file(const char* name, char* buf, uint32_t cap);  // bytes, -1 missing, -2 too big, -3 failed
   const char* load_image(const Manifest& m);
+  void start_flash();
   void finish_flash();
   void record(CardOutcome outcome, const char* why);
   bool write_result();
-  void say(const char* sound, const char* why);
+  void tell(signals::Signal s, const char* why);
   uint32_t ms_since_begin() const { return (uint32_t)((clock_.now_us() - begin_us_) / 1000u); }
 
   KernelStore& card_;
@@ -159,7 +168,8 @@ class CardFlash {
   CardOutcome outcome_ = CardOutcome::None;
   uint64_t begin_us_ = 0;
   uint64_t hello_seen_us_ = 0;  // this check first saw a HELLO (the link asks again while no TELEMETRY comes)
-  uint64_t flash_us_ = 0;       // the flasher started
+  uint64_t flash_us_ = 0;       // the flasher started (Announce: was signalled)
+  uint64_t ended_us_ = 0;       // the flasher was first seen done (a failure waits for a HELLO from then)
   uint32_t first_seq_ = 0;  // the log ring's first line of this check
   CardFacts facts_ = {};
   char why_[160] = {};

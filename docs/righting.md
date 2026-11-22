@@ -111,7 +111,8 @@ What is on the safe side whatever the simulator gets wrong:
 - **Bounded.** At most three tries per press of B1. Each try lasts 2.7
   seconds. After the third, or when nothing more can be done, the mind lets
   every servo go (limp), logs `righting gave up: he is left LIMP on the
-  floor, he needs a hand`, and Kilo **meows** once.
+  floor, he needs a hand`, and his eyes give **three quick red flashes**
+  (and he meows once, if a speaker is connected).
 - **No long stall.** After each try the body's own fall check comes back;
   if he is still down it lies him down and lets the legs go limp 2 seconds
   later, whether the Pi is there or not.
@@ -123,8 +124,9 @@ What is on the safe side whatever the simulator gets wrong:
 ## How it is switched on
 
 1. A kernel built with `KILO_RIGHTING=1`. Without it (the default) B1 does
-   nothing but log that the experiment is not built in, and the body's fall
-   reflex works as always.
+   nothing but log that the experiment is not built in (his eyes give
+   three quick purple flashes: refused), and the body's fall reflex works
+   as always.
 2. The body firmware of the same build (protocol 2.1: it knows FALL_RC).
    `kilo card` writes both; the mind flashes the body at its next boot.
 3. With both, at every start the mind sets FALL_RC to 0: from then on a
@@ -136,7 +138,12 @@ What is on the safe side whatever the simulator gets wrong:
 B1 acts only when the state estimate says he is on his left side, his
 right side or his back. Otherwise it is refused, with a line in the log
 such as `righting refused: he is STANDING: B1 rights him only from a side
-or his back`. Nose or tail down: nothing (the intent gives up at once).
+or his back`, and three quick purple flashes. Nose or tail down: nothing
+(the intent gives up at once).
+
+The eyes while it runs (`docs/signals.md`): white, blinking slowly, from
+B1 until it ends; then three quick green flashes if he is on his feet, or
+three quick red ones if not. A key that stops it shows nothing more.
 
 ## First try (no step is timed)
 
@@ -153,20 +160,25 @@ hand's width of space all round.
    (`KILO_RECORD_SAVE=1` saves the flight recorder to the card, so the try
    can be read afterwards.)
 2. Card into Kilo, switch on. The first start after a new card also
-   updates the body's program: wait until he has trilled (the update is
-   done) and mewed (ready).
+   updates the body's program: wait until his eyes have been steady white
+   for a while (the update) and then given three quick green flashes (the
+   update is done); after that they stay green. Three red flashes instead
+   mean the update failed: stop here and read the card on the laptop
+   (`docs/laptop-setup.md` step 6).
 3. Press **B6** (column B, sixth row from the bottom): he stands.
 4. Lay him gently on the blanket on his **right side**, and take your hands
    away. He chirps, lies down (legs fold) and a little later goes limp.
    That is the new behaviour: no rc.
-5. Press **B1** (column B, bottom row). Hands off. Watch:
+5. Press **B1** (column B, bottom row). Hands off while his eyes blink
+   white. Watch:
    - the legs underneath go forward and back, the top legs reach back, the
      head lifts; a short pause;
    - a sudden kick: does he roll onto his belly? onto his back? not at all?
    - then the legs fold; if he is on his belly he stands up rear first.
 6. If he is down again he tries again by himself, up to three times in
-   all, then goes limp and meows. That is the end of it; nothing more
-   happens until you press a key.
+   all, then goes limp, and his eyes stop blinking and give three quick
+   red flashes. That is the end of it; nothing more happens until you
+   press a key. If he got up, the flashes are green.
 7. Stand him up by hand if needed, press B6, and do the same on his **left
    side**, then once **on his back**. As many times as you have patience
    for; two each way already tells a lot.
@@ -177,7 +189,7 @@ hand's width of space all round.
 
 For each try, one line: which side, what each try did (rolled onto his
 belly / onto his back / did not move / something else), how it ended
-(standing / on his belly / limp and meowed), anything that looked strained
+(standing / on his belly / limp after red flashes), anything that looked strained
 (a buzzing servo, a leg bent under him). "Don't know" is fine. Then switch
 him off, card into the laptop, `make mount`, `kilo card /mnt/e --fetch`, and
 tell me: the log lines starting `intent:` and `righting` and the recording

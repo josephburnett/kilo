@@ -6,6 +6,12 @@ hiss when the distance guard has to pull him back from something very
 close. The sound comes out of the Raspberry Pi's 3.5 mm headphone jack,
 which feeds a small amplifier board (a PAM8403) and a speaker.
 
+**The speaker is not wired up** (the owner's report, 2026-11-22). Until it
+is, nothing here is heard. Everything Kilo tells you with a sound he also
+shows with his eyes, and the eyes come first: `docs/signals.md` is the
+list of colours and flashes. Each sound below goes with one of those
+signals.
+
 The recordings live in `kernel/sounds/` as WAV files. Building the kernel
 packs every one of them into the kernel image, so there are no files to
 copy to the SD card: installing a new kernel (`kilo update`) brings its
@@ -18,9 +24,13 @@ Only the C++ mind that runs on Kilo makes sounds.
 
 | What happens | Sound | Notes |
 |---|---|---|
-| You press **B2** on the remote | a meow | one of `meow1`, `meow2`, `meow3`, picked at random, never the same one twice in a row. B2 moves nothing, so it works at any time, also while he walks or runs the A5 behaviour |
-| Kilo is ready after switching on (the body first answers the Pi) | `mew` | once per boot |
-| He wakes from light sleep (any key, or a laptop) | `mew` | |
+| You press **B2** on the remote | a meow | one of `meow1`, `meow2`, `meow3`, picked at random, never the same one twice in a row. B2 moves nothing, so it works at any time, also while he walks or runs the A5 behaviour. The eyes show nothing for it |
+| Kilo is ready after switching on (the body first answers the Pi) | `mew` | once per boot; the eyes: three green flashes |
+| He wakes from light sleep (any key, or a laptop) | `mew` | the eyes: three green flashes |
+| Done: the body firmware from the SD card flashed, the self-measurement finished, the righting experiment got him up | `trill` | the eyes: three green flashes |
+| Refused: a key he cannot do now, a forward key with something ahead, the card's body firmware refused | `hiss` | the eyes: three purple flashes |
+| Failed: the card's body firmware failed, the self-measurement stopped by itself, the righting experiment failed | `hiss` | the eyes: three red flashes |
+| The righting experiment gave up and left him limp | a meow | the eyes: three red flashes (`docs/righting.md`) |
 | The A5 behaviour, sitting | now and then `purr`, more rarely `trill` or a meow | the first one 20 to 60 s after he settles, then one every 45 to 120 s at most; sometimes nothing |
 | The A5 behaviour, standing or looking around | rarely `trill` or a meow | one every 90 to 240 s at most, often nothing |
 | The distance guard sees something very close (red) and backs him off | `hiss` | once each time it backs off |
@@ -76,7 +86,13 @@ recorder, so a recording shows what he said and when:
     sound play name=meow2 asked=meow why=key:B2 volume=70 ms=1020
 
 `why` is what asked: `key:B2`, `ready`, `wake`, `behaviour`,
-`guard red`, or `host:N` (a laptop).
+`guard red`, `key refused`, `distance guard` (a forward key it refused),
+`card flash done`, `card flash failed`, `card flash refused`,
+`measurement done`, `measurement stopped itself`, `righting done`,
+`righting failed`, `righting gave up`, or `host:N` (a laptop). All but
+B2, the behaviour's and a laptop's come with an eye signal, from the same
+call (`Mind::signal()`, `docs/signals.md`); its log line comes first, e.g.
+`signal refused why=key refused`.
 
 ## Adding or changing a sound
 
@@ -152,7 +168,7 @@ kernel for the next; the kernel's renderer (`kernel/mind/sound/render.cpp`)
 fills it: it decodes the stored samples, converts 22050 to 44100 Hz,
 applies the volume, and writes the same value to both channels (there is
 one speaker). The player (`kernel/mind/sound/player.cpp`) decides what
-plays and when; the hooks above are in `kernel/mind/mind.cpp`.
+plays and when; the hooks above are in `kernel/mind/mind.cpp`, and the signals' sounds in `kernel/mind/signal/signal.cpp` (`signal_sound()`).
 
 **No clicks.** Every sound fades in over 5 ms and out over 15 ms, also
 when it is cut short, so a recording that starts or ends abruptly does not

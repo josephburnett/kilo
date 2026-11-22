@@ -43,9 +43,12 @@ tricks/           the trick model, the compiled-in library (library.gen.cpp) and
 perception/       ultrasonic and IMU detectors, the Percepts aggregator (kilo/perception)
 behaviour/        tree engine, drives, utility selector, library, 10 Hz runner, personality.gen.cpp (kilo/behaviour)
 behaviour/alive   small body moves while the runner idles or explores (no Python counterpart)
-guard/            the distance guard: the range filtered, zones, stop / back off / sit, forward keys refused, the eyes
+guard/            the distance guard: the range filtered, zones, stop / back off / sit, forward keys refused, the eyes' colour
 sound/            Kilo's sounds: the player (requests, families, the queue, the gap, volume), the renderer the audio
                   interrupt runs, the output seam (no Python counterpart; docs/sound.md)
+signal/           what Kilo tells the owner: named signals (ready, done, refused, failed, ...) on the eyes (the eye
+                  language, its priority under the guard's blue and red, SET_EYES) with their sounds, from one call
+                  (Mind::signal; no Python counterpart; docs/signals.md)
 remote/           the IR key map and RemoteControl; client.cpp: BodyClient's posture/balance/look
 measure/          the self-measurement (C5 twice): the script (a port of mind/kilo/measure/script.py) and its run;
                   docs/self-measurement.md

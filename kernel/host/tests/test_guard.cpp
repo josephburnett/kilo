@@ -489,16 +489,18 @@ void test_light_sleep_floor() {
   CHECK(r.mind.guard().action() == Action::Watch && s.stops == 0 && s.pullbacks == 0 && s.refused == 0);
   CHECKF(s.zone_changes == changes_before && r.mind.guard().zone() == Zone::Green, "zone changes %u while lying",
          (unsigned)(s.zone_changes - changes_before));
-  const Goal* g = r.mind.link().goal(KILO_MSG_SET_EYES);  // green all along
-  CHECK(g != nullptr && g->payload[2] == kEyeLevel && g->payload[1] == 0 && g->payload[3] == 0);
+  // green until he sleeps, then dark with the dim green blink (signal/signal.h): never blue or red
+  const Goal* g = r.mind.link().goal(KILO_MSG_SET_EYES);
+  CHECK(g != nullptr && g->payload[1] == 0 && g->payload[3] == 0 &&
+        (g->payload[2] == 0 || g->payload[2] == signals::kDimGreen.g));
   CHECK(r.posture_goal() == KILO_POSTURE_LIMP);
   std::vector<Sent> sent = r.body.of(KILO_MSG_SET_EYES);
-  size_t eyes = sent.size() - eyes_before, other = 0;  // the goal's refreshes: every one green
+  size_t eyes = sent.size() - eyes_before, other = 0;
   for (size_t i = eyes_before; i < sent.size(); i++)
-    if (sent[i].payload.size() != 4 || sent[i].payload[2] != kEyeLevel || sent[i].payload[1] != 0) other++;
+    if (sent[i].payload.size() != 4 || sent[i].payload[1] != 0 || sent[i].payload[3] != 0) other++;
   CHECK(other == 0);
-  std::printf("guard: light sleep, the floor at 55-63 mm for 60 s: zone %s, %u zone changes, %zu SET_EYES (the goal's refresh, "
-              "all green), %u floor readings ignored\n",
+  std::printf("guard: light sleep, the floor at 55-63 mm for 60 s: zone %s, %u zone changes, %zu SET_EYES (green, then "
+              "asleep: dark and the dim blink), %u floor readings ignored\n",
               zone_name(r.mind.guard().zone()), (unsigned)(s.zone_changes - changes_before), eyes,
               (unsigned)r.mind.guard().filter().floor_ignored());
 }
@@ -556,8 +558,9 @@ void test_backward_trick_pickup_and_off_do_not_trigger() {
 }
 
 void test_eyes() {
-  {  // a body with eyes: green, then blue at the stop, the colour latched as SET_EYES
+  {  // a body with eyes: green (after the ready flashes), then blue at the stop, the colour latched as SET_EYES
     WallRig r(WallRig::remote_cfg(), true);
+    r.run_ms(1000);
     const Goal* g = r.mind.link().goal(KILO_MSG_SET_EYES);
     CHECK(g != nullptr && g->payload[0] == 0x3F && g->payload[2] == kEyeLevel && g->payload[1] == 0 &&
           g->payload[3] == 0);
@@ -916,6 +919,7 @@ void test_low_at_rest_rests_and_the_eyes_are_orange() {
   {
     WallRig r(WallRig::remote_cfg(), true);
     r.wall = false;
+    r.run_ms(1000);  // the ready flashes
     CHECK(rgb(r) == green);
     r.body.batt_mv = 6950;
     r.run_ms(500);  // the higher readings before still in the window: not yet
@@ -975,7 +979,7 @@ void test_low_at_rest_rests_and_the_eyes_are_orange() {
     WallRig r(WallRig::remote_cfg(), true);
     r.wall = false;
     r.body.mode = KILO_MODE_LOW_BATT;
-    r.run_ms(200);
+    r.run_ms(1000);  // (and the ready flashes)
     CHECK(r.mind.tired() && rgb(r) == orange && r.log.has("battery: tired (the body's LOW_BATT mode)"));
     r.body.mode = KILO_MODE_IDLE;
     r.run_ms(200);

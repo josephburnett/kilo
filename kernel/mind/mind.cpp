@@ -48,6 +48,7 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
       alive_(link_, player_, log_, cfg.seed, personality(cfg)),
       sound_(clock, log_, cfg.seed),
       chatter_(cfg.seed),
+      eye_driver_(link_),
       recorder_(clock, link_) {
   sleep_.set_enabled(cfg.light_sleep);
   remote::set_rear_up_key(cfg.rear_up_key);
@@ -238,6 +239,8 @@ void Mind::poll() {
   act.lying_rest = lying_rest();
   sleep_.poll(act);
   sound_events();
+  signal_events();
+  eyes_step();
   sound_.poll();
 }
 
@@ -304,11 +307,11 @@ void Mind::sound_events() {
   if (asleep != was_asleep_) {
     was_asleep_ = asleep;
     sound_.suspend(asleep);
-    if (!asleep) say("mew", "wake", true);
+    if (!asleep) signal(signals::Signal::Ready, "wake");
   }
   if (guard_.hisses() != hisses_said_) {  // RED: backing off, leaning back, a turn stopped: once per event
     hisses_said_ = guard_.hisses();
-    say("hiss", "guard red", true);
+    signal(signals::Signal::GuardRed, "guard red");
   }
   sound::Chatter::Mode mode = sound::Chatter::Mode::None;
   if (behaviour_active() && !host_controls()) {
@@ -317,6 +320,50 @@ void Mind::sound_events() {
   }
   const char* what = chatter_.poll((double)clock_.now_us() / 1e6, mode, trick_playing() || sound_.busy());
   if (what != nullptr) say(what, "behaviour");
+}
+
+// ---- what Kilo tells the owner: the eyes first, the sound if a speaker is connected (docs/signals.md) ----
+
+void Mind::signal(signals::Signal s, const char* why) {
+  char l[80];
+  format(l, sizeof l, "signal %s why=%s", signals::signal_name(s), why);
+  logf(log_, LogLevel::Info, "%s", l);
+  recorder_.note(l);
+  eyes_.show(s, clock_.now_us());
+  const char* sound = signals::signal_sound(s);
+  if (sound != nullptr) say(sound, why, true);
+}
+
+// Once a pass: the remote's refused and failed keys, the end of B1's righting, a run saved to the card.
+void Mind::signal_events() {
+  if (remote_.failures() != key_failures_seen_) {
+    key_failures_seen_ = remote_.failures();
+    signal(signals::Signal::Refused, "key refused");
+  }
+  if (righting_on_ && !intent_.active()) {
+    righting_on_ = false;
+    if (intent_.reached()) signal(signals::Signal::Done, "righting done");
+    else if (!gave_up_said_ && intent_.counters().cancelled == righting_cancels_)
+      signal(signals::Signal::Failed, "righting failed");  // (a key that stopped it: nothing; gave up: GaveUp)
+  }
+  if (saver_ != nullptr && saver_->run_saves() != run_saves_seen_) {
+    run_saves_seen_ = saver_->run_saves();
+    signal(signals::Signal::Saved, "run saved");
+  }
+}
+
+// The eyes: what the eye language says now, as SET_EYES (when the body has eyes).
+void Mind::eyes_step() {
+  uint64_t now = clock_.now_us();
+  bool busy = measure_.active() || remote_.measure_pending() || (righting_on_ && intent_.active());
+  signals::State st = {guard_.eyes(), sleep_.asleep(), busy};
+  eye_driver_.poll(eyes_.look(st, now), guard_.eyes_driven(), now);
+}
+
+void Mind::measure_end(const char* line, const char* reason, bool ok) {
+  recorder_.measure_end(line, reason, ok);
+  if (ok) signal(signals::Signal::Done, "measurement done");
+  else if (!str_eq(reason, "STOPPED")) signal(signals::Signal::Failed, "measurement stopped itself");
 }
 
 void Mind::stats(uint64_t now) {
@@ -353,7 +400,7 @@ void Mind::on_hello(const kilo_hello_t& hello, bool solicited) {
   fall_rc_off_ = false;  // a body that (re)booted has FALL_RC 1 again: set it once more
   if (!hello_said_) {  // the first HELLO after boot: ready
     hello_said_ = true;
-    say("mew", "ready", true);
+    signal(signals::Signal::Ready, "ready");
   }
   if (tap_ != nullptr) tap_->on_hello(hello, solicited);
 }
@@ -389,7 +436,10 @@ void Mind::estimate_step(const kilo_telemetry_t& t) {
 
 void Mind::intent_moves() { percepts_.notify_self_motion(seconds(this), kPostureMoveS); }
 
-void Mind::intent_gave_up_down() { say("meow", "righting gave up", true); }
+void Mind::intent_gave_up_down() {
+  gave_up_said_ = true;
+  signal(signals::Signal::GaveUp, "righting gave up");
+}
 
 // ---- the righting experiment (docs/righting.md) --------------------------------------------
 
@@ -428,6 +478,9 @@ const char* Mind::RightingHookImpl::start() {
   }
   const char* why = nullptr;
   if (!m.intent_.be(intent::State::Standing, -1, "remote B1", &why)) return why != nullptr ? why : "refused";
+  m.righting_on_ = true;  // the eyes: busy until it ends, then done or failed (signal_events)
+  m.gave_up_said_ = false;
+  m.righting_cancels_ = m.intent_.counters().cancelled;
   return nullptr;
 }
 
@@ -570,6 +623,7 @@ void Mind::ir_key(const kilo_event_t& e) {
     recorder_.note(why);
     guard_.count_refused();
     metrics_.refusals.add("guard forward key");
+    signal(signals::Signal::Refused, "distance guard");
     return;
   }
   metrics_.keys_acted++;

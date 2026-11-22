@@ -913,11 +913,21 @@ void put(FakeStore& card, const char* name, const std::string& text) {
 }
 void put(FakeStore& card, const char* name, const std::vector<uint8_t>& data) { card.files[name] = data; }
 
+// The signals asked for (signals::signal_name), and when the flash was announced and began.
 struct Sounds final : CardFlashHost {
+  explicit Sounds(Clock& c) : clock(c) {}
+  Clock& clock;
   std::vector<std::string> said;
   int before = 0;
-  void card_sound(const char* name, const char*) override { said.push_back(name); }
-  void card_before_flash() override { before++; }
+  uint64_t flashing_us = 0, before_us = 0;
+  void card_signal(signals::Signal s, const char*) override {
+    said.push_back(signals::signal_name(s));
+    if (s == signals::Signal::Flashing) flashing_us = clock.now_us();
+  }
+  void card_before_flash() override {
+    before++;
+    before_us = clock.now_us();
+  }
 };
 
 // One boot: a CardFlash on the rig's link and the card, run until it is done (or ms pass).
@@ -929,7 +939,7 @@ struct Boot {
   Sounds host;
   CardFlash cf;
   Boot(Rig& rig, FakeStore& c)
-      : r(rig), card(c), ring(rig.clock, &rig.log), cf(c, image, rig.flasher, rig.link, rig.clock, ring) {
+      : r(rig), card(c), ring(rig.clock, &rig.log), host(rig.clock), cf(c, image, rig.flasher, rig.link, rig.clock, ring) {
     cf.set_ring(&ring);
     cf.set_host(&host);
     cf.set_mind_build(0x12345678);
@@ -1045,7 +1055,9 @@ void test_card_flash_boots() {
     CHECKF(b.cf.done() && b.cf.outcome() == CardOutcome::Flashed, "outcome %s after %u ms",
            card_outcome_name(b.cf.outcome()), ms);
     CHECK(r.gpio.edges == std::vector<char>({'L', 'H'}) && b.host.before == 1);
-    CHECK(b.host.said == std::vector<std::string>({"trill"}));
+    CHECK(b.host.said == std::vector<std::string>({"flashing", "done"}));  // the eyes white, then green x3
+    CHECKF(b.host.before_us - b.host.flashing_us >= CardFlash::kAnnounceUs, "the flasher took the line %u ms "
+           "after the eyes' white was asked for", (unsigned)((b.host.before_us - b.host.flashing_us) / 1000));
     CHECK(r.link.state().hello.fw_build == m.build);
     std::string t = card.text(kResultFile);
     CHECKF(t.rfind("kilo-body-result 1\noutcome: flashed\nimage: build 3d441ec0 size 31234 crc32 ", 0) == 0, "%s",
@@ -1089,7 +1101,7 @@ void test_card_flash_refused() {
     Boot b(r, card);
     b.run();
     CHECK(b.cf.done() && b.cf.outcome() == CardOutcome::Refused && r.gpio.edges.empty());
-    CHECK(b.host.said == std::vector<std::string>({"hiss"}));
+    CHECK(b.host.said == std::vector<std::string>({"refused"}));
     std::string t = card.text(kResultFile);
     CHECKF(contains(t, "outcome: refused\n") && contains(t, "half copied") &&
                contains(t, "next boot: checked again: copy body.bin and body.json whole"),
@@ -1149,7 +1161,7 @@ void test_card_flash_failed_not_retried() {
     b.run();
     CHECKF(b.cf.done() && b.cf.outcome() == CardOutcome::Failed, "%s", card_outcome_name(b.cf.outcome()));
     CHECK(r.gpio.edges.size() == 4);  // two attempts
-    CHECK(b.host.said == std::vector<std::string>({"hiss"}));
+    CHECK(b.host.said == std::vector<std::string>({"flashing", "failed"}));
     std::string t = card.text(kResultFile);
     CHECKF(contains(t, "outcome: failed\n") && contains(t, "error: SYNC_TIMEOUT\n") &&
                contains(t, "body after: build 46414b45") && contains(t, "next boot: not retried"),

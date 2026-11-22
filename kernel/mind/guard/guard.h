@@ -67,7 +67,9 @@
 //    for kClearS; after that only the eyes. A hand reaching for him or the floor
 //    seen with the head down never backs him off over and over.
 // The eyes show the zone; while the zone is green and Kilo is tired they
-// are a dim orange instead (the Mind decides: set_tired()).
+// are a dim orange instead (the Mind decides: set_tired()). The guard only
+// names the colour (eyes()); the Mind's eye language (signal/signal.h,
+// docs/signals.md) sends it, blue and red over every other signal.
 // The log and the flight recorder: every zone change and action is a line
 // and a MARK ("guard zone=blue mm=287 ...", "guard action=stopping ..."),
 // and every change of what the guard makes of it (the state Kilo is in and
@@ -225,7 +227,7 @@ class DistanceGuard {
   // with the head down (REST or LIMP, as after A7 and in light sleep): the
   // beam reads the floor, so no reading counts.
   void on_telemetry(const kilo_telemetry_t& t, double head_tilt_deg, bool lying = false);
-  // Every pass: the actions' steps and the eyes' goal.
+  // Every pass: the actions' steps and the eyes' colour (eyes()).
   void poll();
 
   // The guard holds or acts (not watching).
@@ -301,7 +303,6 @@ class DistanceGuard {
   bool green_ = true;
   Eyes eyes_ = Eyes::Green;
   bool tired_ = false;
-  bool eyes_sent_ = false;
   uint32_t zone_changes_ = 0, stops_ = 0, pullbacks_ = 0, refused_ = 0, releases_ = 0;
   uint32_t hisses_ = 0, reactions_ = 0;
   int backs_ = 0;
