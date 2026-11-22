@@ -10,7 +10,11 @@
 #   - flash > FLASH_MAX (default 30720, the P2 ceiling of doc §3h, set by the
 #     owner 2026-10-11 after docs/firmware-size-report.md: the hardware allows
 #     32256 (32 KB - 512 B optiboot); P0 was 20480, P1 24576);
-#   - globals (.data + .bss + .noinit) > GLOBALS_MAX (default 1540);
+#   - globals (.data + .bss + .noinit + the RAM above the stack, i.e. the
+#     reset record) > GLOBALS_MAX (default 1540);
+#   - the reset record (sys_reset_record) is not at its fixed address 0x8F6,
+#     or the stack does not start just below it (__stack 0x8F5): a flashed
+#     firmware must find the record the previous one wrote (hal/sys.h);
 #   - the ELF was not built with the size flags: no __prologue_saves__ (no
 #     -mcall-prologues), or a call/jmp whose target an rcall/rjmp reaches
 #     (no --relax);
@@ -56,10 +60,12 @@ fail=0
 echo "expected build flags: compiler.cpp/c.extra_flags=$CFLAGS compiler.c.elf.extra_flags=$LDFLAGS"
 
 # Flash = .text + .data (what the flasher writes); globals = .data + .bss +
-# .noinit (the RAM that is not stack).
+# .noinit + the reset record above the stack (the RAM that is not stack).
 read -r text data bss < <("$SIZE" -A "$ELF" | awk '$1==".text"{t=$2} $1==".data"{d=$2} $1==".bss"{b=$2} $1==".noinit"{n=$2} END{print t, d, b+n}')
+. "$BODY/tools/reset_record.sh"
+reset_record_check "$NM" "$ELF" || fail=1
 flash=$((text + data))
-globals=$((data + bss))
+globals=$((data + bss + ABOVE_STACK))
 echo "flash:   $flash B (limit $FLASH_MAX; .text $text + .data $data)"
 echo "globals: $globals B (limit $GLOBALS_MAX; stack + margin get $((2048 - globals)) B)"
 [ "$flash" -le "$FLASH_MAX" ] || { echo "FAIL: flash over budget by $((flash - FLASH_MAX)) B"; fail=1; }

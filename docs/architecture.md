@@ -36,7 +36,7 @@ operations notes and test tables. The main body links to them.
 | Tick | 50 Hz, polled against a fixed `micros()` deadline. Nothing blocks. | 3a |
 | Libraries | Custom UART, polled I2C, PCA9685 and DMP drivers. No HardwareSerial, Wire, I2Cdev, Print or `pulseIn`. Integer maths; float is a sanctioned fallback for IK only. | 3 |
 | Ultrasonic | Echo timed by a pin-change ISR on D6. 80 ms cadence, 25 ms cap. | 3a |
-| Reset cause | `.noinit` RAM magic plus a tick-alive canary, because optiboot clears `MCUSR`. | 3a |
+| Reset cause | RAM record at a fixed address (top of RAM): magic plus a tick-alive canary, because optiboot clears `MCUSR`. | 3a |
 | Calibration | Imported from the legacy EEPROM's per-robot values. New A/B 128 B slots at 704..959. The legacy layout is never written. | 3b |
 | Arbitration | Owners REFLEX > TRICK > GAIT > IDLE per joint, a 200 ms crossfade, then head and balance layers, then limits and slew. | 3c |
 | Stale goals | A goal epoch byte. Reflex takeovers and watchdog trips bump it, and goals carrying an old epoch are refused. | 3c, 4 |
@@ -277,7 +277,7 @@ legacy IRremote library (Timer2 at 20 kHz, ≈2 KB) is not used.
 
 **Boot sequence**
 
-1. Read the `.noinit` reset record (below) and initialise the UART.
+1. Read the reset record (below) and initialise the UART.
 2. Initialise I2C and probe the PCA9685. Already configured (awake, expected
    prescaler) = warm start: read back the 16 `LEDn_OFF` registers to seed the
    pose and keep outputting it. Otherwise = cold start: configure it all
@@ -297,8 +297,8 @@ machine in `background()` that uploads one 16 B chunk per pass (≈192 passes,
 about 4 s) and kicks the watchdog in between.
 
 **Reset cause.** The stock Uno optiboot clears `MCUSR` before the application
-runs, so hardware reset flags cannot be read.¹ Instead, a `.noinit` record (not
-zeroed by the C runtime) holds `magic` u16, `build` u32 (hash of the running
+runs, so hardware reset flags cannot be read.¹ Instead, a record in RAM that the
+C runtime neither zeroes nor paints holds `magic` u16, `build` u32 (hash of the running
 firmware), `reason` u8 (set to `REQUESTED` just before a `REBOOT`) and
 `alive_tick` u16 (the tick-alive canary, written every tick). At boot:
 
@@ -310,6 +310,15 @@ firmware), `reason` u8 (set to `REQUESTED` just before a `REBOOT`) and
 | otherwise | `WARM_UNEXPECTED`: watchdog hang, reset button, a GPIO4 pulse not used for flashing, or a RAM-preserving brown-out. `HELLO` carries `last_alive_tick`, and the Pi knows whether it pulsed GPIO4. |
 
 The record is then rewritten for the current boot.
+
+The record sits at a fixed address, the top 10 bytes of RAM (0x8F6 to 0x8FF),
+and the stack starts just below it. Two linker flags in
+`body/tools/build_flags.sh` put it there and `size_check.sh` fails a build
+where it is anywhere else. It must not move: a newly flashed firmware reads the
+record the old one wrote. Until 2026-11-22 it was in `.noinit`, right after
+`.bss`, so its address moved whenever the globals changed size, and the boot-16
+card flash (2 bytes more `.data`) read the old record 2 bytes off and reported
+`COLD` instead of `FLASHED` (`docs/fast-boot-first-boot-results.md`, boot 16).
 
 ¹ Optiboot v8 passes `MCUSR` to the application in `r2`, but installing it
 needs an ISP programmer. That is not planned.
@@ -538,7 +547,7 @@ motion after recovery. So:
   that reboots (brown-out, watchdog reset, the DTR edge of a port reopen)
   would otherwise accept the goals the mind refreshes during the 0.3-2 s
   init (the UART buffers them) as if nothing happened. The reset record in
-  `.noinit` RAM (`core/reset.h`, which survives every reset but not power
+  RAM (`core/reset.h`, which survives every reset but not power
   loss) carries the epoch: the tick writes `b.epoch` into it next to the
   alive canary, and a boot starts at that value + 1, skipping 0
   (`reset_boot_epoch`: 255 wraps to 1). So the epoch counter keeps running
@@ -1977,7 +1986,7 @@ C++ kernel (docs/fast-boot.md) and those commands were removed on
     - UART, COBS, CRC;
     - I2C, PCA9685 with read-back, DMP init (pre-watchdog) and FIFO read;
     - the **fx library and integer attitude** (no float anywhere);
-    - the `.noinit` reset record;
+    - the reset record (fixed address, top of RAM);
     - config slots with legacy import;
     - built-in postures;
     - HELLO, TELEMETRY (with epoch), EVENT, ACK with de-dup, STATS,
@@ -2379,7 +2388,7 @@ Serial/Print ≈1.4 KB, float library ≈1.6 KB.
 | Ultrasonic / eyes / battery | 0.25 / 0.25 / 0.1 KB | 10 / 18 / 6 B |
 | Telemetry, stats / event queue (8 × 5) | 0.5 KB | 30 / 40 B |
 | Buzzer (Timer2 ISR, note queue, chirps) | 0.4 KB | 20 B |
-| `.noinit` reset record | 0.1 KB | 9 B |
+| reset record (top of RAM) | 0.1 KB | 10 B |
 | **Total** | **≈15.4 KB** (S → 18 KB) | **globals ≈1.50 KB** |
 | Stack (painted, worst case) | | 350 B |
 
@@ -2577,7 +2586,7 @@ body/                     the NyBoard firmware (arduino-cli sketch)
                           link (dispatch, ACK/de-dup, HELLO, streams, events)  pgm.h
                           ik  feet (FEET player, STANCE)  keyframe  balance  reflex (fall)  ir_nec (IR remote decoder)
   src/hal/                register-level drivers: uart  i2c  pca9685  mpu6050 (+ dmp_image.h)
-                          adc  buzzer  clock  eeprom  eyes (WS2812)  gpio.h  sys (.noinit record, WDT, stack paint)
+                          adc  buzzer  clock  eeprom  eyes (WS2812)  gpio.h  sys (reset record, WDT, stack paint)
                           ultrasonic  ir  pcint2 (shared PCINT2 vector)
   src/app/                main.cpp (boot, 50 Hz loop)  link_hal.cpp (core/link's hardware seam)
   src/proto/              VENDORED by protocol/vendor.py: kilo_protocol.h, cobs/crc16/kilo_frame.[ch]

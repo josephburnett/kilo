@@ -2,11 +2,13 @@
 
 **Short answer (2026-11-22).** There is now a getting-up that the mind
 works out from the body model instead of the fixed sequence in Kilo's
-body. It is an **experiment**, off unless you build it in, and nothing of
-it has been tried on Kilo. It was checked only in the simulator, and that
-simulator still cannot reproduce the getting-ups recorded on Kilo (see
-"How much to trust it" below). So the first try is the real test: on a
-soft floor, with you watching.
+body. It is an **experiment**, off unless you build it in. It was checked
+only in the simulator, and that simulator still cannot reproduce the
+getting-ups recorded on Kilo (see "How much to trust it" below). First
+tried on Kilo on 2026-11-22 (boot 16), from his back only: the back move
+turned him 31 to 33° toward his right side in all six tries, half what
+the simulator says, and he rolled back each time
+(docs/righting-results.md). The side move has not been tried.
 
 Without the experiment Kilo gets up as before: the body's own fixed move.
 You reported on 2026-11-22 that this built-in getting-up "didn't work 100%

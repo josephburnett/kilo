@@ -10,9 +10,9 @@ The old walk (diagonal couplets, 2026-11-16 to 11-22) lives here only, as
 OLD_WALK, as the baseline the evidence is measured against: it is not one of
 the planner's patterns any more. Everything the virtual body says is
 simulation (kilo.vbody: a rigid body on point feet; RockingPhysics is the
-long-trot study's pendulum-on-the-diagonal physics); the floor numbers are
-measurements of the old walk only. The new walk has never walked on the
-floor.
+long-trot study's pendulum-on-the-diagonal physics); ``floor`` folds the
+recordings of whichever walk they hold (the old walk's until 2026-11-21,
+the new walk's from boot 16 on, docs/walk-trial-results.md).
 """
 
 from __future__ import annotations

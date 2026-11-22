@@ -1591,8 +1591,11 @@ as its baseline (`OLD_WALK`).
 
 **[measured]** marks numbers from the floor recordings of the old walk
 (`~/kilo-logs`, runs of 2026-11-16 to 11-21), **[model]** what the body
-model says about a plan, **[virtual body]** the simulators. The new walk
-has never walked on the floor.
+model says about a plan, **[virtual body]** the simulators. The new walk's
+first floor run (boot 16, 2026-11-22) is in docs/walk-trial-results.md:
+it rocks about as far as the old walk (4.3 to 4.9° a cycle against 4.8°)
+but half as fast (21°/s rms against 36), as RockingPhysics with 10 mm
+predicted (16.5).
 
 ### 16.1 What the stutter is, in numbers
 
@@ -1842,8 +1845,12 @@ case (the old walk: one hold).
 - **Measured:** the old walk's rock and timing (16.1).
 - **Model:** the margins (16.4), from a centre of mass that the first
   self-measurement puts 3 mm further back and feet it puts wider apart.
-- **Not measured:** whether the third foot holds the weight with the margin
-  near 0 at the hand-over (the RockingPhysics question of 16.5); whether
+- **Measured on boot 16** (docs/walk-trial-results.md): the third foot
+  does not hold the weight with the margin near 0 at the hand-over: the
+  roll swing on the floor (4.9° at 58 mm/s, 4.3° at 72.5) is the one
+  RockingPhysics with 10 mm predicted (5.9°, 4.1°), not the 1.0 to 1.4° of
+  the other two physics.
+- **Not measured:** whether
   the servos follow a 220 ms swing with its 6 to 8 mm lift; foot slip on a
   54 mm stride; how the walk looks.
 

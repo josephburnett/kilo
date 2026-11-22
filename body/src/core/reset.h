@@ -3,7 +3,7 @@
 // The stock Uno bootloader (optiboot) clears MCUSR, the register that says
 // whether the last reset was power-on, watchdog or the reset pin. So the
 // firmware keeps its own record in RAM that the C runtime does not zero
-// (the .noinit section, placed by hal/noinit.cpp). Power loss scrambles RAM,
+// (at a fixed address at the top of RAM: hal/sys.h). Power loss scrambles RAM,
 // so a valid magic number means "RAM survived": some kind of warm reset.
 //
 // Boot epoch (doc §3c): the record also carries the goal epoch, written every

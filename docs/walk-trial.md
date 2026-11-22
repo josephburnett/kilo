@@ -20,8 +20,9 @@ weight sits in the middle of them.
 It is a little slower than the old walk: 58 mm a second at the default
 (the old one: 80). The trot covers the faster speeds.
 
-The new walk has never walked on the floor: everything about it so far is
-a model and a simulation.
+It first walked on the floor on 2026-11-22 (boot 16): the recording's
+numbers are in walk-trial-results.md. What it looked like has not been
+written down yet, and the side video below has not been taken.
 
 ## Before you start
 

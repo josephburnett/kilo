@@ -2,7 +2,15 @@
 #include <avr/io.h>
 #include <avr/wdt.h>
 
-ResetRecord sys_reset_record __attribute__((section(".noinit")));
+// On the AVR the record has no definition here: the linker puts the symbol
+// at SYS_RESET_RECORD_ADDR (body/tools/build_flags.sh), so a build without
+// those flags does not link. On the host (the tests) it is a plain global.
+#ifdef __AVR__
+static_assert(SYS_RESET_RECORD_ADDR + sizeof(ResetRecord) == RAMEND + 1,
+              "the reset record fills the top of RAM, above the stack");
+#else
+ResetRecord sys_reset_record;
+#endif
 
 // The two .initN hooks below are AVR start-up code (naked, AVR assembly);
 // the host tests (body/test/hal) compile the rest of this file.
@@ -17,8 +25,8 @@ extern "C" void sys_wdt_off_early(void) {
   wdt_disable();
 }
 
-// Runs in .init1: paint from the end of the globals (_end, which is after
-// .noinit too) to the top of RAM. Plain asm because there is no stack yet
+// Runs in .init1: paint from the end of the globals (_end) to the top of
+// the stack (__stack, just below the reset record, which is not painted). Plain asm because there is no stack yet
 // to speak of and nothing in C is set up.
 extern "C" void sys_paint_stack(void) __attribute__((naked, used, section(".init1")));
 extern "C" void sys_paint_stack(void) {
