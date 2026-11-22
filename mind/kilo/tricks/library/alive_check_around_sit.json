@@ -1,0 +1,39 @@
+{
+  "name": "alive_check_around_sit",
+  "source": {
+    "file": "legacy/InstinctNybble.h",
+    "legacy_name": "ck",
+    "kind": "alive",
+    "trick": "check_around",
+    "base": "sit"
+  },
+  "notes": [
+    "the random mode's check_around (legacy `ck`) from SIT back to SIT: kilo.tricks.alive_set",
+    "first to STAND (the original's start), at the posture rate, at least 25 ticks",
+    "rows [0, 1, 0, 1, 2] timed as the original plays them from there (7.4 ms a pass)",
+    "back to SIT at the posture rate, at least 25 ticks; end posture SIT (no move after)",
+    "stopped (B6, A7, C7, the random mode leaving), back to SIT over 25 ticks, not the body's 0.2 s crossfade"
+  ],
+  "expected": {
+    "roll": 0,
+    "pitch": 0
+  },
+  "loop": {
+    "start": 0,
+    "end": 0,
+    "repeats": 0
+  },
+  "balance": false,
+  "fall_ok": false,
+  "end_posture": "SIT",
+  "stop_ticks": 25,
+  "frames": [
+    {"dur": 25, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": 0, "tail": 0, "lf_shoulder": 30, "rf_shoulder": 30, "rb_shoulder": -30, "lb_shoulder": -30, "lf_knee": 30, "rf_knee": 30, "rb_knee": -30, "lb_knee": -30}},
+    {"dur": 9, "hold": 3, "easing": "cosine", "joints": {"head_pan": 25, "head_tilt": 7, "tail": -70, "lf_shoulder": 27, "rf_shoulder": 19, "rb_shoulder": -21, "lb_shoulder": -35, "lf_knee": 5, "rf_knee": 21, "rb_knee": -33, "lb_knee": -5}},
+    {"dur": 26, "hold": 0, "easing": "cosine", "joints": {"head_pan": -25, "head_tilt": 7, "tail": 70, "lf_shoulder": 19, "rf_shoulder": 27, "rb_shoulder": -35, "lb_shoulder": -21, "lf_knee": 21, "rf_knee": 5, "rb_knee": -5, "lb_knee": -33}},
+    {"dur": 18, "hold": 3, "easing": "cosine", "joints": {"head_pan": 25, "head_tilt": 7, "tail": -70, "lf_shoulder": 27, "rf_shoulder": 19, "rb_shoulder": -21, "lb_shoulder": -35, "lf_knee": 5, "rf_knee": 21, "rb_knee": -33, "lb_knee": -5}},
+    {"dur": 26, "hold": 0, "easing": "cosine", "joints": {"head_pan": -25, "head_tilt": 7, "tail": 70, "lf_shoulder": 19, "rf_shoulder": 27, "rb_shoulder": -35, "lb_shoulder": -21, "lf_knee": 21, "rf_knee": 5, "rb_knee": -5, "lb_knee": -33}},
+    {"dur": 14, "hold": 0, "easing": "cosine", "joints": {"head_pan": 23, "head_tilt": 26, "tail": -38, "lf_shoulder": 15, "rf_shoulder": 15, "rb_shoulder": -33, "lb_shoulder": -33, "lf_knee": 80, "rf_knee": 80, "rb_knee": 4, "lb_knee": 4}},
+    {"dur": 25, "hold": 0, "easing": "cosine", "joints": {"head_pan": 10, "head_tilt": -20, "tail": -60, "lf_shoulder": 30, "rf_shoulder": 30, "rb_shoulder": -80, "lb_shoulder": -80, "lf_knee": 60, "rf_knee": 60, "rb_knee": 45, "lb_knee": 45}}
+  ]
+}

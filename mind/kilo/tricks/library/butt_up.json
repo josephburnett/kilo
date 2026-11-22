@@ -11,6 +11,7 @@
     "dropped nonzero values on unused joints [4, 5, 6, 7]",
     "clamped to joint limits (legacy clamps too): ['lf_shoulder', 'rf_shoulder']",
     "posture: dur 25 ticks (legacy moves from the current pose at 2 deg/step), balance on (legacy gyro balance applies to postures)",
+    "held 100 ticks (legacy held a posture until the next command)",
     "end_posture STAND (default)"
   ],
   "expected": {
@@ -26,6 +27,6 @@
   "fall_ok": false,
   "end_posture": "STAND",
   "frames": [
-    {"dur": 25, "hold": 0, "easing": "cosine", "balance": true, "joints": {"head_pan": 20, "head_tilt": 40, "tail": 0, "lf_shoulder": 80, "rf_shoulder": 80, "rb_shoulder": -45, "lb_shoulder": -45, "lf_knee": -60, "rf_knee": -60, "rb_knee": -5, "lb_knee": -5}}
+    {"dur": 25, "hold": 100, "easing": "cosine", "balance": true, "joints": {"head_pan": 20, "head_tilt": 40, "tail": 0, "lf_shoulder": 80, "rf_shoulder": 80, "rb_shoulder": -45, "lb_shoulder": -45, "lf_knee": -60, "rf_knee": -60, "rb_knee": -5, "lb_knee": -5}}
   ]
 }

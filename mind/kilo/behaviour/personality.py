@@ -27,6 +27,7 @@ TERMS = ("base", "energy", "fatigue", "curiosity", "sociability", "arousal", "ca
          "face", "pet", "near", "approaching", "alone")
 DRIVES = ("energy", "curiosity", "sociability", "arousal")
 POSTURES = ("rest", "sit", "stand", "balance")
+MAX_ALIVE_TRICKS = 8  # alive.tricks (behaviour/personality.h kMaxAliveTricks)
 
 class PersonalityError(ValueError):
     pass
@@ -158,6 +159,16 @@ def validate(cfg: dict[str, Any]) -> None:
     _num(cfg, "behaviours.greet.cooldown_s", 0.0, None)
     _num(cfg, "behaviours.nap.min_s", 0.0, None)
     _num(cfg, "behaviours.startle.hold_s", 0.0, None)
+    _num(cfg, "alive.trick_every_s", 1.0, None)
+    _num(cfg, "alive.trick_speed", 0.25, 2.0)
+    tricks = cfg["alive"]["tricks"]
+    from kilo.tricks.library import AUTHORED  # names only: no JSON is read
+    if (not isinstance(tricks, list) or not 1 <= len(tricks) <= MAX_ALIVE_TRICKS
+            or len(set(tricks)) != len(tricks)
+            or any(not isinstance(t, str) or f"alive_{t}_sit" not in AUTHORED or f"alive_{t}_stand" not in AUTHORED
+                   for t in tricks)):
+        raise PersonalityError(f"alive.tricks must be 1..{MAX_ALIVE_TRICKS} different tricks of "
+                               "kilo.tricks.alive_set.SET (alive_<name>_sit and _stand in the library)")
 
 
 # ---- the built-in YAML subset -------------------------------------------------------

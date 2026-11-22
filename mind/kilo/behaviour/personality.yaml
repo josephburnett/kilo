@@ -76,3 +76,12 @@ behaviours:
     cooldown_s: 30.0
   startle:
     hold_s: 2.0
+
+# The alive layer (kernel/mind/behaviour/alive.h): the small moves while Kilo idles (sitting) or
+# explores (standing) in the random mode, the remote's A5. Now and then one of the original
+# Nybble's tricks instead (mind/kilo/tricks/alive_set.py: each from SIT and from STAND, back to
+# where it started); A5 pressed while the random mode runs plays one at once.
+alive:
+  trick_every_s: 40.0       # the mean wait between two tricks (drawn from 0.5x to 1.5x of it each time)
+  trick_speed: 0.75         # x the original's pace (1.0: as fast as the original Nybble)
+  tricks: [stretch, wash_face, pee, sniff, check_around]  # never the same twice in a row

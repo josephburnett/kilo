@@ -106,8 +106,8 @@ void test_key_table(uint8_t stage) {
 
 // The Mind's runner as the remote sees it.
 struct FakeRunner : BehaviourHook {
-  bool on = false;
-  int starts = 0, stops = 0;
+  bool on = false, refuse_trick = false;
+  int starts = 0, stops = 0, tricks = 0;
   bool active() override { return on; }
   bool start(const char** what) override {
     *what = nullptr;
@@ -118,6 +118,15 @@ struct FakeRunner : BehaviourHook {
   void stop() override {
     on = false;
     stops++;
+  }
+  bool trick(const char** what) override {
+    if (refuse_trick) {
+      *what = "random mode: pee is already waiting";
+      return false;
+    }
+    tricks++;
+    *what = "random mode: pee now";
+    return true;
   }
 };
 
@@ -469,8 +478,14 @@ void test_behaviour_key() {
   // A5: the walk stopped the planned way first, then the runner
   CHECK(std::strcmp(r.key_done("A5"), "behaviour runner started") == 0 && r.runner.on && r.runner.starts == 1);
   CHECK(!r.walker.active() && r.walker.ended_ok());
-  LAST_IS(r, "A5", "behaviour runner already running");  // idempotent
-  CHECK(r.runner.starts == 1);
+  // A5 again: one of the random mode's tricks, each press another; the runner is not started again
+  LAST_IS(r, "A5", "random mode: pee now");
+  LAST_IS(r, "A5", "random mode: pee now");
+  CHECK(r.runner.starts == 1 && r.runner.tricks == 2 && r.runner.on && r.runner.stops == 0);
+  r.runner.refuse_trick = true;  // refused (one waits already): a failed key, the runner left alone
+  LAST_IS(r, "A5", "random mode: pee is already waiting");
+  CHECK(r.remote.last_failed() && r.runner.on && r.runner.tricks == 2);
+  r.runner.refuse_trick = false;
   const char* others[] = {"B7", "B5", "A4", "C4", "A6", "C5"};
   for (const char* g : others) LAST_IS(r, g, "ignored (behaviour runner active)");
   CHECK(!r.walker.active() && r.runner.on);

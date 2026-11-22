@@ -769,7 +769,7 @@ Ethernet ("Network bring-up").
 | `mind_build` | `KILO_BUILD` | `STATUS.mind_build`, the commit's 8 hex digits |
 | `remote` | on | the IR remote drives Kilo; logged `IR remote on` |
 | `balance_kp` | 0.99 | SET_BALANCE on at start, logged `balance on by default (Kp 253/256)` |
-| `behaviour` | off; `make -C kernel KILO_BEHAVIOUR=1` turns it on | the remote's A5 starts the runner at run time either way. While it runs, the remote's keys other than B6, A7 and C7 (which stop it) are ignored. Built in, the kernel logs `Kilo mind, build ... (behaviour runner on)` |
+| `behaviour` | off; `make -C kernel KILO_BEHAVIOUR=1` turns it on | the remote's A5 starts the runner at run time either way. While it runs, A5 plays one of its tricks and the remote's keys other than B6, A7 and C7 (which stop it) are ignored. Built in, the kernel logs `Kilo mind, build ... (behaviour runner on)` |
 | `rear_up_key` | 0 (off); `make -C kernel KILO_REAR_UP=1` (or `2`, `3`) turns it on at that stage | the remote's A2 starts the rear-up trick only when switched on (docs/rear-up-trick.md, the switch): off until the owner's staged trials are done, A2 does nothing like the other keys of rows 1-3. The value is the stage: 1 `rear_up` (28 degrees), 2 `rear_up_2` (40), 3 `rear_up_3` (54). `kilo-mind-host`'s switch is `--rear-up[=N]`. Built in, the kernel logs `Kilo mind, build ... (rear-up key A2 on: rear_up_2, stage 2)` |
 | `intent` | off; `make -C kernel KILO_INTENT=1` turns it on | stand, sit and rest as intents (docs/intent.md): the remote's B6 and A7, the behaviour's postures and the guard's sit go through the state estimate and the moves planned from the body model, instead of the body's own posture change. Off until the first floor try. The state estimate itself always runs and only logs (`state: MOVING -> STANDING (...)`). `kilo-mind-host`'s switch is `--intent`. Built in, the kernel logs `Kilo mind, build ... (intents on: stand, sit and rest are moves from the model)`; either way the mind logs `state estimate on; intents ON ...` or `... intents off ...` |
 | `seed` | 32 bits from the hardware RNG | the behaviour runner logs it (`seed N`, at boot or in the remote's A5 line), so a run can be replayed on the laptop |
@@ -805,7 +805,7 @@ floor only, never on a desk.**
 | A6 | 0x22 | standing: turn left in place, in the gait last chosen, at 1×. Walking forward or backward: steer one step more to the left |
 | B6 | 0x02 | stand: the quick stop, then stand |
 | C6 | 0xC2 | the same as A6, to the right |
-| A5 | 0xE0 | start the behaviour runner (Kilo acting on his own, `mind/behaviour/`). While it runs, B6, A7 and C7 stop it and then do their own job, and the other keys are ignored (the distance guard's sitting lets the walking keys through: docs/distance-guard.md) |
+| A5 | 0xE0 | start the behaviour runner (Kilo acting on his own, `mind/behaviour/`). While it runs, B6, A7 and C7 stop it and then do their own job, A5 again makes him do one of the original Nybble's tricks at random (kernel/mind/README.md "The random mode's tricks"), and the other keys are ignored (the distance guard's sitting lets the walking keys through: docs/distance-guard.md) |
 | B5 | 0xA8 | slower: one speed level down, past the slowest into backward. While turning in place: stop turning and walk straight backward |
 | C5 | 0x90 | the quick stop, then the calibration posture (CALIB) |
 | A4 | 0x68 | trot |

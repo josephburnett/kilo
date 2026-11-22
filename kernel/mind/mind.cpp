@@ -44,7 +44,7 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
       posture_hook_(*this),
       sleep_(link_, walker_, clock, log_),
       guard_(link_, walker_, clock, log_),
-      alive_(link_, player_, log_, cfg.seed),
+      alive_(link_, player_, log_, cfg.seed, personality(cfg)),
       sound_(clock, log_, cfg.seed),
       chatter_(cfg.seed),
       recorder_(clock, link_) {
@@ -847,6 +847,11 @@ void Mind::RunnerHook::stop() {
   m_.alive_.stop();
   m_.sitting_variant_ = false;
   m_.runner_by_guard_ = false;
+}
+
+// A5 while the runner runs: one of the alive layer's tricks (behaviour/alive.h).
+bool Mind::RunnerHook::trick(const char** what) {
+  return m_.alive_.request_trick((double)m_.clock_.now_us() / 1e6, what);
 }
 
 // The runner the guard started gives way to the walking keys (turn, back up; a forward key the guard

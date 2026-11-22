@@ -373,16 +373,22 @@ return the raw arrays (`LegacySkill`), which `legacy.to_trick()` maps:
   (`period == 1`) 16 angles; gaits (`period > 1`) 8 angles for joints 8-15;
   behaviours (`period < 0`) 16 angles + `speed, delay, trigger axis, trigger
   angle`. `angle_ratio` 2 means angles are stored halved (none in Nybble).
-- **speed → dur.** Legacy `transform()` moves at `speed/4` degrees per step
-  in `round(maxΔ / (speed/4))` steps, one PCA write per joint per step, cosine
-  eased. `dur = ceil(steps · LEGACY_STEP_MS / 20 ms)` with `LEGACY_STEP_MS =
-  5.5` (est., to be calibrated by filming `hi` on both firmwares); `maxΔ` is
-  over the 11 driven joints from the previous frame, and frame 0 is sized
-  from the `up` posture. `speed ≤ 0` (legacy "jump") → `dur 1`, step easing.
+- **speed → dur.** Legacy `transform()` moves at `speed/4` degrees per pass
+  in `steps = round(maxΔ / (speed/4))` steps, `steps + 1` passes each writing
+  all 16 joints, cosine eased. `dur = round((steps + 1) · LEGACY_STEP_MS / 20 ms)`
+  with `LEGACY_STEP_MS = 7.4` (the central estimate from the code; to be
+  calibrated by filming `hi` on both firmwares, docs/timing-vs-legacy.md §4);
+  `maxΔ` is over all 16 slots from where the row played before left them
+  (`legacy.legacy_timing`), and frame 0 is sized from the `up` posture. A
+  finite loop is unrolled (one keyframe per row played: a repeat starts from
+  the loop's last row, so it has its own duration). `speed ≤ 0` (legacy
+  "jump") → `dur 1`, step easing.
 - **delay → hold.** Legacy waits `|delay| · 50 ms`, so `hold = round(|delay| ·
   2.5)` ticks (half up).
 - Postures: `dur 25` (the body's default posture transition; legacy moves
-  from wherever it is at 2°/step), balance on. Gaits: 1 tick per frame
+  from wherever it is at 2°/step), balance on; one that is not a built-in
+  posture (`str`, `buttUp`: legacy held it until the next command) holds
+  2 s before the end posture. Gaits: 1 tick per frame
   (est.), linear, legs only, loop until stopped. Behaviours: balance off
   (legacy never balances during a behaviour).
 - Joints 3-7 are dropped; angles beyond the joint limits are clamped (legacy
