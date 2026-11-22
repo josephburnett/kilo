@@ -236,7 +236,7 @@ $(OBJS) $(NETBOOT_OBJS): | circle-config
 $(BUILD)/%.o: %.cpp
 	@mkdir -p $(@D)
 	@echo "  CPP   $@"
-	@$(CPP) $(CPPFLAGS) -c -o $@ $<
+	@$(CPP) $(CPPFLAGS) -MMD -MP -c -o $@ $<
 
 $(BUILD)/%.o: %.c
 	@mkdir -p $(@D)

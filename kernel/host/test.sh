@@ -46,6 +46,12 @@ PROTO="$(sed -n 's/^#define KILO_PROTO_MAJOR \([0-9]*\)u$/\1/p' "$REPO/kernel/mi
 [ -n "$PROTO" ] || { echo "FAILED: no KILO_PROTO_MAJOR in kernel/mind/proto/kilo_protocol.h"; exit 1; }
 VBODY_BUILD=45524f43  # the virtual body's HELLO.fw_build (kilo.vbody.core CORE_BUILD, "CORE")
 
+# The Pi kernel's Makefile must track headers (-MMD on its C++ rule): without it an incremental build keeps
+# objects compiled against old class layouts, which is the kernel that stood unasked on Kilo on 2026-11-21.
+echo "== the Pi kernel's Makefile tracks header dependencies"
+grep -Eq '^\s*@\$\(CPP\) \$\(CPPFLAGS\) -MMD -MP -c -o \$@ \$<' "$REPO/kernel/Makefile" \
+    || { echo "FAILED: kernel/Makefile's %.cpp rule has no -MMD -MP: incremental Pi builds would go stale"; exit 1; }
+
 echo "== vendored protocol copies up to date"
 python3 "$REPO/protocol/vendor.py" --check
 
