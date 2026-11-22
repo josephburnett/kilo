@@ -112,6 +112,20 @@ no twist (0.00 +- 0.08 mm) and level poses within 0.3 degrees.
 - The servos' lag: the pitch began to rise 0.25 s after the model's,
   on both sides alike; this does not separate left from right.
 
+**The left front leg, too.** The walk's study of the same day (agent
+"walk2", its left drift) finds him dropping onto his left front corner
+about 3 degrees against 1.6 to 1.9 on the right, in every recorded gait.
+The rear-up agrees where the front legs carry him: the +3.3 to +4.2 at
+"back" (both front feet down) fell to +1.5..+2.2 exactly while "paw_l"
+lifted the LEFT paw (1.74 to 1.86 s, the roll rate -15 deg/s), i.e. once
+the left front leg no longer carried anything. So that part of the lean
+is most likely the left front leg giving (or set a little short). It
+cannot explain the tip itself: in "up" both paws are in the air, and there
+the commanded lean and, perhaps, the left hind leg are what is left. Both
+legs have their place in the model (`servo_give` and `servo_lag_d_ms` at
+joint ids 8 and 12, left front shoulder and knee; 11 and 15, left hind)
+for when they are measured.
+
 **One look settles (a) against (b)**: a slow-motion phone video from
 directly behind, at the height of his hips, of one play of the new stage 1
 (it is symmetric now, below). If the left hip rises later or less than the
