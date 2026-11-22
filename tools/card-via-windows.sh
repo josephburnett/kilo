@@ -62,12 +62,12 @@ if ((FHash "\$s\\kernel7.img") -ne (FHash "\$s\\.card-kernel")) {
   Move-Item -Force "\$d\\kernel7.new" "\$d\\kernel7.img"
 } else { 'kernel: the card already has this one' }
 foreach (\$f in 'kernel7.old','kernel7.bad') {   # no previous kernel is kept
-  if (Test-Path "\$d\\\$f") { Remove-Item "\$d\\\$f"; "\$f: removed" }
+  if (Test-Path "\$d\\\$f") { Remove-Item "\$d\\\$f"; "\${f}: removed" }
 }
 Copy-Item "\$s\\body.bin" "\$d\\body.bin" -Force
 Copy-Item "\$s\\body.json" "\$d\\body.json" -Force
 foreach (\$f in 'kernel7.img','body.bin','body.json') {
-  if ((FHash "\$d\\\$f") -ne (FHash "\$s\\\$f")) { throw "\$f on the card differs from the build" } else { "\$f: on the card, verified" }
+  if ((FHash "\$d\\\$f") -ne (FHash "\$s\\\$f")) { throw "\$f on the card differs from the build" } else { "\${f}: on the card, verified" }
 }
 if (Test-Path "\$d\\body-result.txt") { Remove-Item "\$d\\body-result.txt" }
 EOF
