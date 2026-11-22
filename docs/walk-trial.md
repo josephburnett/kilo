@@ -52,7 +52,9 @@ better.
 
 1. Put Kilo at one end of the line, his body along it, the line running
    under the middle of his belly from tail to nose. Check from above
-   that he points along it.
+   that he points along it. Switch him on: his eyes stay dark until he
+   is ready, then turn steady green (`docs/signals.md`); keys work from
+   then on.
 2. **B6**: he stands. Check again that he still points along the line;
    nudge him straight if not.
 3. **C4**: he walks forward at the default speed. Do not steer.

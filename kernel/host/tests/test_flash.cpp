@@ -1055,7 +1055,7 @@ void test_card_flash_boots() {
     CHECKF(b.cf.done() && b.cf.outcome() == CardOutcome::Flashed, "outcome %s after %u ms",
            card_outcome_name(b.cf.outcome()), ms);
     CHECK(r.gpio.edges == std::vector<char>({'L', 'H'}) && b.host.before == 1);
-    CHECK(b.host.said == std::vector<std::string>({"flashing", "done"}));  // the eyes white, then green x3
+    CHECK(b.host.said == std::vector<std::string>({"flashing"}));  // the eyes white, then (the Mind's ready) green
     CHECKF(b.host.before_us - b.host.flashing_us >= CardFlash::kAnnounceUs, "the flasher took the line %u ms "
            "after the eyes' white was asked for", (unsigned)((b.host.before_us - b.host.flashing_us) / 1000));
     CHECK(r.link.state().hello.fw_build == m.build);

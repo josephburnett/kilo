@@ -239,6 +239,7 @@ void Mind::poll() {
   act.lying_rest = lying_rest();
   sleep_.poll(act);
   sound_events();
+  ready_step();
   signal_events();
   eyes_step();
   sound_.poll();
@@ -334,6 +335,16 @@ void Mind::signal(signals::Signal s, const char* why) {
   if (sound != nullptr) say(sound, why, true);
 }
 
+// Ready, once: the body alive and no card flash check under way. The remote is polled on every pass
+// from the first (cfg_.remote), so from here keys are acted on.
+void Mind::ready_step() {
+  if (ready_said_ || ready_held_) return;
+  const BodyState& b = link_.state();
+  if (!b.has_hello || b.proto_ok != 1 || !b.alive(clock_.now_us(), kBodyLostUs)) return;
+  ready_said_ = true;
+  signal(signals::Signal::Ready, "ready");
+}
+
 // Once a pass: the remote's refused and failed keys, the end of B1's righting, a run saved to the card.
 void Mind::signal_events() {
   if (remote_.failures() != key_failures_seen_) {
@@ -398,10 +409,6 @@ void Mind::on_connection(bool connected, bool alive) {
 
 void Mind::on_hello(const kilo_hello_t& hello, bool solicited) {
   fall_rc_off_ = false;  // a body that (re)booted has FALL_RC 1 again: set it once more
-  if (!hello_said_) {  // the first HELLO after boot: ready
-    hello_said_ = true;
-    signal(signals::Signal::Ready, "ready");
-  }
   if (tap_ != nullptr) tap_->on_hello(hello, solicited);
 }
 

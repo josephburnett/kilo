@@ -22,7 +22,9 @@ What you need to do, in short:
 1. A flat, hard floor (a table top on the floor, a board, tiles; not a
    rug, not a slope), with about **30 cm clear** around him. He moves his
    body a few centimetres and does not walk.
-2. Battery charged (he refuses below 7.4 V, as for the rear-up).
+2. Battery charged (he refuses below 7.4 V, as for the rear-up). Switch
+   him on and wait until his eyes turn steady green: dark until then
+   means he is not ready yet (`docs/signals.md`).
 3. Press **C5** (he takes the calibration posture), then **C5** again
    whenever you are ready: he stands, and once he has been still for about
    a second and a half the routine starts by itself. From the second C5 on

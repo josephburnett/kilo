@@ -314,6 +314,7 @@ boolean CKernel::Initialize (void)
 	// RNG does not.
 	m_pMind->link ().seed_seq ((uint8_t) m_Random.GetNumber ());
 	m_pMind->start ();		// balance on, then link.connect(): HELLO_REQ
+	m_pMind->hold_ready (TRUE);	// not ready (the eyes dark) until the check is over: BootFlash()
 	m_pCardFlash->begin ();
 
 #if KILO_PLANNER_BENCH
@@ -524,6 +525,7 @@ void CKernel::BootFlash (void)
 	if (m_pCardFlash->done ())
 	{
 		m_bGoAhead = TRUE;
+		m_pMind->hold_ready (FALSE);	// the Mind says ready once the body is alive (after a flash: the new one)
 	}
 }
 

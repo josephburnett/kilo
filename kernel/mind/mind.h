@@ -225,6 +225,12 @@ class Mind final : public LinkListener,
   void signal(signals::Signal s, const char* why);
   signals::EyeLanguage& eyes() { return eyes_; }
   const signals::EyeDriver& eye_driver() const { return eye_driver_; }
+  // Ready (signal/signal.h Signal::Ready: the eyes dark until then, steady green after): said once,
+  // on the first pass with the body alive (its HELLO, our protocol, TELEMETRY coming) and not held.
+  // The boot-time card flash check holds it from its begin() until it is done (kernel.cpp
+  // BootFlash, kilo-mind-host --card), so ready comes after any flash, from the body it left.
+  void hold_ready(bool hold) { ready_held_ = hold; }
+  bool ready() const { return ready_said_; }
   behaviour::Alive& alive() { return alive_; }
   // The behaviour runner's sitting variant (the guard started it): every stand the tree asks for is a sit.
   bool sitting_variant() const { return sitting_variant_; }
@@ -349,7 +355,9 @@ class Mind final : public LinkListener,
   bool was_asleep_ = false;       // light sleep, the last pass
   bool floor_seen_ = false;       // lying_rest(): the ultrasonic read the floor under his nose
   uint64_t floor_seen_us_ = 0;    // ... last at
-  bool hello_said_ = false;       // the first HELLO's mew
+  bool ready_said_ = false;       // Ready signalled (ready_step())
+  bool ready_held_ = false;       // ... not yet: the card flash check runs (hold_ready())
+  void ready_step();
   uint32_t hisses_said_ = 0;      // the guard's RED reactions hissed at
   signals::EyeLanguage eyes_;     // what the eyes show (signal/)
   signals::EyeDriver eye_driver_;  // ... sent as SET_EYES

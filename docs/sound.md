@@ -25,9 +25,9 @@ Only the C++ mind that runs on Kilo makes sounds.
 | What happens | Sound | Notes |
 |---|---|---|
 | You press **B2** on the remote | a meow | one of `meow1`, `meow2`, `meow3`, picked at random, never the same one twice in a row. B2 moves nothing, so it works at any time, also while he walks or runs the A5 behaviour. The eyes show nothing for it |
-| Kilo is ready after switching on (the body first answers the Pi) | `mew` | once per boot; the eyes: three green flashes |
-| He wakes from light sleep (any key, or a laptop) | `mew` | the eyes: three green flashes |
-| Done: the body firmware from the SD card flashed, the self-measurement finished, the righting experiment got him up | `trill` | the eyes: three green flashes |
+| Kilo is ready after switching on (the body answers the Pi, the SD card's flash check is over) | `mew` | once per boot; the eyes: dark until then, then steady green |
+| He wakes from light sleep (any key, or a laptop) | `mew` | the eyes: steady green again |
+| Done: the self-measurement finished, the righting experiment got him up | `trill` | the eyes: three green flashes |
 | Refused: a key he cannot do now, a forward key with something ahead, the card's body firmware refused | `hiss` | the eyes: three purple flashes |
 | Failed: the card's body firmware failed, the self-measurement stopped by itself, the righting experiment failed | `hiss` | the eyes: three red flashes |
 | The righting experiment gave up and left him limp | a meow | the eyes: three red flashes (`docs/righting.md`) |

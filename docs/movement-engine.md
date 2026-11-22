@@ -175,6 +175,19 @@ observer (mind, every TELEMETRY) -> state, errors, contact guesses -> back to th
   forward, body low in front, hold. Because these are wishes, they are
   valid from any pose the solver can reach: from sitting, a paw trick needs
   no three-foot shift; from standing it does, and the engine makes it.
+- **A shake is an overlay, not a pose.** The owner asked (2026-11-22) for
+  the stretch to end with a little shake of the raised rear, and how that
+  is expressed here. In the engine the stretch is a held goal: front low,
+  rear high, the weight where the solver keeps it over the feet, head up. The shake is not part of
+  that goal: it is an overlay, a small oscillation with an amplitude (a few
+  mm of the rear) and a rate (a few swings a second) added on top of
+  whatever goal is being held. So the same shake can be put on any pose
+  (standing, sitting, the stretch), at any tempo, and the board keeps
+  correcting balance underneath it as it does for the held pose. Today,
+  with tricks still recorded keyframes, the shake is only extra keyframes
+  at the end of the stretch's hold (the hind feet 4 mm forward and back
+  three times, the tail with them: `mind/kilo/tricks/alive_set.py`
+  `SHAKES`); it cannot be put on another pose without writing it again.
 
 ### Balance: the board's layer, and what the mind does above it
 
