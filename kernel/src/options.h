@@ -24,12 +24,10 @@
 //                       sleep.h, docs/power.md; 0: A7 is plain rest)
 //   KILO_SOUND          the sounds on the 3.5 mm jack (src/sound.h, docs/
 //                       sound.md; 0: every play request is a counted no-op)
-//   KILO_SOUND_KEEP_RUNNING  the sound device runs between sounds
 //   KILO_MDNS           mDNS answers for kilo.local (src/net.h CKiloMdns)
 //   KILO_BOOT_PROBE     GPIO21 marks the boot for a scope (src/bootprobe.h)
 //
-// KILO_BUILD (the commit's hash, kernel.o only) and KILO_BODY_SERIAL_PL011
-// (defined or not) are not checked here.
+// KILO_BUILD (the commit's hash, kernel.o only) is not checked here.
 //
 #ifndef KILO_SRC_OPTIONS_H
 #define KILO_SRC_OPTIONS_H
@@ -37,7 +35,7 @@
 #if !defined(KILO_PLANNER_BENCH) || !defined(KILO_BEHAVIOUR) || !defined(KILO_REAR_UP) || \
 	!defined(KILO_INTENT) || !defined(KILO_RIGHTING) || \
 	!defined(KILO_RECORD_SAVE) || !defined(KILO_LIGHT_SLEEP) || !defined(KILO_SOUND) || \
-	!defined(KILO_SOUND_KEEP_RUNNING) || !defined(KILO_MDNS) || !defined(KILO_BOOT_PROBE)
+	!defined(KILO_MDNS) || !defined(KILO_BOOT_PROBE)
 #error "a KILO_ build switch is missing: kernel/Makefile defines them all (KILO_DEFS)"
 #endif
 

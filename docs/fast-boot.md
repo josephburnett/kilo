@@ -219,9 +219,6 @@ image on SD for a `kilo flash --rollback`.
 - **Porting fidelity.** The Python tests and `vbody` are the oracle. Add a
   mode where the C++ mind runs on the laptop against `vbody` (Circle code
   behind a thin platform layer) so the same cases run in CI.
-- **Power.** The USB-cable outages (docs/pi-outages-2026-10-13.md) are
-  electrical; this plan does not fix them. The header UART does not share the
-  USB 5 V path.
 
 ## 8. What is retired
 

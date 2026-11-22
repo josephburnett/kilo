@@ -208,7 +208,7 @@ in `core/fx`): one tick playing a FEET pose with the balance on costs 12
 int32 division and ≈30 µs per `isqrt` on the 328P that is ≈0.6 ms
 **(est.)**, less than the 1.x gait generator's (8 sin/cos and 2 more
 divisions for the trajectory). `max_tick_us` is the measurement: 7.7-7.9 ms
-cumulative maximum on Kilo with the 1.x gait (`docs/p2-hardware-test-results.md`).
+cumulative maximum on Kilo with the 1.x gait (measured 2026-10-11).
 
 *FEET and TELEMETRY at 50 Hz* (protocol 2.0). The link carries, per 20 ms
 tick, one FEET Pi → body (16 B payload, 22 B on the wire) and one TELEMETRY
@@ -377,9 +377,9 @@ B 600, CZP = 90 + dir·midShift), emits `CONFIG_DEFAULTED(reason)`, and refuses
 and a `CAL_SAVE` has completed. Appendix C explains where 600 and 11 come from, and why
 neutral is ≈1590 counts rather than 1500.
 
-**P0 task:** dump EEPROM 0..282 from Kilo once with `EEPROM_READ` before the
-first flash of new firmware, and commit it as `docs/kilo-eeprom-legacy.md`
-(hex + decoded).
+Kilo's EEPROM 0..282, dumped on 2026-10-10 before the first flash of new
+firmware, is kept byte for byte (and decoded) in
+`body/test/test_kilo_eeprom.cpp`.
 
 **EEPROM layout (new).** The legacy layout uses 0..282, 320..700 and
 ≈966..1023, and the new firmware never writes those. Flashing the legacy
@@ -558,8 +558,7 @@ motion after recovery. So:
 **Why the body no longer makes its own gait.** Until protocol 1.5 the body
 ran a gait generator (`SET_GAIT`: patterns, a phase oscillator, sway, early
 touchdown, forward placement; git history before 2026-10-14 has it). On the
-floor on 2026-10-14 (`docs/p3-hardware-test-results.md`,
-`docs/walking-and-balance.md` §8-9) its walk fell every time with the
+floor on 2026-10-14 (`docs/walking-and-balance.md` §8-9) its walk fell every time with the
 balance on and stayed up with it off: on three feet the body tips about the
 far diagonal in under 0.1 s, the balance answers about 0.25 s later and
 makes the swing grow. Keeping the body over its feet needs a plan for the
@@ -703,8 +702,8 @@ IK:  d² = x² + z²   (clamp d to [d_min, 0.95(L1+L2)])
   is a sphinx fold (front paws forward) and `sit` reads 28° nose up (its
   header says −30°). A host test checks that FK of the legacy `up`, `sit` and
   `rest` postures puts the feet below the body and symmetric left/right
-  (`test_ik.cpp`). A HIL test nudges the feet +10 mm forward
-  (`docs/p2-hardware-test.md`), which is the only real check of these signs.
+  (`test_ik.cpp`). The only real check of these signs is on the robot: on
+  2026-10-11 a +20 mm foot nudge on Kilo confirmed them.
 - `L1`, `L2`, `Lb`, `W` and the foot offset must be measured (open question 1).
   Appendix B describes how and gives rough guesses.
 
@@ -910,9 +909,9 @@ Kp 0.5, and 5.5° at the largest `kp_q8` (255/256). H13 asks for 3°. If the
 hardware confirms that, either the leg response per degree of `corr` is
 larger than 1 (the legacy gains were never calibrated to it), or `kp_q8`
 needs a coarser scale (Q6 would allow Kp up to 4) or the gain table a
-global multiplier. Measured in `docs/p1-hardware-test.md` step 5.
+global multiplier.
 
-*Measured 2026-10-11* (`docs/p1-hardware-test-results.md`): the leg response
+*Measured 2026-10-11*: the leg response
 is **≈0.17° of body per degree of `corr`**, not 1. On a board propped 15°
 nose up, Kp 0.99 moved the body from −10.2° to −8.8°, three times out of
 three; the signs are right, the legs settle. H13 (3° residual) would need
@@ -938,8 +937,8 @@ the four commanded feet with a 0.15 s servo lag): 10° of pitch and roll
 slope, Kp 0.99 → within 2.5° after 1 s and settled at the 2° dead band for
 leg responses 0.7×, 1× and 1.6×; a flipped sensor runs away to the clamp; a
 6° pose pitch is held with no correction. At the default Kp 0.5 half the
-slope remains: H13 on Kilo was run with `kp_q8` 253
-(`docs/p2-hardware-test-results.md`).
+slope remains: H13 on Kilo was run with `kp_q8` 253 (2026-10-11: within
+2.1° of level on a 13° board, nose up and sideways).
 
 *Under a FEET stream* (protocol 2.0, 2026-10-14; the agreed direction of
 `docs/walking-and-balance.md` §9: the mind plans, the body corrects the
@@ -1181,8 +1180,7 @@ As implemented in P1 (`core/reflex.{h,cpp}` for the detector,
   it by the roll sign instead: unmirrored for roll < 0 (right side down;
   the unmirrored frame 1 swings the right legs, which then push on the
   ground), mirrored for roll > 0, and flipped on every other try in case
-  that guess is wrong or the body rolled over (**to be verified on Kilo**,
-  p1-hardware-test.md "Fall and head").
+  that guess is wrong or the body rolled over (**to be verified on Kilo**).
 - **Check, retry.** After rc's last frame REFLEX holds it for up to 1 s;
   25 consecutive samples with |roll|, |pitch| < 20° are RECOVERED: IDLE
   takes STAND (REST if the config is DEFAULTED, where STAND would be
@@ -1396,9 +1394,8 @@ Appendix E has every byte layout.
   UARTCLK and divisor 12.000. 115200 has a 2.1% error
   on the 328P. 500000 would halve the main-loop slack for no need.
 - Worst-case load is 21% upstream and 38% downstream (Appendix B; walking: FEET and TELEMETRY at 50 Hz are 4% and 8% of the line).
-- The Petoi CH343 USB adapter can stand in for the Pi (Appendix F).
-  **Unplug it whenever the Pi drives the UART**, because both drive the same
-  RX line.
+- The Petoi CH343 USB adapter (retired) drives the same RX line: **keep it
+  unplugged from Kilo while the Pi drives the UART**.
 
 **Framing:**
 
@@ -1692,7 +1689,7 @@ percentage from a resting 2S curve.
 - Import rules:
   - `dur = round((round(maxΔ / (speed/4)) + 1) · LEGACY_STEP_MS / 20)`, maxΔ
     over all 16 slots from the row played before, finite loops unrolled, where
-    `LEGACY_STEP_MS` (7.4 ms **(est.)**, docs/timing-vs-legacy.md §4) is
+    `LEGACY_STEP_MS` (7.4 ms **(est.)**, mind/README.md "Importer") is
     calibrated by filming both firmwares doing `hi`.
   - Legacy speed 0 ("jump to") → `dur = 1`; the body's slew limit absorbs the
     jump.
@@ -1992,8 +1989,8 @@ C++ kernel (docs/fast-boot.md) and those commands were removed on
   - Mind: codec, `SerialLink` (three threads), `BodyClient` (postures +
     epoch), CLI `status/monitor/posture/cal/param/flash`.
   - Host tests, virtual body, size harness.
-  - **Task: dump the legacy EEPROM 0..282 and commit
-    `docs/kilo-eeprom-legacy.md`.**
+  - **Task: dump the legacy EEPROM 0..282** (done 2026-10-10:
+    `body/test/test_kilo_eeprom.cpp`).
 - **Removed vs today:**
   - the token protocol and parser, and `newCmd` (468 B RAM);
   - the skill system and I2C-EEPROM skills;
@@ -2029,11 +2026,11 @@ C++ kernel (docs/fast-boot.md) and those commands were removed on
 - **Status:**
   - Joint-space balance: done on the host (3c layer 2, 3f): controller,
     legacy gain table, gating, `SET_BALANCE`, TELEMETRY `BALANCE_ACTIVE`,
-    `kilo balance`, the vbody mirror. Hardware validation:
-    `docs/p1-hardware-test.md` (H13 and the sign check).
+    `kilo balance`, the vbody mirror. Hardware validation on Kilo
+    2026-10-11 (H13 and the sign check).
   - Attitude A/B: the host half passes (0.038° max over 5000 orientations
-    within ±60°, against the legacy float path); a static side-by-side on
-    Kilo is in the P1 hardware test.
+    within ±60°, against the legacy float path); on Kilo (2026-10-11,
+    against a phone level) the new firmware read the board's tilt right.
   - Trick player: done on the host (§3e): store, upload with CRC and
     cache check, player with easing, holds, loops, speed and mirror, the
     TRICK owner and its crossfades, end posture, TRICK_DONE reasons,
@@ -2041,9 +2038,7 @@ C++ kernel (docs/fast-boot.md) and those commands were removed on
     `kilo trick`, the vbody mirror and the C-vs-vbody cross-check
     (TRICK_DONE on the same tick). `body/test/test_keyframe.cpp` replays
     every library trick (also mirrored and at 1.5×): angles within the joint
-    limits, frame timing exactly as the JSON. Hardware: the "P1 tricks
-    hardware test" in `docs/p1-hardware-test.md` (side by side with the
-    legacy firmware, H9 with `push_up --repeats 255`).
+    limits, frame timing exactly as the JSON.
   - Flash 21246 B of 22528 B (the ceiling then); globals 1525 B of 1540 B.
     Now 22132 B of 24576 B, 1433 B globals (§3h).
 
@@ -2059,8 +2054,7 @@ C++ kernel (docs/fast-boot.md) and those commands were removed on
   balance, bob and wag (`core/gait`, `body_tick`, arbiter, link), host tests
   `test_ik.cpp` and `test_gait.cpp` (3d "As implemented in P2"). Flash
   26938 B, globals 1517 B (3h). Not yet done: the leg measurements and the
-  sign check on Kilo, tuning, H9/H13/H14 on the floor
-  (`docs/p2-hardware-test.md`), the simavr runs.
+  sign check on Kilo, tuning, H9/H13/H14 on the floor, the simavr runs.
 - **Since 2026-10-14 (protocol 2.0):** the gait generator, its flags (sway,
   early touchdown, forward placement, bob, wag) and `SET_GAIT` left the
   body after the P3 floor runs (3d); the mind plans the steps and streams
@@ -2097,8 +2091,8 @@ C++ kernel (docs/fast-boot.md) and those commands were removed on
    Lb 123, W 65; front knees bend back, back knees forward (the IK's
    `IK_SIGMA_FRONT` convention). Still open: confirm on Kilo that the
    calibration posture is "upper leg vertical, lower leg at 90°"
-   (`LEG_SH_ZERO_DEG`, `LEG_KN_ZERO_DEG`) and the joint signs (foot nudge,
-   `docs/p2-hardware-test.md`).
+   (`LEG_SH_ZERO_DEG`, `LEG_KN_ZERO_DEG`). The joint signs (foot nudge) were
+   confirmed on Kilo 2026-10-11.
 2. **Battery.** Do one meter reading against the reported `batt_mv` to fix the
    scale. Is a higher-drain pack planned? Petoi warns the stock 1000 mAh pack
    struggles with a Pi aboard, and the thresholds depend on it.
@@ -2561,13 +2555,9 @@ reset circuit.
 The original Petoi firmware and its built image are in git history only. The
 body never writes the EEPROM area that firmware used.
 
-**The Petoi CH343 USB adapter.**
-- It enumerates as `/dev/ttyACM0` or `/dev/ttyUSB0` on Linux (COM9 on the
-  owner's Windows host, passed into WSL2 with usbipd).
-- avrdude resets the board through DTR. DTR is AC-coupled to RESET, so every
-  port open that raises DTR resets the 328P.
-- The adapter and the Pi share the 328P's single UART. **Unplug the
-  adapter whenever the Pi drives the UART**, and vice versa.
+**The Petoi CH343 USB adapter** (retired: nothing here uses it). It and
+the Pi share the 328P's single UART: **keep the adapter unplugged from
+Kilo**.
 
 ---
 
@@ -2646,9 +2636,8 @@ mind/                     the Python side (pip install -e mind): the laptop's `k
 docs/                     the design (architecture.md), setup (setup.md the dev host, laptop-setup.md),
                           the Pi on the NyBoard (raspberry-pi.md, research notes),
                           the kernel route (fast-boot.md, fast-boot-first-boot.md), topic notes (walking-and-balance,
-                          calibration, power, sound, distance-guard, rear-up-trick, timing-vs-legacy,
-                          kilo-eeprom-legacy, firmware-size-report), hardware test procedures and their
-                          dated -results.md logs, reviews and outage notes
+                          calibration, power, sound, distance-guard, rear-up-trick, firmware-size-report),
+                          hardware test procedures and their dated -results.md logs
 tools/kilo-hud/           a Claude Code mod that shows Kilo's state beside the chat
 legacy/                   five headers of Petoi's original OpenCat firmware, read by tests and the trick
                           importer, not built (legacy/README.md); the rest of that firmware is in git
@@ -2709,11 +2698,11 @@ reference; this table is the overview.
 | H10 | 30 min soak, max streams + 5 Hz goals | `rx_crc_err` ≈ 0 (eye updates explain any); seq gaps < 0.1% |
 | H11 | Ultrasonic at 10 / 30 / 100 cm | ±1 / ±2 / ±4 cm |
 | H12 | Eyes R/G/B/W per side; BEEP scale | Correct LEDs; clean tones; no ultrasonic degradation while beeping |
-| H13 | Board tilted 0 → 10° pitch and roll | Body within 3° of level after 1 s. **Not met by the P1 joint-space layer (measured 2026-10-11: ≈0.17° body per degree of correction); deferred to P2 IK levelling by the owner.** P2: geometric levelling in STANCE/GAIT on the slope estimate (3f); host plant within 2.5° after 1 s at `kp_q8` 253; on Kilo: `docs/p2-hardware-test.md`. |
+| H13 | Board tilted 0 → 10° pitch and roll | Body within 3° of level after 1 s. **Not met by the P1 joint-space layer (measured 2026-10-11: ≈0.17° body per degree of correction); deferred to P2 IK levelling by the owner.** P2: geometric levelling in STANCE/GAIT on the slope estimate (3f); host plant within 2.5° after 1 s at `kp_q8` 253; on Kilo 2026-10-11: within 2.1° on a 13° board. |
 | H14 | Walk 2 m (P2) | Drift < 20 cm **(target)**; 360° turn in place < 20 s; 30 s trot without a fall |
 | H15 | Flash the original firmware's image (on 2026-10-10 with `kilo flash --legacy`; the command and the image have since been deleted) | Old `kup`, `kwkF` work with the old calibration |
 
-Results so far (docs/p0-hardware-test-results.md):
+Results so far:
 - 2026-10-10, from the Pi over the CH343 adapter: **H1 passed** (3 flashes,
   HELLO FLASHED with the build hash), **H2 passed** for the import side
   (`cal show` = legacy CALIB; STAND counts recorded, no legacy read-back to

@@ -152,8 +152,8 @@ private:
 class CKiloNet : public CTask
 {
 public:
-	// pUSB: the USB host to initialise first (its scan finds the LAN9514), or
-	// 0 when the kernel already did (the USB serial scan). pGoAhead: the scan
+	// pUSB: the USB host to initialise first (its scan finds the LAN9514).
+	// pGoAhead: the scan
 	// waits for it (the main loop sets it once the body's first HELLO and
 	// the boot-time flash from SD are over) or UsbWaitUs, so that the scan,
 	// which stalls the main loop, neither delays the HELLO nor cuts into a

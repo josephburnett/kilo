@@ -57,7 +57,7 @@ static void load_legacy() {
   const double t[16][2] = {{-panF, 0}, {-panF, -tiltF}, {-2 * panF, 0}, {0, 0}, {sRF, -sPF}, {-sRF, -sPF},
                            {-sRF, sPF}, {sRF, sPF},      {uRF, uPF},      {uRF, uPF}, {-uRF, uPF}, {-uRF, uPF},
                            {lRF, lPF},  {lRF, lPF},      {-lRF, lPF},     {-lRF, lPF}};
-  // Kilo's legacy EEPROM, ADAPT_PARAM @128 (docs/kilo-eeprom-legacy.md).
+  // Kilo's legacy EEPROM, ADAPT_PARAM @128 (the dump in test_kilo_eeprom.cpp).
   static const uint8_t EE[32] = {0xc4, 0x00, 0xc4, 0xc4, 0x88, 0x00, 0x00, 0x00, 0x32, 0xf4, 0xce,
                                  0xf4, 0xce, 0x0c, 0x32, 0x0c, 0x3c, 0x1e, 0x3c, 0x1e, 0xc4, 0x1e,
                                  0xc4, 0x1e, 0xa6, 0xd3, 0xa6, 0xd3, 0x5a, 0xd3, 0x5a, 0xd3};

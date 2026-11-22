@@ -52,7 +52,7 @@ WALKING_DOF = 8
 # calibratedPWM()'s EEPROM reads and one PCA9685 write at 500 kHz I2C), with
 # the IR receiver's 50 us timer interrupt taking its share. From the code
 # with typical ATmega328P costs: 5.6 / 7.4 / 10.2 ms (fast / central / slow,
-# docs/timing-vs-legacy.md section 4). The central figure; no film of the
+# mind/README.md "The original firmware's trick timing"). The central figure; no film of the
 # legacy firmware has calibrated it.
 LEGACY_STEP_MS = 7.4
 # Legacy delay byte unit: delay(|delay| * 50) ms.

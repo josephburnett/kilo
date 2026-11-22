@@ -243,7 +243,7 @@ flash refusal (6600 mV). So 6600 mV now means three things: the body's LOW
 clear level, the card flash refusal floor and the mind's 0 % mark. The mind's two limits come with the kernel; the
 body's three need the body firmware flashed. What to watch: weak or slow legs near the end, and whether
 the pack's own cutoff comes before 6000 mV (on 2026-10-10 it cut out from
-a reading of 6.87 V, docs/p0-hardware-test-results.md).
+a reading of 6.87 V).
 
 **Cheap things that would extend play time** (none needs body flash):
 

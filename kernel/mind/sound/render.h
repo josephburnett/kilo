@@ -137,7 +137,7 @@ class TimedOutput final : public SoundOutput {
   static constexpr uint32_t kChunkFrames = 512;
   using Tap = void (*)(void* arg, const unsigned* words, uint32_t n);
 
-  explicit TimedOutput(Clock& clock, uint32_t max = 0xFFFF, bool keep_running = false);
+  explicit TimedOutput(Clock& clock, uint32_t max = 0xFFFF);
   void set_tap(Tap tap, void* arg) {
     tap_ = tap;
     tap_arg_ = arg;
@@ -154,7 +154,6 @@ class TimedOutput final : public SoundOutput {
  private:
   Clock& clock_;
   Renderer r_;
-  bool keep_running_;
   bool running_ = false, asleep_ = false;
   uint64_t t_us_ = 0;   // the clock up to which frames are rendered
   uint64_t frac_ = 0;   // frames owed, x 1e6

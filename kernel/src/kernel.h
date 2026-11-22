@@ -97,7 +97,7 @@ public:
 	TShutdownMode Run (void);
 
 private:
-	kilo::Serial *ChooseSerial (void);
+	kilo::Serial *OpenSerial (void);
 	void BootFlash (void);
 	void WatchFlash (void);
 	void DrainCircleLog (void);
@@ -107,8 +107,8 @@ private:
 
 private:
 	// Construction order matters (Circle's samples use the same order).
-	// No CSerialDevice member: the PL011 on GPIO14/15 is built only when it
-	// is the body link (ChooseSerial).
+	// No CSerialDevice member: the PL011 on GPIO14/15 is built in
+	// OpenSerial, after the Mind (so its lines are in the ring).
 	CActLED			m_ActLED;
 	CKernelOptions		m_Options;
 	CDeviceNameService	m_DeviceNameService;
@@ -128,9 +128,8 @@ private:
 	CircleLog		m_CircleLog;	// into CLogger: the screen, or nowhere
 	KernelLog		m_KernelLog;	// the Mind's platform Log: on to CircleLog
 	CircleResetGpio		m_ResetGpio;	// GPIO4 released at once; the flasher pulses it
-	SerialSlot		m_Serial;	// the Mind's Serial: one of these two once chosen
+	SerialSlot		m_Serial;	// the Mind's Serial: m_pPl011 once open
 	Pl011Serial		*m_pPl011;
-	UsbSerial		*m_pUsbSerial;
 	const char		*m_pSerialName;
 
 	// The whole mind core (mind/mind.h): about 60 KB, on the heap (this

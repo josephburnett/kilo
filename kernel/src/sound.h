@@ -20,18 +20,12 @@
 // chunk asked for more than 1.5 chunk periods after the one before counts
 // as late (the DMA may have replayed a buffer: a click).
 //
-// Idle (KILO_SOUND_IDLE, kernel/Makefile):
-//   stop  (default) the device runs only while a sound plays: Start() for
-//         a sound, the DC level ramped up from 0 (kRampMs), the sound, the
-//         level ramped down, then GetChunk returns 0 and the DMA stops. No
-//         interrupts and no PWM carrier while idle (no idle hiss from the
-//         jack); each sound costs two 80 ms ramps.
-//   run   the device starts at boot and keeps running between sounds at
-//         the middle level (silence): no ramp per sound, but 86 interrupts
-//         a second and the carrier always on. The switch to try if the
-//         ramps still pop on the real amplifier.
-// Light sleep stops the device in either mode (the level ramped down
-// first); waking starts it again in "run".
+// Idle: the device runs only while a sound plays: Start() for a sound, the
+// DC level ramped up from 0 (kRampMs), the sound, the level ramped down,
+// then GetChunk returns 0 and the DMA stops. No interrupts and no PWM
+// carrier while idle (no idle hiss from the jack); each sound costs two
+// 80 ms ramps. Light sleep stops a sound that is playing (the level ramped
+// down first).
 //
 // The main loop's calls into the Renderer are wrapped in EnterCritical /
 // LeaveCritical: a few instructions with interrupts off, so they never
@@ -50,11 +44,10 @@ public:
 	static const unsigned SampleRate = kilo::sound::kOutRate;
 	static const unsigned ChunkFrames = 512;		// 11.6 ms at 44.1 kHz
 
-	CKiloSound (CInterruptSystem *pInterrupt, boolean bKeepRunning);
+	CKiloSound (CInterruptSystem *pInterrupt);
 
-	// The range, and in "run" the device started. FALSE if it would not start.
-	boolean Initialize (void);
-	boolean KeepRunning (void) const	{ return m_bKeepRunning; }
+	// The range. The device starts with the first sound.
+	void Initialize (void);
 
 	// kilo::sound::SoundOutput
 	bool play (const kilo::sound::Sound &rSound, uint32_t nGainQ16) override;
@@ -71,7 +64,6 @@ private:
 	void Run (void);	// start the DMA if the Renderer has something to send
 
 	kilo::sound::Renderer m_Renderer;
-	boolean m_bKeepRunning;
 	boolean m_bAsleep;
 	boolean m_bFailed;
 	unsigned m_nPeriodUs;	// one chunk

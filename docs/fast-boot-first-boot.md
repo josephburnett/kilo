@@ -50,49 +50,35 @@ Words used below:
 - Kilo's IR remote. Keys are named by where they sit: columns A, B, C from
   left to right, rows 1 to 7 from the bottom to the top. So B7 is the middle
   key of the top row.
-- Kilo, charged, and **one** of these two ways to connect it:
-  - **B. The Pi's pin header** (the expected wiring; the kernel's default
-    build), with Kilo's USB adapter unplugged from Kilo (the two must not be
-    connected at the same time). Either:
-    - **the Pi plugged onto the NyBoard's socket**: the socket joins the
-      Pi's header pins 1 to 10 to the NyBoard, so the serial line (pins 8
-      and 10) and the reset line (pin 7) are connected with nothing to add
-      (docs/raspberry-pi.md); or
-    - **three wires**, on the bench, with the Pi off Kilo:
-      - Pi pin 8 (GPIO14, the Pi's transmit) to the NyBoard's receive (RX),
-      - Pi pin 10 (GPIO15, the Pi's receive) to the NyBoard's transmit (TX),
-      - Pi pin 6 (ground) to the NyBoard's ground.
+- Kilo, charged, connected through the Pi's pin header, with no USB serial
+  adapter plugged into Kilo (the two must not be connected at the same
+  time). Either:
+  - **the Pi plugged onto the NyBoard's socket** (the expected wiring): the
+    socket joins the Pi's header pins 1 to 10 to the NyBoard, so the serial
+    line (pins 8 and 10) and the reset line (pin 7) are connected with
+    nothing to add (docs/raspberry-pi.md); or
+  - **three wires**, on the bench, with the Pi off Kilo:
+    - Pi pin 8 (GPIO14, the Pi's transmit) to the NyBoard's receive (RX),
+    - Pi pin 10 (GPIO15, the Pi's receive) to the NyBoard's transmit (TX),
+    - Pi pin 6 (ground) to the NyBoard's ground.
 
-      Pin 1 has a square solder pad underneath. It is at the end of the
-      header away from the USB ports, in the inner row. Odd numbers run
-      along the inner row (1, 3, 5, ...), even numbers along the outer row
-      at the board's edge (2, 4, 6, ...). https://pinout.xyz shows the
-      picture. Never connect pins 2 or 4 with a wire: they are 5 V. The
-      NyBoard's serial on its Pi socket is 3.3 V (docs/raspberry-pi.md,
-      which also says to check that with a meter first).
-  - **A. The USB cable** (the old wiring, now the fallback): Kilo's USB
-    adapter cable into one of the Pi's USB ports. It needs a kernel built
-    for it: `make -C kernel KILO_BODY_SERIAL=auto` in step 1. The default
-    kernel never looks for the cable.
+    Pin 1 has a square solder pad underneath. It is at the end of the
+    header away from the USB ports, in the inner row. Odd numbers run
+    along the inner row (1, 3, 5, ...), even numbers along the outer row
+    at the board's edge (2, 4, 6, ...). https://pinout.xyz shows the
+    picture. Never connect pins 2 or 4 with a wire: they are 5 V. The
+    NyBoard's serial on its Pi socket is 3.3 V (docs/raspberry-pi.md,
+    which also says to check that with a meter first).
 
 ## Before you start: power
 
-**On the NyBoard's socket (way B)**, pins 2 and 4 bring the NyBoard's 5 V to
+**On the NyBoard's socket**, pins 2 and 4 bring the NyBoard's 5 V to
 the Pi: the NyBoard makes it from Kilo's battery (docs/raspberry-pi.md,
 "Power"; that is what Petoi's socket is for), so the Pi starts as soon as
 Kilo is switched on. **Do not plug the Pi's own power supply in as well**:
 that would join two 5 V supplies, and nothing here has checked whether that
 is safe. The Pi then runs only while Kilo is on, from Kilo's battery. The
 three bench wires carry no 5 V, so with them the Pi keeps its own supply.
-
-**With the USB cable (way A)**: the cable joins Kilo's 5 V and the Pi's 5 V
-(see docs/pi-outages-2026-10-13.md). With Kilo switched off, the Pi powers Kilo's
-board through the cable and its supply dips; that has reset the Pi before.
-So, with the USB cable (way A):
-
-- **Switch Kilo on before the cable goes into the Pi**, and keep it on.
-- If the Pi resets when you plug the cable in, that is this problem, not
-  the kernel. Start again from step 3.
 
 ## Before you start: the remote
 
@@ -128,9 +114,6 @@ make -C kernel boot
 ```
 
 The last line downloads the Pi's start-up files once; it needs the internet.
-That builds the kernel for way B (the header). For way A (the USB cable),
-build it with `make -C kernel KILO_BODY_SERIAL=auto` instead of the plain
-`make -C kernel` (here and in the `make -C kernel card` below).
 Put the SD card in the laptop. It must be FAT formatted and empty, or hold
 only Pi boot files. Then (replace the path with where the card is mounted):
 
@@ -158,9 +141,8 @@ card. `kernel/build/card/kernel/` is the same for the production card.
 ### 2. Cable the Pi
 
 - Ethernet cable from the Pi to the router.
-- Way B: the Pi on the NyBoard's socket, or the three header wires, with
-  Kilo's USB adapter unplugged from Kilo.
-- Way A: do not plug the USB cable in yet.
+- The Pi on the NyBoard's socket, or the three header wires, with no USB
+  serial adapter plugged into Kilo.
 
 ### 3. Power the Pi
 
@@ -179,10 +161,7 @@ shown, look for a device whose hardware address (MAC) starts with
 If it is not there after a minute: check the Ethernet cable's lights on the
 Pi, then power the Pi off and on again.
 
-### 5. Switch Kilo on, then connect it
-
-- Switch Kilo on (way B and way A).
-- Way A: now plug Kilo's USB cable into a Pi USB port.
+### 5. Switch Kilo on
 
 ### 6. Send the kernel (on the laptop)
 
@@ -209,9 +188,9 @@ it is usually the same). Powering the Pi off and on does the same.
 
 | What the green light does | What it means |
 |---|---|
-| Steady on, briefly (way A: a second or a few) | The kernel is starting (way A: it is looking for USB devices first). |
-| Slow blink: 1 s on, 1 s off | The kernel runs but hears no Kilo yet. Normal for a few seconds: with the USB cable, the kernel opening the adapter may restart Kilo's board, which then takes a second or two to start. |
-| The blink stops for about a second, once, soon after the start | Way B: the kernel is looking for USB devices (the network chip) now that Kilo answered. Normal. |
+| Steady on, briefly | The kernel is starting. |
+| Slow blink: 1 s on, 1 s off | The kernel runs but hears no Kilo yet. Normal for a second or two. |
+| The blink stops for about a second, once, soon after the start | The kernel is looking for USB devices (the network chip) now that Kilo answered. Normal. |
 | Even blink, twice a second | **Success**: Kilo's board is talking to the Pi. |
 | Fast blink, five times a second | Kilo's board runs firmware with another protocol version. The Pi keeps the link alive but will not drive Kilo. Flash the body firmware (step 12, or the way you do today, from Linux). |
 | Two short flashes, then a pause, once a second | The Pi is flashing Kilo's board (step 12, or a `body.bin` on the card). Leave it alone until the pattern changes, about 10 to 20 s. |
@@ -360,8 +339,8 @@ anything Kilo did that you did not expect.
 ### 10. Optional: watch with a screen
 
 With an HDMI monitor plugged in **before** step 3, the kernel prints its log
-on the screen: the build number, which serial connection it chose
-(`utty1 (USB serial)` for way A, `ttyS1 (PL011, GPIO14/15)` for way B),
+on the screen: the build number, the serial connection
+(`ttyS1 (PL011, GPIO14/15)`),
 `first HELLO ... s after the kernel started`, and once a second a line of
 link counts (`telemetry 25/s`, decode errors). This may not work: the card
 gives the graphics chip very little memory (`gpu_mem=16`). Without a
@@ -375,8 +354,8 @@ on pin 40 and the Pi's 5 V, from a cold power-on with the production card
 (`make-sd.sh ... --kernel` instead of `--netboot`):
 
 - power-on to the rising edge: the Pi's own start-up files plus Circle,
-- rising to falling edge: our start-up plus Kilo's board starting (way A:
-  the USB scan included; way B scans USB after the first HELLO).
+- rising to falling edge: our start-up plus Kilo's board starting (the USB
+  scan comes after the first HELLO).
 
 ### 12. Optional: flash Kilo's board from the laptop, through the Pi
 
@@ -387,17 +366,13 @@ in optiboot until flashed again (optiboot itself is never overwritten).
 
 **Wiring.** The Pi must be able to pull Kilo's reset line:
 
-- With the Pi on the NyBoard's socket (way B, the expected wiring), pin 7
+- With the Pi on the NyBoard's socket (the expected wiring), pin 7
   already lands on the reset line (docs/raspberry-pi.md). Nothing to add.
-- Way B with the three header wires: add a fourth wire, Pi pin 7 (GPIO4:
+- With the three header wires: add a fourth wire, Pi pin 7 (GPIO4:
   the inner row, fourth pin counting pin 1 as the first) to the NyBoard's
   reset line: the pin marked DTR on the 6-pin header where the USB adapter
   plugs in. Check the marking on the board first; if there is none, stop
   here and note it.
-- Way A (USB cable) does **not** work for this: on the cable, the reset
-  line is the adapter's DTR, and the kernel cannot pulse it. The kernel
-  will try for about 3 s and report `SYNC_TIMEOUT`; Kilo keeps its old
-  firmware.
 
 **Flash.** With Kilo on and the even blink (step 7), on the laptop:
 
@@ -592,8 +567,7 @@ an older kernel: update it (step 13).
 
 ### 15. Finish
 
-Power the Pi off. Way A: unplug the USB cable from the Pi before you switch
-Kilo off.
+Power the Pi off.
 
 ## When it goes wrong
 
@@ -601,10 +575,9 @@ Kilo off.
 |---|---|
 | `netboot.sh` says it timed out | Wrong address, or the loader is not running. Check step 4 again; power-cycle the Pi; try `kernel/tools/netboot.sh --http 192.168.88.X`. |
 | `netboot.sh` worked but the light stays dark | The loader may not hand over on this board. Write the kernel straight to the card instead: `kernel/tools/make-sd.sh /media/$USER/BOOT --kernel` (on a card with only Pi boot files), and power on with it. Note it in the results. |
-| Slow blink that never turns into the even blink | Is Kilo switched on? Way B: is the Pi seated on the socket the right way round (or, with wires: are TX and RX crossed, Pi transmit to NyBoard receive, and is ground connected)? Is the USB adapter unplugged from Kilo? Way A: was the kernel built with `KILO_BODY_SERIAL=auto` (step 1; the default kernel ignores the cable)? Is the USB cable in the Pi, and was it plugged in **before** step 6? (The kernel looks for USB devices only once, when it starts.) Then power-cycle the Pi and start from step 3. |
+| Slow blink that never turns into the even blink | Is Kilo switched on? Is the Pi seated on the socket the right way round (or, with wires: are TX and RX crossed, Pi transmit to NyBoard receive, and is ground connected)? Is a USB serial adapter still plugged into Kilo? Then power-cycle the Pi and start from step 3. |
 | Even blink, then slow blink | Kilo stopped talking (switched off, battery cut out, or the cable moved). |
 | Fast blink | See step 7: flash the body firmware. |
-| The Pi resets when Kilo's cable goes in | The 5 V problem above. Note it; Kilo must be on before the cable goes in. |
 | Steady light for more than 20 s | Note whether it was on or off, and whether a screen showed anything. Power-cycle and try once more. |
 | No **kilo** in the router's list | Wait a minute and look again, and try the loader's address anyway. If nothing answers, note it: the kernel's network did not come up. |
 | `kilo status` says `no host key` | Step 1's `kilo key init` was not run on this laptop (or `--key`/`KILO_HOST_KEY` points elsewhere). |

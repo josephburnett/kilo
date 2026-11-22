@@ -2,8 +2,8 @@
 // SLA, data, repeated START, ACK/NACK on reads, STOP), the error codes, the
 // short-circuit after the first error, the per-action spin bound, the bus
 // recovery (SCL pulses until a stuck slave lets go, never driving a line
-// high) and the error counter. Also measures the polling bounds that
-// docs/code-review-2026-10-11.md §2.2 calls weak: a dead bus costs one
+// high) and the error counter. Also measures the polling bounds a code
+// review of 2026-10-11 called weak: a dead bus costs one
 // bounded wait per transfer, a slow (not dead) bus is bounded only per
 // action, so per transfer it scales with the byte count; and the per-tick
 // budget: what it is charged, a transfer refused once it is spent, and a

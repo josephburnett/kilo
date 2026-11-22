@@ -34,11 +34,11 @@ enum LegId : uint8_t { LEG_LF = 0, LEG_RF = 1, LEG_RB = 2, LEG_LB = 3 };
 inline bool leg_front(uint8_t leg) { return leg < 2; }
 inline bool leg_left(uint8_t leg) { return leg == LEG_LF || leg == LEG_LB; }
 
-// ---- Joint sign conventions: TO BE VERIFIED ON KILO -----------------------
+// ---- Joint sign conventions -----------------------------------------------
 // There is no position feedback, so these come from the legacy posture
-// tables and must be checked on the robot with the foot-nudge test
-// (docs/p2-hardware-test.md: STANCE, then SET_BODY_POSE x-shift +10 mm; each
-// foot must move FORWARD). What the tables say: in "up" (STAND) the front
+// tables, checked on Kilo on 2026-10-11 with the foot-nudge test (STANCE,
+// then SET_BODY_POSE x-shift +20 mm: the planted feet pushed the body back,
+// i.e. each foot moved FORWARD in the body frame; signs unchanged). What the tables say: in "up" (STAND) the front
 // legs are shoulder +30 / knee +30 and the back legs -30 / -30, i.e. front
 // and back are mirror images (Nybble's front "elbows" point back, its back
 // knees forward, as in a cat; the owner confirmed this on Kilo 2026-10-11:

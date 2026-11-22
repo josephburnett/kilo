@@ -609,7 +609,7 @@ move, he does one of the original Nybble's tricks:
   he goes back to STANCE afterwards), so he never jumps at the end.
 - They are the library's `alive_<name>_sit` and `alive_<name>_stand`, written by
   `mind/kilo/tricks/alive_set.py` from the original skill tables with the
-  original's timing (`docs/timing-vs-legacy.md` §4), each checked against the
+  original's timing (`mind/README.md` "The original firmware's trick timing"), each checked against the
   body model (`mind/tests/test_alive_tricks.py`). Left out: `butt_up` (it asks
   for more than the front shoulders reach and the model puts him on three feet),
   `scratch` (the model has him tip 7.7 mm onto a foot when the hind leg comes up),
