@@ -85,9 +85,9 @@ void test_behaviour_through_the_mind() {
   r.body.event(KILO_EVENT_IR_KEY, 0x68);  // A4: trot, ignored while the runner runs
   r.run_ms(40);
   CHECK(r.log.has("remote A4 (0x68, trot): ignored (behaviour runner active)") && !r.mind.walker().active());
-  r.body.event(KILO_EVENT_IR_KEY, 0xE0);  // A5 again: nothing
+  r.body.event(KILO_EVENT_IR_KEY, 0xE0);  // A5 again: one of the random mode's tricks
   r.run_ms(40);
-  CHECK(r.log.has("remote A5 (0xE0, behaviour): behaviour runner already running"));
+  CHECK(r.log.has("remote A5 (0xE0, behaviour): random mode: "));
   CHECK(r.mind.stamping());
   // the loop stalls 2 s: the pass after it does not stamp (the runner has not ticked for 1 s), then it does again
   r.body.clock.advance_ms(2000);

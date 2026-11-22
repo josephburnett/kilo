@@ -110,11 +110,37 @@ def test_synthetic_mapping():
 def test_speed_delay_mapping():
     assert legacy.speed_to_ticks(60, 0) == 1
     assert legacy.speed_to_ticks(0, 8) == 1
-    # 60 deg at speed 8 = 2 deg/step -> 30 steps x 5.5 ms = 165 ms -> 9 ticks
-    assert legacy.speed_to_ticks(60, 8) == 9
+    # 60 deg at speed 8 = 2 deg/step -> 30 steps, 31 passes x 7.4 ms = 229 ms -> 11 ticks
+    assert legacy.transform_passes(60, 8) == 31 and legacy.transform_passes(61, 8) == 32  # round half away
+    assert legacy.speed_to_ticks(60, 8) == 11
+    assert legacy.transform_passes(0, 8) == 1 and legacy.speed_to_ticks(0, 8) == 1
     assert legacy.delay_to_ticks(0) == 0
     assert legacy.delay_to_ticks(2) == 5
     assert legacy.delay_to_ticks(-4) == 10
+
+
+def test_behaviours_take_the_original_s_time(lib, skills):
+    """Each library behaviour, frame by frame, as long as the original firmware plays it from `up`
+    (legacy.legacy_timing: steps + 1 passes of LEGACY_STEP_MS, maxDiff over all 16 joints from
+    where the row before left them, a loop's repeats entered from its last row), to the tick."""
+    up = skills["up"].angles(0)
+    for name, t in lib.items():
+        s = skills[t.source["legacy_name"]]
+        if s.kind != "behaviour":
+            continue
+        timing = legacy.legacy_timing(s, up)
+        assert len(t.frames) == len(timing), name
+        for f, (row, move_ms, delay_ms) in zip(t.frames, timing):
+            # (a move under a tick, one pass: no move, is the body's shortest, 1 tick)
+            assert abs(f.dur * 20 - move_ms) <= 10 or (f.dur == 1 and move_ms < 20), (name, row, f.dur, move_ms)
+            assert abs(f.hold * 20 - delay_ms) <= 10, (name, row, f.hold, delay_ms)
+        assert abs(t.duration_ticks * 20 - legacy.legacy_ms(s, up)) <= 20 * len(t.frames), name
+    # the two the owner named: wash_face 4.0 s and pee 2.6 s at the central 7.4 ms a pass (both were
+    # 0.3-0.5 s short before 2026-11-22: 5.5 ms a pass, steps not steps + 1, the loops sized once)
+    assert lib["wash_face"].duration_ticks == 202 and lib["pee"].duration_ticks == 133
+    # a posture the original held until the next command is held 2 s (stretch was a flick: P1, 2026-10-11)
+    assert lib["stretch"].frames[0].hold == lib["butt_up"].frames[0].hold == legacy.POSTURE_HOLD_TICKS
+    assert lib["sit"].frames[0].hold == lib["stand"].frames[0].hold == 0
 
 
 def test_legacy_file_facts(skills):
@@ -136,13 +162,14 @@ EXPECTED = {
     "stand": ("up", 1, 0, 0, 0, 0, 0, Posture.STAND),
     "stretch": ("str", 1, 0, 0, 0, 0, 15, Posture.STAND),
     "balance": ("balance", 1, 0, 0, 0, 0, 0, Posture.STAND),
-    "hi": ("hi", 6, 2, 3, 3, 0, 0, Posture.STAND),
-    "wash_face": ("wsf", 6, 2, 3, 3, 0, 0, Posture.SIT),
-    "check_around": ("ck", 3, 0, 1, 2, 0, 0, Posture.STAND),
-    "sniff": ("snf", 5, 2, 3, 3, 0, 0, Posture.STAND),
-    "scratch": ("scrh", 6, 3, 4, 5, 0, 0, Posture.STAND),
-    "pee": ("pee", 5, 2, 3, 2, 0, 0, Posture.STAND),
-    "push_up": ("pu", 6, 1, 2, 3, 0, 0, Posture.STAND),
+    # the behaviours' finite loops are unrolled (legacy.play_order): 2 + 2 x 3 + 2 rows ...
+    "hi": ("hi", 10, 0, 0, 0, 0, 0, Posture.STAND),
+    "wash_face": ("wsf", 10, 0, 0, 0, 0, 0, Posture.SIT),
+    "check_around": ("ck", 5, 0, 0, 0, 0, 0, Posture.STAND),
+    "sniff": ("snf", 9, 0, 0, 0, 0, 0, Posture.STAND),
+    "scratch": ("scrh", 14, 0, 0, 0, 0, 0, Posture.STAND),
+    "pee": ("pee", 7, 0, 0, 0, 0, 0, Posture.STAND),
+    "push_up": ("pu", 10, 0, 0, 0, 0, 0, Posture.STAND),
     "butt_up": ("buttUp", 1, 0, 0, 0, 0, 15, Posture.STAND),
 }
 
@@ -167,8 +194,10 @@ def test_library_known_frames(lib, skills):
     # legacy rb shoulder -85 is clamped to its -80 limit
     assert hi.frames[2].angles == pose((35, -15, -86, 0, -3, -3, 3, 3, -75, 43, -80, -72, 40, 53, 60, 6))
     assert hi.frames[1].hold == legacy.delay_to_ticks(2)
+    # the loop's first row (2) entered from row 1 the first time, from row 3 (22 deg away, not 105) after
+    assert hi.frames[4].angles == hi.frames[2].angles and hi.frames[4].dur < hi.frames[2].dur / 3
     pu = lib["push_up"]
-    assert pu.frames[3].angles == pose((5, 5, 0, 0, 0, 0, 0, 0, 75, -70, 55, 55, -50, 70, -75, -75))
+    assert pu.frames[7].angles == pose((5, 5, 0, 0, 0, 0, 0, 0, 75, -70, 55, 55, -50, 70, -75, -75))
     assert lib["stand"].frames[0].angles == pose(UP)
     assert lib["rest"].frames[0].angles == pose((-30, -80, -45, 0, -3, -3, 3, 3,
                                                   60, 60, -60, -60, -45, -45, 45, 45))
@@ -176,7 +205,8 @@ def test_library_known_frames(lib, skills):
     # every unclamped angle equals the legacy number
     for t in lib.values():
         s = skills[t.source["legacy_name"]]
-        for k, f in enumerate(t.frames):
+        rows = legacy.play_order(s) if s.kind == "behaviour" else range(len(s.frames))
+        for f, k in zip(t.frames, rows, strict=True):
             for j in CANONICAL:
                 lo, hi_ = JOINT_LIMITS[j]
                 assert f.angles[j] == min(hi_, max(lo, s.angles(k)[j]))
@@ -221,7 +251,8 @@ def test_mirror_matches_legacy_rule(skills):
         for col in range(2, 8):
             r[2 * col], r[2 * col + 1] = r[2 * col + 1], r[2 * col]
     t = legacy.to_trick(s).mirror()
-    for k, r in enumerate(rows):
+    for k, row in enumerate(legacy.play_order(s)):  # the loop is unrolled
+        r = rows[row]
         for j in CANONICAL:
             lo, hi = JOINT_LIMITS[j]
             assert t.frames[k].angles[j] == min(hi, max(lo, r[j]))  # pairs share limits

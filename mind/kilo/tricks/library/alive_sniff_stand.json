@@ -1,0 +1,41 @@
+{
+  "name": "alive_sniff_stand",
+  "source": {
+    "file": "legacy/InstinctNybble.h",
+    "legacy_name": "snf",
+    "kind": "alive",
+    "trick": "sniff",
+    "base": "stand"
+  },
+  "notes": [
+    "the random mode's sniff (legacy `snf`) from STAND back to STAND: kilo.tricks.alive_set",
+    "rows [0, 1, 2, 3, 2, 3, 2, 3, 4] timed as the original plays them from there (7.4 ms a pass)",
+    "back to STAND at the posture rate, at least 25 ticks; end posture STAND (no move after)",
+    "stopped (B6, A7, C7, the random mode leaving), back to STAND over 25 ticks, not the body's 0.2 s crossfade"
+  ],
+  "expected": {
+    "roll": 0,
+    "pitch": 0
+  },
+  "loop": {
+    "start": 0,
+    "end": 0,
+    "repeats": 0
+  },
+  "balance": false,
+  "fall_ok": false,
+  "end_posture": "STAND",
+  "stop_ticks": 25,
+  "frames": [
+    {"dur": 7, "hold": 0, "easing": "cosine", "joints": {"head_pan": -8, "head_tilt": -50, "tail": -40, "lf_shoulder": 16, "rf_shoulder": 16, "rb_shoulder": -28, "lb_shoulder": -31, "lf_knee": 34, "rf_knee": 34, "rb_knee": -27, "lb_knee": -19}},
+    {"dur": 10, "hold": 0, "easing": "cosine", "joints": {"head_pan": -1, "head_tilt": -31, "tail": -21, "lf_shoulder": 25, "rf_shoulder": 33, "rb_shoulder": -37, "lb_shoulder": -37, "lf_knee": -15, "rf_knee": -20, "rb_knee": -55, "lb_knee": -55}},
+    {"dur": 10, "hold": 0, "easing": "cosine", "joints": {"head_pan": -5, "head_tilt": -45, "tail": -7, "lf_shoulder": 51, "rf_shoulder": 59, "rb_shoulder": -20, "lb_shoulder": -20, "lf_knee": -27, "rf_knee": -32, "rb_knee": -56, "lb_knee": -56}},
+    {"dur": 11, "hold": 0, "easing": "cosine", "joints": {"head_pan": 5, "head_tilt": -51, "tail": -37, "lf_shoulder": 47, "rf_shoulder": 55, "rb_shoulder": -24, "lb_shoulder": -24, "lf_knee": -27, "rf_knee": -32, "rb_knee": -56, "lb_knee": -56}},
+    {"dur": 11, "hold": 0, "easing": "cosine", "joints": {"head_pan": -5, "head_tilt": -45, "tail": -7, "lf_shoulder": 51, "rf_shoulder": 59, "rb_shoulder": -20, "lb_shoulder": -20, "lf_knee": -27, "rf_knee": -32, "rb_knee": -56, "lb_knee": -56}},
+    {"dur": 11, "hold": 0, "easing": "cosine", "joints": {"head_pan": 5, "head_tilt": -51, "tail": -37, "lf_shoulder": 47, "rf_shoulder": 55, "rb_shoulder": -24, "lb_shoulder": -24, "lf_knee": -27, "rf_knee": -32, "rb_knee": -56, "lb_knee": -56}},
+    {"dur": 11, "hold": 0, "easing": "cosine", "joints": {"head_pan": -5, "head_tilt": -45, "tail": -7, "lf_shoulder": 51, "rf_shoulder": 59, "rb_shoulder": -20, "lb_shoulder": -20, "lf_knee": -27, "rf_knee": -32, "rb_knee": -56, "lb_knee": -56}},
+    {"dur": 11, "hold": 0, "easing": "cosine", "joints": {"head_pan": 5, "head_tilt": -51, "tail": -37, "lf_shoulder": 47, "rf_shoulder": 55, "rb_shoulder": -24, "lb_shoulder": -24, "lf_knee": -27, "rf_knee": -32, "rb_knee": -56, "lb_knee": -56}},
+    {"dur": 12, "hold": 0, "easing": "cosine", "joints": {"head_pan": -17, "head_tilt": 5, "tail": 23, "lf_shoulder": 30, "rf_shoulder": 30, "rb_shoulder": -30, "lb_shoulder": -30, "lf_knee": 30, "rf_knee": 30, "rb_knee": -30, "lb_knee": -30}},
+    {"dur": 25, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": 0, "tail": 0, "lf_shoulder": 30, "rf_shoulder": 30, "rb_shoulder": -30, "lb_shoulder": -30, "lf_knee": 30, "rf_knee": 30, "rb_knee": -30, "lb_knee": -30}}
+  ]
+}

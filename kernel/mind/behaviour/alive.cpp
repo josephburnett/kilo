@@ -1,6 +1,7 @@
 #include "behaviour/alive.h"
 #include "link/consts.h"
 #include "remote/client.h"
+#include "tricks/library.h"
 #include "tricks/model.h"
 #include "util/dmath.h"
 #include "util/fmt.h"
@@ -47,8 +48,9 @@ double stance_margin_mm(const planner::BodyModel& m, const BodyPose& p) {
   return mf < ms ? mf : ms;
 }
 
-Alive::Alive(SerialLink& link, tricks::TrickPlayer& player, LogRing& log, uint64_t seed)
-    : link_(link), player_(player), log_(log), rng_(seed ^ 0xA11FEull) {
+Alive::Alive(SerialLink& link, tricks::TrickPlayer& player, LogRing& log, uint64_t seed, const Personality& personality)
+    : link_(link), player_(player), log_(log), rng_(seed ^ 0xA11FEull), pers_(personality),
+      trick_rng_(seed ^ 0x7121CC5ull) {
   trick_.name = "alive_sit";
   trick_.legacy = "";
   trick_.frames = frames_;
@@ -57,7 +59,10 @@ Alive::Alive(SerialLink& link, tricks::TrickPlayer& player, LogRing& log, uint64
 Alive::Variant Alive::wanted() const {
   SerialLink& l = link_;
   const Goal* g = l.goal(KILO_MSG_SET_POSTURE);
-  if (g == nullptr) return variant_ == Variant::Sit ? Variant::Sit : Variant::None;  // a sit move's trick cleared it
+  if (g == nullptr) {  // a sit move's trick or one of the tricks cleared it (a standing one: STANCE again after)
+    if (variant_ == Variant::Sit) return Variant::Sit;
+    return variant_ == Variant::Stand && (restance_ || trick_playing()) ? Variant::Stand : Variant::None;
+  }
   uint8_t code = g->payload[1], flags = g->payload[3];
   if (code == KILO_POSTURE_STAND && flags == 0) return Variant::Stand;
   if (code == KILO_POSTURE_STANCE && own_stance_) return Variant::Stand;
@@ -82,6 +87,8 @@ void Alive::enter(Variant v, double now) {
   next_at_ = now + kSettleS + rng_.uniform(0, 2.0);
   n_steps_ = 0;
   from_ = cur_ = {0, 0, 0, 0};
+  if (trick_at_ == 0 && pers_.n_alive_tricks > 0 && pers_.alive_trick_every_s > 0)
+    trick_at_ = now + pers_.alive_trick_every_s * trick_rng_.uniform(0.5, 1.5);
   if (v == Variant::Stand && !own_stance_) {
     own_stance_ = client_posture(link_, nullptr, "stance");
     logf(log_, LogLevel::Info, "alive: standing (STANCE, the body pose on top)%s", own_stance_ ? "" : ": refused");
@@ -96,10 +103,96 @@ void Alive::stop() {
   if (pose_sent_ && (cur_.pitch != 0 || cur_.roll != 0 || cur_.dh != 0 || cur_.xs != 0)) send_pose({0, 0, 0, 0});
   if (looked_) client_look(link_, 0, 0);  // the sitting looks: the head back to straight ahead
   looked_ = false;
-  if (player_.busy() && player_.trick() == &trick_) player_.stop();
+  if (player_.busy() && (player_.trick() == &trick_ || trick_playing())) player_.stop();
   n_steps_ = 0;
   variant_ = Variant::None;
   own_stance_ = false;
+  restance_ = false;
+}
+
+// ---- the tricks (the original Nybble's, mind/kilo/tricks/alive_set.py) ------------------------
+
+bool Alive::trick_playing() const {
+  return lib_ != nullptr && player_.busy() && player_.trick() == lib_ && player_.result().play == lib_play_;
+}
+
+// One of the personality's tricks, never the last one again (when there are two or more).
+int Alive::pick_trick() {
+  int n = pers_.n_alive_tricks;
+  if (n <= 0) return -1;
+  if (n == 1 || last_trick_ < 0 || last_trick_ >= n) return (int)(trick_rng_.random() * n) % n;
+  int k = (int)(trick_rng_.random() * (n - 1)) % (n - 1);
+  return k >= last_trick_ ? k + 1 : k;
+}
+
+bool Alive::trick_due(double now) const {
+  return pending_ || (trick_at_ > 0 && now >= trick_at_ && pers_.n_alive_tricks > 0);
+}
+
+bool Alive::request_trick(double now, const char** what) {
+  if (pers_.n_alive_tricks == 0) {
+    *what = "random mode: no tricks in the personality (alive.tricks)";
+    return false;
+  }
+  if (pending_) {
+    format(what_, sizeof what_, "random mode: %s is already waiting", pers_.alive_tricks[pending_k_]);
+    *what = what_;
+    return false;
+  }
+  pending_k_ = pick_trick();
+  pending_ = true;
+  pending_at_ = now;
+  const char* name = pers_.alive_tricks[pending_k_];
+  if (trick_playing())
+    format(what_, sizeof what_, "random mode: %s after the %s playing", name, last_trick());
+  else if (player_.busy())
+    format(what_, sizeof what_, "random mode: %s after the move playing", name);
+  else if (variant_ == Variant::None)
+    format(what_, sizeof what_, "random mode: %s once he sits or stands in it (up to %d s)", name, (int)kTrickWaitS);
+  else
+    format(what_, sizeof what_, "random mode: %s now", name);
+  *what = what_;
+  return true;
+}
+
+// Plays the trick asked for or due: its variant for the pose held. False: none played.
+bool Alive::play_trick(double now) {
+  int k = pending_ ? pending_k_ : pick_trick();
+  bool asked = pending_;
+  pending_ = false;
+  double every = pers_.alive_trick_every_s > 0 ? pers_.alive_trick_every_s : 0;
+  if (k < 0) return false;
+  char name[48];
+  bool standing = variant_ == Variant::Stand;
+  format(name, sizeof name, "alive_%s_%s", pers_.alive_tricks[k], standing ? "stand" : "sit");
+  const tricks::Trick* t = tricks::find_trick(name);
+  double speed = d_clamp(pers_.alive_trick_speed > 0 ? pers_.alive_trick_speed : 1.0, 0.25, 3.98);
+  uint8_t q6 = (uint8_t)d_clamp((double)d_iround(speed * tricks::kSpeedUnity), tricks::kSpeedMin, 255);
+  const char* why = "no such trick in the library";
+  uint32_t play = t != nullptr ? player_.start(*t, false, q6, &why) : 0;
+  last_trick_ = k;
+  if (play == 0) {
+    trick_failures_++;
+    trick_at_ = every > 0 ? now + every * trick_rng_.uniform(0.5, 1.5) : 0;
+    logf(log_, LogLevel::Warn, "alive: trick %s not played: %s", name, why != nullptr ? why : "?");
+    return false;
+  }
+  lib_ = t;
+  lib_play_ = play;
+  tricks_++;
+  uint32_t ticks = 0;
+  tricks::total_ticks(*t, q6, &ticks);
+  double end = now + ticks * kTickS;
+  trick_at_ = every > 0 ? end + every * trick_rng_.uniform(0.5, 1.5) : 0;
+  next_at_ = end + (standing ? rng_.uniform(kPauseMinS, kPauseMaxS) : rng_.uniform(kSitPauseMinS, kSitPauseMaxS));
+  if (standing) {  // the body pose back to level; STANCE again once the trick is done (in STAND)
+    n_steps_ = 0;
+    if (cur_.pitch != 0 || cur_.roll != 0 || cur_.dh != 0 || cur_.xs != 0) send_pose({0, 0, 0, 0});
+    restance_ = true;
+  }
+  logf(log_.status(), LogLevel::Info, "alive: trick %s (%s, %u ticks at %u/64%s)", pers_.alive_tricks[k],
+       standing ? "standing" : "sitting", (unsigned)ticks, (unsigned)q6, asked ? ", asked for" : "");
+  return true;
 }
 
 void Alive::leave() {
@@ -327,8 +420,18 @@ void Alive::stand_step(double now) {
 }
 
 void Alive::poll(double now, bool running, bool calm, double head_pan) {
+  if (pending_ && now - pending_at_ > kTrickWaitS && (variant_ == Variant::None || !calm)) {
+    pending_ = false;
+    logf(log_, LogLevel::Info, "alive: the trick asked for is dropped (not sitting or standing in %d s)",
+         (int)kTrickWaitS);
+  }
   if (!running || !calm) {
     if (variant_ != Variant::None) leave();
+    if (!running) {  // the runner stopped or paused: the tricks' timer starts again with it
+      if (pending_) logf(log_, LogLevel::Info, "alive: the trick asked for is dropped (the random mode stopped)");
+      pending_ = false;
+      trick_at_ = 0;
+    }
     return;
   }
   Variant v = wanted();
@@ -340,11 +443,32 @@ void Alive::poll(double now, bool running, bool calm, double head_pan) {
   const BodyState& b = link_.state();
   bool idle = b.has_telemetry && (b.telemetry.mode == KILO_MODE_IDLE || b.telemetry.mode == KILO_MODE_TRICK);
   if (variant_ == Variant::Stand) {
+    if (restance_ && !trick_playing()) {  // the trick is over: STANCE again (it ended in STAND)
+      restance_ = false;
+      const tricks::PlayResult& r = player_.result();
+      bool done = r.play == lib_play_ && r.state == tricks::PlayState::Done && r.reason == KILO_TRICK_DONE_REASON_DONE;
+      own_stance_ = done && client_posture(link_, nullptr, "stance");
+      if (!own_stance_) {
+        logf(log_, LogLevel::Info, "alive: standing left (the trick ended %s)",
+             done ? "but STANCE was refused" : tricks::done_reason_name(r.reason));
+        leave();
+        return;
+      }
+      next_at_ = now + kSettleS + rng_.uniform(kPauseMinS, kPauseMaxS);
+      if (trick_at_ > 0 && trick_at_ < next_at_) trick_at_ = next_at_;
+      return;
+    }
+    if (pending_ && n_steps_ > 0) {  // asked for: the pose move is dropped (levelled) for it
+      n_steps_ = 0;
+      send_pose({0, 0, 0, 0});
+    }
     if (n_steps_ > 0) {
       stand_step(now);
       return;
     }
-    if (now < next_at_ || !idle || b.telemetry.mode != KILO_MODE_IDLE) return;
+    if (!idle || b.telemetry.mode != KILO_MODE_IDLE || player_.busy()) return;
+    if ((pending_ || now >= next_at_) && trick_due(now) && play_trick(now)) return;
+    if (now < next_at_) return;
     double pan_jump = head_pan - last_pan_;
     last_pan_ = head_pan;
     AliveMove m = (pan_jump > 10 || pan_jump < -10) && last_ != AliveMove::Follow ? AliveMove::Follow : pick(true);
@@ -364,7 +488,9 @@ void Alive::poll(double now, bool running, bool calm, double head_pan) {
   }
   // sitting: a move is a trick; the next waits for it and the pause; the head looks around meanwhile
   if (b.has_telemetry && (b.telemetry.mode == KILO_MODE_IDLE || b.telemetry.mode == KILO_MODE_TRICK)) sit_look(now);
-  if (now < next_at_ || player_.busy() || !b.has_telemetry || b.telemetry.mode != KILO_MODE_IDLE) return;
+  if (player_.busy() || !b.has_telemetry || b.telemetry.mode != KILO_MODE_IDLE) return;
+  if ((pending_ || now >= next_at_) && trick_due(now) && play_trick(now)) return;
+  if (now < next_at_) return;
   AliveMove m = pick(false);
   plan_sit(m);
   const char* why = nullptr;
@@ -389,8 +515,9 @@ void Alive::poll(double now, bool running, bool calm, double head_pan) {
 }
 
 void Alive::metrics_line(char* out, uint32_t n) const {
-  uint32_t len = format(out, n, "alive: moves=%u looks=%u sit_failures=%u", (unsigned)moves_, (unsigned)looks_,
-                        (unsigned)sit_failures_);
+  uint32_t len = format(out, n, "alive: moves=%u looks=%u sit_failures=%u tricks=%u trick_failures=%u",
+                        (unsigned)moves_, (unsigned)looks_, (unsigned)sit_failures_, (unsigned)tricks_,
+                        (unsigned)trick_failures_);
   for (int i = 0; i < (int)AliveMove::kCount; i++)
     if (counts_[i] != 0) len += format(out + len, n - len, " %s=%u", alive_move_name((AliveMove)i), (unsigned)counts_[i]);
 }

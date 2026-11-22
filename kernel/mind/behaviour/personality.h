@@ -30,7 +30,8 @@ struct Weight {
 };
 
 struct Personality {
-  static constexpr int kMaxWeights = 8;  // per behaviour
+  static constexpr int kMaxWeights = 8;      // per behaviour
+  static constexpr int kMaxAliveTricks = 8;  // personality.MAX_ALIVE_TRICKS
   const char* name;
   // drives
   double initial_energy, initial_curiosity, initial_sociability, initial_arousal;
@@ -61,6 +62,11 @@ struct Personality {
   const char* greet_trick;
   double greet_cooldown_s;
   double startle_hold_s;
+  // the alive layer's tricks (behaviour/alive.h): the mean wait between two, their speed (x the
+  // original's), and their names (library tricks alive_<name>_sit and alive_<name>_stand)
+  double alive_trick_every_s, alive_trick_speed;
+  uint8_t n_alive_tricks;
+  const char* alive_tricks[kMaxAliveTricks];
 };
 
 // mind/kilo/behaviour/personality.yaml, as personality.load() reads it.

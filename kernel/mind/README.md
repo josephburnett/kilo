@@ -497,7 +497,8 @@ could stall while the loop runs.
 **Who drives.** A laptop client holding control (`CONTROL take=1`) pauses
 the behaviour runner and silences the remote. The remote's A5 starts the runner at run time;
 while it runs, B6, A7 and C7 stop it (`Runner::stop()` halts the running
-behaviour, which cancels its trick) and its other keys are ignored.
+behaviour, which cancels its trick), A5 again plays one of the random mode's tricks
+("The random mode's tricks" below) and its other keys are ignored.
 `MindConfig` defaults: remote and behaviour off (the kernel turns on the
 remote and the balance at Kp 0.99, kernel/README.md "The Mind's settings"),
 so without `--behaviour` the runner is off until A5.
@@ -512,8 +513,8 @@ of `kilo/body/client.py`. The library is compiled in: the mind only ever
 uploads it, so a `Trick` is already in wire form (the TRICK_BEGIN fields and
 the 14 B keyframes exactly as Python's `Trick.begin()` and
 `Keyframe.to_wire()` make them). `tricks/gen_library.py` writes
-`library.gen.{h,cpp}` from `mind/kilo/tricks/library/*.json` (13 tricks,
-43 frames, about 940 B of tables), with Python's CRC, trick_id and duration
+`library.gen.{h,cpp}` from `mind/kilo/tricks/library/*.json` (26 tricks,
+188 frames, about 3.4 KB of tables), with Python's CRC, trick_id and duration
 for the tests:
 
 ```
@@ -588,6 +589,57 @@ Python's `play:` action fails after every real
 trick (`_as_status` rejects the `TrickResult` that `BodyClient.play`
 returns); here a trick that ends DONE succeeds.
 
+### The random mode's tricks
+
+The random mode is the behaviour runner started by A5 (or by the distance
+guard). While it idles he sits, and while it explores he stands; the alive
+layer (`behaviour/alive.h`, no Python counterpart) then makes small moves:
+shifts, leans, a tail swish, looks around. Now and then, instead of a small
+move, he does one of the original Nybble's tricks:
+
+| Trick | What he does | From sitting | From standing |
+|---|---|---|---|
+| stretch | front low, rear high, head up (the original's `str`), held 2 s | stands up first | as the original |
+| wash_face | sits and licks a front paw, then rubs his face with it (`wsf`) | as the original | sits first (the original's own first row) |
+| pee | lifts a hind leg (`pee`) | stands up first | as the original |
+| sniff | head down, sniffing the floor (`snf`) | stands up first | as the original |
+| check_around | looks round to each side (`ck`) | stands up first | as the original |
+
+- Each trick ends exactly in the pose it started from (SIT or STAND; standing
+  he goes back to STANCE afterwards), so he never jumps at the end.
+- They are the library's `alive_<name>_sit` and `alive_<name>_stand`, written by
+  `mind/kilo/tricks/alive_set.py` from the original skill tables with the
+  original's timing (`docs/timing-vs-legacy.md` §4), each checked against the
+  body model (`mind/tests/test_alive_tricks.py`). Left out: `butt_up` (it asks
+  for more than the front shoulders reach and the model puts him on three feet),
+  `scratch` (the model has him tip 7.7 mm onto a foot when the hind leg comes up),
+  `hi` and `push_up` (not a cat's idle moves).
+- How often: `personality.yaml` `alive:` section. `trick_every_s: 40` is the
+  mean wait between two tricks (each wait drawn between 20 and 60 s); the small
+  moves come every few seconds, so a trick is about one move in ten. Never the
+  same trick twice in a row.
+- How fast: `trick_speed: 0.75`, three quarters of the original's pace (a first,
+  careful setting; 1.0 is the original's).
+- A5 while the random mode runs (however it started): one trick at random at
+  once. If a small move or another trick is playing, the new one waits for it to
+  end (it is not cut short); one waits at most, so a press while one is already
+  waiting is refused (the log says so). If he is napping or busy with another
+  behaviour, it waits up to 10 s for him to sit or stand, then is dropped.
+- B6, A7 and C7 stop a trick as they stop the random mode. For the rest of the
+  mind a trick is a trick: he is quiet during it, and the distance guard waits
+  for its end (6 s at the longest, wash_face) before it acts.
+
+To try it on Kilo (nothing here has been tried on the robot; the model checks
+are a rigid, slow-motion model without inertia):
+
+1. Put Kilo on the floor, away from edges, and press **A5**. He sits and looks
+   around, shifting now and then.
+2. Wait. Within about a minute he does one of the tricks above, then goes on
+   with the small moves.
+3. Press **A5** again: he does a trick at once (or right after the move he is
+   in). Press it again for another.
+4. **B6** stops it all and he stands.
+
 ## Remote
 
 `remote/` holds the key table and map (keys named by grid:
@@ -605,7 +657,7 @@ behaviour runner (`remote/remote.h` says what each key does):
 | B7, B5 | faster, slower by one speed level (the trot 0.4, 0.7, 1, 1.3, 1.6 × its speed: 58 to 230 mm/s; the walk and the crawl 0.4, 0.7, 1, 1.15, 1.25); past the slowest B5 goes backward; only while walking. Turning in place: stop turning and walk straight forward (B7) or backward (B5) at once |
 | A6, C6 | from standing: turn left, right in place; walking forward or backward: steer one level left or right (0.25, 0.5, 1 of the stride off the inner side, at most 3 each way), without stopping (docs/walking-and-balance.md §13) |
 | C7 | freeze: the quick stop of the walk (as B6, ending in STANCE, powered), a trick and the behaviour runner stopped; then only B6 and A7 act |
-| A5 | start the behaviour runner |
+| A5 | start the behaviour runner (the random mode); while it runs: one of its tricks at random, at once or after the move playing ("The random mode's tricks") |
 | A2 | off unless built with `KILO_REAR_UP=1`, `2` or `3` (the highest stage allowed): rear up (docs/rear-up-trick.md): up to stage 1 (28 degrees nose up) and hold; A2 again while he holds a stage (4 s) takes him on to the next (40, then 54 degrees), up to the build's; without it he comes down to SIT from there; the top stage holds 2 s and comes down. A2 at another moment, B6 or C7: down at once (1.5 to 2.5 s); refused below 7400 mV at rest (the highest reading of the last 20 s). B2 until 2026-11-17 |
 | B2 | a meow: one of the meow family, picked at random (`sound/`, docs/sound.md); it moves nothing, so it plays at once, also while a walk or the behaviour runs |
 | B1 | the self-measurement (`measure/`, docs/self-measurement.md): small poses streamed as FEET with the balance off, recorded as a run of its own; any key stops it into STAND |

@@ -1690,13 +1690,14 @@ percentage from a resting 2S curve.
   Athletic tricks (backflip, roll, jump) are not ported. `rc` stays a PROGMEM
   reflex on the body.
 - Import rules:
-  - `dur = ceil(maxΔ / (speed/4) · LEGACY_STEP_MS / 20)`, where
-    `LEGACY_STEP_MS` (≈5-6 ms **(est.)**) is calibrated by filming both
-    firmwares doing `hi`.
+  - `dur = round((round(maxΔ / (speed/4)) + 1) · LEGACY_STEP_MS / 20)`, maxΔ
+    over all 16 slots from the row played before, finite loops unrolled, where
+    `LEGACY_STEP_MS` (7.4 ms **(est.)**, docs/timing-vs-legacy.md §4) is
+    calibrated by filming both firmwares doing `hi`.
   - Legacy speed 0 ("jump to") → `dur = 1`; the body's slew limit absorbs the
     jump.
   - `hold = delay·50/20`.
-  - `loopCycle` maps to the loop fields. Joints 3-7 are dropped.
+  - A finite `loopCycle` is unrolled; an endless one maps to the loop fields. Joints 3-7 are dropped.
   - On mirror, `expectedRollPitch[0]` (roll) is negated.
   - `FALL_OK` is set for tricks whose expected or reached tilt exceeds 45°.
 - Found while writing the importer (`mind/kilo/tricks/`, details in

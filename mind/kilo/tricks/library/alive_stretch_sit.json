@@ -1,0 +1,35 @@
+{
+  "name": "alive_stretch_sit",
+  "source": {
+    "file": "legacy/InstinctNybble.h",
+    "legacy_name": "str",
+    "kind": "alive",
+    "trick": "stretch",
+    "base": "sit"
+  },
+  "notes": [
+    "the random mode's stretch (legacy `str`) from SIT back to SIT: kilo.tricks.alive_set",
+    "first to STAND (the original's start), at the posture rate, at least 25 ticks",
+    "the posture at the original's posture rate (2 deg a pass of 7.4 ms), held 100 ticks",
+    "back to SIT at the posture rate, at least 25 ticks; end posture SIT (no move after)",
+    "stopped (B6, A7, C7, the random mode leaving), back to SIT over 25 ticks, not the body's 0.2 s crossfade"
+  ],
+  "expected": {
+    "roll": 0,
+    "pitch": 0
+  },
+  "loop": {
+    "start": 0,
+    "end": 0,
+    "repeats": 0
+  },
+  "balance": false,
+  "fall_ok": false,
+  "end_posture": "SIT",
+  "stop_ticks": 25,
+  "frames": [
+    {"dur": 25, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": 0, "tail": 0, "lf_shoulder": 30, "rf_shoulder": 30, "rb_shoulder": -30, "lb_shoulder": -30, "lf_knee": 30, "rf_knee": 30, "rb_knee": -30, "lb_knee": -30}},
+    {"dur": 20, "hold": 100, "easing": "cosine", "joints": {"head_pan": 10, "head_tilt": 45, "tail": -30, "lf_shoulder": -75, "rf_shoulder": -75, "rb_shoulder": -45, "lb_shoulder": -45, "lf_knee": 60, "rf_knee": 60, "rb_knee": -45, "lb_knee": -45}},
+    {"dur": 25, "hold": 0, "easing": "cosine", "joints": {"head_pan": 10, "head_tilt": -20, "tail": -60, "lf_shoulder": 30, "rf_shoulder": 30, "rb_shoulder": -80, "lb_shoulder": -80, "lf_knee": 60, "rf_knee": 60, "rb_knee": 45, "lb_knee": 45}}
+  ]
+}
