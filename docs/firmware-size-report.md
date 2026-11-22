@@ -204,7 +204,7 @@ Evidence:
    allow.** `mind/firmware/opencat-legacy.hex` covers addresses up to 32016
    (measured from the hex records). On 2026-10-10 it was flashed with
    `avrdude -c arduino -b 115200` and verified ("32016 B verified",
-   `docs/p0-hardware-test-results.md` row 9, H15 passed), and it ran.
+   the P0 hardware test, H15 passed), and it ran.
    Afterwards the P0 firmware was flashed back over the same bootloader. With
    the classic 2 KB bootloader the application area would end at 30720 B, so
    bytes 30720..32015 would either fail to write (lock bits) or overwrite the

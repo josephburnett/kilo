@@ -376,8 +376,7 @@ return the raw arrays (`LegacySkill`), which `legacy.to_trick()` maps:
 - **speed → dur.** Legacy `transform()` moves at `speed/4` degrees per pass
   in `steps = round(maxΔ / (speed/4))` steps, `steps + 1` passes each writing
   all 16 joints, cosine eased. `dur = round((steps + 1) · LEGACY_STEP_MS / 20 ms)`
-  with `LEGACY_STEP_MS = 7.4` (the central estimate from the code; to be
-  calibrated by filming `hi` on both firmwares, docs/timing-vs-legacy.md §4);
+  with `LEGACY_STEP_MS = 7.4` (the central estimate from the code, below);
   `maxΔ` is over all 16 slots from where the row played before left them
   (`legacy.legacy_timing`), and frame 0 is sized from the `up` posture. A
   finite loop is unrolled (one keyframe per row played: a repeat starts from
@@ -399,6 +398,30 @@ return the raw arrays (`LegacySkill`), which `legacy.to_trick()` maps:
 - `end_posture`: behaviours take the nearest built-in posture (`up`, `sit`,
   `rest`) by leg angles; posture tricks their own if they are one, else STAND.
   `FALL_OK` is set when the expected tilt exceeds 45° (none of the list).
+
+**The original firmware's trick timing** (worked out from its code, never
+timed on Kilo). The old firmware has no clock for tricks: each row is
+`steps + 1` passes of `transform()` (`legacy/motion.h`), each pass writing
+all 16 joints (a `cos()`, float maths, `calibratedPWM()`'s EEPROM reads and
+one PCA9685 write at 500 kHz I2C, plus the IR receiver's 50 µs timer
+interrupt). With typical ATmega328P costs [assumed, not measured] a pass takes
+5.6 / 7.4 / 10.2 ms (fast / central / slow); the importer uses the central
+7.4 ms. No IMU reads happen inside a trick. On that estimate the old totals
+are, from `up` (s, fast / central / slow): `hi` 1.71 / 2.21 / 3.00, `pu`
+3.65 / 4.76 / 6.48, `pee` 2.12 / 2.64 / 3.45, `wsf` 3.28 / 4.02 / 5.16, `ck`
+1.51 / 1.96 / 2.66, `snf` 1.46 / 1.92 / 2.65, `scrh` 1.10 / 1.46 / 2.01;
+`str` and `buttUp` reach their pose in about 0.3-0.4 s and hold it until the
+next command. Kilo's tricks now take within 2 % of the central figure
+(`mind/tests/test_tricks.py` holds every row to the replayed old time within
+half a tick). Until 2026-11-22 the importer made them 0.7-1.0 of the old time:
+5.5 ms a pass, `steps` instead of `steps + 1` passes, only the 11 driven joints
+in `maxΔ`, and one duration for every repeat of a loop (sized for the first
+time through); and `str`/`buttUp` went straight back to STAND (the owner saw
+"way too fast" on 2026-10-11). To calibrate the 7.4 ms: film the old firmware
+doing `hi` from the side, count the frames from the first move to the last,
+change `LEGACY_STEP_MS` (`legacy.py`), then re-run `python -m
+kilo.tricks.import_legacy` and `python -m kilo.tricks.alive_set` (from
+`mind/`) and `kernel/mind/tricks/gen_library.py`.
 
 ## Perception
 

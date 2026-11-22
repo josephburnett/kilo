@@ -9,8 +9,7 @@
 //     a non-blocking Send() queues without limit (heap) when the peer stops
 //     reading;
 //   - the address and the link are read from CNetConfig / CNetDeviceLayer.
-// The one long call is the USB scan (the default KILO_BODY_SERIAL=pl011
-// build; with auto the kernel scanned before the link): Circle's
+// The one long call is the USB scan: Circle's
 // USB enumeration spins in CTimer::MsDelay, so it stalls the main loop once,
 // about a second (est.), after the body's first HELLO and the boot-time
 // flash check (CKiloNet::BringUp).
@@ -154,25 +153,22 @@ void CKiloNet::Run (void)
 
 void CKiloNet::BringUp (void)
 {
-	if (m_pUSB != 0)
+	// The scan spins (no yield) for about a second (est.): let the link
+	// get its HELLO and a boot-time flash run first.
+	while (   !(m_pGoAhead != 0 && *m_pGoAhead)
+	       && m_Clock.now_us () - m_nStartUs < UsbWaitUs)
 	{
-		// The scan spins (no yield) for about a second (est.): let the link
-		// get its HELLO and a boot-time flash run first.
-		while (   !(m_pGoAhead != 0 && *m_pGoAhead)
-		       && m_Clock.now_us () - m_nStartUs < UsbWaitUs)
-		{
-			CScheduler::Get ()->MsSleep (10);
-		}
+		CScheduler::Get ()->MsSleep (10);
+	}
 
-		uint64_t t0 = m_Clock.now_us ();
-		boolean bOK = m_pUSB->Initialize ();
-		unsigned nMs = (unsigned) ((m_Clock.now_us () - t0) / 1000);
-		logf (*m_pLog, bOK ? LogLevel::Info : LogLevel::Error,
-		      "USB scan for Ethernet: %s, %u ms (the main loop waited)", bOK ? "done" : "FAILED", nMs);
-		if (!bOK)
-		{
-			return;		// no Ethernet: the task idles; the mind runs on
-		}
+	uint64_t t0 = m_Clock.now_us ();
+	boolean bOK = m_pUSB->Initialize ();
+	unsigned nMs = (unsigned) ((m_Clock.now_us () - t0) / 1000);
+	logf (*m_pLog, bOK ? LogLevel::Info : LogLevel::Error,
+	      "USB scan for Ethernet: %s, %u ms (the main loop waited)", bOK ? "done" : "FAILED", nMs);
+	if (!bOK)
+	{
+		return;		// no Ethernet: the task idles; the mind runs on
 	}
 
 	// FALSE: do not wait for the PHY (Circle would spin up to 4 s); the

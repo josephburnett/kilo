@@ -6,10 +6,9 @@
 #include <circle/synchronize.h>
 #include <circle/timer.h>
 
-CKiloSound::CKiloSound (CInterruptSystem *pInterrupt, boolean bKeepRunning)
+CKiloSound::CKiloSound (CInterruptSystem *pInterrupt)
 :	CPWMSoundBaseDevice (pInterrupt, SampleRate, 2 * ChunkFrames),
 	m_Renderer (SampleRate),
-	m_bKeepRunning (bKeepRunning),
 	m_bAsleep (FALSE),
 	m_bFailed (FALSE),
 	m_nPeriodUs (ChunkFrames * 1000000u / SampleRate),
@@ -25,16 +24,9 @@ CKiloSound::CKiloSound (CInterruptSystem *pInterrupt, boolean bKeepRunning)
 {
 }
 
-boolean CKiloSound::Initialize (void)
+void CKiloSound::Initialize (void)
 {
 	m_Renderer.set_max ((uint32_t) GetRangeMax ());
-	if (m_bKeepRunning)
-	{
-		m_Renderer.power (true);
-		Run ();
-	}
-
-	return !m_bFailed;
 }
 
 void CKiloSound::Run (void)
@@ -90,26 +82,18 @@ void CKiloSound::stop (void)
 void CKiloSound::suspend (bool bAsleep)
 {
 	m_bAsleep = bAsleep;
-	EnterCritical ();
 	if (bAsleep)
 	{
+		EnterCritical ();
 		m_Renderer.power (false);	// the level down, then GetChunk returns 0: the DMA stops
-	}
-	else if (m_bKeepRunning)
-	{
-		m_Renderer.power (true);
-	}
-	LeaveCritical ();
-	if (!bAsleep)
-	{
-		Run ();
+		LeaveCritical ();
 	}
 }
 
 void CKiloSound::poll (void)
 {
 	EnterCritical ();
-	if (!m_bKeepRunning && m_Renderer.powered () && !m_Renderer.sounding ())
+	if (m_Renderer.powered () && !m_Renderer.sounding ())
 	{
 		m_Renderer.power (false);	// "stop": the sound is over, the level goes down
 	}

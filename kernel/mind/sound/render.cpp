@@ -105,8 +105,7 @@ uint32_t Renderer::render(unsigned* out, uint32_t frames) {
 
 // ---- the host's output ----------------------------------------------------------------------
 
-TimedOutput::TimedOutput(Clock& clock, uint32_t max, bool keep_running)
-    : clock_(clock), r_(kOutRate, max), keep_running_(keep_running) {}
+TimedOutput::TimedOutput(Clock& clock, uint32_t max) : clock_(clock), r_(kOutRate, max) {}
 
 bool TimedOutput::play(const Sound& s, uint32_t gain_q16) {
   if (asleep_) return false;
@@ -133,16 +132,7 @@ void TimedOutput::suspend(bool asleep) {
 
 void TimedOutput::poll() {
   uint64_t now = clock_.now_us();
-  if (!running_) {
-    if (keep_running_ && !asleep_) {  // always running: the level up from the start
-      r_.power(true);
-      running_ = true;
-      t_us_ = now;
-      frac_ = 0;
-      starts_++;
-    }
-    return;
-  }
+  if (!running_) return;
   if (now - t_us_ > 1000000) t_us_ = now - 1000000;  // a long stall: at most a second to catch up
   frac_ += (now - t_us_) * kOutRate;
   t_us_ = now;
@@ -159,7 +149,7 @@ void TimedOutput::poll() {
     }
     if (tap_ != nullptr) tap_(tap_arg_, buf_, w);
   }
-  if (!keep_running_ && !r_.sounding() && r_.powered()) r_.power(false);  // stopped between sounds
+  if (!r_.sounding() && r_.powered()) r_.power(false);  // stopped between sounds
 }
 
 void TimedOutput::stats(OutputStats& out) {

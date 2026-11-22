@@ -46,10 +46,6 @@ OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/
 
 # Build options (README "Body link", "Boot probe", "Planner bench", "mDNS",
 # "The Mind's settings"):
-#   KILO_BODY_SERIAL=pl011  the PL011 on GPIO14/15 (default): the Pi on the NyBoard's socket, its
-#                           header UART and GPIO4 reset; USB (Ethernet) is scanned after the link is up
-#   KILO_BODY_SERIAL=auto   a USB serial adapter if one enumerates, else the PL011: the fallback for
-#                           Kilo's USB adapter cable (USB is scanned before the link)
 #   KILO_BOOT_PROBE=1|0     GPIO21 (header pin 40) marks the boot for a scope (default 1)
 #   KILO_PLANNER_BENCH=1|0  time the walking planner once at boot, no body involved (default 1)
 #   KILO_MDNS=1|0           answer mDNS queries for kilo.local and the _kilo._tcp service (default 1)
@@ -73,9 +69,6 @@ OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/
 #                           the awake baseline of docs/power.md)
 #   KILO_SOUND=1|0          Kilo's sounds on the 3.5 mm jack (docs/sound.md): kernel/sounds/*.wav packed into the
 #                           image, Circle's PWM sound device (default 1; 0: no sound code, no sounds, no libsound)
-#   KILO_SOUND_IDLE=stop|run  the sound device between sounds: stopped, started for each sound with a ramp
-#                           (default), or running at silence from boot (src/sound.h)
-KILO_BODY_SERIAL ?= pl011
 KILO_BOOT_PROBE ?= 1
 KILO_PLANNER_BENCH ?= 1
 KILO_MDNS ?= 1
@@ -86,7 +79,6 @@ KILO_RIGHTING ?= 0
 KILO_RECORD_SAVE ?= 0
 KILO_LIGHT_SLEEP ?= 1
 KILO_SOUND ?= 1
-KILO_SOUND_IDLE ?= stop
 ifeq ($(filter 0 1 2 3,$(KILO_REAR_UP)),)
 $(error KILO_REAR_UP must be 0, 1, 2 or 3)
 endif
@@ -99,17 +91,9 @@ endif
 ifeq ($(filter 0 1,$(KILO_SOUND)),)
 $(error KILO_SOUND must be 0 or 1)
 endif
-ifeq ($(filter stop run,$(KILO_SOUND_IDLE)),)
-$(error KILO_SOUND_IDLE must be stop or run)
-endif
-ifeq ($(KILO_BODY_SERIAL),pl011)
-KILO_DEFS := -DKILO_BODY_SERIAL_PL011
-else ifneq ($(KILO_BODY_SERIAL),auto)
-$(error KILO_BODY_SERIAL must be auto or pl011)
-endif
-KILO_DEFS += -DKILO_BOOT_PROBE=$(KILO_BOOT_PROBE) -DKILO_PLANNER_BENCH=$(KILO_PLANNER_BENCH) -DKILO_MDNS=$(KILO_MDNS) \
+KILO_DEFS := -DKILO_BOOT_PROBE=$(KILO_BOOT_PROBE) -DKILO_PLANNER_BENCH=$(KILO_PLANNER_BENCH) -DKILO_MDNS=$(KILO_MDNS) \
 	-DKILO_BEHAVIOUR=$(KILO_BEHAVIOUR) -DKILO_REAR_UP=$(KILO_REAR_UP) -DKILO_INTENT=$(KILO_INTENT) -DKILO_RIGHTING=$(KILO_RIGHTING) -DKILO_RECORD_SAVE=$(KILO_RECORD_SAVE) -DKILO_LIGHT_SLEEP=$(KILO_LIGHT_SLEEP) \
-	-DKILO_SOUND=$(KILO_SOUND) -DKILO_SOUND_KEEP_RUNNING=$(if $(filter run,$(KILO_SOUND_IDLE)),1,0)
+	-DKILO_SOUND=$(KILO_SOUND)
 
 # Kilo's sounds (docs/sound.md): the PWM sound device (src/sound.cpp, Circle's lib/sound) and the
 # table tools/pack_sounds.py packs from sounds/*.wav into build/gen/sounds.gen.cpp, every build (it

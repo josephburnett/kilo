@@ -165,20 +165,15 @@ between them over 80 ms instead: slowly enough that the speaker barely
 moves. Whether that is quiet enough with this amplifier has to be heard
 (below).
 
-**Stopped between sounds.** By default the output runs only while a sound
-plays: started for it (the 80 ms ramp up, then the sound), the ramp down
-after it, then stopped. While it is stopped there is no switching on the
-pin, so no hiss from it and no interrupts. The other way is
-`make -C kernel KILO_SOUND_IDLE=run`: the output starts at boot and keeps
-running at silence between sounds (no ramp per sound, 86 interrupts a
-second, the switching always on). That is the one to try if the ramps
-still pop.
+**Stopped between sounds.** The output runs only while a sound plays:
+started for it (the 80 ms ramp up, then the sound), the ramp down after it,
+then stopped. While it is stopped there is no switching on the pin, so no
+hiss from it and no interrupts.
 
 **Light sleep** (A7, then 30 s of nothing: docs/power.md; the servos
 going off 3 s after A7 changes nothing here) ramps the
-output down and stops it in both modes, so nothing runs or hisses while
-he sleeps; any sound asked for meanwhile is dropped. Waking starts it
-again ("run") and plays the mew.
+output down and stops it, so nothing runs or hisses while
+he sleeps; any sound asked for meanwhile is dropped. Waking plays the mew.
 
 **The control loop is not disturbed.** The interrupt that fills a chunk
 runs with other interrupts held off, the body link's serial port's
@@ -232,8 +227,8 @@ Computed or assumed, to be checked on the real robot:
 
 1. **That it plays at all** on the Pi 2 B's jack with Circle's PWM device
    (the pins, the DMA, the channels): `kilo sound play mew --host
-   kilo.local` and listen. The boot log line `sound: PWM on the 3.5 mm
-   jack, 44100 Hz, range 5669, ...` must not say "did NOT start".
+   kilo.local` and listen. The boot log has the line `sound: PWM on the
+   3.5 mm jack, 44100 Hz, range 5669, ...`.
 2. **The control loop and the body link while sounds play**: walk Kilo
    with the remote and press B2 repeatedly. `kilo metrics --host` then:
    `sound: ... callback_max_us=` (expected under about 100), `late=0`,
@@ -241,12 +236,11 @@ Computed or assumed, to be checked on the real robot:
    no `PL011 line errors` lines. Compare `loop_max_us` with a walk without
    sounds.
 3. **Pops** when a sound starts and ends (the 80 ms ramps), and when Kilo
-   falls asleep and wakes. If they are loud, try `KILO_SOUND_IDLE=run`.
+   falls asleep and wakes.
 4. **Idle hiss**: with Kilo awake and quiet, put an ear to the speaker. In
    the default mode the output is stopped between sounds; any hiss then
-   comes from the amplifier itself. With `KILO_SOUND_IDLE=run` compare
-   again.
-5. **A high whine** while a sound plays or (with "run") all the time: the
+   comes from the amplifier itself.
+5. **A high whine** while a sound plays: the
    PWM switches at 44.1 kHz, above hearing, but a little of it can reach
    the amplifier. People will not hear it; a real cat in the room might.
 6. **Loudness**: at volume 70 through the PAM8403, whether 70 is a good

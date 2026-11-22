@@ -7,7 +7,7 @@ and the joint angles as given. Both were wrong for the rear_up trick:
 
 - The body turns a joint angle into a servo pulse and clamps the pulse to
   500..2500 us (body/src/core/joints.cpp joint_counts). With Kilo's
-  calibration (the EEPROM dump of 2026-10-10, docs/kilo-eeprom-legacy.md)
+  calibration (the EEPROM dump of 2026-10-10, body/test/test_kilo_eeprom.cpp)
   the right hind shoulder's pulse reaches 2500 us at -57.3 deg: any angle
   below that (rear_up's sink and step ask for -80 and -77, SIT for -80)
   leaves the right hind leg at -57.3 while the left one goes to -80. The
@@ -57,7 +57,7 @@ from .model import JOINT_IDS, JOINT_LIMITS
 # body/src/core/joints.cpp: servo = zero + dir * angle (degrees), counts =
 # floor((a2p * servo + b * 1000) / 1000), clamped to 500..2500 (us). The
 # zeros, slopes and b come from the legacy EEPROM (config_migrate): Kilo's
-# dump of 2026-10-10 (docs/kilo-eeprom-legacy.md, body/test/test_kilo_eeprom.cpp:
+# dump of 2026-10-10 (body/test/test_kilo_eeprom.cpp:
 # CZP, a2p 0x2ad3 = 10963 for every joint, b 60 x 10). If the owner
 # recalibrates (kilo cal set ...), `kilo cal show` gives the new offsets and
 # CZP = 90 + dir * mid + dir * offset.

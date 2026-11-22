@@ -1248,8 +1248,7 @@ imu_pitch_deg = 0.0
 imu_roll_deg = 0.0
 
 # The servo zeros of Kilo's calibration, by legacy joint id 0..15 (the EEPROM
-# dump of 2026-10-10, docs/kilo-eeprom-legacy.md; body/test/test_kilo_eeprom.cpp
-# has the same bytes): servo angle at joint angle 0. They decide where each
+# dump of 2026-10-10, kept byte for byte in body/test/test_kilo_eeprom.cpp): servo angle at joint angle 0. They decide where each
 # servo's pulse is clamped (the right hind shoulder stops at -57 degrees).
 #   reseated_rb_shoulder_czp  the right hind shoulder's zero after its upper
 #                      leg was re-seated (docs/rear-up-trick.md section 2:

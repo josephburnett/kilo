@@ -150,47 +150,6 @@ bool Pl011Serial::set_baud (uint32_t nBaud)
 	return true;
 }
 
-// ---- USB serial -------------------------------------------------------------
-
-UsbSerial::UsbSerial (CUSBSerialDevice *pDevice)
-:	m_pDevice (pDevice)
-{
-	assert (m_pDevice != 0);
-	m_pDevice->SetOptions (0);		// no NL -> CR NL
-}
-
-int32_t UsbSerial::read (uint8_t *pBuffer, uint32_t nCount)
-{
-	// 0 while the IN request is in flight; -1 only when it cannot be queued.
-	int nResult = m_pDevice->Read (pBuffer, nCount);
-
-	return nResult < 0 ? -1 : nResult;
-}
-
-int32_t UsbSerial::write (const uint8_t *pBuffer, uint32_t nCount)
-{
-	// Blocks until the bulk OUT transfer completes: a frame is <= 66 bytes,
-	// two full-speed packets. The adapter NAKs while its own buffer is full,
-	// and Circle retries without a timeout, so a wedged adapter would stall
-	// here (not seen; the offered load is a fifth of the line rate).
-	int nResult = m_pDevice->Write (pBuffer, nCount);
-
-	return nResult < 0 ? -1 : nResult;
-}
-
-uint32_t UsbSerial::tx_free (void)
-{
-	// Write() takes a whole frame or fails; nothing queues on this side.
-	return 512;
-}
-
-bool UsbSerial::set_baud (uint32_t nBaud)
-{
-	return    m_pDevice->SetBaudRate (nBaud)
-	       && m_pDevice->SetLineProperties (USBSerialDataBits8, USBSerialParityNone,
-						USBSerialStopBits1);
-}
-
 // ---- clock, log, GPIO4 ------------------------------------------------------
 
 // ---- randomness --------------------------------------------------------------

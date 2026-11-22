@@ -276,7 +276,7 @@ the trot is the gait to drive with.
 
 ## 8. Measured on the floor, 2026-10-14 (the sway, flashed as 56768228)
 
-Full table in docs/p3-hardware-test-results.md. The short version: the walk
+The full table is in git history (the P3 hardware test results). The short version: the walk
 pattern fell within 2-3 s with the balance on, sway on or off, every time
 (four runs), always with the same growing 3 Hz side-to-side swing; with the
 balance **off** it rocked ±15° and stayed up for the whole 6 s. The trot
@@ -323,7 +323,7 @@ free today). The firmware becomes a pose player with reflexes and the
 residual loop. Can the Pi keep up: a 50 Hz Python loop on the Pi 2 with
 the daemon running fired 1500 ticks with the latest 0.44 ms late (20:49);
 a 10-minute run under SD-write and Wi-Fi load had its worst tick 9.6 ms
-late, none later than 20 ms (docs/p3-hardware-test-results.md section 6). The per-tick work (4 legs of IK plus the
+late, none later than 20 ms (2026-10-14). The per-tick work (4 legs of IK plus the
 mass model) is well under 1 ms; a frame of foot positions plus predicted
 attitude is ~35 bytes, ~1.5 ms on the wire. The 100 ms lookahead in the
 body covers garbage-collector pauses and SD stalls; if Python itself

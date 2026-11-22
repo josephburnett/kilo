@@ -43,8 +43,7 @@
 // the HDMI screen if the firmware gives us a frame buffer, else nowhere
 // (Kilo has no monitor). The LED:
 //
-//   steady on      starting up (with KILO_BODY_SERIAL=auto the USB scan comes
-//                  first: about a second or more)
+//   steady on      starting up
 //   0.5 Hz blink   no body: no HELLO yet, or no TELEMETRY for 300 ms
 //   2 Hz blink     the body is alive: TELEMETRY flowing
 //   5 Hz blink     the body speaks another protocol major: not driven (flash it)
@@ -145,7 +144,6 @@ CKernel::CKernel (void)
 	m_CircleLog (&m_Logger, LogLevel::Info),
 	m_KernelLog (&m_CircleLog),
 	m_pPl011 (0),
-	m_pUsbSerial (0),
 	m_pSerialName ("none"),
 	m_pMind (0),
 	m_pLog (0),
@@ -215,10 +213,9 @@ boolean CKernel::Initialize (void)
 	Config.random = &m_KeyRandom;
 #if KILO_SOUND
 	// The jack: Circle's PWM sound device (the PWM clock and GPIO40/45 set
-	// up now; the DMA starts with the first sound, or at once with
-	// KILO_SOUND_IDLE=run), the sounds the build packed.
-	m_pSound = new CKiloSound (&m_Interrupt, KILO_SOUND_KEEP_RUNNING != 0);
-	boolean bSoundOK = m_pSound->Initialize ();
+	// up now; the DMA starts with the first sound), the sounds the build packed.
+	m_pSound = new CKiloSound (&m_Interrupt);
+	m_pSound->Initialize ();
 	Config.sounds = kilo::sound::kSounds;
 	Config.sound_count = kilo::sound::kSoundCount;
 	Config.sound_output = m_pSound;
@@ -245,11 +242,9 @@ boolean CKernel::Initialize (void)
 	}
 
 #if KILO_SOUND
-	logf (*m_pLog, bSoundOK ? LogLevel::Info : LogLevel::Error,
-	      "sound: PWM on the 3.5 mm jack, %u Hz, range %d, chunks of %u frames, idle %s%s",
-	      CKiloSound::SampleRate, m_pSound->GetRangeMax () + 1, CKiloSound::ChunkFrames,
-	      m_pSound->KeepRunning () ? "running (KILO_SOUND_IDLE=run)" : "stopped",
-	      bSoundOK ? "" : ": the device did NOT start");
+	logf (*m_pLog, LogLevel::Info,
+	      "sound: PWM on the 3.5 mm jack, %u Hz, range %d, chunks of %u frames, idle stopped",
+	      CKiloSound::SampleRate, m_pSound->GetRangeMax () + 1, CKiloSound::ChunkFrames);
 #else
 	logf (*m_pLog, LogLevel::Info, "sound: not built in (KILO_SOUND=0)");
 #endif
@@ -266,7 +261,7 @@ boolean CKernel::Initialize (void)
 		      KILO_LIGHT_SLEEP ? "on (A7: servos off 3 s after, the Pi after 30 s of nothing)" : "off (KILO_LIGHT_SLEEP=0)");
 	}
 
-	kilo::Serial *pSerial = ChooseSerial ();
+	kilo::Serial *pSerial = OpenSerial ();
 	if (pSerial == 0)
 	{
 		return FALSE;
@@ -325,56 +320,19 @@ boolean CKernel::Initialize (void)
 	m_pBench = new CPlannerBench (m_pLog);
 #endif
 
-	// Last: it first runs at the main loop's first sleep. With the PL011 the
-	// USB host was not scanned yet (ChooseSerial), and the LAN9514 is a USB
-	// device, so the task scans first.
-#ifdef KILO_BODY_SERIAL_PL011
-	CUSBHCIDevice *pUSB = &m_USBHCI;
-#else
-	CUSBHCIDevice *pUSB = 0;
-#endif
-	m_pNetTask = new CKiloNet (&m_Net, pUSB, &m_bGoAhead, m_pLog, m_pListener, (u32) KILO_BUILD);
+	// Last: it first runs at the main loop's first sleep. The USB host was
+	// not scanned yet, and the LAN9514 is a USB device, so the task scans
+	// first.
+	m_pNetTask = new CKiloNet (&m_Net, &m_USBHCI, &m_bGoAhead, m_pLog, m_pListener, (u32) KILO_BUILD);
 
 	return TRUE;
 }
 
-// The body link's device. The default build (KILO_BODY_SERIAL=pl011) uses
-// the PL011 on GPIO14/15 at once: the Pi on the NyBoard's socket, no USB
-// before the link (plan rule 1); the net task scans USB later. Built with
-// KILO_BODY_SERIAL=auto (the fallback for Kilo's USB adapter cable): a USB
-// serial adapter (utty1, the cable's CH343) if one enumerated, else the
-// PL011.
-kilo::Serial *CKernel::ChooseSerial (void)
+// The body link's device: the PL011 on GPIO14/15, opened at once (the Pi
+// on the NyBoard's socket, no USB before the link; the net task scans USB
+// later).
+kilo::Serial *CKernel::OpenSerial (void)
 {
-#ifndef KILO_BODY_SERIAL_PL011
-	// This scan also finds the LAN9514 (Ethernet) for the net task.
-	if (!m_USBHCI.Initialize ())
-	{
-		logf (*m_pLog, LogLevel::Error, "USB host failed: trying the PL011 (no Ethernet)");
-	}
-	else
-	{
-		CUSBSerialDevice *pDevice =
-			(CUSBSerialDevice *) m_DeviceNameService.GetDevice ("utty1", FALSE);
-		if (pDevice != 0)
-		{
-			m_pUsbSerial = new UsbSerial (pDevice);
-			if (!m_pUsbSerial->set_baud (KILO_BAUD))
-			{
-				// Not fatal: the CDC default may still be right; the stats show it.
-				logf (*m_pLog, LogLevel::Warn, "utty1: cannot set %u baud", (unsigned) KILO_BAUD);
-			}
-			m_pSerialName = "utty1 (USB serial)";
-			logf (*m_pLog, LogLevel::Info, "body link on %s, %u baud", m_pSerialName,
-			      (unsigned) KILO_BAUD);
-
-			return m_pUsbSerial;
-		}
-
-		logf (*m_pLog, LogLevel::Info, "no USB serial adapter (utty1)");
-	}
-#endif
-
 	m_pPl011 = new Pl011Serial (&m_Interrupt);
 	if (!m_pPl011->Initialize (KILO_BAUD))
 	{
@@ -427,9 +385,8 @@ TShutdownMode CKernel::Run (void)
 
 		if (!Link.connected ())
 		{
-			// The Serial failed (a USB adapter gone). The PL011 does not
-			// fail; a USB device that went away does not come back without
-			// plug-and-play, so this mostly logs once a second.
+			// The Serial failed. The PL011 does not fail, so this mostly
+			// logs once a second.
 			if (nNow >= nNextReconnect)
 			{
 				nNextReconnect = nNow + ReconnectUs;
@@ -549,8 +506,7 @@ void CKernel::LightSleep (unsigned nUs)
 // route, `kilo card PATH`): once the body's first HELLO arrived (or none came
 // 3 s after link.connect()), read body.json and body.bin, flash them if the
 // body runs another build, and write the outcome to body-result.txt. Then
-// the go-ahead for the net task's USB scan (the default
-// KILO_BODY_SERIAL=pl011 build), which stalls the main loop and so must not
+// the go-ahead for the net task's USB scan, which stalls the main loop and so must not
 // cut into a flash.
 //
 // The card is read only after the HELLO, so neither the link nor the boot

@@ -57,7 +57,7 @@ the sounds change), then:
 
 | Output | What | Size |
 |---|---|---|
-| `build/kernel7.img` | the mind kernel | 607,140 bytes with one key (`KILO_BODY_SERIAL=auto`: about 250 bytes less) |
+| `build/kernel7.img` | the mind kernel | 607,140 bytes with one key |
 | `build/netboot/kernel7.img` | the network loader | 305,420 bytes |
 
 Of the mind kernel, the SD card (FatFs about 23 KB, the SD driver about
@@ -293,10 +293,9 @@ are not its members; as statics, their initialisers would go into the
 image. With the net task's 64 KB stack that is about 0.25 MB of a heap of
 about 1000 MB (1 GB less `gpu_mem=16` and Circle's low memory; est.).
 
-The `Mind` is built before the serial device is chosen, so it takes a
-`SerialSlot` (`src/seams.h`) that forwards to `Pl011Serial` or
-`UsbSerial` once `ChooseSerial` has picked one; nothing calls it before
-`mind.start()`.
+The `Mind` is built before the serial device is opened, so it takes a
+`SerialSlot` (`src/seams.h`) that forwards to `Pl011Serial` once
+`OpenSerial` has opened it; nothing calls it before `mind.start()`.
 
 This is the composition `mind/README.md` gives ("Laptop interface", "The
 planner"), as `kernel/host/main.cpp` and `walk_demo.cpp` do on the laptop.
@@ -305,7 +304,7 @@ implement its seams:
 
 | Seam | On Circle |
 |---|---|
-| `Serial` | `Pl011Serial` or `UsbSerial` (below) |
+| `Serial` | `Pl011Serial` (below) |
 | `Clock` | `CTimer::GetClockTicks64()`: 1 MHz, 64 bits, no wrap |
 | `Log` | every part logs into the `Mind`'s RAM ring (`mind.log()`, a `LogRing` of 4096 lines of history, `kilo log --host`, Debug included; "The log"), which passes each line to the platform log, `KernelLog`, and that to `CircleLog`: `CLogger::WriteNoAlloc` (no heap), Info and above; Debug -> `LogDebug`, Info -> `LogNotice`, Warn -> `LogWarning`, Error -> `LogError` |
 | `Gpio` | GPIO4 (header pin 7, the NyBoard's reset line) as an emulated open drain: released = input, no pull; asserted = latch low, then output. Never driven high. Released at boot; only the flasher pulses it. |
@@ -537,7 +536,7 @@ Plan rule 1 (docs/fast-boot.md §3): the control loop comes first and never
 waits for the network. `CKiloNet` (`src/net.*`), a Circle task, is created
 last in `Initialize` and first runs at the main loop's first sleep:
 
-1. **USB** (the default `KILO_BODY_SERIAL=pl011` build). The LAN9514
+1. **USB**. The LAN9514
    Ethernet chip is a USB device, so Circle's USB host must scan first.
    The link is already up on the PL011, so the task waits for the main
    loop's go-ahead: the body's first HELLO (or 3 s), the boot flash check
@@ -546,8 +545,6 @@ last in `Initialize` and first runs at the main loop's first sleep:
    loop stops for the length of the scan**, about a second (est.), once.
    The body's watchdog covers it; at boot nothing is walking. The log line
    `USB scan for Ethernet: done, N ms (the main loop waited)` measures it.
-   With `auto` (the USB cable), `ChooseSerial` already scanned, before the
-   link, and this step is skipped.
 2. **TCP/IP**: `CNetSubSystem::Initialize(FALSE)`: do not wait for the PHY
    (Circle would spin up to 4 s). Circle's `net` task then finds the
    device, the `netphy` task watches the link, and a `dhcp` task asks for a
@@ -656,35 +653,18 @@ EEPROM_SAVED); reading is open to any client, changing needs control or the
 calibration posture held by any client, and no walk or trick. A walk the raw
 bridge or a flash cut off is aborted when the pause ends.
 
-### Body link: two serial back ends
+### Body link: the PL011
 
-**The default** (`KILO_BODY_SERIAL=pl011`): the PL011, opened at once.
 The Pi sits on the NyBoard's socket: the header UART (GPIO14/15) is the
-body link and GPIO4 the body's reset line, and USB enumeration (about a
-second or more, est.) does not come before the link (docs/fast-boot.md §3
-rule 1); the net task scans USB for Ethernet later ("Network bring-up").
-Kilo's USB adapter cable is retired.
+body link and GPIO4 the body's reset line. `CKernel::OpenSerial` opens the
+PL011 at once, so USB enumeration (about a second or more, est.) does not
+come before the link (docs/fast-boot.md §3 rule 1); the net task scans USB
+for Ethernet later ("Network bring-up"). The log line `body link on ...`
+names it.
 
-**The fallback** (`make -C kernel KILO_BODY_SERIAL=auto`, for the USB
-cable; `CKernel::ChooseSerial`): initialise Circle's USB host
-(`CUSBHCIDevice`, one scan, no plug-and-play) and use the USB serial device
-`utty1` if one enumerated; else the PL011. A USB adapter plugged in after
-boot is not seen. Either way the log line `body link on ...` says which.
-
-- **USB** (the `auto` fallback): Kilo's CH343 adapter enumerates as CDC-ACM
-  (interface class 2-2-1), so Circle's `CUSBSerialCDCDevice` drives it and
-  names it `utty1` (any USB serial adapter Circle knows gets that name).
-  Baud is set with CDC `SET_LINE_CODING` (250000, 8N1), the same request
-  Linux's `cdc_acm` sends. Opening the adapter raises DTR, which on the
-  NyBoard may reset the body once at boot, as opening `/dev/ttyACM0` does
-  on Linux; the link sees an unsolicited HELLO. Circle's driver writes
-  synchronously (a bulk OUT transfer, no timeout: a frame is two
-  full-speed packets) and reads one USB packet (64 B) per completed IN
-  request: at a 1 ms loop that is up to 64 kB/s, against 25 kB/s line rate.
-  `tx_free()` is a constant 512: there is no queue on this side to measure.
-- **PL011** (the default; GPIO14/15, header pins 8 and 10; `ttyS1`): Circle's
-  `CSerialDevice`, interrupt driven. Built only when chosen, because its
-  constructor takes over GPIO14/15. 250000 baud is exact: UARTCLK 48 MHz /
+- **PL011** (GPIO14/15, header pins 8 and 10; `ttyS1`): Circle's
+  `CSerialDevice`, interrupt driven, built in `OpenSerial` (its
+  constructor takes over GPIO14/15). 250000 baud is exact: UARTCLK 48 MHz /
   (16 x 250000) = 12, remainder 0, so IBRD 12, FBRD 0. The NL -> CR NL
   translation that is on by default is switched off (it would break binary
   frames). Line errors (break, overrun, framing, parity) come back from
@@ -730,24 +710,12 @@ a frame only when `tx_free()` covers all of it; otherwise it counts
   around a switch anyway. Risk: the PL011 TRM wants the UART idle before
   its control registers change; the drain and the BUSY wait give that for
   TX, but a byte being received at that moment is lost.
-- **USB serial**: `UsbSerial::set_baud()` sends CDC `SET_LINE_CODING`
-  (Circle's `SetBaudRate()` and `SetLineProperties()`): a synchronous
-  control transfer. Writes are synchronous too, so nothing is queued on
-  the Pi's side; whether the CH343 sends its own FIFO out at the old rate
-  first is the adapter's business (not checked). **But flashing does not
-  work over the USB cable**: the body's RESET is wired to the adapter's
-  DTR line there, and Circle's CDC driver raises DTR once when it
-  configures the adapter and has no call to pulse it. The flasher pulses
-  GPIO4 (header pin 7), so over USB it ends in `SYNC_TIMEOUT` (link restored)
-  unless pin 7 is also wired to the NyBoard's reset line. Pulsing DTR
-  would need a CDC `SET_CONTROL_LINE_STATE` request from a patched or
-  subclassed Circle driver.
 
 ### ACT LED
 
 | Pattern | Meaning |
 |---|---|
-| steady on | starting up (with `KILO_BODY_SERIAL=auto`, the USB scan: a second or more) |
+| steady on | starting up |
 | 0.5 Hz (1 s on, 1 s off) | no body: no HELLO yet, or no TELEMETRY for 300 ms |
 | 2 Hz | the body is alive: TELEMETRY flowing |
 | 5 Hz | the body's HELLO has another protocol major: the kernel stays up and keeps the heartbeat, but sends no goals or FEET (kilo-mind-host exits 2 instead) |
@@ -757,7 +725,7 @@ a frame only when `tx_free()` covers all of it; otherwise it counts
 
 The LED says nothing about the network (the log does). The blink freezes
 for a moment while the SD card is read (after the first HELLO) and while a
-`--persist` writes to it; with the default `KILO_BODY_SERIAL=pl011` it
+`--persist` writes to it; it
 also freezes once for about a second (est.) early on: the USB scan for
 Ethernet ("Network bring-up").
 
@@ -775,7 +743,7 @@ Ethernet ("Network bring-up").
 | `intent` | off; `make -C kernel KILO_INTENT=1` turns it on | stand, sit and rest as intents (docs/intent.md): the remote's B6 and A7, the behaviour's postures and the guard's sit go through the state estimate and the moves planned from the body model, instead of the body's own posture change. Off until the first floor try. The state estimate itself always runs and only logs (`state: MOVING -> STANDING (...)`). `kilo-mind-host`'s switch is `--intent`. Built in, the kernel logs `Kilo mind, build ... (intents on: stand, sit and rest are moves from the model)`; either way the mind logs `state estimate on; intents ON ...` or `... intents off ...` |
 | `seed` | 32 bits from the hardware RNG | the behaviour runner logs it (`seed N`, at boot or in the remote's A5 line), so a run can be replayed on the laptop |
 | `stats_period_ms` | 1000 | a STATS_REQ to the body each second, logged `body STATS: ...`, as `kilo-mind-host` does |
-| `sounds`, `sound_output` | `make -C kernel KILO_SOUND=0` leaves them out | Kilo's sounds on the 3.5 mm jack (docs/sound.md, `src/sound.h`, `mind/sound/`): the sounds `tools/pack_sounds.py` packs from `kernel/sounds/*.wav` and Circle's PWM sound device. Logged at boot: `sound: PWM on the 3.5 mm jack, 44100 Hz, range 5669, chunks of 512 frames, idle stopped` and `sound: N sounds (S s) in the image, on, volume 70`. `KILO_SOUND_IDLE=run` keeps the device running between sounds; `KILO_SOUNDS_DIR=DIR` packs another directory. `kilo sound on|off|volume N --host` switches them at run time (not kept over a reboot) |
+| `sounds`, `sound_output` | `make -C kernel KILO_SOUND=0` leaves them out | Kilo's sounds on the 3.5 mm jack (docs/sound.md, `src/sound.h`, `mind/sound/`): the sounds `tools/pack_sounds.py` packs from `kernel/sounds/*.wav` and Circle's PWM sound device. Logged at boot: `sound: PWM on the 3.5 mm jack, 44100 Hz, range 5669, chunks of 512 frames, idle stopped` and `sound: N sounds (S s) in the image, on, volume 70`. `KILO_SOUNDS_DIR=DIR` packs another directory. `kilo sound on|off|volume N --host` switches them at run time (not kept over a reboot) |
 | `light_sleep` | on; `make -C kernel KILO_LIGHT_SLEEP=0` turns it off | the remote's A7: the servos off (LIMP, inert) 3 s after he lies still, then after 30 s of nothing (no laptop connected) light sleep (the loop idles in wfi, the Ethernet PHY powered down while no cable is in); lying idle in REST for 2 min does the same as A7 (docs/power.md, `mind/power/sleep.h`). Logged at boot: `power: ARM 600 MHz, SoC .. C, throttled 0x..; light sleep on`. Off, none of it: A7 is plain REST with the servos on, the awake baseline docs/power.md compares against. `kilo-mind-host --light-sleep` runs the same state machine on Linux (no wfi there) |
 
 The runner's wind-down ends in a poweroff request. The kernel cannot switch the Pi off: it logs `behaviour runner
@@ -1055,12 +1023,9 @@ kilo-mind-host runs the same check with `--card DIR` (DIR stands for the
 card, against tests/fake_optiboot.py in kernel/host/test.sh).
 
 **Order at boot**: link up -> HELLO (or 3 s) -> SD card -> flash if needed
--> the go-ahead for the net task's USB scan (the default
-`KILO_BODY_SERIAL=pl011`). The scan stalls the main loop for about a
+-> the go-ahead for the net task's USB scan. The scan stalls the main loop for about a
 second (est.), and optiboot gives up after 1 s without a byte, so it must
-not cut into a flash; it waits for the go-ahead (at most 30 s). With the
-`auto` build (the USB cable) the scan came before the link, so nothing
-waits.
+not cut into a flash; it waits for the go-ahead (at most 30 s).
 
 **`--persist`**: after a DONE from a `FLASH_BEGIN` with `PERSIST`, the
 kernel removes `body.json`, writes `body.bin`, then writes `body.json`
@@ -1383,9 +1348,8 @@ clean (no WATCHDOG, no PL011 overruns); that Kilo lying limp and standing
 up from LIMP with B6 is fine; and the battery slopes awake and asleep.
 
 All of it: nothing here has run on a Pi. In particular: the netboot loader
-on the 2 B; Circle's USB host finding the CH343 behind the LAN9514 hub and
-its CDC driver at 250000 baud; whether opening it resets the body; how long
-the USB scan takes; USB write latency; the PL011 at 250000 against the
+on the 2 B; how long
+the USB scan takes; the PL011 at 250000 against the
 328P; the LED codes; the boot probe; the screen with `gpu_mem=16`; the
 hardware RNG's warm-up time (Circle discards the first 0x40000 numbers).
 The network: the LAN9514 coming up through Circle's SMSC951x driver; how
