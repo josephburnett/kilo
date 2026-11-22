@@ -35,7 +35,12 @@ every move, sampled every 2 degrees of the largest joint change, the rigid quasi
 mass over its support, and never topples by more than DROP_MAX_MM at once (a rock onto another
 foot, as the alive layer's own sitting moves are allowed). A lean on three feet (the pee: 16 deg of
 roll, the centre of mass 15 mm inside them) is the trick, not a fault. What the model cannot see:
-inertia, the legs' give, a foot sliding. The tricks left out are in DROPPED, with why.
+inertia, the legs' give, a foot sliding. The tricks left out are in DROPPED, with why. Along the
+same samples the head (the righting model's estimate, kilo.tricks.righting.Lying) must stay
+HEAD_CLEAR_MM from the front legs, with a positive pan turning the nose either way (not known).
+
+Two changes to the original, both the owner's (2026-11-22): the paw lick's head (HEAD_ROWS: the
+original turns it into the raised paw) and a shake of the rear at the end of the stretch (SHAKES).
 
     python -m kilo.tricks.alive_set [--check]      (from mind/; then kernel/mind/tricks/gen_library.py)
 """
@@ -47,11 +52,16 @@ import math
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Mapping
+
+import numpy as np
 
 from . import legacy
+from . import sagittal as S
 from . import stance as T
 from .library import FIRST_VERSION, LIBRARY_DIR, path_for
-from .model import CANONICAL, JOINT_LIMITS, JOINT_NAMES, Easing, Keyframe, Posture, Trick
+from .model import CANONICAL, JOINT_IDS, JOINT_LIMITS, JOINT_NAMES, Easing, Keyframe, Posture, Trick
+from .righting import Lying
 
 # The tricks of the random mode, by their library name, in the order the personality lists them.
 SET = ("stretch", "wash_face", "pee", "sniff", "check_around")
@@ -84,6 +94,51 @@ POSTURE_DUR_TICKS = legacy.POSTURE_DUR_TICKS
 DROP_MAX_MM = 6.0   # the largest single topple: a rock onto another foot, not a fall
 DEG_PER_SAMPLE = 2.0
 REFINE = 8
+HEAD_CLEAR_MM = 10.0  # the least gap between the head and a front leg (knee servo, lower leg, foot)
+
+# The head in the original's rows, changed (legacy row: (pan, tilt)). The owner, 2026-11-22: "Kilo
+# was bumping his head when licking his paw." In `wsf` rows 2 and 3 (played three times over) the
+# left front paw goes up in front of him and the head turns toward it (pan 37 and 49) and comes up
+# into it (tilt -67 then -28): in the model the paw's lower leg reaches the muzzle (0.4 mm: a bump,
+# if a positive pan turns the nose left; 17 mm the other way). Here the head stays on the inner
+# side of the paw, facing straight ahead and a little up (pan 0, tilt 10 then 0; the sitting head
+# is at tilt -20) while the paw goes up and down beside the muzzle, 14 mm from it. Pan 0, because
+# which way a positive pan turns is not known: straight ahead is the same either way. The least gap
+# of the whole trick is then 12 mm (row 4, the paw going back down while the head turns to pan -45:
+# toward the paw if a positive pan turns right; 14.5 mm if it turns left). The
+# original's timing is kept (the head moves less than the leg in every row).
+HEAD_ROWS = {"wash_face": {2: (0, 10), 3: (0, 0)}}
+
+
+@dataclass(frozen=True)
+class Shake:
+    """A small shake of the raised rear at the end of a posture's hold (the owner, 2026-11-22: "when
+    Kilo goes butt up (stretching) make him shake a little before coming back up"): both hind feet
+    swing ``amp_mm`` forward and back together (the rear shifts back and forth over them), with the
+    tail swinging ``tail_deg`` to each side in step; ``cycles`` full swings of 2 x ``half_ticks``
+    ticks each (at speed 1; the alive layer plays at trick_speed), eased in and out over half a
+    swing. Fore and aft, not side to side: the legs cannot move sideways, so a side-to-side shake
+    is the hind feet up and down in turn, which rocks him onto a diagonal pair of feet (the model,
+    as designed: the centre of mass 8.5 mm inside the support instead of 32). The shake ends where
+    the posture was, at the end of its hold: the hold is as long as before, the still part shorter."""
+    amp_mm: float
+    half_ticks: int
+    cycles: int
+    tail_deg: float
+
+    @property
+    def ticks(self) -> int:
+        return (2 * self.cycles - 1) * self.half_ticks + 2 * self._edge
+
+    @property
+    def _edge(self) -> int:
+        return (self.half_ticks + 1) // 2
+
+
+# 4 mm a foot, 5 ticks a half swing (100 ms; 133 ms at trick_speed 0.75: 3.75 swings a second),
+# 3 swings, the tail 20 deg: gentle. The servos lag about 120 ms and close 63 % of a gap in 70 ms
+# ([model] servo_lag_ms + servo_tau_ms), so at 3.75 Hz the feet move about half of the 4 mm.
+SHAKES = {"stretch": Shake(amp_mm=4.0, half_ticks=5, cycles=3, tail_deg=20.0)}
 
 _SKILLS = legacy.parse_file()
 # The bases as the body holds them (its joint limits applied: SIT's rear shoulders -90 -> -80), 16
@@ -126,6 +181,50 @@ def _posture_ticks(frm, to) -> int:
     return legacy.speed_to_ticks(legacy._max_diff(frm, to), POSTURE_SPEED)
 
 
+def _with_head(f: Keyframe, head) -> Keyframe:
+    if head is None:
+        return f
+    a = list(f.angles)
+    a[JOINT_IDS["head_pan"]], a[JOINT_IDS["head_tilt"]] = head
+    return replace(f, angles=tuple(a))
+
+
+def _hind_leg_dx(shoulder: float, knee: float, dx: float) -> tuple[int, int]:
+    """A hind leg's (shoulder, knee), whole degrees, with its foot ``dx`` mm further forward and at
+    the same height (the side view's leg, sagittal.leg_points): Newton on the two angles."""
+    g = S.Geometry()
+    def foot(s, k):
+        _, _, f = S.leg_points(g, False, s, k)
+        return np.array(f)
+    target = foot(shoulder, knee) + np.array([dx, 0.0])
+    s, k = float(shoulder), float(knee)
+    for _ in range(20):
+        e = target - foot(s, k)
+        if np.hypot(*e) < 1e-3:
+            break
+        J = np.column_stack([(foot(s + 1e-3, k) - foot(s, k)) / 1e-3, (foot(s, k + 1e-3) - foot(s, k)) / 1e-3])
+        s, k = (np.array([s, k]) + np.linalg.solve(J, e)).tolist()
+    return round(s), round(k)
+
+
+def shake_frames(pose: tuple, shake: Shake) -> list[Keyframe]:
+    """The shake's keyframes from the 16-slot ``pose`` (where it starts and ends): each a swing to
+    the next side, cosine eased."""
+    sides = []
+    for side in (1, -1):  # +1: the hind feet forward (the rear back over them), the tail one way
+        a = list(pose)
+        for leg in ("lb", "rb"):
+            sh, kn = JOINT_IDS[f"{leg}_shoulder"], JOINT_IDS[f"{leg}_knee"]
+            a[sh], a[kn] = _hind_leg_dx(pose[sh], pose[kn], side * shake.amp_mm)
+        a[JOINT_IDS["tail"]] = round(pose[JOINT_IDS["tail"]] + side * shake.tail_deg)
+        sides.append(_clamped(tuple(a)))
+    out = [Keyframe(sides[0], dur=shake._edge, easing=Easing.COSINE)]
+    for i in range(1, 2 * shake.cycles):
+        out.append(Keyframe(sides[i % 2], dur=shake.half_ticks, easing=Easing.COSINE))
+    out.append(Keyframe(tuple(pose), dur=shake._edge, easing=Easing.COSINE))
+    return out
+
+
 def build(trick: str, base: str) -> Trick:
     skill = _SKILLS[FIRST_VERSION[trick]]
     via = VIA.get((trick, base))
@@ -142,19 +241,28 @@ def build(trick: str, base: str) -> Trick:
         here = to
     if skill.kind == "posture":
         to = skill.angles(0)
-        frames.append(Keyframe(_clamped(to), dur=_posture_ticks(here, to), hold=POSTURE_HOLD_TICKS,
-                               easing=Easing.COSINE))
+        shake = SHAKES.get(trick)
+        still = POSTURE_HOLD_TICKS - (shake.ticks if shake else 0)
+        frames.append(Keyframe(_clamped(to), dur=_posture_ticks(here, to), hold=still, easing=Easing.COSINE))
         notes.append(f"the posture at the original's posture rate (2 deg a pass of {legacy.LEGACY_STEP_MS} ms), "
                      f"held {POSTURE_HOLD_TICKS} ticks")
+        if shake:
+            frames += shake_frames(_clamped(to), shake)
+            notes.append(f"the last {shake.ticks} ticks of the hold: the rear shakes ({shake.cycles} swings, "
+                         f"the hind feet {shake.amp_mm:g} mm forward and back, {2 * shake.half_ticks} ticks "
+                         f"a swing, the tail {shake.tail_deg:g} deg), not the original's")
         last = to
     else:
         core = legacy.to_trick(skill, name=trick, skills=_SKILLS, start=here)
         assert core.repeats == 0, f"{trick}: its loop is not unrolled"
-        frames += [replace(f, balance=False) for f in core.frames]
         order = legacy.play_order(skill)
+        heads = HEAD_ROWS.get(trick, {})
+        frames += [replace(_with_head(f, heads.get(row)), balance=False) for f, row in zip(core.frames, order)]
         last = skill.angles(order[-1])
         notes.append(f"rows {order} timed as the original plays them from there "
                      f"({legacy.LEGACY_STEP_MS} ms a pass)")
+        for row, (pan, tilt) in sorted(heads.items()):
+            notes.append(f"row {row}: the head at pan {pan}, tilt {tilt} (the original's would touch the paw)")
     home = base_angles(base)
     frames.append(Keyframe(home, dur=max(POSTURE_DUR_TICKS, _posture_ticks(last, _base_legacy(base))),
                            easing=Easing.COSINE))
@@ -182,9 +290,13 @@ class Check:
     pitch: tuple       # deg (lo, hi), nose up +
     drop: float        # mm, the largest single topple
     contacts: frozenset  # everything that touched the floor
+    head: float = math.inf  # mm, the least gap between the head and a front leg, either way the pan turns
+    head_where: str = ""
 
     def problems(self) -> list[str]:
         out = []
+        if self.head < HEAD_CLEAR_MM:
+            out.append(f"the head within {self.head:.1f} mm of a front leg ({self.head_where}; < {HEAD_CLEAR_MM:g})")
         bad = sorted(self.contacts - T.ALLOWED)
         if bad:
             out.append(f"rests on {bad}")
@@ -199,6 +311,82 @@ def _joints(angles) -> dict:
     return {JOINT_NAMES[j]: float(angles[j]) for j in CANONICAL if angles[j] is not None}
 
 
+# ---- the head against the front legs ------------------------------------------------------------
+# The head as the righting model has it (kilo.tricks.righting.Lying: the neck 10 mm ahead of the
+# front axles, 12 mm up; the head 45 mm long, 44 wide, the ears 45 mm up; ESTIMATES, never
+# measured), as round parts in the head's frame (from the neck, at pan 0 and tilt 0): the skull a
+# ball as wide as the head, the muzzle a rod as wide as the muzzle points reaching to the muzzle's
+# end and down to the chin, each ear a thin rod. The front legs: the knee servo a ball
+# (Lying.knee_r), the lower leg a rod as thick as the foot (foot_r_mm), in each leg's plane.
+# A positive tilt lifts the nose (REST's -80 has the head down; the sniff's -50 looked right on
+# Kilo). Which way a positive pan turns is NOT KNOWN: the gap is taken both ways.
+_LY = Lying()
+
+
+def _head_parts(ly: Lying = _LY) -> list[tuple[np.ndarray, np.ndarray, float]]:
+    w, L, rm = ly.head_half_w, ly.head_len, 0.6 * ly.head_half_w
+    parts = [((ly.ear_x, 0.0, 10.0), (ly.ear_x, 0.0, 10.0), w),
+             ((18.0, 0.0, -4.0), (L - rm, 0.0, -4.0), rm)]
+    parts += [((ly.ear_x, y, 30.0), (ly.ear_x, y, ly.ear_z), 3.0) for y in (0.8 * w, -0.8 * w)]
+    return [(np.array(a), np.array(b), r) for a, b, r in parts]
+
+
+_HEAD = _head_parts()
+_HEAD_NAMES = ("skull", "muzzle", "left ear", "right ear")
+
+
+def _seg_dist(p1, q1, p2, q2) -> float:
+    """The least distance between the segments p1-q1 and p2-q2 (either may be a point)."""
+    d1, d2, r = q1 - p1, q2 - p2, p1 - p2
+    a, e, f = d1 @ d1, d2 @ d2, d2 @ r
+    if a < 1e-9 and e < 1e-9:
+        return float(np.linalg.norm(r))
+    if a < 1e-9:
+        s, t = 0.0, min(1.0, max(0.0, f / e))
+    else:
+        c = d1 @ r
+        if e < 1e-9:
+            s, t = min(1.0, max(0.0, -c / a)), 0.0
+        else:
+            b = d1 @ d2
+            den = a * e - b * b
+            s = min(1.0, max(0.0, (b * f - c * e) / den)) if den > 1e-9 else 0.0
+            t = (b * s + f) / e
+            if t < 0:
+                s, t = min(1.0, max(0.0, -c / a)), 0.0
+            elif t > 1:
+                s, t = min(1.0, max(0.0, (b - c) / a)), 1.0
+    return float(np.linalg.norm((p1 + d1 * s) - (p2 + d2 * t)))
+
+
+def head_clearance(js: Mapping, g3: T.Geometry3, pan_sign: float, ly: Lying = _LY) -> tuple[float, str]:
+    """(mm, where): the least gap between the head and the front legs at joints ``js``, with a
+    positive pan turning the nose left (``pan_sign`` +1) or right (-1)."""
+    a = math.radians(pan_sign * g3.joint(js, "head_pan"))
+    b = math.radians(ly.tilt_sign * g3.joint(js, "head_tilt"))
+    Rz = np.array([[math.cos(a), -math.sin(a), 0.0], [math.sin(a), math.cos(a), 0.0], [0.0, 0.0, 1.0]])
+    Ry = np.array([[math.cos(b), 0.0, -math.sin(b)], [0.0, 1.0, 0.0], [math.sin(b), 0.0, math.cos(b)]])
+    Rh, neck = Rz @ Ry, np.array([ly.neck_x, 0.0, ly.neck_z])
+    head = [(neck + Rh @ p, neck + Rh @ q, r) for p, q, r in _HEAD]
+    best, where = math.inf, ""
+    for leg in ("lf", "rf"):
+        _, k, f = (np.array(p, float) for p in T._leg(g3, js, leg))
+        for part, (p, q, rr) in (("knee", (k, k, ly.knee_r)), ("lower leg", (k, f, g3.g.body.foot_r_mm))):
+            for name, (hp, hq, hr) in zip(_HEAD_NAMES, head):
+                d = _seg_dist(p, q, hp, hq) - rr - hr
+                if d < best:
+                    best, where = d, f"{leg} {part} and the {name}"
+    return best, where
+
+
+def _head_gap(js: Mapping, g3: T.Geometry3) -> tuple[float, str]:
+    out = []
+    for s in (1.0, -1.0):
+        d, where = head_clearance(js, g3, s)
+        out.append((d, f"{where}, a positive pan turning {'left' if s > 0 else 'right'}"))
+    return min(out)
+
+
 def check(t: Trick, base: str, g3: T.Geometry3) -> Check:
     """The rigid quasi-static model along the trick, from its base at rest."""
     start = _joints(base_angles(base))
@@ -208,6 +396,7 @@ def check(t: Trick, base: str, g3: T.Geometry3) -> Check:
     margin, roll, drop = r.margin, abs(r.roll), 0.0
     pitch = [r.pitch, r.pitch]
     contacts = set(r.contacts)
+    head, head_where = _head_gap(start, g3)
     for f in t.frames:
         nxt = {**cur, **_joints(f.angles)}
         span = max(abs(T.applied(T.JOINT_IDS[k], nxt[k], g3.czp) - T.applied(T.JOINT_IDS[k], cur[k], g3.czp))
@@ -232,8 +421,11 @@ def check(t: Trick, base: str, g3: T.Geometry3) -> Check:
             pitch = [min(pitch[0], r.pitch), max(pitch[1], r.pitch)]
             drop = max(drop, d)
             contacts |= set(r.contacts)
+            h = _head_gap(T.lerp(cur, nxt, i / n), g3)
+            if h[0] < head:
+                head, head_where = h
         cur = nxt
-    return Check(margin, roll, tuple(pitch), drop, frozenset(contacts))
+    return Check(margin, roll, tuple(pitch), drop, frozenset(contacts), head, head_where)
 
 
 def main(argv: list[str] | None = None) -> int:

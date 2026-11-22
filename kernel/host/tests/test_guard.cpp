@@ -558,7 +558,7 @@ void test_backward_trick_pickup_and_off_do_not_trigger() {
 }
 
 void test_eyes() {
-  {  // a body with eyes: green (after the ready flashes), then blue at the stop, the colour latched as SET_EYES
+  {  // a body with eyes: green (once ready), then blue at the stop, the colour latched as SET_EYES
     WallRig r(WallRig::remote_cfg(), true);
     r.run_ms(1000);
     const Goal* g = r.mind.link().goal(KILO_MSG_SET_EYES);
@@ -919,7 +919,7 @@ void test_low_at_rest_rests_and_the_eyes_are_orange() {
   {
     WallRig r(WallRig::remote_cfg(), true);
     r.wall = false;
-    r.run_ms(1000);  // the ready flashes
+    r.run_ms(1000);  // ready: green
     CHECK(rgb(r) == green);
     r.body.batt_mv = 6950;
     r.run_ms(500);  // the higher readings before still in the window: not yet
@@ -979,7 +979,7 @@ void test_low_at_rest_rests_and_the_eyes_are_orange() {
     WallRig r(WallRig::remote_cfg(), true);
     r.wall = false;
     r.body.mode = KILO_MODE_LOW_BATT;
-    r.run_ms(1000);  // (and the ready flashes)
+    r.run_ms(1000);  // (and ready)
     CHECK(r.mind.tired() && rgb(r) == orange && r.log.has("battery: tired (the body's LOW_BATT mode)"));
     r.body.mode = KILO_MODE_IDLE;
     r.run_ms(200);

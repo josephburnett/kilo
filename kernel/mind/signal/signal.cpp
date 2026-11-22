@@ -58,6 +58,10 @@ void EyeLanguage::show(Signal s, uint64_t now) {
     return;
   }
   flashing_ = false;  // the flash's outcome (or anything after it) ends the steady white
+  if (s == Signal::Ready) {
+    ready_ = true;
+    return;
+  }
   Shot shot = {true, false, s, now, 0};
   if (!playing_.used) {
     playing_ = shot;
@@ -95,7 +99,7 @@ Look EyeLanguage::look(const State& st, uint64_t now) {
     playing_ = waiting_;
     waiting_.used = false;
   }
-  bool guard_says = st.guard == guard::Eyes::Blue || st.guard == guard::Eyes::Red;
+  bool guard_says = ready_ && (st.guard == guard::Eyes::Blue || st.guard == guard::Eyes::Red);
   if (playing_.used && !playing_.started) {
     if (!guard_says) {
       playing_.started = true;
@@ -113,6 +117,7 @@ Look EyeLanguage::look(const State& st, uint64_t now) {
   if (flashing_) return kWhite;
   if (guard_says) return guard_look(st.guard);
   if (playing_.used && playing_.started) return frame(playing_.s, now - playing_.start);
+  if (!ready_) return kOff;
   if (st.asleep) return now % kSleepEveryUs < kSleepBlinkUs ? kDimGreen : kOff;
   if (st.busy) return (now / kBusyHalfUs) % 2 == 0 ? kWhite : kOff;
   return guard_look(st.guard);

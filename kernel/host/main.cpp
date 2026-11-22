@@ -333,7 +333,10 @@ int main(int argc, char** argv) {
     }
   }
   mind.start();
-  if (card_flash != nullptr) card_flash->begin();
+  if (card_flash != nullptr) {
+    mind.hold_ready(true);  // not ready until the check is over (as on the Pi)
+    card_flash->begin();
+  }
 
   const uint64_t start = clock.now_us();
   const uint64_t end = duration_s >= 0 ? start + (uint64_t)(duration_s * 1e6) : UINT64_MAX;
@@ -344,7 +347,10 @@ int main(int argc, char** argv) {
     uint64_t t_poll = clock.now_us();
     mind.poll();
     window.add_poll(clock.now_us() - t_poll);
-    if (card_flash != nullptr) card_flash->poll(!mind.host().link_paused() && !updater->busy());
+    if (card_flash != nullptr && !card_flash->done()) {
+      card_flash->poll(!mind.host().link_paused() && !updater->busy());
+      if (card_flash->done()) mind.hold_ready(false);
+    }
     if (!link.connected()) {
       logf(log, LogLevel::Error, "port %s failed", port);
       status = 1;
