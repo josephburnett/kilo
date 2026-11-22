@@ -10,14 +10,19 @@ SITTING and RESTING. An EDGE is one step:
                shipped moves leads to the goal, and from UNKNOWN (settled,
                upright enough, but in no pose the model knows);
   WAIT_REFLEX  from a fallen state: wait for the body's fall reflex to
-               right him (EVENT RECOVERED: he stands). A PLACEHOLDER: the
-               righting move of step 3b replaces it by changing RIGHTING
-               below, the one entry all four fallen states use.
+               right him (EVENT RECOVERED: he stands). What the mind does
+               unless it is built with the righting experiment;
+  RIGHT        from a side or his back, with the righting experiment
+               (KILO_RIGHTING=1, docs/righting.md): a righting move
+               (kilo.intent.righting, RIGHTING below), played by the trick
+               player as a FALL_OK trick, mirrored from his left side.
 
-``next_edge(state, goal)`` is the first edge of the shortest chain (fewest
-edges; MOVE before POSTURE among equals; the table's order after that).
-kernel/mind/intent/gen_intent.py writes the edges and this next-step table
-into the mind (intent.gen.cpp), so the C++ only looks it up.
+``next_edge(state, goal, righting=...)`` is the first edge of the shortest
+chain (fewest edges; MOVE before POSTURE among equals; the table's order
+after that), without the RIGHT edges or, with ``righting``, without the
+WAIT_REFLEX ones. kernel/mind/intent/gen_intent.py writes the edges and both
+next-step tables into the mind (intent.gen.cpp), so the C++ only looks them
+up.
 """
 
 from __future__ import annotations
@@ -38,6 +43,7 @@ class Kind(IntEnum):
     MOVE = 1
     POSTURE = 2
     WAIT_REFLEX = 3
+    RIGHT = 4
 
 
 @dataclass(frozen=True)
@@ -45,13 +51,19 @@ class Edge:
     src: State
     dst: State
     kind: Kind
-    move: str = ""          # MOVE: the shipped move's name ("stand_to_sit")
+    move: str = ""          # MOVE, RIGHT: the move's name ("stand_to_sit", "righting_side")
     posture: int = 0        # POSTURE: the SET_POSTURE code
+    mirror: bool = False    # RIGHT: played mirrored (left and right swapped)
 
 
-# What gets Kilo up from a fallen state, and where it leaves him. Step 3b's righting move goes here:
-# (Kind.MOVE, "the move's name", State.<where it ends>).
-RIGHTING = (Kind.WAIT_REFLEX, "", State.STANDING)
+# Without the righting experiment a fallen state waits for the body's fall reflex, which ends standing.
+REFLEX = (Kind.WAIT_REFLEX, "", State.STANDING)
+# With it (kilo.intent.righting): from where, which move, mirrored, and where it means to leave him.
+# A side ends on his belly (RESTING; the shipped rest_to_stand takes it on); his back ends on his
+# right side (the side move follows). Nose or tail down: nothing (the intent gives up).
+RIGHTING = ((State.ON_RIGHT_SIDE, "righting_side", False, State.RESTING),
+            (State.ON_LEFT_SIDE, "righting_side", True, State.RESTING),
+            (State.ON_BACK, "righting_back", False, State.ON_RIGHT_SIDE))
 
 
 def edges(plan: dict | None = None) -> list[Edge]:
@@ -73,20 +85,23 @@ def edges(plan: dict | None = None) -> list[Edge]:
             if b not in reach[a]:
                 out.append(Edge(a, b, Kind.POSTURE, posture=int(M.END[b])))
     for s in E.FALLEN:
-        out.append(Edge(s, RIGHTING[2], RIGHTING[0], move=RIGHTING[1]))
+        out.append(Edge(s, REFLEX[2], REFLEX[0], move=REFLEX[1]))
+    for s, name, mirror, to in RIGHTING:
+        out.append(Edge(s, to, Kind.RIGHT, move=name, mirror=mirror))
     for b in GOALS:
         out.append(Edge(State.UNKNOWN, b, Kind.POSTURE, posture=int(M.END[b])))
     return out
 
 
-def next_edge(state: State, goal: State, es: list[Edge] | None = None) -> int:
+def next_edge(state: State, goal: State, es: list[Edge] | None = None, righting: bool = False) -> int:
     """The index (in edges()) of the first step from ``state`` to ``goal``; -1: none (already
-    there, MOVING, or no way)."""
+    there, MOVING, or no way). ``righting``: the RIGHT edges instead of the WAIT_REFLEX ones."""
     es = es if es is not None else edges()
     if state == goal or state == State.MOVING:
         return -1
-    # breadth first over the edges, each state's edges in (MOVE, POSTURE, WAIT_REFLEX), then table order
-    order = sorted(range(len(es)), key=lambda i: (int(es[i].kind), i))
+    skip = Kind.WAIT_REFLEX if righting else Kind.RIGHT
+    # breadth first over the edges, each state's edges in (MOVE, POSTURE, WAIT_REFLEX, RIGHT), then table order
+    order = sorted((i for i in range(len(es)) if es[i].kind != skip), key=lambda i: (int(es[i].kind), i))
     first = {state: -1}
     queue = [state]
     while queue:
@@ -102,10 +117,10 @@ def next_edge(state: State, goal: State, es: list[Edge] | None = None) -> int:
     return -1
 
 
-def next_table(es: list[Edge] | None = None) -> list[list[int]]:
+def next_table(es: list[Edge] | None = None, righting: bool = False) -> list[list[int]]:
     """next_edge for every state (rows, E.State order) and goal (columns, GOALS order)."""
     es = es if es is not None else edges()
-    return [[next_edge(s, g, es) for g in GOALS] for s in State]
+    return [[next_edge(s, g, es, righting) for g in GOALS] for s in State]
 
 
 def posture_name(code: int) -> str:
@@ -117,12 +132,15 @@ def describe(es: list[Edge] | None = None) -> str:
     out = []
     for i, e in enumerate(es):
         what = {Kind.MOVE: f"move {e.move} (model-planned)", Kind.POSTURE: f"the body's own change to {posture_name(e.posture)}",
-                Kind.WAIT_REFLEX: "wait for the body's fall reflex (placeholder)"}[e.kind]
-        out.append(f"{i:2d} {e.src.name:14s} -> {e.dst.name:9s} {what}")
-    t = next_table(es)
-    out.append("first step, by state and goal (" + ", ".join(g.name for g in GOALS) + "):")
-    for s in State:
-        out.append(f"   {s.name:14s} " + " ".join(f"{v:3d}" for v in t[int(s)]))
+                Kind.WAIT_REFLEX: "wait for the body's fall reflex",
+                Kind.RIGHT: f"righting move {e.move}{' mirrored' if e.mirror else ''} (the experiment)"}[e.kind]
+        out.append(f"{i:2d} {e.src.name:14s} -> {e.dst.name:13s} {what}")
+    for righting in (False, True):
+        t = next_table(es, righting)
+        out.append(f"first step{' with the righting experiment' if righting else ''}, by state and goal ("
+                   + ", ".join(g.name for g in GOALS) + "):")
+        for s in State:
+            out.append(f"   {s.name:14s} " + " ".join(f"{v:3d}" for v in t[int(s)]))
     return "\n".join(out)
 
 

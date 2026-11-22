@@ -286,6 +286,7 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
     case Kind::Posture:
     case Kind::Behaviour:
     case Kind::Measure:
+    case Kind::Righting:
       stop_then_act(now);
       return;
     case Kind::Trick:
@@ -649,6 +650,13 @@ void RemoteControl::act() {
       why = measure_ != nullptr ? measure_->start() : "no self-measurement";
       if (why == nullptr) format(what, sizeof what, "measuring (about 80 s; any key stops it)");
       else format(what, sizeof what, "measure refused: %s", why);
+      done(what, why != nullptr);
+      return;
+    }
+    case Kind::Righting: {
+      why = righting_ != nullptr ? righting_->start() : "no righting";
+      if (why == nullptr) format(what, sizeof what, "righting (the experiment; any key but B1 stops it)");
+      else format(what, sizeof what, "righting refused: %s", why);
       done(what, why != nullptr);
       return;
     }

@@ -12,8 +12,14 @@
 //   Posture     the body's own posture change (SET_POSTURE): where no checked
 //               move leads, and from UNKNOWN;
 //   WaitReflex  fallen: wait for the body's fall reflex (EVENT RECOVERED or
-//               RECOVERY_FAILED), up to kReflexWaitUs. The placeholder for
-//               the mind's own righting move.
+//               RECOVERY_FAILED), up to kReflexWaitUs;
+//   Right       instead, with the righting experiment (set_righting:
+//               KILO_RIGHTING, docs/righting.md): from a side or his back, a
+//               righting move played as a FALL_OK trick, which the body takes
+//               from its fall reflex once the Mind has set its param FALL_RC
+//               to 0 (mirrored from his left side). At most kMaxRightings of
+//               them per intent; then, or when it gives up while he is down,
+//               he is sent LIMP and the host says so (a meow).
 //
 // be(goal):
 //   Settle   wait (up to kSettleWaitUs) for the estimate to leave MOVING;
@@ -56,6 +62,8 @@ class IntentHost {
   virtual void intent_moves() {}
   // A line for the flight recorder ("intent goal=STANDING ...").
   virtual void intent_mark(const char* /*line*/) {}
+  // The righting experiment gave up and left him limp: a sound for the owner.
+  virtual void intent_gave_up_down() {}
 
  protected:
   ~IntentHost() = default;
@@ -74,11 +82,17 @@ class Intent {
   static constexpr uint64_t kPlayerWaitUs = 2000000;   // a move waits this long for the trick player to be free
   static constexpr int kMaxFails = 3;                  // failed steps before it gives up
   static constexpr int kMaxSteps = 6;                  // steps in all
+  static constexpr int kMaxRightings = 3;              // righting moves per intent (the experiment)
 
   Intent(SerialLink& link, Clock& clock, Log& log, tricks::TrickPlayer& player, planner::Walker& walker,
          const Estimator& estimator)
       : link_(link), clock_(clock), log_(log), player_(player), walker_(walker), est_(estimator) {}
   void set_host(IntentHost* h) { host_ = h; }
+  // The righting experiment (KILO_RIGHTING): Right edges instead of waiting for the body's reflex.
+  void set_righting(bool on) { righting_ = on; }
+  bool righting() const { return righting_; }
+  // A righting move is playing or about to.
+  bool righting_now() const { return active() && righting_ && fallen(from_) && phase_ == Phase::Move; }
 
   // Be in goal (Standing, Sitting or Resting). balance: the posture's balance flag once there (1 on, else
   // off). who: for the log ("remote B6", "behaviour"). False (and *why) when the goal is none of the three or
@@ -107,6 +121,7 @@ class Intent {
   struct Counters {
     uint32_t asked, reached, gave_up, cancelled;
     uint32_t moves, postures, reflex_waits, failed_steps;
+    uint32_t rightings, left_limp;
   };
   const Counters& counters() const { return n_; }
 
@@ -138,6 +153,9 @@ class Intent {
   State from_ = State::Unknown;     // the state the step under way began in
   State to_ = State::Unknown;       // ...and where it means to end
   const tricks::Trick* move_ = nullptr;
+  bool mirror_ = false;             // the move plays mirrored (a righting move from his left side)
+  bool righting_ = false;
+  int rightings_ = 0;               // righting moves this intent
   bool move_started_ = false;       // the trick player took the move
   uint32_t play_ = 0;
   uint32_t known_play_ = 0;

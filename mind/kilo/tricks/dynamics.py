@@ -18,7 +18,11 @@ kilo.tricks.stance, on a flat floor:
   COMPLIANCE: each leg joint gives ``sag`` degrees per kg cm of the load its
   leg's contacts put on it;
 - the moving legs move the centre of mass (the momentum is the whole
-  robot's; the legs' own spin is left out);
+  robot's; the legs' own spin is left out). A ``kin`` with ``internal``
+  set (kilo.tricks.righting's) also turns the frame against the moving
+  lumps' angular momentum about the centre of mass (a leg swung one way
+  turns the body the other way); the rear-up and the intent moves were
+  fitted and checked without it, and on four feet it is small;
 - the IMU reads the body's pitch and roll plus ``imu_pitch`` / ``imu_roll``.
 
 It does NOT model: the tail servo giving (at 0 it holds nothing), a foot
@@ -116,6 +120,7 @@ class Params:
     czp: tuple = DESIGN_CZP      # the servo zeros: the pulse clamp (stance.KILO_CZP: before the re-seat)
     tail_len: float = BODY.tail.len_mm
     tail_droop_deg: float = BODY.tail.droop_deg
+    tail_sign: float = BODY.tail.sign  # +1: a positive tail angle swings the tip LEFT. NOT KNOWN
     belly_z: float = BODY.outline.belly_z_mm  # the frame's underside at its rear corner (an ESTIMATE)
     offsets: tuple = ()          # (joint, deg): the joint really sits this far off what it is sent
     # TELEMETRY nose up minus the model's, deg (STAND reads -1.9): the "tricks" view's, the tricks' default too
@@ -142,7 +147,8 @@ class Params:
 
     def g3(self) -> T.Geometry3:
         g = S.Geometry(com_dx=self.com_dx, com_dz=self.com_dz, tail_len=self.tail_len,
-                       tail_droop_deg=self.tail_droop_deg, belly_z=self.belly_z)
+                       tail_droop_deg=self.tail_droop_deg, belly_z=self.belly_z,
+                       tail_sign=self.tail_sign)
         return T.Geometry3(g=g, czp=self.czp, com_dy=self.com_dy, imu_pitch=self.imu_pitch)
 
 
@@ -252,6 +258,7 @@ class Kin:
         mtot += self.tail_g
         pm.append((self.tail_g, tc))
         c = msum / mtot
+        self.pm = pm                     # the lumps as (grams, point): for the moving parts' momentum
         I = self.I_box.copy()
         for w, x in pm:
             d = x - c
@@ -444,6 +451,12 @@ def simulate(frames, p: Params = FITTED, start: Mapping = STAND, settle_s: float
     clears: dict = {lb: [] for lb in kin.labels}
     next_sample = t0
     P_prev = c_prev = None
+    internal = bool(getattr(kin, "internal", False))
+    pm_prev = h_prev = None
+    tau_int = np.zeros(3)
+    if internal:
+        kin.state(dict(zip(JOINTS, q + off_v)))
+        pm_w = np.array([w_ for w_, _ in kin.pm])
     Pdot = np.zeros((kin.n, 3))
     cdot = np.zeros(3)
     fall_t = over_since = None
@@ -465,6 +478,17 @@ def simulate(frames, p: Params = FITTED, start: Mapping = STAND, settle_s: float
             if P_prev is not None:
                 Pdot = (Pq - P_prev) / (dt * KIN_EVERY)
                 cdot = (cq - c_prev) / (dt * KIN_EVERY)
+            if internal:
+                # the moving parts' own angular momentum about the centre of mass (body frame): what
+                # the frame turns by to keep the whole robot's when a leg, the head or the tail swings
+                pmq = np.array([x for _, x in kin.pm])
+                if pm_prev is not None:
+                    vel = (pmq - pm_prev) / (dt * KIN_EVERY) - cdot
+                    h_int = (pm_w[:, None] * np.cross(pmq - cq, vel)).sum(axis=0)
+                    if h_prev is not None:
+                        tau_int = -(h_int - h_prev) / (dt * KIN_EVERY)
+                    h_prev = h_int
+                pm_prev = pmq
             P_prev, c_prev = Pq, cq
             P_k, c_k, I_k = P, c, I
         else:
@@ -498,7 +522,7 @@ def simulate(frames, p: Params = FITTED, start: Mapping = STAND, settle_s: float
             anchors[i] = None
         Iw = R @ I @ R.T
         a = F.sum(axis=0) / m + np.array([0.0, 0.0, -G])
-        alpha = np.linalg.solve(Iw, np.cross(rel, F).sum(axis=0) - np.cross(w, Iw @ w))
+        alpha = np.linalg.solve(Iw, np.cross(rel, F).sum(axis=0) - np.cross(w, Iw @ w) + R @ tau_int)
         v = v + a * dt
         w = w + alpha * dt
         x = x + v * dt

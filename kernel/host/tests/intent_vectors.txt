@@ -11501,18 +11501,21 @@ s 4160000 36 0 37 29 -4 2 1 -> 0 2 91 1720000 36 0
 s 4200000 40 4 -1 -27 21 2 1 -> 0 2 90 1720000 40 4
 s 4240000 38 3 -29 -19 4 2 1 -> 0 2 90 1720000 38 3
 s 4280000 40 4 4 -16 -9 2 1 -> 0 2 90 1720000 40 4
-edge 0 2 3 1 0 intent_stand_to_sit
-edge 1 2 4 1 0 intent_stand_to_rest
-edge 2 3 2 1 0 intent_sit_to_stand
-edge 3 4 2 1 0 intent_rest_to_stand
-edge 4 5 2 3 0 -
-edge 5 6 2 3 0 -
-edge 6 7 2 3 0 -
-edge 7 8 2 3 0 -
-edge 8 0 2 2 3 -
-edge 9 0 3 2 2 -
-edge 10 0 4 2 1 -
-next 0 8 9 10
+edge 0 2 3 1 0 intent_stand_to_sit 0
+edge 1 2 4 1 0 intent_stand_to_rest 0
+edge 2 3 2 1 0 intent_sit_to_stand 0
+edge 3 4 2 1 0 intent_rest_to_stand 0
+edge 4 5 2 3 0 - 0
+edge 5 6 2 3 0 - 0
+edge 6 7 2 3 0 - 0
+edge 7 8 2 3 0 - 0
+edge 8 6 4 4 0 intent_righting_side 0
+edge 9 5 4 4 0 intent_righting_side 1
+edge 10 7 6 4 0 intent_righting_back 0
+edge 11 0 2 2 3 - 0
+edge 12 0 3 2 2 - 0
+edge 13 0 4 2 1 - 0
+next 0 11 12 13
 next 1 -1 -1 -1
 next 2 -1 0 1
 next 3 2 -1 2
@@ -11521,7 +11524,18 @@ next 5 4 4 4
 next 6 5 5 5
 next 7 6 6 6
 next 8 7 7 7
+nextr 0 11 12 13
+nextr 1 -1 -1 -1
+nextr 2 -1 0 1
+nextr 3 2 -1 2
+nextr 4 3 3 -1
+nextr 5 9 9 9
+nextr 6 8 8 8
+nextr 7 10 10 10
+nextr 8 -1 -1 -1
 move intent_stand_to_sit 47279 13 52
 move intent_stand_to_rest 24895 178 102
 move intent_sit_to_stand 14439 117 52
 move intent_rest_to_stand 5220 168 102
+move intent_righting_side 24010 187 141
+move intent_righting_back 44047 163 133

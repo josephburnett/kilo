@@ -31,7 +31,7 @@ void test_vectors(const char* path) {
   if (f == nullptr) return;
   char line[512];
   Estimator est;
-  int rows = 0, cs = 0, ss = 0, edges = 0, nexts = 0, moves = 0;
+  int rows = 0, cs = 0, ss = 0, edges = 0, nexts = 0, nextrs = 0, moves = 0;
   while (std::fgets(line, sizeof line, f) != nullptr) {
     if (line[0] == '#') continue;
     int a[16];
@@ -64,13 +64,18 @@ void test_vectors(const char* path) {
              "sample at %lld: %d %s %d since %lld err %d %d; Python %d state %d %d since %lld err %d %d", t, (int)ch,
              state_name(e.state), e.confidence, (long long)e.since_us, e.err_pitch, e.err_roll, a[7], a[8], a[9],
              since, a[10], a[11]);
-    } else if (std::sscanf(line, "edge %d %d %d %d %d %63s", &a[0], &a[1], &a[2], &a[3], &a[4], name) == 6) {
+    } else if (std::sscanf(line, "edge %d %d %d %d %d %63s %d", &a[0], &a[1], &a[2], &a[3], &a[4], name, &a[5]) == 7) {
       edges++;
       CHECK(a[0] < kEdgeCount);
       const Edge& e = kEdges[a[0]];
       bool move_ok = e.move == nullptr ? std::strcmp(name, "-") == 0 : std::strcmp(name, e.move->name) == 0;
-      CHECKF((int)e.from == a[1] && (int)e.to == a[2] && (int)e.kind == a[3] && e.posture == a[4] && move_ok,
+      CHECKF((int)e.from == a[1] && (int)e.to == a[2] && (int)e.kind == a[3] && e.posture == a[4] && move_ok &&
+                 (int)e.mirror == a[5],
              "edge %d", a[0]);
+    } else if (std::sscanf(line, "nextr %d %d %d %d", &a[0], &a[1], &a[2], &a[3]) == 4) {
+      nextrs++;
+      CHECK(a[0] < kStates);
+      for (int g = 0; g < kGoals; g++) CHECKF(kNextRighting[a[0]][g] == a[1 + g], "nextr %d %d", a[0], g);
     } else if (std::sscanf(line, "next %d %d %d %d", &a[0], &a[1], &a[2], &a[3]) == 4) {
       nexts++;
       CHECK(a[0] < kStates);
@@ -89,7 +94,8 @@ void test_vectors(const char* path) {
     }
   }
   std::fclose(f);
-  CHECKF(rows == kRowCount && cs > 5000 && ss > 800 && edges == kEdgeCount && nexts == kStates && moves == kMoveCount,
+  CHECKF(rows == kRowCount && cs > 5000 && ss > 800 && edges == kEdgeCount && nexts == kStates && nextrs == kStates &&
+             moves == kMoveCount,
          "vectors read: %d rows, %d classify, %d samples, %d edges, %d next, %d moves", rows, cs, ss, edges, nexts,
          moves);
 }
@@ -117,6 +123,40 @@ void test_table() {
         steps++;
       }
       CHECKF(st == goal && steps <= 3, "%s to %s: %d steps", state_name((State)s), state_name(goal), steps);
+    }
+  }
+}
+
+// The righting experiment's table: the same for upright states; a side or his back by a Right edge (a
+// FALL_OK righting move ending in REST, or on a side), nose or tail down nothing; up within four steps.
+void test_table_righting() {
+  for (int s = 0; s < kStates; s++) {
+    for (int g = 0; g < kGoals; g++) {
+      State st = (State)s, goal = kGoalStates[g];
+      if (!fallen(st)) {
+        CHECK(kNextRighting[s][g] == kNext[s][g]);
+        continue;
+      }
+      if (st == State::OnEnd) {
+        CHECK(kNextRighting[s][g] == -1);
+        continue;
+      }
+      int steps = 0;
+      while (st != goal && steps <= Intent::kMaxSteps) {
+        int idx = kNextRighting[(int)st][g];
+        CHECKF(idx >= 0 && idx < kEdgeCount, "no righting step from %s to %s", state_name(st), state_name(goal));
+        if (idx < 0) break;
+        const Edge& e = kEdges[idx];
+        CHECK(e.from == st);
+        if (fallen(st)) {
+          CHECK(e.kind == EdgeKind::Right && e.move != nullptr && (e.move->flags & KILO_TRICK_FLAGS_FALL_OK) &&
+                e.move->end_posture == KILO_POSTURE_REST && e.move->roll_max_a16 == 0);
+          CHECK(e.mirror == (st == State::OnLeftSide));
+        }
+        st = e.to;
+        steps++;
+      }
+      CHECKF(st == goal && steps <= 4, "righting %s to %s: %d steps", state_name((State)s), state_name(goal), steps);
     }
   }
 }
@@ -414,6 +454,7 @@ int main(int argc, char** argv) {
     if (std::strstr(argv[i], "intent_vectors")) path = argv[i];
   test_vectors(path);
   test_table();
+  test_table_righting();
   test_estimate_in_the_mind();
   test_off_is_as_before();
   test_rest_to_stand();

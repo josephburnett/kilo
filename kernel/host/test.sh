@@ -1138,4 +1138,44 @@ if grep -Eq "intent: .*(given up|meant to end)" "$OUT/host_intent.log"; then
 fi
 echo "   intents: stood from LIMP and from REST by the model's moves, rested, waited out a fall on his side"
 
+echo "== righting: kilo-mind-host --righting against the virtual body (FALL_RC 0; B1 standing; a fall onto his right side, B1, righted; again, left down: three tries, limp)"
+start_ctl_body "$OUT/vbody_righting.log"
+trap stop_body EXIT
+run_mind "$OUT/host_righting.log" --remote --righting --seed 3 --duration 44
+sleep 2
+ctl ir 0x02                   # B6: stand (the body's own change: no intents)
+sleep 2
+ctl ir 0x4A                   # B1 standing: refused
+sleep 1
+ctl att 0 -100                # he falls onto his right side: FELL, and with FALL_RC 0 no rc: REST, then LIMP
+sleep 4
+ctl ir 0x4A                   # B1 limp on his side: REST first, the fall reflex holds him, then the righting move
+sleep 3.5
+ctl att 0 0                   # (the virtual body cannot roll: the script rights him while the move plays)
+sleep 8
+ctl att 0 100                 # onto his left side, and he stays there
+sleep 2
+ctl ir 0x4A                   # B1: three tries, then limp
+wait_mind "$OUT/host_righting.log"
+stop_body
+trap - EXIT
+grep -E " righting| state: | intent: |FELL|RECOVER" "$OUT/host_righting.log"
+expect "$OUT/host_righting.log" "righting experiment ON" "righting on"
+expect "$OUT/host_righting.log" "righting: the body's fall reflex will not play rc \(FALL_RC 0\)" "FALL_RC 0 set"
+expect "$OUT/host_righting.log" "righting refused: he is STANDING: B1 rights him only from a side or his back" "B1 refused standing"
+expect "$OUT/host_righting.log" "event FELL arg=-1" "the fall tripped"
+expect "$OUT/host_righting.log" "event RECOVERY_FAILED" "the body gave up at once (no rc)"
+expect "$OUT/host_righting.log" "intent: the servos are off: REST first" "from LIMP: REST first"
+expect "$OUT/host_righting.log" "intent: step [0-9]: ON_RIGHT_SIDE -> RESTING by the righting move intent_righting_side \(try 1 of 3" "the side move"
+expect "$OUT/host_righting.log" "trick intent_righting_side: TRICK_DONE DONE" "the body played it"
+expect "$OUT/host_righting.log" "intent: step [0-9]: RESTING -> STANDING by the move intent_rest_to_stand" "then up by the model's move"
+expect "$OUT/host_righting.log" "intent: STANDING reached" "STANDING reached"
+expect "$OUT/host_righting.log" "intent: step [0-9]: ON_LEFT_SIDE -> RESTING by the righting move intent_righting_side mirrored \(try 3 of 3" "three mirrored tries"
+expect "$OUT/host_righting.log" "intent: righting gave up: he is left LIMP on the floor" "limp after three"
+expect "$OUT/host_righting.log" "sound play name=meow[0-9] asked=meow why=righting gave up" "a meow"
+if grep -Eq "RECOVERING|rc " "$OUT/vbody_righting.log"; then
+    echo "FAILED: the body played rc"; exit 1
+fi
+echo "   righting: FALL_RC 0, refused standing, righted from the right side and stood, gave up limp after three tries on the left"
+
 echo "== all kernel host tests passed"

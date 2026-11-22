@@ -12,7 +12,7 @@ from dataclasses import dataclass, field, fields as dc_fields
 from typing import Any, ClassVar
 
 PROTO_MAJOR = 2
-PROTO_MINOR = 0
+PROTO_MINOR = 1
 BAUD = 250000
 MAX_PAYLOAD = 60
 HEADER_BYTES = 2
@@ -1564,7 +1564,7 @@ class TrickCommit:
 
 @dataclass
 class TrickPlay:
-    """0x23 TRICK_PLAY (command). Play the committed trick with speed (64 = 1x; scales dur and hold) and mirror (L/R swap, pan, tail and expected roll negated). STALE on an epoch mismatch, NO_TRICK if trick_id is not committed, BAD_ARG for speed < 16 or unknown flags, BUSY while a trick plays, under a reflex, or in LIMP or CALIB, REFUSED_LOW_BATT, UNCALIBRATED. Ends with EVENT TRICK_DONE."""
+    """0x23 TRICK_PLAY (command). Play the committed trick with speed (64 = 1x; scales dur and hold) and mirror (L/R swap, pan, tail and expected roll negated). STALE on an epoch mismatch, NO_TRICK if trick_id is not committed, BAD_ARG for speed < 16 or unknown flags, BUSY while a trick plays, under a reflex, or in LIMP or CALIB, REFUSED_FALLEN while the fall reflex holds the joints (but with param FALL_RC 0 a FALL_OK trick takes them from it), REFUSED_LOW_BATT, UNCALIBRATED. Ends with EVENT TRICK_DONE."""
     ID: ClassVar[int] = 0x23
     NAME: ClassVar[str] = 'TRICK_PLAY'
     KIND: ClassVar[Kind] = Kind.COMMAND
@@ -2948,6 +2948,7 @@ class ParamId(enum.IntEnum):
     LEG_W_MM = 16
     LEG_SH_ZERO_DEG = 17
     LEG_KN_ZERO_DEG = 18
+    FALL_RC = 19
 
 
 PARAMS: dict[int, ParamInfo] = {
@@ -2989,6 +2990,8 @@ PARAMS: dict[int, ParamInfo] = {
                          'Upper link angle from straight down (+ = foot forward) at joint angle 0 (the calibration posture). Petoi: upper leg vertical = 0; verify on Kilo.'),
     18: ParamInfo(18, 'LEG_KN_ZERO_DEG', 90, 30, 150, 'deg',
                          'Knee bend relative to the upper link at joint angle 0 (the calibration posture). Petoi: lower leg at 90 deg; verify on Kilo.'),
+    19: ParamInfo(19, 'FALL_RC', 1, 0, 1, 'bool',
+                         "1: after a roll fall the fall reflex plays rc (up to three tries). 0: it never does: once he is still, FAILED at once (REST, EVENT RECOVERY_FAILED, LIMP), and while the reflex holds the joints TRICK_PLAY of a FALL_OK trick is accepted and ends the reflex (the mind's righting, docs/righting.md). Set live, never persisted, by a mind built with KILO_RIGHTING=1."),
 }
 PARAMS_BY_NAME: dict[str, ParamInfo] = {p.name: p for p in PARAMS.values()}
 

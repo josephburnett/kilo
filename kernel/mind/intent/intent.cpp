@@ -56,7 +56,7 @@ bool Intent::be(State goal, int8_t balance, const char* who, const char** why) {
   ended_ = nullptr;
   reached_ = false;
   if (!active()) {
-    steps_ = fails_ = 0;
+    steps_ = fails_ = rightings_ = 0;
     asked_at_ = now;
     known_play_ = player_.result().play;
     // a posture takes the legs from the stream: end a walk first, so no FEET re-enters GAIT under the move
@@ -115,10 +115,18 @@ void Intent::finish(bool reached, const char* why) {
 }
 
 void Intent::give_up(State st, const char* why) {
-  // leave him in the safest posture he can reach: upright, the body's own REST; fallen, as he lies
+  // leave him in the safest posture he can reach: upright, the body's own REST; fallen, as he lies, and
+  // with the righting experiment limp (no servo left pushing against the floor), with a sound
   if (!fallen(st) && st != State::Resting) {
     bool ok = latch(KILO_POSTURE_REST, false);
     logf(log_, LogLevel::Warn, "intent: he is left in REST (the body's own change)%s", ok ? "" : ": REFUSED by the link");
+  } else if (fallen(st) && righting_) {
+    if (phase_ == Phase::Move && move_started_ && player_.busy()) player_.stop();
+    bool ok = latch(KILO_POSTURE_LIMP, false);
+    n_.left_limp++;
+    logf(log_, LogLevel::Warn, "intent: righting gave up: he is left LIMP on the floor, he needs a hand%s",
+         ok ? "" : ": LIMP REFUSED by the link");
+    if (host_ != nullptr) host_->intent_gave_up_down();
   }
   finish(false, why);
 }
@@ -164,10 +172,19 @@ void Intent::wait_reflex(State st, uint64_t now) {
 
 void Intent::start_edge(const Edge& e, State st, uint64_t now) {
   switch (e.kind) {
+    case EdgeKind::Right:
+      if (rightings_ >= kMaxRightings) {
+        give_up(st, "the righting moves did not right him");
+        return;
+      }
+      rightings_++;
+      n_.rightings++;
+      [[fallthrough]];
     case EdgeKind::Move: {
       from_ = st;
       to_ = e.to;
       move_ = e.move;
+      mirror_ = e.mirror;
       move_started_ = false;
       steps_++;
       enter(Phase::Move, now);
@@ -201,8 +218,9 @@ void Intent::decide(State st, uint64_t now) {
     give_up(st, "three steps did not end where the model said");
     return;
   }
-  if (b.has_telemetry && b.telemetry.mode == KILO_MODE_LIMP && !fallen(st)) {
-    // the servos are off: REST first (a trick is refused in LIMP), then look again
+  if (b.has_telemetry && b.telemetry.mode == KILO_MODE_LIMP && (!fallen(st) || righting_)) {
+    // the servos are off: REST first (a trick is refused in LIMP), then look again. Down, with the
+    // righting experiment: the body's fall reflex trips on it and holds him; the move then takes over
     bool ok = latch(KILO_POSTURE_REST, false);
     logf(log_, ok ? LogLevel::Info : LogLevel::Warn, "intent: the servos are off: REST first%s",
          ok ? "" : ": REFUSED by the link");
@@ -211,7 +229,7 @@ void Intent::decide(State st, uint64_t now) {
     return;
   }
   int g = goal_index(goal_);
-  int idx = (int)st < kStates && g >= 0 ? kNext[(int)st][g] : -1;
+  int idx = (int)st < kStates && g >= 0 ? (righting_ ? kNextRighting : kNext)[(int)st][g] : -1;
   if (idx < 0) {
     give_up(st, "no step leads from there");
     return;
@@ -227,7 +245,7 @@ void Intent::poll() {
     case Phase::Idle:
       return;
     case Phase::Settle:
-      if (reflex_busy()) {  // the reflex has the joints and refuses every goal: wait for it
+      if (reflex_busy() && !righting_) {  // the reflex has the joints and refuses every goal: wait for it
         wait_reflex(st, now);
         return;
       }
@@ -252,7 +270,7 @@ void Intent::poll() {
         }
         const char* why = nullptr;
         if (host_ != nullptr) host_->intent_moves();
-        play_ = player_.start(*move_, false, tricks::kSpeedUnity, &why);
+        play_ = player_.start(*move_, mirror_, tricks::kSpeedUnity, &why);
         if (play_ == 0) {
           logf(log_, LogLevel::Warn, "intent: the move %s was refused: %s", move_->name, why != nullptr ? why : "?");
           steps_--;
@@ -262,8 +280,13 @@ void Intent::poll() {
         move_started_ = true;
         known_play_ = play_;
         n_.moves++;
-        logf(log_, LogLevel::Info, "intent: step %d: %s -> %s by the move %s (planned from the model)", steps_,
-             state_name(from_), state_name(to_), move_->name);
+        if (fallen(from_))
+          logf(log_, LogLevel::Info, "intent: step %d: %s -> %s by the righting move %s%s (try %d of %d; the experiment)",
+               steps_, state_name(from_), state_name(to_), move_->name, mirror_ ? " mirrored" : "", rightings_,
+               kMaxRightings);
+        else
+          logf(log_, LogLevel::Info, "intent: step %d: %s -> %s by the move %s (planned from the model)", steps_,
+               state_name(from_), state_name(to_), move_->name);
         char l[120];
         format(l, sizeof l, "intent step=%d kind=move move=%s from=%s to=%s play=%u", steps_, move_->name,
                state_name(from_), state_name(to_), (unsigned)play_);

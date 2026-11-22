@@ -146,7 +146,7 @@ and the guard.
    | RESTING | the move "rest to stand": the hind legs first, then the front ones |
    | SITTING | the move "sit to stand" |
    | servos off (after A7's sleep, or at power-on) | REST first (the body refuses a move with the servos off), 1.5 seconds, then as from RESTING |
-   | on a side, on his back, on end | wait for the body's fall reflex to right him (up to 15 seconds). **A placeholder**: the mind's own getting-up move will replace it |
+   | on a side, on his back, on end | wait for the body's fall reflex to right him (up to 15 seconds). With the righting experiment built in (`KILO_RIGHTING=1`, docs/righting.md): the mind's own righting moves instead, from a side or his back; on end, nothing |
    | UNKNOWN | the body's own change to STAND, as before |
 
 4. When the step is over and he is settled, it reads the state again.
@@ -193,9 +193,11 @@ stretch. That is what to watch on the floor.
 - **The end postures themselves.** STAND, SIT and REST are still the
   body's joint-angle tables. The moves end exactly in them.
 - **The 13 stock tricks** (hi, wash face, ...) and the sitting fidgets.
-- **Getting up after a fall.** Still the body's fall reflex. With the
-  switch on the mind sees that he has fallen and waits for the reflex; it
-  does not yet get him up itself. Nothing was removed from the body.
+- **Getting up after a fall.** Still the body's fall reflex, unless the
+  kernel is built with the righting experiment (`KILO_RIGHTING=1`,
+  docs/righting.md): then B1 gets him up by moves reasoned on the model,
+  and the body's own getting-up is switched off. An experiment: nothing of
+  it has been tried on Kilo.
 
 ## First floor try
 
@@ -269,5 +271,7 @@ postures as before.
 - After a change to the model or the moves: `python -m kilo.intent.moves
   --write` (two minutes), then `kernel/mind/intent/gen_intent.py`, then the
   vectors (`kernel/host/tests/gen_intent_vectors.py`).
-- The getting-up move, when there is one, goes into one place:
-  `RIGHTING` in `mind/kilo/intent/graph.py`.
+- The righting experiment's moves: `mind/kilo/intent/righting.py` (and
+  `righting/*.json`, its results; `python -m kilo.intent.righting --write`,
+  a few minutes), wired in at one place: `RIGHTING` in
+  `mind/kilo/intent/graph.py`.

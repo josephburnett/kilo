@@ -5,6 +5,7 @@
     python -m kilo.tricks.righting --rest       how the model lies against how Kilo lay
     python -m kilo.tricks.righting --replay     rc in the model from each recorded start, against the recording
     python -m kilo.tricks.righting --bands      ...across the uncertain numbers (a minute or two)
+    python -m kilo.tricks.righting --phases     where the model has him at the end of each rc frame, against Kilo
 
 WHAT THIS IS FOR. Getting up after a fall is today a table in the body
 (body/src/core/posture.cpp, the three ``rc`` rows; reflex.h). Before a
@@ -19,10 +20,24 @@ WHAT IS ADDED TO kilo.tricks.dynamics FOR IT (``KinLying``, ``Lying``):
 
 - a start in any attitude (dynamics.simulate ``R0``);
 - the head: a box on the neck that the pan and tilt servos move, as contact
-  points (its mass stays in the frame's lump: about 2 mm of the centre of
-  mass is not followed);
+  points, and its mass (``head_g``, out of the frame's lump) moving with it;
+- the moving parts' momentum (dynamics.Kin ``internal``): a leg, the head
+  or the tail swung one way turns the frame the other way (2026-11-22);
 - how far the shoulder and knee servos stick out sideways from the legs'
-  plane, and the top edges he lies against on his side and on his back.
+  plane, the top edges he lies against on his side and on his back, and a
+  higher middle of the back (``ridge_z``, off by default);
+- which way the tail swings (dynamics.Params ``tail_sign``), not known.
+
+WHY IT FAILS (2026-11-22, ``--phases`` and docs/righting-results.md): rc's
+three frames test three different things. Frame 1 (from a side, he rolls
+onto his back on Kilo, 3 of 3) holds only with the back's top edges lower
+than estimated (top_z 30); frame 2 (from his back over one side) goes the
+way Kilo went only with a higher, rounded middle of the back that the feet
+cannot out-reach, and then only unmirrored; frame 3 (from the side up onto
+his feet) falls short in nearly every variant. No one outline of the 200
+tried does all three: the outline of his back and head, never measured, is
+what the outcome hangs on. The friction, the servos' speed and the legs'
+give change little.
 
 NONE OF THOSE DIMENSIONS IS MEASURED. ``Lying``'s defaults are estimates,
 three of them (``hip_r``, ``ear_z``, ``top_z``) set so that the model lies
@@ -166,6 +181,8 @@ class Lying:
     knee_r: float = 9.0        # the knee servo, as a ball about the knee's axle (stance has 0)
     top_z: float = 36.0        # the top edges he lies against (the model's pi_top_z), and
     top_y: float = 30.0        # ...their half width (the model's half_width)
+    ridge_z: float = 0.0       # a higher middle of the back (the Pi's connectors), at +-ridge_y; 0: none
+    ridge_y: float = 10.0
     # the head: a box on the neck. The pan servo's axis is vertical through the neck, the tilt's across it.
     neck_x: float = 72.0       # the neck, ahead of the middle of the shoulders (the front axles are at 61.5)
     neck_z: float = 12.0       # ...and above the axles
@@ -174,6 +191,9 @@ class Lying:
     ear_z: float = 45.0        # the top of the ears above the neck
     ear_x: float = 12.0        # ...and ahead of it
     chin_z: float = -17.0      # the underside of the muzzle below the neck
+    head_g: float = 25.0       # the head's moving part (tilt servo, ultrasonic sensor, shell), out of the frame's lump
+    head_com_x: float = 18.0   # ...its centre ahead of the neck
+    head_com_z: float = 8.0    # ...and above it
     pan_sign: float = 1.0      # +1: a positive pan turns the nose LEFT. NOT KNOWN
     tilt_sign: float = 1.0     # +1: a positive tilt lifts the nose (REST has -80 and the head down)
 
@@ -210,6 +230,11 @@ class KinLying(D.Kin):
                 q[2] = ly.top_z
                 q[1] = math.copysign(ly.top_y, q[1])
             fixed.append((lb, q, rr))
+        if ly.ridge_z > 0:  # the ridge: four points over the Pi's length
+            for sx in (-40.0, 20.0):
+                for sy in (-1.0, 1.0):
+                    fixed.append((f"ridge_{'l' if sy > 0 else 'r'}{'f' if sx > 0 else 'b'}",
+                                  np.array([sx, sy * ly.ridge_y, ly.ridge_z]), 0.0))
         # the shoulder servos' ends (dynamics.Kin leaves stance's hip points out: on his feet they never touch)
         for leg in D.LEGS:
             hx = self.hx if T.FRONT[leg] else -self.hx
@@ -224,6 +249,12 @@ class KinLying(D.Kin):
         self.n = len(self.labels)
         self.neck = np.array([ly.neck_x, 0.0, ly.neck_z])
         self.head_P = np.array([q for _, q, _ in self.head])
+        # the head's mass moves with the head: taken out of the frame's lump where it sits at pan 0, tilt 0
+        self.head_c = np.array([ly.head_com_x, 0.0, ly.head_com_z])
+        w0, x0 = self.fixed_m[0]
+        hp = self.neck + self.head_c
+        self.fixed_m[0] = (w0 - ly.head_g, (w0 * x0 - ly.head_g * hp) / (w0 - ly.head_g))
+        self.internal = True       # the moving parts' momentum turns the frame (dynamics.simulate)
 
     def state(self, q: Mapping):
         P, c, I = super().state(q)       # feet, knees, tail, then the side view's fixed points (nose among them)
@@ -232,8 +263,18 @@ class KinLying(D.Kin):
         b = math.radians(self.ly.tilt_sign * q["head_tilt"])
         Rz = np.array([[math.cos(a), -math.sin(a), 0.0], [math.sin(a), math.cos(a), 0.0], [0.0, 0.0, 1.0]])
         Ry = np.array([[math.cos(b), 0.0, -math.sin(b)], [0.0, 1.0, 0.0], [math.sin(b), 0.0, math.cos(b)]])
-        head = self.neck + self.head_P @ (Rz @ Ry).T
-        return np.vstack([P[:n_lead], self.fixed_P, head]), c, I
+        Rh = Rz @ Ry
+        head = self.neck + self.head_P @ Rh.T
+        # the head's lump back in: the centre of mass and the inertia about it
+        m_h = self.ly.head_g
+        h = self.neck + Rh @ self.head_c
+        m0 = self.total - m_h
+        cn = (m0 * c + m_h * h) / self.total
+        d0, dh = c - cn, h - cn
+        E3 = np.eye(3)
+        I = I + m0 * (np.dot(d0, d0) * E3 - np.outer(d0, d0)) + m_h * (np.dot(dh, dh) * E3 - np.outer(dh, dh))
+        self.pm = list(self.pm) + [(m_h, h)]
+        return np.vstack([P[:n_lead], self.fixed_P, head]), cn, I
 
 
 # ---- rc, as the body plays it ----------------------------------------------------------------------
@@ -461,6 +502,10 @@ def bands(p: D.Params | None = None, ly: Lying | None = None) -> list[tuple[str,
             out.append((f"{k} x{s:g}", p, ly.with_(**{k: v * s})))
     out.append(("pan the other way", p, ly.with_(pan_sign=-ly.pan_sign)))
     out.append(("tilt the other way", p, ly.with_(tilt_sign=-ly.tilt_sign)))
+    out.append(("tail the other way", p.with_(tail_sign=-p.tail_sign), ly))
+    out.append(("no head mass", p, ly.with_(head_g=0.0)))
+    out.append(("a rounded back (ridge 42 mm at +-14, edges 26)", p, ly.with_(ridge_z=42.0, ridge_y=14.0, top_z=26.0,
+                                                                           ear_z=55.0)))
     out.append(("no head", p, ly.with_(head_len=1.0, head_half_w=1.0, ear_z=1.0, ear_x=0.0, chin_z=-1.0)))
     return out
 
@@ -564,12 +609,45 @@ def rest_check(p: D.Params = D.FITTED, ly: Lying | None = None) -> list[tuple[st
     return out
 
 
+# ---- rc frame by frame ------------------------------------------------------------------------------
+PHASE_ENDS_S = (0.88, 1.42, 1.95)   # just after rc's first, second and third frame (RC_TICKS, the lag)
+
+
+def roll_angle(u: np.ndarray) -> float:
+    """The roll about the long axis, deg: 0 upright, -90 on his right side, +-180 on his back."""
+    return math.degrees(math.atan2(-u[1], u[2]))
+
+
+def phases(p: D.Params = D.FITTED, ly: Lying | None = None, workers: int = 4) -> list[dict]:
+    """Per floor try: the roll angle at the end of each rc frame, Kilo's and the model's."""
+    fl = [(f, n) for f, n in tries() if f.get("floor", True)]
+    rs = [replay(f, n, p, ly) for f, n in fl]
+    out = []
+    for (f, n), r in zip(fl, rs):
+        rec = np.array(f["tries"][n - 1]["trace"], float)
+        kilo = [roll_angle(up_of(*rec[int(np.argmin(abs(rec[:, 0] - t))), 1:3])) for t in PHASE_ENDS_S]
+        model = [roll_angle(r.up[min(int(np.searchsorted(r.t, t)), len(r.t) - 1)]) for t in PHASE_ENDS_S]
+        out.append({"try": r.label, "mirrored": r.mirrored, "kilo": kilo, "model": model})
+    return out
+
+
+def phases_table(rows: list[dict]) -> str:
+    out = ["try                 rc        Kilo after frame 1, 2, 3     model after frame 1, 2, 3   (deg: 0 upright, "
+           "-90 right side, +-180 back)"]
+    for r in rows:
+        out.append(f"{r['try']:19s} {'mirrored' if r['mirrored'] else 'as is   '}  "
+                   + " ".join(f"{v:+5.0f}" for v in r["kilo"]) + "             "
+                   + " ".join(f"{v:+5.0f}" for v in r["model"]))
+    return "\n".join(out)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m kilo.tricks.righting", description=__doc__.split("\n\n")[0])
     ap.add_argument("--falls", action="store_true")
     ap.add_argument("--rest", action="store_true")
     ap.add_argument("--replay", action="store_true")
     ap.add_argument("--bands", action="store_true")
+    ap.add_argument("--phases", action="store_true")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--extract", nargs="+", metavar="FILE.krec",
                     help="instead: the falls in these flight recordings as JSON (the fixture's entries), to add to "
@@ -583,6 +661,9 @@ def main(argv: list[str] | None = None) -> int:
         json.dump({"falls": falls}, sys.stdout, separators=(",", ":"))
         print()
         print(falls_table({"falls": falls}), file=sys.stderr)
+        return 0
+    if a.phases:
+        print(phases_table(phases()))
         return 0
     if a.falls or not (a.rest or a.replay or a.bands):
         print(falls_table())

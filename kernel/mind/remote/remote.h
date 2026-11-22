@@ -85,11 +85,16 @@
 //   that crossfade first (Phase::Settle).
 // - B2 meows (Kind::Sound): the Mind asks its sound player (sound/player.h)
 //   and never calls perform() for it.
-// - B1 Kind::Measure, docs/self-measurement.md: the self-measurement routine
+// - Kind::Measure, docs/self-measurement.md: the self-measurement routine
 //   (MeasureHook; measure/measure.h), after stopping a walk and a trick as a
 //   posture key does; its refusals (battery, not standing level) fail the
-//   key. While it runs every key stops it first (into STAND): B1 again only
-//   that, B6, A7 and C7 then do their own action, the others nothing more.
+//   key. While it runs every key stops it first (into STAND): the measure
+//   key again only that, B6, A7 and C7 then do their own action, the others
+//   nothing more.
+// - B1 Kind::Righting, docs/righting.md: the righting experiment
+//   (RightingHook: the Mind's intent "be standing" from a side or his back
+//   by the righting moves); its refusals (not lying there, not built in)
+//   fail the key.
 // - Rows 1-3 but A1, B1, B2 (and A2 unless switched on) do nothing (Mind::ir_key logs them as ignored).
 // Every key leaves one log line, "remote <grid> (0x.., <label>): <outcome>".
 // Which keys never reach perform() (repeats, other remotes' keys, rows 1-3,
@@ -164,6 +169,16 @@ class MeasureHook {
   ~MeasureHook() = default;
 };
 
+// The righting experiment, as B1 starts it (the Mind's: docs/righting.md).
+class RightingHook {
+ public:
+  // Start it: null, or why not (he is not lying on a side or his back, it is not built in).
+  virtual const char* start() = 0;
+
+ protected:
+  ~RightingHook() = default;
+};
+
 // Who hears of a trick the remote refused to start (the flight recorder:
 // a REFUSED trick run). Not pure, as BehaviourHook.
 class TrickNotes {
@@ -192,6 +207,7 @@ class RemoteControl {
   void set_behaviour(BehaviourHook* hook) { behaviour_ = hook; }
   void set_trick_notes(TrickNotes* notes) { notes_ = notes; }
   void set_measure(MeasureHook* hook) { measure_ = hook; }
+  void set_righting(RightingHook* hook) { righting_ = hook; }
   // The posture keys' action goes to hook (null, the default: the remote's own SET_POSTURE).
   void set_posture_hook(PostureHook* hook) { posture_hook_ = hook; }
 
@@ -282,6 +298,7 @@ class RemoteControl {
   uint32_t actions_ = 0, failures_ = 0;
   TrickNotes* notes_ = nullptr;
   MeasureHook* measure_ = nullptr;
+  RightingHook* righting_ = nullptr;
   PostureHook* posture_hook_ = nullptr;
 };
 

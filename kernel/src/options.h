@@ -12,6 +12,10 @@
 //                       and the moves planned from the body model
 //                       (mind/intent/intent.h, docs/intent.md; 0: postures
 //                       change as before, the estimate only logs)
+//   KILO_RIGHTING       the righting experiment: B1 rights him from a side
+//                       or his back by moves planned on the body model; the
+//                       body's rc off (FALL_RC 0; docs/righting.md; 0: the
+//                       body's fall reflex as before, B1 does nothing)
 //   KILO_RECORD_SAVE    the flight recorder's card saver from the start
 //                       (mind/record/saver.h; else off until `kilo record
 //                       save on --host`, remembered as kilorec/SAVE_ON)
@@ -31,7 +35,7 @@
 #define KILO_SRC_OPTIONS_H
 
 #if !defined(KILO_PLANNER_BENCH) || !defined(KILO_BEHAVIOUR) || !defined(KILO_REAR_UP) || \
-	!defined(KILO_INTENT) || \
+	!defined(KILO_INTENT) || !defined(KILO_RIGHTING) || \
 	!defined(KILO_RECORD_SAVE) || !defined(KILO_LIGHT_SLEEP) || !defined(KILO_SOUND) || \
 	!defined(KILO_SOUND_KEEP_RUNNING) || !defined(KILO_MDNS) || !defined(KILO_BOOT_PROBE)
 #error "a KILO_ build switch is missing: kernel/Makefile defines them all (KILO_DEFS)"
@@ -43,6 +47,10 @@
 
 #if KILO_INTENT < 0 || KILO_INTENT > 1
 #error "KILO_INTENT must be 0 or 1"
+#endif
+
+#if KILO_RIGHTING < 0 || KILO_RIGHTING > 1
+#error "KILO_RIGHTING must be 0 or 1"
 #endif
 
 #endif

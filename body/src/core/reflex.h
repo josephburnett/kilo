@@ -14,7 +14,10 @@
 //                       < 20 deg/s on FALL_STILL_TICKS (10) samples.
 //   FALLEN  -> RC       roll fall: play `rc`, mirrored for roll > 0 and
 //                       flipped on every other try, up to FALL_TRIES (3).
-//                       Pitch fall: FAILED.
+//                       Pitch fall: FAILED. Param FALL_RC 0: never rc,
+//                       FAILED at once (the mind rights him with a FALL_OK
+//                       trick, which TRICK_PLAY then accepts while the
+//                       reflex holds the joints: it lets go; docs/righting.md).
 //   RC      -> CHECK    after rc's last frame: hold it for up to
 //                       FALL_CHECK_TICKS (1 s), waiting for upright.
 //   CHECK   -> FALLEN   not upright after 1 s: the next try (still first),

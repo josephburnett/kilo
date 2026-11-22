@@ -179,7 +179,8 @@ static void fall_step(Body& b, bool fresh) {
     if (!fresh) return;
     f.still = fall_still(b.att) ? (uint8_t)(f.still + 1) : 0;
     if (f.still < FALL_STILL_TICKS) return;
-    if (f.axis == 2 || f.axis == -2) return fall_failed(b);  // no recovery from nose or tail down
+    // No recovery from nose or tail down; none at all with FALL_RC 0 (the mind rights him: docs/righting.md)
+    if (f.axis == 2 || f.axis == -2 || !PARAM(FALL_RC)) return fall_failed(b);
     // rc as legacy wrote it pushes with the right legs (unmirrored for the
     // right side down, roll < 0); every other try flips it, in case the
     // body lies the other way round by then.
@@ -467,7 +468,12 @@ uint8_t body_trick_play(Body& b, const uint8_t p[4]) {
   if (p[0] != b.epoch) return GOAL_STALE;
   uint8_t s = kf_check_play(b.kf, p[1], p[2], p[3]);
   if (s) return s;
-  if (body_fallen(b)) return GOAL_FALLEN;
+  if (body_fallen(b)) {
+    // With FALL_RC 0 a FALL_OK trick (the mind's righting, docs/righting.md) takes the joints from the reflex.
+    if (PARAM(FALL_RC) || !(b.kf.flags & KILO_TRICK_FLAGS_FALL_OK)) return GOAL_FALLEN;
+    b.fall.state = FS_UPRIGHT;
+    release_reflex(b, RH_FALL);
+  }
   if (b.batt.level >= BATT_LOW) return GOAL_LOW_BATT;
   uint8_t idle = arbiter_idle_posture(b.arb);
   if (b.holder != RH_NONE || b.arb.reflex_active || idle == POSTURE_LIMP || idle == POSTURE_CALIB) return GOAL_BUSY;

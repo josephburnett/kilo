@@ -2495,6 +2495,7 @@ the config block, 0x7FFF = default). The P0 body implements:
 | 16 | `LEG_W_MM` | 65 | 30..150 | mm | Left-right foot track (Kilo's, measured) |
 | 17 | `LEG_SH_ZERO_DEG` | 0 | -45..45 | deg | Upper link angle at joint angle 0 (θ1_0) |
 | 18 | `LEG_KN_ZERO_DEG` | 90 | 30..150 | deg | Knee bend at joint angle 0 (θ2_0) |
+| 19 | `FALL_RC` | 1 | 0..1 | bool | Fall reflex plays rc (0: the mind rights him) |
 <!-- end of the generated params table -->
 
 The two clear levels replace the earlier single `BATT_HYST_MV`, because the

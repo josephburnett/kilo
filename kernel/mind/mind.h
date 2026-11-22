@@ -84,6 +84,8 @@ struct MindConfig {
   bool behaviour = false;       // the behaviour runner from the start (the remote's A5 starts it too)
   uint8_t rear_up_key = 0;      // the stage the remote's A2 starts, 1-3, 0 off (KILO_REAR_UP; remote/keys.h): off until the trials
   bool intent = false;          // stand, sit and rest go through the intents (intent/intent.h; KILO_INTENT): off until tried on Kilo
+  bool righting = false;        // the righting experiment: B1 rights him from a side or his back by a move planned
+                                // on the model, the body's own rc off (KILO_RIGHTING; docs/righting.md)
   double balance_kp = -1;       // >= 0: SET_BALANCE on with this Kp from the start
   uint64_t seed = 0;            // the behaviour RNG's seed (logged)
   const behaviour::Personality* personality = nullptr;  // null: behaviour::kPersonality
@@ -195,6 +197,7 @@ class Mind final : public LinkListener,
   measure::Measure& measure() { return measure_; }
   // intent::IntentHost
   void intent_moves() override;
+  void intent_gave_up_down() override;
   void intent_mark(const char* line) override { recorder_.note(line); }
   intent::Estimator& estimator() { return estimator_; }
   intent::Intent& intent() { return intent_; }
@@ -269,6 +272,16 @@ class Mind final : public LinkListener,
    private:
     Mind& m_;
   };
+  // the remote's B1 (remote.h RightingHook): the righting experiment
+  class RightingHookImpl final : public remote::RightingHook {
+   public:
+    explicit RightingHookImpl(Mind& m) : m_(m) {}
+    const char* start() override;
+
+   private:
+    Mind& m_;
+    char why_[96] = {};
+  };
   class NoListener final : public Listener {
    public:
     int32_t accept() override { return -1; }
@@ -307,6 +320,12 @@ class Mind final : public LinkListener,
   intent::Estimator estimator_;
   intent::Intent intent_;
   PostureHookImpl posture_hook_;
+  RightingHookImpl righting_hook_;
+  // The righting experiment's param on the body: FALL_RC 0 (no rc) is set after every HELLO.
+  bool fall_rc_off_ = false;      // the body acknowledged FALL_RC 0 since its last HELLO
+  bool fall_rc_asked_ = false;
+  uint8_t fall_rc_seq_ = 0;
+  void fall_rc_step();
   intent::Cmd prior_ = intent::Cmd::None;  // intent_cmd() when no SET_POSTURE goal is latched
   uint32_t state_entered_[intent::kStates] = {};  // how often the estimate entered each state (METRICS "state:")
   void estimate_step(const kilo_telemetry_t& t);

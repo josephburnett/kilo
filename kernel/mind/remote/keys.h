@@ -18,9 +18,12 @@
 //   A1 0x42 long trot (Kind::Gait "longtrot": the trot with a longer stride
 //           built up a step at a time, three stages with B7 / B5; since
 //           2026-11-21, docs/walking-and-balance.md §15)
-//   B1 0x4A measure himself (Kind::Measure, docs/self-measurement.md: about
-//           45 s of small poses from a stand on a flat floor; any key stops
-//           it, B1 again among them, and he stands); 2026-11-21
+//   B1 0x4A the righting experiment (Kind::Righting, docs/righting.md):
+//           lying on a side or his back, he rights himself by a move planned
+//           on the body model; refused (a log line) when he is not lying
+//           there or the mind is built without KILO_RIGHTING=1; 2026-11-22.
+//           The owner's experiment keys go along row 1 (A1 rear-up, B1
+//           righting, C1 free), then row 2: never two on one key
 //   A3 0x30, B3 0x18, C3 0x7A, C2 0x5A,
 //   C1 0x52: nothing (logged as ignored)
 //
@@ -43,7 +46,7 @@ namespace remote {
 
 constexpr uint16_t kRepeat = 0x100;
 
-enum class Kind : uint8_t { Ignore, Posture, Gait, Speed, Turn, Freeze, Behaviour, Trick, Sound, Measure };
+enum class Kind : uint8_t { Ignore, Posture, Gait, Speed, Turn, Freeze, Behaviour, Trick, Sound, Measure, Righting };
 
 struct Key {
   uint8_t command;     // NEC command byte

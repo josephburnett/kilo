@@ -608,7 +608,7 @@ behaviour runner (`remote/remote.h` says what each key does):
 | A5 | start the behaviour runner |
 | A2 | off unless built with `KILO_REAR_UP=1`, `2` or `3` (the highest stage allowed): rear up (docs/rear-up-trick.md): up to stage 1 (28 degrees nose up) and hold; A2 again while he holds a stage (4 s) takes him on to the next (40, then 54 degrees), up to the build's; without it he comes down to SIT from there; the top stage holds 2 s and comes down. A2 at another moment, B6 or C7: down at once (1.5 to 2.5 s); refused below 7400 mV at rest (the highest reading of the last 20 s). B2 until 2026-11-17 |
 | B2 | a meow: one of the meow family, picked at random (`sound/`, docs/sound.md); it moves nothing, so it plays at once, also while a walk or the behaviour runs |
-| B1 | the self-measurement (`measure/`, docs/self-measurement.md): small poses streamed as FEET with the balance off, recorded as a run of its own; any key stops it into STAND |
+| B1 | the righting experiment (docs/righting.md), only in a kernel built with `KILO_RIGHTING=1`: lying on a side or his back, he rights himself by the righting moves (`intent/`), then stands; otherwise refused with a log line; any other key stops it |
 | rows 1-3 but A1, B1, A2 and B2 | nothing (logged as ignored) |
 
 With intents on (`MindConfig.intent`, `KILO_INTENT=1`; docs/intent.md) the posture of B6 and of A7 is not the

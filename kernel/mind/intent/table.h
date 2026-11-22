@@ -55,13 +55,15 @@ enum class EdgeKind : uint8_t {
   None = 0,
   Move = 1,        // a move planned and checked from the model, played by the trick player
   Posture = 2,     // the body's own posture change (SET_POSTURE)
-  WaitReflex = 3,  // fallen: wait for the body's fall reflex (the placeholder for the righting move)
+  WaitReflex = 3,  // fallen: wait for the body's fall reflex (without the righting experiment)
+  Right = 4,       // a side or his back: a righting move, a FALL_OK trick (the experiment, docs/righting.md)
 };
 struct Edge {
   State from, to;
   EdgeKind kind;
-  const tricks::Trick* move;  // Move
+  const tricks::Trick* move;  // Move, Right
   uint8_t posture;            // Posture: KILO_POSTURE_*
+  bool mirror;                // Right: played mirrored
 };
 
 }  // namespace intent
