@@ -82,7 +82,7 @@ struct MindConfig {
   uint32_t mind_build = 0;      // STATUS.mind_build (the git hash's first 8 hex digits)
   bool remote = false;          // the IR remote's keys act (the kernel turns it on)
   bool behaviour = false;       // the behaviour runner from the start (the remote's A5 starts it too)
-  uint8_t rear_up_key = 0;      // the stage the remote's A2 starts, 1-3, 0 off (KILO_REAR_UP; remote/keys.h): off until the trials
+  uint8_t rear_up_key = 0;      // the stage the remote's A1 starts, 1-3, 0 off (KILO_REAR_UP; remote/keys.h): off until the trials
   bool intent = false;          // stand, sit and rest go through the intents (intent/intent.h; KILO_INTENT): off until tried on Kilo
   bool righting = false;        // the righting experiment: B1 rights him from a side or his back by a move planned
                                 // on the model, the body's own rc off (KILO_RIGHTING; docs/righting.md)
