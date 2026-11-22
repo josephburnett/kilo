@@ -25,7 +25,8 @@
 //   6. the guard's steady colour: green, or orange when he is tired.
 //
 // Sending (EyeDriver): SET_EYES only on a change of what the eyes should
-// show, plus the link's own 5 Hz refresh. The body skips a SET_EYES that
+// show (or when the link's goal is not it: a laptop set another), plus the
+// link's own 5 Hz refresh. The body skips a SET_EYES that
 // arrives while an echo is being timed (up to 25 ms in every 80, body/src/
 // hal/eyes.h); so a change is sent again kRepeatUs and 2 x kRepeatUs later,
 // so that a quick flash is not lost or stretched to the next refresh.

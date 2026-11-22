@@ -124,7 +124,11 @@ void EyeDriver::poll(const Look& l, bool driven, uint64_t now) {
     return;
   }
   const uint8_t p[KILO_SET_EYES_LEN] = {l.mask, l.r, l.g, l.b};
-  if (!has_ || !same(l, sent_)) {
+  // the link's goal is this look (a laptop may have set another, a STALE refusal dropped it)
+  const Goal* g = link_.goal(KILO_MSG_SET_EYES);
+  bool latched = g != nullptr && g->len == sizeof p;
+  for (uint32_t i = 0; latched && i < sizeof p; i++) latched = g->payload[i] == p[i];
+  if (!has_ || !same(l, sent_) || !latched) {
     if (!link_.set_goal(KILO_MSG_SET_EYES, p, sizeof p)) return;
     has_ = true;
     sent_ = l;
