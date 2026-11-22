@@ -12,9 +12,9 @@ namespace guard {
 namespace {
 constexpr double kPi = 3.14159265358979;
 // The gaits that turn round slowly, so very close they only stop: the crawl (its strides 0.5 mm a
-// tick: 4 s to walk back) and the long trot (0.75 mm a tick from a 50 mm stride: 1.5 s, while the
-// quick stop has him still in 0.6 s).
-bool turns_slowly(const char* gait) { return str_eq(gait, "crawl") || str_eq(gait, "longtrot"); }
+// tick: 4 s to walk back) and the trot (0.75 mm a tick: 0.7 s from 144 mm/s, 1.5 s from a 50 mm
+// stride, while the quick stop has him still in 0.2 to 0.6 s).
+bool turns_slowly(const char* gait) { return str_eq(gait, "crawl") || str_eq(gait, "trot"); }
 }  // namespace
 
 const char* zone_name(Zone z) {
@@ -365,14 +365,14 @@ void DistanceGuard::poll() {
       if (wk == Walk::Forward) {
         v_ = v;
         gait_ = gait;
-        // the crawl and the long trot turn round slowly (turns_slowly): they only stop
+        // the crawl and the trot turn round slowly (turns_slowly): they only stop
         if (zone_ == Zone::Red && backs_ < kMaxBacks && !turns_slowly(gait)) {
           red_new_ = blue_new_ = false;
           decide(state, "back off");
           back_off(now, "very close: backing off");
           return;
         }
-        if (zone_ == Zone::Red && backs_ < kMaxBacks) {  // the crawl or the long trot, very close: stop (the hiss, counted)
+        if (zone_ == Zone::Red && backs_ < kMaxBacks) {  // the crawl or the trot, very close: stop (the hiss, counted)
           hisses_++;
           backs_++;
         }

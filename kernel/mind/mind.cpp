@@ -485,7 +485,8 @@ void Mind::ir_key(const kilo_event_t& e) {
   }
   for (int k = 0; k < remote::kKeys && k < 32; k++)
     if (&remote::kKeyTable[k] == key) metrics_.key_counts[k]++;
-  if (measure_.active() && !host_controls()) {  // every key stops the self-measurement first (remote.h, B1)
+  remote_.key_seen(*key);  // C5's second press must follow C5 with no other key between (remote.h)
+  if (measure_.active() && !host_controls()) {  // every key stops the self-measurement first (remote.h, C5 twice)
     metrics_.keys_acted++;
     recorder_.key(text);
     remote_.perform(*key, arg);
@@ -816,7 +817,7 @@ void Mind::sit_and_behave() {
        ok ? "started" : "not started", what != nullptr ? ": " : "", what != nullptr ? what : "");
 }
 
-// ---- the self-measurement, as the remote starts it (B1) --------------------------------------
+// ---- the self-measurement, as the remote starts it (C5 twice) --------------------------------
 
 const char* Mind::MeasureHookImpl::start() {
   uint16_t mv = 0;

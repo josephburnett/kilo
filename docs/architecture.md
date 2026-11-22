@@ -1787,7 +1787,7 @@ where it came from; `kilo model show` prints it in plain words.
 constants for C and Python; `BodyModel` (`mind/kilo/planner/model.py`, and
 `kernel/mind/planner/model.h` for the Pi) is the model built from them. The
 walk planner, the self-measurement, the virtual body, the tricks' models
-(`mind/kilo/tricks/`: sagittal, stance, dynamics, rear_up), the long trot and
+(`mind/kilo/tricks/`: sagittal, stance, dynamics, rear_up), the trot's foot placement and
 the distance guard all take their body numbers from there. The body firmware
 reads the same leg parameters for its own leg arithmetic, and a test checks
 that it and the mind compute the same leg (within 0.15 degrees; measured
@@ -1801,7 +1801,7 @@ disagreement is visible in one place:
 
 | View | Used by | What disagrees |
 |---|---|---|
-| `longtrot` | the long trot's foot placement | centre of mass 3.5 mm ahead of the shoulders' middle (the model: 7.4) |
+| `trot` | the trot's foot placement | centre of mass 3.5 mm ahead of the shoulders' middle (the model: 7.4) |
 | `tricks` | the rear-up's design and checks | centre of mass 5.5 mm further back and 5 mm to the right, legs that give (4 degrees per kg cm), the tail drooping 16 degrees (18), the tilt sensor reading 1.9 degrees nose down and 2 degrees of roll |
 | `tricks_rigid` | the rear-up's check against the falls of 2026-11-17 | centre of mass 2 mm to the right |
 
@@ -1847,7 +1847,7 @@ generated into the mind (`kernel/mind/intent/gen_intent.py`):
   (`RIGHTING` in `mind/kilo/intent/graph.py`). The end postures are still
   the body's tables, and nothing was removed from the body.
 
-**How a measurement gets in.** Remote key B1 (Kilo measures himself,
+**How a measurement gets in.** Remote key C5 pressed twice (Kilo measures himself,
 `docs/self-measurement.md`) → `kilo measure fetch` or `kilo measure fit`
 writes a `.fit.json` → `kilo model show --fit FILE` compares it with the
 model and the views → `kilo model apply FILE --dry-run` shows what would be

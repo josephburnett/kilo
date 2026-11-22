@@ -10,23 +10,23 @@
 //   A6 0x22 turn left / steer B6 0x02 stand and stop    C6 0xC2 turn right / steer
 //   A5 0xE0 behaviour         B5 0xA8 slower, then back C5 0x90 calibration posture
 //   A4 0x68 trot              B4 0x98 crawl             C4 0xB0 walk
-//   A2 0x10 rear up (trick rear_up, rear_up_2 or rear_up_3 by the stage;
-//           again: down), only with the rear-up key on (below); B2 until
-//           2026-11-17 (the owner: A2 matches the picture better)
 //   B2 0x38 meow (Kind::Sound: one of the meow family, docs/sound.md;
 //           the Mind plays it at once, past the remote's queue: it moves nothing)
-//   A1 0x42 long trot (Kind::Gait "longtrot": the trot with a longer stride
-//           built up a step at a time, three stages with B7 / B5; since
-//           2026-11-21, docs/walking-and-balance.md §15)
-//   B1 0x4A measure himself (Kind::Measure, docs/self-measurement.md: about
-//           45 s of small poses from a stand on a flat floor; any key stops
-//           it, B1 again among them, and he stands); 2026-11-21
-//   A3 0x30, B3 0x18, C3 0x7A, C2 0x5A,
-//   C1 0x52: nothing (logged as ignored)
+//   A1 0x42 rear up (trick rear_up, rear_up_2 or rear_up_3 by the stage;
+//           again: down), only with the rear-up key on (below); A2 until
+//           2026-11-22, B2 until 2026-11-17
+//   A3 0x30, B3 0x18, C3 0x7A, A2 0x10, C2 0x5A,
+//   B1 0x4A, C1 0x52: nothing (logged as ignored)
+//
+// C5 pressed twice with no key between: the calibration posture, then the
+// self-measurement (remote.h; docs/self-measurement.md).
+//
+// Row 1 holds the owner's experiments, one a key, the owner calling A1 "A"
+// and B1 "B": A1 the rear-up, B1 kept for the righting experiment, C1 free.
 //
 // The rear-up key is OFF unless switched on (docs/rear-up-trick.md, the
 // switch): until the owner has done the staged, hand-supported trials,
-// A2 does nothing, like the other keys of rows 1-3. The switch is
+// A1 does nothing, like the other keys of rows 1-3. The switch is
 // KILO_REAR_UP, which is also the stage (1, 2 or 3: how high Kilo goes;
 // the owner tries them in order): make -C kernel KILO_REAR_UP=2
 // (MindConfig::rear_up_key, which the Mind passes to set_rear_up_key());
@@ -43,7 +43,7 @@ namespace remote {
 
 constexpr uint16_t kRepeat = 0x100;
 
-enum class Kind : uint8_t { Ignore, Posture, Gait, Speed, Turn, Freeze, Behaviour, Trick, Sound, Measure };
+enum class Kind : uint8_t { Ignore, Posture, Gait, Speed, Turn, Freeze, Behaviour, Trick, Sound };
 
 struct Key {
   uint8_t command;     // NEC command byte
@@ -61,12 +61,12 @@ const Key* key_for(uint8_t command);
 // The command byte and whether it is a held-key repeat.
 inline uint8_t key_command(uint16_t arg) { return (uint8_t)(arg & 0xFF); }
 inline bool key_repeat(uint16_t arg) { return (arg & kRepeat) != 0; }
-// The key's entry (rows 1-3 too, Kind::Ignore but A1, B1, A2 and B2), or null
+// The key's entry (rows 1-3 too, Kind::Ignore but A1 and B2), or null
 // for a held-key repeat or a key of another remote. With the rear-up key
-// off, A2's entry is a Kind::Ignore one ("none").
+// off, A1's entry is a Kind::Ignore one ("none").
 const Key* action_for(uint16_t arg);
-// The stage A2 starts, 1 rear_up
-// (28 deg), 2 rear_up_2 (40 deg), 3 rear_up_3 (54 deg), or 0: A2 does
+// The stage A1 starts, 1 rear_up
+// (28 deg), 2 rear_up_2 (40 deg), 3 rear_up_3 (54 deg), or 0: A1 does
 // nothing (the default). Anything above 3 is 0.
 constexpr uint8_t kRearUpStages = 3;
 void set_rear_up_key(uint8_t stage);

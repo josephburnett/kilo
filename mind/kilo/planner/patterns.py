@@ -9,11 +9,14 @@ the couple), so
 
     period = groups x (shift + span),   stance = period - swing.
 
-The swing time is fixed per pattern (short enough for the body's tip time
-constant on two feet, long enough for the servos: the walk's fastest
-joint stays under 415 deg/s at every speed, the trot's up to 184 mm/s too
-and under 480 above it (since 2026-11-17), under the body's 500 deg/s
-safety slew).
+The swing time is fixed in the walk and the crawl (short enough for the
+body's tip time constant on two feet, long enough for the servos: the
+walk's fastest joint stays under 415 deg/s at every speed, under the
+body's 500 deg/s safety slew). The trot's swing grows with the speed
+instead (``swing_for``, the trot's schedule below; docs/walking-and-
+balance.md §15): 8 ticks up to 150 mm/s, a tick more every 18 mm/s, at
+most 11, so its stride can grow to 52 mm without a joint passing that
+slew.
 
 The walk and the trot have a fixed cadence (``fixed_cadence``): their shift
 stays at its shortest, one tick, and the speed sets the stride alone, from
@@ -33,6 +36,7 @@ tail). A move that needs longer makes its slot longer.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from kilo.planner.model import LB, LF, RB, RF
@@ -86,20 +90,19 @@ class Pattern:
 #   middle: on three feet with a hind leg up it is inside their triangle, with
 #   a fore leg up outside. Fixed cadence (460 ms cycle, duty 0.67); speed
 #   from the stride, 26 to 97 mm/s.
-# - trot: the diagonal pairs LF+RB, RF+LB, fixed cadence (340 ms cycle, one
-#   tick on four feet), speed from the stride, 42 to 232 mm/s (to 184 until
-#   2026-11-17: a 35 mm stride). The stride now goes to 44 mm and the lift
-#   tapers from 8 mm at 35 mm to 6 mm at 44, which keeps the swing's fastest
-#   joint under 9.5 deg a tick (the body's slew is 10): the joint speed of
-#   the swing is what limits the trot, not the legs' reach (at the 76 mm
-#   stance height a foot reaches 48 mm fore and aft; it goes to 23).
-#   docs/walking-and-balance.md §13.
+# - trot: the diagonal pairs LF+RB, RF+LB, one tick on four feet, the swing
+#   growing with the speed (TrotConfig, swing_for; the "long trot" of
+#   2026-11-21, the only trot since 2026-11-22): the stride is the speed x
+#   (swing + 1.5 ticks), 42 to 207 mm/s forward (180 backward), the stride
+#   up to 51.8 mm, the lift 8 mm at every stride. Each pair lands where the
+#   body, falling about its diagonal, ends upright (kilo.planner.plan
+#   TrotFit). docs/walking-and-balance.md §15.
 #
-# The walk and the trot move their strides 1.5 mm a tick (stride_slew_mm,
-# since 2026-11-17; 0.5 before, the crawl's still): a turn in place to
-# straight walking, a steer and a speed level take a cycle or two, not two
-# seconds. The strides stay inside the pattern's longest one whatever the
-# change, so no swing carries a foot further than at the top speed.
+# The walk moves its strides 1.5 mm a tick (stride_slew_mm, since
+# 2026-11-17), the trot 0.75 (its build-up), the crawl 0.5: a turn in place
+# to straight walking, a steer and a speed level take a cycle or two. The
+# strides stay inside the pattern's longest one whatever the change, so no
+# swing carries a foot further than at the top speed.
 #
 # Fixed cadence (the patterns without a lean): their four-foot phase stays
 # one tick at every speed, so the body's balance loop (which holds its
@@ -110,9 +113,10 @@ PATTERNS: dict[str, Pattern] = {
     "walk": Pattern("walk", ((LB, RF), (RB, LF)), swing_ms=150.0, stride_mm=30.0, step_h_mm=8.0,
                     body_h_256=205, period_ms=460.0, shift_min_ms=20.0, stance_max_ms=310.0, lean=False,
                     couple_ms=60.0, default_mm_s=80.0, stride_slew_mm=1.5),
-    "trot": Pattern("trot", ((LF, RB), (RF, LB)), swing_ms=150.0, stride_mm=44.0, step_h_mm=8.0,
-                    body_h_256=205, period_ms=340.0, shift_min_ms=20.0, stance_max_ms=190.0, lean=False,
-                    default_mm_s=144.0, step_h_long_mm=6.0, taper_from_mm=35.0, stride_slew_mm=1.5),
+    # the trot's swing_ms, stride_mm and period_ms are its table entry's (its timing is TrotConfig's)
+    "trot": Pattern("trot", ((LF, RB), (RF, LB)), swing_ms=160.0, stride_mm=52.0, step_h_mm=8.0,
+                    body_h_256=205, period_ms=360.0, shift_min_ms=20.0, stance_max_ms=250.0, lean=False,
+                    default_mm_s=144.0, stride_slew_mm=0.75),
     "crawl": Pattern("crawl", ((LB,), (LF,), (RB,), (RF,)), swing_ms=300.0, stride_mm=50.0, step_h_mm=15.0,
                      body_h_256=179, period_ms=2550.0, shift_min_ms=0.0, stance_max_ms=4000.0, lean=True),
 }
@@ -123,8 +127,7 @@ _ALIASES = {"backward": "back", "backwards": "back"}
 
 
 def pattern(name: "str | Pattern") -> Pattern:
-    """A pattern by name; a Pattern is returned as it is (kilo.planner.longtrot's LONG_TROT, which is
-    not among PATTERNS)."""
+    """A pattern by name; a Pattern is returned as it is."""
     if isinstance(name, Pattern):
         return name
     try:
@@ -147,6 +150,59 @@ class Timing:
     stance_ms: float
     period_ms: float
     speed_mm_s: float  # what this timing walks at with the stride
+
+
+def is_trot(p: Pattern) -> bool:
+    """The trot: its swing and its timing are TrotConfig's."""
+    return p.name == "trot"
+
+
+# The trot's schedule (docs/walking-and-balance.md §15). Its stride is limited by the joints: a
+# fixed 8-tick swing cannot carry more than about 44 mm under the body's 500 deg/s. So the swing
+# grows with the speed, a tick a step at most (the build-up), with one tick on four feet: a foot's
+# ground time is the swing + STANCE_PLUS ticks and the stride the speed x that.
+STANCE_PLUS = 1.5
+
+
+@dataclass(frozen=True)
+class TrotConfig:
+    v_from: float = 150.0          # up to this speed the swing is 8 ticks ...
+    v_step: float = 18.0           # ... then a tick more for every v_step mm/s ...
+    w_min: int = 8
+    w_max: int = 11                # ... up to this (220 ms)
+    top_mm_s: float = 207.0        # the fastest forward: 51.8 mm at 11 ticks
+    top_back_mm_s: float = 180.0   # ... and backward (its feet land further forward, where the knee works harder)
+    step_mm_per_tick: float = 5.4  # a swing that carries a foot d mm takes at least d / this ticks
+    stride_per_tick: float = 4.75  # ... and a side's stride is at most this x the swing's ticks less 0.5 mm
+    # A swing that is not the steady trot's (a stop's or the quick stop's square-up from a long
+    # stride, the way home into the crawl, the swing shortening out of the trot) is also as long
+    # as its path needs for no joint to turn more than this a tick (the body's slew is 10, 500 deg/s):
+    # a foot that starts 45 mm behind its shoulder, near the leg's reach, turns the knee fast.
+    joint_deg_per_tick: float = 8.0
+
+
+TROT = TrotConfig()
+
+
+def swing_for(speed_mm_s: float, cfg: TrotConfig = TROT) -> int:
+    """The trot's swing ticks at a speed (the build-up's target)."""
+    v = abs(speed_mm_s)
+    if v <= cfg.v_from:
+        return cfg.w_min
+    return min(cfg.w_max, cfg.w_min + int(math.ceil((v - cfg.v_from) / cfg.v_step - 1e-9)))
+
+
+def trot_timing(speed_mm_s: float | None, back: bool = False, cfg: TrotConfig = TROT) -> tuple[int, float, float]:
+    """(swing ticks, stride mm, speed mm/s) of the trot at a speed (default: 144), clamped to its
+    slowest (STRIDE_MIN_MM over the 8-tick swing's ground time) and to top_mm_s (top_back_mm_s
+    backward)."""
+    v = PATTERNS["trot"].default_mm_s if speed_mm_s is None else abs(float(speed_mm_s))
+    lo = STRIDE_MIN_MM / ((cfg.w_min + STANCE_PLUS) * TICK_MS / 1000.0)
+    v = min(cfg.top_back_mm_s if back else cfg.top_mm_s, max(lo, v))
+    w = swing_for(v, cfg)
+    stance = (w + STANCE_PLUS) * TICK_MS / 1000.0
+    s = max(STRIDE_MIN_MM, v * stance)
+    return w, s, s / stance
 
 
 def shift_min_ms(p: Pattern) -> float:
@@ -177,16 +233,24 @@ def default_speed(p: Pattern | str) -> float:
 def speed_range(p: Pattern | str) -> tuple[float, float]:
     """(slowest, fastest) speed in mm/s that timing() gives."""
     p = pattern(p) if isinstance(p, str) else p
+    if is_trot(p):
+        return trot_timing(0.0)[2], TROT.top_mm_s
     lo, hi = _stance_limits(p)
     if fixed_cadence(p):
         hi = lo
     return STRIDE_MIN_MM / hi * 1000.0, p.stride_mm / lo * 1000.0
 
 
-def timing(p: Pattern | str, speed_mm_s: float | None = None) -> Timing:
+def timing(p: Pattern | str, speed_mm_s: float | None = None, direction_name: str = "forward") -> Timing:
     """Stride, shift and period for walking at ``speed_mm_s`` (default: the
-    pattern's default speed), clamped to speed_range()."""
+    pattern's default speed), clamped to speed_range(). The trot's is its
+    schedule's (trot_timing: the swing from swing_for, one tick on four feet,
+    the ground time the swing + STANCE_PLUS ticks; slower backward)."""
     p = pattern(p) if isinstance(p, str) else p
+    if is_trot(p):
+        w, s, v = trot_timing(speed_mm_s, back=direction(direction_name) == "back")
+        st = (w + STANCE_PLUS) * TICK_MS
+        return Timing(s, TICK_MS, st, st + w * TICK_MS, v)
     n = len(p.groups)
     st_lo, st_hi = _stance_limits(p)
     v = default_speed(p) if speed_mm_s is None else abs(float(speed_mm_s))

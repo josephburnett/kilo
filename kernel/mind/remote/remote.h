@@ -7,39 +7,36 @@
 // The remote's state: the gait (trot at start), a signed speed level, the
 // heading (straight, or left / right: turning in place) and the steer
 // (-3..+3, + left, while walking straight). Levels +1..+5 walk forward at
-// speed_factors() x the gait's default speed (the trot 0.4, 0.7, 1, 1.3, 1.6
-// since 2026-11-17; the walk and the crawl 0.4, 0.7, 1, 1.15, 1.25),
-// -1..-5 backward at the same factors; there is no level 0. Every stop (B6,
-// A7, C5, C7, a walk that ended by itself) puts the level back to +3 (1x),
-// the heading straight and the steer to 0.
+// speed_factors() x the gait's default speed (the trot 0.4, 0.7, 1, 1.25, 1.4
+// x 144: 57.6 to 201.6 mm/s, since 2026-11-22; the walk and the crawl 0.4,
+// 0.7, 1, 1.15, 1.25), -1..-5 backward at the same factors (the trot only to
+// -3); there is no level 0. Every stop (B6, A7, C5, C7, a walk that ended by
+// itself) puts the level back to +3 (1x), the heading straight and the
+// steer to 0.
+//
+// The trot (docs/walking-and-balance.md §15, planner/trot.h) swings a leg
+// 8 ticks up to 150 mm/s, so up to +3 it steps as the trot always did; at
+// +4 (180 mm/s) and +5 (201.6) its swing is 10 and 11 ticks and its stride
+// 41 and 50 mm, built up a tick a step. Its pendulum was fitted to straight
+// trots, so there the steer is at most kTrotFastSteerSteps level (0.25; a
+// steer of more is eased to it as B7 goes up, logged). Backward it stops at
+// -3 (144 mm/s, the 8-tick swing): its long swing backward never walked on
+// the floor.
 //
 // - A4 trot, B4 crawl, C4 walk: not walking, start walking forward in that
 //   gait at +3. Walking in another gait: change the gait (the walk and the
 //   trot directly, the crawl after every leg has stepped home), level,
-//   heading and steer kept (out of the long trot: +3). Walking in that gait:
-//   straight forward at the current level's magnitude, no steer (from a
-//   turn, a bend or backward); already straight forward, nothing changes.
-// - A1 the long trot (docs/walking-and-balance.md §15, planner/longtrot.h):
-//   as a gait key, into its first stage, +1: 160 mm/s, straight forward,
-//   from standing or from any gait (the walk and the trot straight over, the
-//   crawl after the legs have stepped home), the steer kept but at most one
-//   level. The planner starts it at the trot's 8-tick swing and builds the
-//   swing up a tick a step. Its levels are three stages, forward only:
-//   kLongTrotSpeeds, 160, 180, 200 mm/s (swings of 9, 10, 11 ticks; strides
-//   33.6, 41.4, 50 mm). B7 a stage up (at +3: "already the top stage"); B5 a
-//   stage down, and at +1 out of it into the trot at +3 (144 mm/s, the
-//   planner shortens the swing a tick a step first), from where B5 goes on as
-//   in the trot. A6 / C6 steer it one level (0.25) at most: its balance was
-//   fitted to straight trots only. Stops, freeze, the guard: as for the trot.
-//   From standing, A6 / C6 after a long trot turn in place in the trot.
+//   heading and steer kept. Walking in that gait: straight forward at the
+//   current level's magnitude, no steer (from a turn, a bend or backward);
+//   already straight forward, nothing changes.
 // - A6 / C6: not walking, turn left / right in place in the selected gait
 //   at 1x. Walking forward or backward: steer one level to the left / right
 //   (kSteerLevels: the inner side's stride 0.25, 0.5 or 1 of it shorter,
-//   the outer's longer; at most 3 each way), without stopping; the nose
-//   turns that way forward and backward alike. Turning in place: the other
-//   key turns the other way.
+//   the outer's longer; at most 3 each way, the trot at +4, +5 one), without
+//   stopping; the nose turns that way forward and backward alike. Turning
+//   in place: the other key turns the other way.
 // - B7 faster, B5 slower: one level up / down (... -2 -1 +1 +2 ...),
-//   stopping at +5 and -5, the steer kept. Turning in place: stop turning
+//   stopping at +5 and -5 (the trot -3), the steer kept. Turning in place: stop turning
 //   and walk straight forward (B7) or backward (B5) at the turn's level,
 //   without a stop first. Not walking: ignored (they never start a walk). A
 //   level the planner clamps to the same speed still changes the level, and
@@ -48,6 +45,15 @@
 //   walk with the quick stop (planner/plan.h halt(): the feet down where
 //   they are, the body stopped in about 0.2 s, the legs squared up) and wait
 //   for it (up to stop_timeout), stop a playing trick, then take the posture.
+// - C5 again, with no other key between and the posture still CALIB: the
+//   self-measurement (MeasureHook; measure/measure.h, docs/self-measurement.md).
+//   It starts only from STAND or STANCE, level and still, so the remote
+//   first takes STAND (Phase::MeasureStand), then from kMeasureSettleUs on
+//   asks the routine to start every pass until it does or kMeasureWaitUs
+//   have passed (the last refusal fails the key: battery, not level and
+//   still). Any key meanwhile cancels it (he stands). While it runs every
+//   key stops it first (into STAND): C5 only that, B6, A7 and C7 then do
+//   their own action, the others nothing more.
 // - C7 freeze: at once, ahead of any key waiting (the action under way is
 //   cancelled, keys queued behind it dropped, each logged): the quick stop
 //   of the walk (as B6; it ends in STANCE, powered), stop a playing trick,
@@ -59,38 +65,34 @@
 //   do their own action, A5 again does nothing, every other key is ignored
 //   (but those the hook yields() to: the distance guard's sitting runner
 //   gives way to the walking keys; docs/distance-guard.md).
-// - A2 rear up (Kind::Trick, docs/rear-up-trick.md; B2 until 2026-11-17),
-//   only with the rear-up key switched on (keys.h set_rear_up_key,
-//   KILO_REAR_UP=1|2|3: the highest stage allowed; off, A2 is a row 1-3 key
-//   and never reaches perform()): not playing a trick, stop a walk, then
+// - A1 rear up (Kind::Trick, docs/rear-up-trick.md; A2 until 2026-11-22, B2
+//   until 2026-11-17), only with the rear-up key switched on (keys.h
+//   set_rear_up_key, KILO_REAR_UP=1|2|3: the highest stage allowed; off, A1
+//   is a row 1-3 key and never reaches perform()): not playing a trick, stop a walk, then
 //   start the stage's trick (rear_up, rear_up_2 or rear_up_3: the highest
 //   allowed; the key is done once TRICK_PLAY is out). Kilo goes up to stage
 //   1 and holds it: in rear_up_2 and rear_up_3 the lower stages' tops hold
-//   4 s (rear_up.py STEP_HOLD). A2 while he goes up to or holds such a top
+//   4 s (rear_up.py STEP_HOLD). A1 while he goes up to or holds such a top
 //   takes him on to the next stage (up to the build's); without it, the
 //   remote stops the trick kStepLeadUs before that hold ends and he comes
 //   down to SIT (step_gate()). The trick's own guards (pitch and roll at
 //   every guarded hold, each stage's top among them) still stop it when
-//   the body is not where the model says. A2 at any other moment, B6 and
+//   the body is not where the model says. A1 at any other moment, B6 and
 //   C7 bring him down (TRICK_STOP over the trick's stop_ticks). Each stage
 //   reached, gone on from or left is a log line and a mark in the trick's
 //   flight-recorder run. Refused below kTrickMinMv at rest (the highest
 //   reading of the last 20 s, TrickNotes::rested_mv: a walk just stopped
 //   sags the reading for a moment) or on USB power (NO_BATTERY), so that
 //   the body's low-battery reflex does not take Kilo to REST half way up.
-// - Stopping a trick (A2, the posture keys, a walk from standing, C7) sends
+// - Stopping a trick (A1, the posture keys, a walk from standing, C7) sends
 //   TRICK_STOP over the trick's stop_ticks (rear_up: 1.5 s to SIT, the
 //   higher stages 2 and 2.5 s, not the body's 0.2 s); a key that then
 //   takes a posture or walks waits for
 //   that crossfade first (Phase::Settle).
 // - B2 meows (Kind::Sound): the Mind asks its sound player (sound/player.h)
 //   and never calls perform() for it.
-// - B1 Kind::Measure, docs/self-measurement.md: the self-measurement routine
-//   (MeasureHook; measure/measure.h), after stopping a walk and a trick as a
-//   posture key does; its refusals (battery, not standing level) fail the
-//   key. While it runs every key stops it first (into STAND): B1 again only
-//   that, B6, A7 and C7 then do their own action, the others nothing more.
-// - Rows 1-3 but A1, B1, B2 (and A2 unless switched on) do nothing (Mind::ir_key logs them as ignored).
+// - Rows 1-3 but B2 (and A1 unless switched on) do nothing (Mind::ir_key logs them as ignored). Row 1
+//   holds the owner's experiments, one a key (A1 the rear-up; B1 kept for the righting experiment).
 // Every key leaves one log line, "remote <grid> (0x.., <label>): <outcome>".
 // Which keys never reach perform() (repeats, other remotes' keys, rows 1-3,
 // a laptop client holding the body) is the caller's call (Mind::ir_key).
@@ -108,15 +110,17 @@ namespace remote {
 constexpr int kSpeedSteps = 5;
 extern const double kSpeedFactors[kSpeedSteps];      // the walk's and the crawl's levels
 extern const double kTrotSpeedFactors[kSpeedSteps];  // the trot's levels
+constexpr int kTrotBackSteps = 3;                    // the trot backward: to -3 (144 mm/s, its 8-tick swing)
+constexpr int kTrotLongFrom = 4;                     // the trot's long swing: from +4 (180 mm/s) ...
+constexpr int kTrotFastSteerSteps = 1;               // ... where it steers at kSteerLevels' first level only
 // The five levels of a gait, x its default speed.
 const double* speed_factors(const planner::Pattern& p);
 constexpr int kSteerSteps = 3;
 extern const double kSteerLevels[kSteerSteps];   // the steer's magnitudes, level 1..3
 constexpr int kDefaultLevel = 3;                  // +3: 1x, the gait's spec defaults
-constexpr int kLongTrotStages = 3;                // the long trot's levels +1..+3 (A1, then B7 / B5) ...
-extern const double kLongTrotSpeeds[kLongTrotStages];  // ... 160, 180, 200 mm/s
-constexpr int kLongTrotSteerSteps = 1;            // the long trot steers at kSteerLevels' first level only
-constexpr uint16_t kTrickMinMv = KILO_BATTERY_TRICK_MIN_MV;  // spec [battery]: A2 refuses below this pack voltage
+constexpr uint16_t kTrickMinMv = KILO_BATTERY_TRICK_MIN_MV;  // spec [battery]: A1 refuses below this pack voltage
+constexpr uint64_t kMeasureSettleUs = 1500000;    // the second C5: STAND, then the routine asked from this on ...
+constexpr uint64_t kMeasureWaitUs = 6000000;      // ... until it starts or this has passed
 
 enum class Heading : uint8_t { Straight, Left, Right };
 
@@ -172,7 +176,7 @@ class TrickNotes {
   // A line into the trick's run (the rear-up's stages).
   virtual void trick_mark(const char* /*line*/) {}
   // The rear-up's stages in the player's play `play`: the highest stage allowed so far (1 at the
-  // start, A2 raises it), the highest whose top was reached (0: none yet), of `of` (the run's label).
+  // start, A1 raises it), the highest whose top was reached (0: none yet), of `of` (the run's label).
   virtual void trick_stage(uint32_t /*play*/, int /*allowed*/, int /*reached*/, int /*of*/) {}
   // The battery at rest (power/battery.h RestedBattery), false if none: the trick's refusal.
   virtual bool rested_mv(uint16_t* /*mv*/) { return false; }
@@ -198,6 +202,9 @@ class RemoteControl {
   // Carry out a key's action (now, or after the ones queued; C7 at once).
   // False when the queue is full (the key is dropped, and logged).
   bool perform(const Key& key, uint16_t arg);
+  // Every key the Mind hears, also those that never reach perform() (rows 1-3, B2, a laptop holding
+  // the body): any but C5 means the next C5 is a first press again.
+  void key_seen(const Key& key);
   void poll();
   bool busy() const { return phase_ != Phase::Idle || n_ > 0; }
 
@@ -220,7 +227,7 @@ class RemoteControl {
   double speed_mm_s() const;
 
  private:
-  enum class Phase : uint8_t { Idle, StopWalk, StopTrick, Settle };
+  enum class Phase : uint8_t { Idle, StopWalk, StopTrick, Settle, MeasureStand };
   void stop_trick();  // TRICK_STOP over the trick's stop_ticks; settle_us_ for Phase::Settle
   void start_trick();
   int mode() const;
@@ -234,8 +241,10 @@ class RemoteControl {
   void act();
   void done(const char* what, bool failed);
   void walk_done(const char* suffix, const char* prefix = "");
-  void long_trot_start();
-  void long_trot_speed(bool up);
+  int steer_most() const;
+  bool limit_steer();
+  bool calib_held() const;  // the last action was C5's calibration posture, and the posture goal is still CALIB
+  bool take_posture(const char* name);
   // ", steering left 2", or "" when straight.
   void steer_text(char* buf, uint32_t cap) const;
   planner::WalkGoal walk_goal() const;
@@ -258,7 +267,7 @@ class RemoteControl {
   int steer_ = 0;
   bool walking_ = false;  // the remote started the walker's walk
   bool frozen_ = false;
-  // the rear-up's stages: the play, its highest stage, the stage A2 allows now
+  // the rear-up's stages: the play, its highest stage, the stage A1 allows now
   const tricks::Trick* step_trick_ = nullptr;
   uint32_t step_play_ = 0;
   int step_max_ = 0, step_allowed_ = 0, step_held_ = 0, step_reached_ = 0;
@@ -282,6 +291,9 @@ class RemoteControl {
   uint32_t actions_ = 0, failures_ = 0;
   TrickNotes* notes_ = nullptr;
   MeasureHook* measure_ = nullptr;
+  bool calib_held_ = false;    // C5's calibration posture was the last action: C5 again measures
+  bool measure_next_ = false;  // this C5 is the second: stand, then the self-measurement
+  uint64_t measure_from_ = 0;  // Phase::MeasureStand: when STAND went out
   PostureHook* posture_hook_ = nullptr;
 };
 

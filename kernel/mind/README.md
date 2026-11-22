@@ -33,7 +33,7 @@ link/goals        latched goals, one per type
 link/consts       message classes and timings (kilo/link/consts.py, LinkConfig)
 link/names        names of message types and enums, for logs
 link/stats.h      link counters (kilo/body/state.py LinkStats)
-planner/          the walking planner: a port of mind/kilo/planner (model, patterns, plan, errors, walker)
+planner/          the walking planner: a port of mind/kilo/planner (model, patterns, trot: the trot's schedule and fitted pendulum, plan, errors, walker)
 flash/image       the body image in RAM (32 KB) and its manifest (body.json parse and write)
 flash/crc32       the image's CRC-32, as zlib.crc32
 flash/flasher     the STK500v1 flasher: RESET, optiboot, pages, verify, the HELLO after
@@ -47,7 +47,7 @@ guard/            the distance guard: the range filtered, zones, stop / back off
 sound/            Kilo's sounds: the player (requests, families, the queue, the gap, volume), the renderer the audio
                   interrupt runs, the output seam (no Python counterpart; docs/sound.md)
 remote/           the IR key map and RemoteControl; client.cpp: BodyClient's posture/balance/look
-measure/          the self-measurement (B1): the script (a port of mind/kilo/measure/script.py) and its run;
+measure/          the self-measurement (C5 twice): the script (a port of mind/kilo/measure/script.py) and its run;
                   docs/self-measurement.md
 intent/           the state estimate (always on, read only: a port of mind/kilo/intent/estimate.py) and the
                   intents "be standing / sitting / resting" (MindConfig.intent, KILO_INTENT; intent.h), their
@@ -600,16 +600,17 @@ behaviour runner (`remote/remote.h` says what each key does):
 | B6 | stand and stop: the quick stop of a walk (the feet in the air put down where they are, the body stopped in about 0.2 s, the legs squared up under the shoulders; docs/walking-and-balance.md §14), then STAND |
 | A7 | sleep: the quick stop, then REST; 30 s later, if nothing else happened, light sleep (servos off, the Pi idles; any key or the laptop wakes him: `power/sleep.h`, docs/power.md) |
 | C5 | the quick stop, then the calibration posture (CALIB) |
-| A4, B4, C4 | trot, crawl, walk: walk forward in that gait from standing; change the gait while walking; the gait in use: straight forward again (out of the long trot: at that gait's +3) |
-| A1 | the long trot (`planner/longtrot.h`, docs/walking-and-balance.md §15): from standing or any gait, straight forward at its stage 1 (160 mm/s, a 9-tick swing, 33.6 mm stride), the swing built up a tick a step from the trot's 8; B7 / B5 stages 2 and 3 (180 and 200 mm/s, 10 and 11 ticks, 41.4 and 50 mm), B5 at stage 1 into the trot at 144 mm/s; A6 / C6 steer it one level (0.25) at most; stops and the guard as the trot (very close: the quick stop only) |
-| B7, B5 | faster, slower by one speed level (the trot 0.4, 0.7, 1, 1.3, 1.6 × its speed: 58 to 230 mm/s; the walk and the crawl 0.4, 0.7, 1, 1.15, 1.25); past the slowest B5 goes backward; only while walking. Turning in place: stop turning and walk straight forward (B7) or backward (B5) at once |
-| A6, C6 | from standing: turn left, right in place; walking forward or backward: steer one level left or right (0.25, 0.5, 1 of the stride off the inner side, at most 3 each way), without stopping (docs/walking-and-balance.md §13) |
+| C5 again (no other key between) | the self-measurement (`measure/`, docs/self-measurement.md): he stands (STAND), and once he is still the routine starts: small poses streamed as FEET with the balance off, recorded as a run of its own; any key stops it into STAND; refused (logged, he stands) if he is not still within 6 s, below 7400 mV at rest or on USB power |
+| A4, B4, C4 | trot, crawl, walk: walk forward in that gait from standing; change the gait while walking; the gait in use: straight forward again |
+| B7, B5 | faster, slower by one speed level (the trot 0.4, 0.7, 1, 1.25, 1.4 × its speed: 58 to 202 mm/s, its swing 8 ticks up to +3, 10 and 11 at +4 and +5 (`planner/trot.h`, docs/walking-and-balance.md §15); the walk and the crawl 0.4, 0.7, 1, 1.15, 1.25); past the slowest B5 goes backward (the trot to -3 only, 144 mm/s); only while walking. Turning in place: stop turning and walk straight forward (B7) or backward (B5) at once |
+| A6, C6 | from standing: turn left, right in place; walking forward or backward: steer one level left or right (0.25, 0.5, 1 of the stride off the inner side, at most 3 each way; the trot at +4 and +5 one, a sharper steer eased to it), without stopping (docs/walking-and-balance.md §13) |
 | C7 | freeze: the quick stop of the walk (as B6, ending in STANCE, powered), a trick and the behaviour runner stopped; then only B6 and A7 act |
 | A5 | start the behaviour runner |
-| A2 | off unless built with `KILO_REAR_UP=1`, `2` or `3` (the highest stage allowed): rear up (docs/rear-up-trick.md): up to stage 1 (28 degrees nose up) and hold; A2 again while he holds a stage (4 s) takes him on to the next (40, then 54 degrees), up to the build's; without it he comes down to SIT from there; the top stage holds 2 s and comes down. A2 at another moment, B6 or C7: down at once (1.5 to 2.5 s); refused below 7400 mV at rest (the highest reading of the last 20 s). B2 until 2026-11-17 |
+| A1 | an experiment key (row 1: one experiment a key): off unless built with `KILO_REAR_UP=1`, `2` or `3` (the highest stage allowed): rear up (docs/rear-up-trick.md): up to stage 1 (28 degrees nose up) and hold; A1 again while he holds a stage (4 s) takes him on to the next (40, then 54 degrees), up to the build's; without it he comes down to SIT from there; the top stage holds 2 s and comes down. A1 at another moment, B6 or C7: down at once (1.5 to 2.5 s); refused below 7400 mV at rest (the highest reading of the last 20 s). A2 until 2026-11-22, B2 until 2026-11-17 |
 | B2 | a meow: one of the meow family, picked at random (`sound/`, docs/sound.md); it moves nothing, so it plays at once, also while a walk or the behaviour runs |
-| B1 | the self-measurement (`measure/`, docs/self-measurement.md): small poses streamed as FEET with the balance off, recorded as a run of its own; any key stops it into STAND |
-| rows 1-3 but A1, B1, A2 and B2 | nothing (logged as ignored) |
+| B1 | an experiment key, kept for the righting experiment; nothing until it is wired (logged as ignored) |
+| C1 | an experiment key, free; nothing (logged as ignored) |
+| rows 1-3 but A1 and B2 | nothing (logged as ignored) |
 
 With intents on (`MindConfig.intent`, `KILO_INTENT=1`; docs/intent.md) the posture of B6 and of A7 is not the
 SET_POSTURE goal but `be(STANDING)` and `be(RESTING)` (`intent/intent.h`, through the remote's `PostureHook`):

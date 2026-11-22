@@ -1,6 +1,6 @@
 """The long-stride study (docs/walking-and-balance.md §15): the trot's limits,
-the fit of its rock to the floor recordings, and the long trot
-(kilo.planner.longtrot) in the virtual body.
+the fit of its rock to the floor recordings, and the trot's long swing
+(kilo.planner.plan, the trot since 2026-11-22) in the virtual body.
 
     PYTHONPATH=mind python mind/tests/stridesim.py limits     # joints and reach per swing length
     PYTHONPATH=mind python mind/tests/stridesim.py fit        # the recorded rock against the models (~/kilo-logs)
@@ -11,7 +11,7 @@ Two physics: kilo.vbody.physics.Physics (the virtual body's own) and
 kilo.vbody.rocking.RockingPhysics (a pendulum on the diagonal's line,
 momentum kept across support changes, ROCKING's settings: the closest of
 those tried to the recordings, still about half their rock above 160 mm/s).
-The fitted pendulum (kilo.planner.longtrot.TROT_FIT) is the model that
+The fitted pendulum (kilo.planner.plan.TROT_FIT) is the model that
 matches the recordings; the physics check the mechanics (reach, joints,
 clearance, falls, the stop) and the direction of the effects.
 """
@@ -30,9 +30,9 @@ from dataclasses import replace
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from kilo.planner import patterns as pat  # noqa: E402
-from kilo.planner.longtrot import LONG_TROT, TROT_FIT, LongTrotConfig, LongTrotPlanner, swing_for, timing  # noqa: E402
 from kilo.planner.model import LEGS, BodyModel, Mass  # noqa: E402
-from kilo.planner.plan import Planner  # noqa: E402
+from kilo.planner.patterns import TROT, swing_for, trot_timing as timing  # noqa: E402
+from kilo.planner.plan import TROT_FIT, PlannerConfig  # noqa: E402
 from kilo.protocol import kilo_protocol as P  # noqa: E402
 from kilo.vbody import feet as vfeet  # noqa: E402
 from kilo.vbody import physics as phys  # noqa: E402
@@ -76,11 +76,6 @@ class physics_as:
         vfeet.FeetPlayer.PHYSICS = self.old
 
 
-def long_factory(cfg: LongTrotConfig | None = None):
-    return lambda model, direction, speed, tick, config: LongTrotPlanner(model, direction, speed, tick=tick,
-                                                                        config=config, long=cfg)
-
-
 def shifted(dx: float = 0.0, dy: float = 0.0, battery_g: float = 0.0) -> BodyModel:
     """The body model with its centre of mass moved (the body's mass moved) and battery added."""
     b, bat = M.body, M.battery
@@ -91,15 +86,12 @@ def shifted(dx: float = 0.0, dy: float = 0.0, battery_g: float = 0.0) -> BodyMod
 
 # ---- one walk -------------------------------------------------------------------------------------
 
-def walk(speed: float, direction: str = "forward", planner: str = "long", physics: str = "rocking",
-         cfg: LongTrotConfig | None = None, ticks: int = 400, body_model: BodyModel | None = None,
-         **vb_kw) -> dict:
-    """``ticks`` of walking at ``speed`` after the build-up from rest; what the virtual body did."""
+def walk(speed: float, direction: str = "forward", physics: str = "rocking", place: bool = True,
+         ticks: int = 400, body_model: BodyModel | None = None, **vb_kw) -> dict:
+    """``ticks`` of trotting at ``speed`` after the build-up from rest (place False: the pairs land at
+    half a stride); what the virtual body did."""
     with physics_as(physics):
-        if planner == "long":
-            sim = WalkSim("trot", direction, speed, planner_factory=long_factory(cfg), body_model=body_model, **vb_kw)
-        else:
-            sim = WalkSim("trot", direction, speed, body_model=body_model, **vb_kw)
+        sim = WalkSim("trot", direction, speed, body_model=body_model, config=PlannerConfig(trot_place=place), **vb_kw)
         sim.run(150)
         n0 = len(sim.telemetry)
         sent0 = len(sim.link.sent)
@@ -153,7 +145,7 @@ def reached_lift(w: int, lift: float = 8.0, model: BodyModel = M) -> float:
 
 
 def limits() -> None:
-    h = M.stance_height(LONG_TROT.body_h_256)
+    h = M.stance_height(pat.PATTERNS["trot"].body_h_256)
     print(f"body height {h:.1f} mm: the foot reaches {math.sqrt(M.reach_mm ** 2 - h ** 2):.1f} mm fore and aft "
           f"(lower: {M.stance_height(190):.1f} mm -> {math.sqrt(M.reach_mm ** 2 - M.stance_height(190) ** 2):.1f})")
     print("today's trot, 8-tick swing: " + ", ".join(
@@ -235,15 +227,22 @@ def _fold(slots, j):
 
 
 def recorded_rock(paths, physics: str = "rocking", settle: int = 30) -> dict:
-    """Straight trots and long trots in the recordings, by (pattern, direction, speed, stride): the
-    folded rock (deg, + toward the front foot in the air), measured and replayed, deduplicated (runs
-    copied in two files)."""
+    """Straight trots in the recordings, by (pattern, direction, speed, stride): the folded rock (deg,
+    + toward the front foot in the air), measured and replayed, deduplicated (runs copied in two
+    files). The pattern is "trot" for today's trot (its cycle 350 ms or more; "longtrot" in the
+    recordings of 2026-11-21) and "old trot" for the trot replaced on 2026-11-22 (an 8-tick swing in a
+    340 ms cycle, landing half a stride ahead: the recordings the pendulum was fitted to)."""
     seen, by = set(), defaultdict(list)
     for path, w in _recordings(paths):
         segs = []
         for m in w.marks:
             if m.word in ("stream", "timing"):
-                segs.append((int(m.fields["tick"]), m.fields.get("pattern"), m.fields.get("dir"),
+                p = m.fields.get("pattern")
+                if p == "longtrot" or (p == "trot" and float(m.fields.get("period_ms", 340)) >= 345):
+                    p = "trot"
+                elif p == "trot":
+                    p = "old trot"
+                segs.append((int(m.fields["tick"]), p, m.fields.get("dir"),
                              m.fields.get("steer"), float(m.fields.get("speed", 0)), float(m.fields.get("stride_mm", 0))))
             elif m.word == "stop":
                 segs.append((int(m.fields["tick"]), None, None, None, 0.0, 0.0))
@@ -255,7 +254,7 @@ def recorded_rock(paths, physics: str = "rocking", settle: int = 30) -> dict:
                 end = segs[i + 1][0] if i + 1 < len(segs) else 1 << 30
                 if sg[0] + settle <= s[0] and s[0] + 10 < end:
                     lab = sg
-            if (lab is None or lab[1] not in ("trot", "longtrot") or lab[3] not in (None, "0.00")
+            if (lab is None or lab[1] not in ("trot", "old trot") or lab[3] not in (None, "0.00")
                     or lab[2] not in ("forward", "back")):
                 continue
             key = (s[0], s[1], round(s[2][0], 3))
@@ -278,19 +277,20 @@ def fit(paths) -> None:
     for physics in ("physics", "rocking"):
         for k, r in recorded_rock(paths, physics).items():
             rows.setdefault(k, {"n": r["n"], "tip": r["tip"]})[physics] = r["tip_virtual"]
-    # the long trot (A1, since 2026-11-21): its swing and its landing from the planner's rules, so the
-    # fitted pendulum's prediction there is the long trot's (about 0: it lands at the balanced point)
+    # today's trot: its swing and its landing from the planner's rules, so the fitted pendulum's
+    # prediction there is the trot's (about 0: it lands at the balanced point); the old trot's: 8
+    # ticks, half a stride
     print("| trot | stride | slots | tip measured | fitted pendulum | virtual body (Physics) | RockingPhysics |")
     print("|---|---|---|---|---|---|---|")
     for (p, d, v, s), r in sorted(rows.items(), key=lambda kv: (kv[0][0], kv[0][1] != "forward", kv[0][2])):
         sv = v if d == "forward" else -v
         land = s / 2 if d == "forward" else -s / 2
         w = 8
-        if p == "longtrot":
+        if p == "trot":
             w = swing_for(v)
             x = TROT_FIT.land_x(w, sv)
             land = min(s / 2 + 6, max(0.0, x)) if sv > 0 else max(-s / 2 - 6, min(0.0, x))
-        print(f"| {'long ' if p == 'longtrot' else ''}{d} {v:.0f} mm/s ({w} ticks) | {s} mm | {r['n']} "
+        print(f"| {p} {d} {v:.0f} mm/s ({w} ticks) | {s} mm | {r['n']} "
               f"| {r['tip']:+.2f} | {TROT_FIT.tip_deg(w, sv, land):+.2f} "
               f"| {r.get('physics', float('nan')):+.2f} | {r.get('rocking', float('nan')):+.2f} |")
 
@@ -306,13 +306,13 @@ ERRORS = {"nominal": {}, "mass 5 mm ahead": dict(body_model=shifted(5.0)),
 
 
 def schedule(errors: bool = True) -> None:
-    cfg = LongTrotConfig()
+    cfg = TROT
     print("| speed | swing | stride | cycle | lands ahead (half stride) | tip if it landed at half a stride "
           "| gain per mm off | virtual body: error, rocking / Physics | worst of the model errors (rocking) "
           "| fastest joint | feet x |")
     print("|---|---|---|---|---|---|---|---|---|---|---|")
     for v in SPEEDS:
-        w, s, vv = timing(v, cfg)
+        w, s, vv = timing(v, cfg=cfg)
         land = TROT_FIT.land_x(w, vv)
         r = walk(v)
         r0 = walk(v, physics="physics")
@@ -336,7 +336,7 @@ def schedule(errors: bool = True) -> None:
 
 
 def stops(speeds=(144, 180, 207), step: int = 2) -> None:
-    """The quick stop (halt) at every ``step``-th tick of a cycle, from the long trot at each speed."""
+    """The quick stop (halt) at every ``step``-th tick of a cycle, from the trot at each speed."""
     print("| speed | stride | stopped (median / worst) | way (median / worst) | done (median) | peak tilt | fell |")
     print("|---|---|---|---|---|---|---|")
     for v in speeds:
@@ -353,7 +353,7 @@ def one_stop(speed: float, at: int, physics: str = "rocking", warm_s: float = 3.
     phys.Physics.INERTIA = True
     try:
         with physics_as(physics):
-            sim = WalkSim("trot", "forward", speed, planner_factory=long_factory())
+            sim = WalkSim("trot", "forward", speed)
             for _ in range(int(warm_s / TICK_S) + at):
                 sim.step()
             sim.planner.halt()

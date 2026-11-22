@@ -17,7 +17,7 @@ holding him (the owner: "he should always react, unless sleeping"):
 
 | Kilo is | Blue (too close) | Red (very close) |
 |---|---|---|
-| walking forward, any gait, also steering | below 20 cm (more when faster, up to 23.5 cm at the trot's top speed): the quick stop (below), then he sits and starts the A5 behaviour in its sitting form | below 15 cm: backs off a short way (4-8 cm, slowly), the quick stop, sits; hisses. In the crawl and the long trot (A1) he only stops and sits (they take 4 s and 1.5 s to turn round) |
+| walking forward, any gait, also steering | below 20 cm (more when faster, up to 21.5 cm at the trot's top speed): the quick stop (below), then he sits and starts the A5 behaviour in its sitting form | below 15 cm: in the walk, backs off a short way (4-8 cm, slowly), the quick stop, sits; hisses. In the crawl and the trot he only stops and sits (they take 4 s, and 0.7 to 1.5 s, to turn round; the trot that backed off was replaced on 2026-11-22) |
 | turning in place (A6, C6) | below 12 cm: nothing; a wall seen as he turns is no reason to stop turning | below 8 cm: the quick stop, then he sits; hisses |
 | walking backward | below 12 cm: nothing; he is going away from it | below 8 cm: nothing (the eyes go red) |
 | standing still | below 12 cm: he looks at it (the head straight ahead) and sits | below 8 cm: backs off a short way and sits; hisses |
@@ -34,11 +34,11 @@ The same thing in front of him, by distance:
 
 | Something at | Walking forward | Standing, sitting, turning, backward |
 |---|---|---|
-| more than 20 cm (at the trot +4 / +5: 20.5 / 23.5 cm) | walks on | nothing |
+| more than 20 cm (at the trot +5: 21.5 cm) | walks on | nothing |
 | 15 to 20 cm | the quick stop, sits | nothing; but a forward key is refused (the walk would stop at once) |
-| 12 to 15 cm | backs off, stops, sits | nothing; a forward key is refused |
-| 8 to 12 cm | backs off, stops, sits | blue: looks at it (standing: and sits); a forward key is refused |
-| under 8 cm | backs off, stops, sits | red: standing backs off and sits, sitting leans back, turning stops; hisses |
+| 12 to 15 cm | the walk backs off, stops, sits (the trot and the crawl: the quick stop, sits) | nothing; a forward key is refused |
+| 8 to 12 cm | the walk backs off, stops, sits (the trot and the crawl: the quick stop, sits) | blue: looks at it (standing: and sits); a forward key is refused |
+| under 8 cm | the walk backs off, stops, sits (the trot and the crawl: the quick stop, sits) | red: standing backs off and sits, sitting leans back, turning stops; hisses |
 
 "Something comes close" means the zone **changes** to blue or red: standing
 next to a wall that was already there does nothing; a hand put in front of
@@ -134,7 +134,7 @@ speed, because a faster walk needs more room to stop:
 
     blue = 100 mm gap left after the stop
          + speed x 0.40 s   (the readings come in, the stop reaches the body, the servos follow)
-         + 5 mm + the quick stop's own way (speed^2 / 2a; a: walk 400, trot and long trot 700 mm/s^2; the crawl 20 mm)
+         + 5 mm + the quick stop's own way (speed^2 / 2a; a: walk 400, trot 700 mm/s^2; the crawl 20 mm)
     never below 200 mm
     left again 80 mm above it
 
@@ -161,11 +161,9 @@ reading, not a missed echo. And no echo right after something closer than
 | Gait, level | Speed | Blue below (before 2026-11-19) | The quick stop's own way: planner / the guard allows | Stopped short of the wall (simulated, clean / noisy) |
 |---|---|---|---|---|
 | walk +5 | 96.8 mm/s | 200 mm (206) | 5 / 17 mm | 166 / 166 mm |
-| trot +4 | 187.2 mm/s | 205 mm (330) | 10 / 30 mm | 142 / 142 mm |
-| trot +5 | 230.4 mm/s | 235 mm (425) | 13 / 43 mm | 162 / 180 mm |
-| crawl +5 | 26.9 mm/s | 200 mm (200) | 10 / 20 mm | 196 / 196 mm |
-| long trot stage 2 | 180 mm/s | 200 mm (since 2026-11-21) | 10 / 28 mm | 150 / 136 mm |
-| long trot stage 3 | 200 mm/s | 214 mm | 10 / 34 mm | 155 / 155 mm |
+| trot +4 | 180 mm/s | 200 mm (since 2026-11-22) | 10 / 28 mm | 150 / 136 mm |
+| trot +5 | 201.6 mm/s | 215 mm | 11 / 34 mm | 156 / 156 mm |
+| crawl +5 | 26.9 mm/s | 200 mm (200) | 10 / 20 mm | 196 / 192 mm |
 
 Steering (A6 / C6 while walking forward) is still walking forward: the
 same thresholds at the same speed; the steered walk goes a little slower,

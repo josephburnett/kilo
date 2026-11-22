@@ -60,7 +60,7 @@ def test_the_feet_stop_sliding_in_halt_ticks_and_no_foot_lifts_in_the_hold():
 
 
 def test_halt_during_the_planned_stop_and_twice():
-    p = Planner(BodyModel(), "trot", "forward", 187.2)
+    p = Planner(BodyModel(), "trot", "forward", 180.0)
     for _ in range(80):
         p.next()
     p.stop()

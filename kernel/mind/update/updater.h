@@ -17,9 +17,12 @@
 //               card)
 //   VERIFYING   kernel7.new read back, kSliceBytes per poll(): its size and
 //               CRC-32 must be the image's
-//   INSTALLING  one poll(): kernel7.old removed if there is one,
-//               kernel7.img renamed to kernel7.old (if there is one),
-//               kernel7.new renamed to kernel7.img, sync
+//   INSTALLING  one poll(): kernel7.old and kernel7.bad removed if there
+//               are any, kernel7.img renamed to kernel7.old (if there is
+//               one), kernel7.new renamed to kernel7.img, kernel7.old
+//               removed, sync: no previous kernel is kept on the card (the
+//               owner, 2026-11-22: "This is all in Git"; a kernel that
+//               misbehaves is replaced by rebuilding the wanted commit)
 //   DONE        the platform reboots into it (HostServer: REST, then
 //               reboot_requested())
 //
@@ -44,7 +47,8 @@ namespace kilo {
 // File names on the SD card's FAT partition (config.txt boots kernel7.img).
 constexpr const char* kKernelFile = "kernel7.img";
 constexpr const char* kKernelNewFile = "kernel7.new";
-constexpr const char* kKernelOldFile = "kernel7.old";
+constexpr const char* kKernelOldFile = "kernel7.old";  // the previous kernel, only during the swap
+constexpr const char* kKernelBadFile = "kernel7.bad";  // what docs/laptop-setup.md once had the owner rename to
 
 // KILO_UPDATE_ERROR_* by name, for logs and RESULT text ("?" if unknown).
 const char* update_error_name(uint8_t error);

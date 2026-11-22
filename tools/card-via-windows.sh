@@ -11,9 +11,10 @@
 # How: the card's files are copied to a staging folder, `kilo card --force`
 # runs on that folder (--force because it is not a mount point), and for
 # `write` the four files it made go to the card in `kilo card`'s own order,
-# each compared by SHA-256 with the staged one: kernel7.new, then
-# kernel7.img -> kernel7.old and kernel7.new -> kernel7.img, then body.bin and
-# body.json; body-result.txt is removed, as `kilo card` does.
+# each compared by SHA-256 with the staged one: kernel7.new, then kernel7.new
+# moved over kernel7.img (no previous kernel is kept; a kernel7.old or
+# kernel7.bad left from earlier is removed), then body.bin and body.json;
+# body-result.txt is removed, as `kilo card` does.
 #
 # `write` builds the Pi kernel from an empty build folder: on 2026-11-21 an
 # incremental build put a kernel on the card whose pieces disagreed about a
@@ -37,7 +38,7 @@ WSTAGE="$(wslpath -w "$STAGE")"
 
 # the card as `kilo card` wants to see it; the recordings only when they are read
 ps -Command "\$ErrorActionPreference='Stop'
-  foreach (\$f in 'kernel7.img','kernel7.old','config.txt','bootcode.bin','body.bin','body.json','body-result.txt') {
+  foreach (\$f in 'kernel7.img','config.txt','bootcode.bin','body.bin','body.json','body-result.txt') {
     if (Test-Path ${DRIVE}:\\\$f) { Copy-Item ${DRIVE}:\\\$f '$WSTAGE' } }
   if (Test-Path ${DRIVE}:\\kilorec\\SAVE_ON) { Copy-Item ${DRIVE}:\\kilorec\\SAVE_ON '$WSTAGE\\kilorec' }"
 
@@ -58,10 +59,11 @@ if ((FHash "\$d\\kernel7.img") -ne (FHash "\$s\\.card-kernel")) { throw 'the car
 if ((FHash "\$s\\kernel7.img") -ne (FHash "\$s\\.card-kernel")) {
   Copy-Item "\$s\\kernel7.img" "\$d\\kernel7.new"
   if ((FHash "\$d\\kernel7.new") -ne (FHash "\$s\\kernel7.img")) { throw 'kernel7.new on the card differs from the build' }
-  if (Test-Path "\$d\\kernel7.old") { Remove-Item "\$d\\kernel7.old" }
-  Rename-Item "\$d\\kernel7.img" kernel7.old
-  Rename-Item "\$d\\kernel7.new" kernel7.img
+  Move-Item -Force "\$d\\kernel7.new" "\$d\\kernel7.img"
 } else { 'kernel: the card already has this one' }
+foreach (\$f in 'kernel7.old','kernel7.bad') {   # no previous kernel is kept
+  if (Test-Path "\$d\\\$f") { Remove-Item "\$d\\\$f"; "\$f: removed" }
+}
 Copy-Item "\$s\\body.bin" "\$d\\body.bin" -Force
 Copy-Item "\$s\\body.json" "\$d\\body.json" -Force
 foreach (\$f in 'kernel7.img','body.bin','body.json') {

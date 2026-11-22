@@ -288,7 +288,7 @@ def test_a_refused_trick():
 
 
 def test_the_stage_reached_labels_a_staged_trick():
-    # the mind since 2026-11-21: the stage allowed at the start, each rise (A2) and top reached, the end's
+    # the mind since 2026-11-21: the stage allowed at the start, each rise (A1) and top reached, the end's
     recs = [run_mark(T0, 9, P.RunKind.TRICK, P.RunEvent.BEGIN),
             mark(T0, "trick id=9 format=2 trick=rear_up_3 stage=1 of=3 tid=5 crc=0 frames=12 speed=64 mirror=0 "
                      "battery_mv=7900 mode=IDLE by=remote"),

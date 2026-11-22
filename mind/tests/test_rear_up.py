@@ -349,7 +349,7 @@ def test_trick_is_built_and_up_to_date(st):
     assert all(t.frames[g.frame].hold >= 20 for g in t.guards) and t.roll_max == RU.PLAY_ROLL_MAX
     top = RU.top_frame(t)
     assert top == st.top and t.frames[top].hold == RU.HOLD and names[-3:] == ["settle", "drop", "sit"]
-    # the lower stages' tops hold STEP_HOLD: the remote's A2 goes on from there (or he comes down)
+    # the lower stages' tops hold STEP_HOLD: the remote's A1 goes on from there (or he comes down)
     lower = [s.top for s in RU.STAGES if s.number < st.number]
     assert [i for i, f in enumerate(t.frames) if f.hold == RU.STEP_HOLD] == lower
     assert [names[i] for i in lower] == ["up", "mid"][:len(lower)]

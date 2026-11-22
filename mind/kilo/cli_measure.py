@@ -1,5 +1,5 @@
 """``kilo measure``: Kilo's self-measurement (docs/self-measurement.md; the
-routine is the remote's B1, kernel/mind/measure/).
+routine is the remote's C5 pressed twice, kernel/mind/measure/).
 
     kilo measure plan                         the experiments, their signals against the IMU, the time
     kilo measure fit FILE [FILE...] [--turned FILE...] [--walk FILE...] [--out PATH] [--json]
@@ -24,7 +24,7 @@ from kilo import EXIT_ERR, EXIT_OK
 
 
 def add_parser(sub: Any) -> None:
-    s = sub.add_parser("measure", help="Kilo's self-measurement (B1): plan, fit a recorded run, fetch the last one, "
+    s = sub.add_parser("measure", help="Kilo's self-measurement (C5 twice): plan, fit a recorded run, fetch the last one, "
                                        "check the fit in simulation",
                        description=__doc__.split("\n\n")[0])
     ms = s.add_subparsers(dest="measure_cmd", required=True, metavar="ACTION")
@@ -132,7 +132,7 @@ def cmd_host(args: argparse.Namespace, hl: Any) -> int:
     ours = [w for w in runs if bytes(w.text).decode("ascii", "replace").startswith("measure")
             and not w.flags & P.WalkFlags.RECORDING]
     if not ours:
-        print("kilo measure fetch: no self-measurement run that has ended on the mind (press B1; a run is "
+        print("kilo measure fetch: no self-measurement run that has ended on the mind (press C5 twice; a run is "
               "fetchable 2 s after it ends)", file=sys.stderr)
         return EXIT_ERR
     w = ours[-1]

@@ -464,7 +464,7 @@ def cmd_update(args: argparse.Namespace, hl: HostLink) -> int:
             print(f"update: kernel7.new written ({st.image_size} bytes); reading it back", flush=True)
         elif first and phase == "INSTALLING":
             print(f"update: kernel7.new read back: {st.done} bytes, crc32 {st.card_crc32:08x}; installing: "
-                  "kernel7.img -> kernel7.old, kernel7.new -> kernel7.img", flush=True)
+                  "kernel7.new -> kernel7.img (no previous kernel kept)", flush=True)
         if phase in ("WRITING", "VERIFYING") and st.done > 0:
             step = st.done * 4 // max(1, st.image_size)  # quarters
             if shown.get(phase) != step:
@@ -487,7 +487,7 @@ def cmd_update(args: argparse.Namespace, hl: HostLink) -> int:
         _release(hl)
         return EXIT_ERR
     print(f"update: DONE: kernel7.img on the SD card is the new kernel ({st.image_size} bytes, crc32 "
-          f"{st.card_crc32:08x} read back); the previous one is kernel7.old", flush=True)
+          f"{st.card_crc32:08x} read back)", flush=True)
     print("update: the mind is rebooting into it", flush=True)
     hl.wait_closed(REBOOT_CLOSE_WAIT_S)
     hl.close()

@@ -68,7 +68,7 @@ while IFS= read -r name; do
 	bootcode.bin|start*.elf|fixup*.dat|config.txt|kernel*.img|armstub*.bin|*.dtb) ;;
 	LICENCE.broadcom|COPYING.linux) ;;
 	body.bin|body.json) ;;  # the body image, `kilo flash --sd` (kernel/mind/README.md "Flashing")
-	kernel7.old|kernel7.new) ;;  # `kilo update --host`: the previous kernel, an unfinished write
+	kernel7.old|kernel7.bad|kernel7.new) ;;  # left from earlier updates and recovery advice, an unfinished write
 	"System Volume Information"|.Trashes|.fseventsd|.Spotlight-V100) ;;
 	*) bad="$bad '$name'" ;;
 	esac

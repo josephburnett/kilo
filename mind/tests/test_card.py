@@ -1,6 +1,7 @@
 """`kilo card PATH` (kilo.cli_card) against a temporary directory standing for
-Kilo's SD card: which folders it takes, the kernel and the body written with
-kernel7.old kept and body-result.txt removed, the checks before (the marker,
+Kilo's SD card: which folders it takes, the kernel and the body written (no
+previous kernel kept: a kernel7.old or kernel7.bad found is removed) and
+body-result.txt removed, the checks before (the marker,
 this laptop's key, build options), the builds it runs, --status reading what
 the mind wrote (kernel/mind/flash/cardflash.h), and --fetch copying the
 flight recorder's files in the network fetch's layout. The mind's side is
@@ -82,27 +83,29 @@ def test_check_card_refusals(tmp_path):
 def test_write_kernel_and_body(tmp_path, no_key, capsys):
     card = make_card(tmp_path)
     (card / "body-result.txt").write_text("kilo-body-result 1\noutcome: failed\nimage: none\n")
+    (card / "kernel7.old").write_bytes(b"previous")  # left by an update before 2026-11-22
+    (card / "kernel7.bad").write_bytes(b"bad")       # the old recovery advice's name
     kernel = tmp_path / "kernel7.img"
     kernel.write_bytes(b"new " + MARK + b"\1" * 5000)
     body, m = body_files(tmp_path)
     assert kcard(str(card), "--force-dir", "--kernel", str(kernel), "--image", str(body)) == 0
     out, err = capsys.readouterr()
     assert (card / "kernel7.img").read_bytes() == kernel.read_bytes()
-    assert (card / "kernel7.old").read_bytes().startswith(b"old ")
+    assert not (card / "kernel7.old").exists() and not (card / "kernel7.bad").exists()
     assert not (card / "kernel7.new").exists()
     assert (card / "body.bin").read_bytes() == body.read_bytes()
     assert BI.Manifest.from_json((card / "body.json").read_text()) == m
     assert not (card / "body-result.txt").exists()
     assert "removed body-result.txt (it said: failed, none)" in out
-    assert "the previous one is kernel7.old" in out
+    assert "removed kernel7.old and kernel7.bad" in out
     assert f"compares body.json (build {m.build:08x})" in out and f"kilo card {card} --status" in out
     assert "this laptop has no key" in err  # a warning, not a refusal
 
-    # Again with the same kernel: left alone, kernel7.old not touched.
+    # Again with the same kernel: left alone, a kernel7.old left from before removed all the same.
     (card / "kernel7.old").write_bytes(b"older")
     assert kcard(str(card), "--force-dir", "--kernel", str(kernel), "--no-body") == 0
     assert "already this image" in capsys.readouterr().out
-    assert (card / "kernel7.old").read_bytes() == b"older"
+    assert not (card / "kernel7.old").exists() and (card / "kernel7.img").read_bytes() == kernel.read_bytes()
 
 
 def test_kernel_checks(tmp_path, host_key, capsys):

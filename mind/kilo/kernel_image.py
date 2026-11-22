@@ -13,8 +13,11 @@ REPO_DIR = Path(__file__).resolve().parents[2]
 KERNEL_DIR = REPO_DIR / "kernel"
 # The mind kernel `make -C kernel` builds in this checkout: the default image of both.
 DEFAULT_KERNEL = KERNEL_DIR / "build" / "kernel7.img"
-# On the card: the kernel the Pi boots, the one being written, the one before.
-KERNEL_FILE, KERNEL_NEW, KERNEL_OLD = "kernel7.img", "kernel7.new", "kernel7.old"
+# On the card: the kernel the Pi boots and the one being written. No previous kernel is kept (the
+# owner, 2026-11-22: "This is all in Git"): KERNEL_STALE are the names earlier updates and the old
+# recovery advice left (the previous kernel, the one renamed away), removed when a kernel is written.
+KERNEL_FILE, KERNEL_NEW = "kernel7.img", "kernel7.new"
+KERNEL_STALE = ("kernel7.old", "kernel7.bad")
 
 
 def has_marker(image: bytes) -> bool:

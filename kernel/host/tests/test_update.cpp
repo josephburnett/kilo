@@ -1,7 +1,8 @@
 // The kernel updater (update/updater.h) against an in-memory card
-// (tests/fake_store.h): a good image installed (kernel7.old kept, slices
-// bounded), the checks at commit (bad size, out of order, short, bad CRC,
-// no marker, FORCE), and every store failure: before the renames the card's
+// (tests/fake_store.h): a good image installed (no previous kernel kept:
+// kernel7.old only for the swap, kernel7.bad removed too; slices bounded),
+// the checks at commit (bad size, out of order, short, bad CRC, no marker,
+// FORCE), and every store failure: before the renames the card's
 // kernel7.img is untouched and kernel7.new removed; a failed last rename
 // puts the old kernel back, and only if that fails too is the card broken.
 // The host channel's UPDATE_* are tested in test_flash.cpp (with a flasher,
@@ -46,6 +47,7 @@ struct Rig {
   Rig() {
     store.files["kernel7.img"] = {'O', 'L', 'D'};
     store.files["kernel7.old"] = {'S', 'T', 'A', 'L', 'E'};
+    store.files["kernel7.bad"] = {'B', 'A', 'D'};
     store.files["config.txt"] = {'k'};
   }
   void send(const std::vector<uint8_t>& d, uint32_t chunk = 200) {
@@ -80,7 +82,7 @@ void test_good_image() {
   CHECKF(r.up.status().phase == KILO_UPDATE_PHASE_DONE, "phase %u error %u", r.up.status().phase,
          r.up.status().error);
   CHECK(r.file("kernel7.img") == d);
-  CHECK(r.store.text("kernel7.old") == "OLD");  // the previous kernel kept, the stale one gone
+  CHECK(!r.store.has("kernel7.old") && !r.store.has("kernel7.bad"));  // no previous kernel kept
   CHECK(!r.store.has("kernel7.new") && r.store.text("config.txt") == "k");
   const KernelUpdater::Status& s = r.up.status();
   CHECK(s.received == 100000 && s.size == 100000 && s.crc32 == crc32(d.data(), 100000) && s.card_crc32 == s.crc32);
@@ -92,9 +94,9 @@ void test_good_image() {
          r.store.writes, r.store.max_write);
   CHECKF(r.passes >= 14 && r.passes <= 17, "%u passes", r.passes);
   // The renames only after the read-back, in this order.
-  std::vector<std::string> tail(r.store.ops.end() - 4, r.store.ops.end());
-  std::vector<std::string> want_ops = {"remove kernel7.old", "rename kernel7.img kernel7.old",
-                                       "rename kernel7.new kernel7.img", "sync"};
+  std::vector<std::string> tail(r.store.ops.end() - 6, r.store.ops.end());
+  std::vector<std::string> want_ops = {"remove kernel7.old", "remove kernel7.bad", "rename kernel7.img kernel7.old",
+                                       "rename kernel7.new kernel7.img", "remove kernel7.old", "sync"};
   CHECK(tail == want_ops);
   CHECK(r.log.has("update: installed: kernel7.img is the new kernel"));
   CHECK(!r.up.busy());
@@ -107,7 +109,7 @@ void test_no_old_kernel() {
   std::vector<uint8_t> d = kernel_image(5000, 0);
   CHECK(r.install(d) == KILO_UPDATE_ERROR_NONE && r.up.status().phase == KILO_UPDATE_PHASE_DONE);
   CHECK(r.file("kernel7.img") == d && !r.store.has("kernel7.old"));
-  CHECK(r.log.has("no kernel7.img on the card to keep"));
+  CHECK(r.log.has("no kernel7.img on the card"));
 }
 
 void test_checks() {

@@ -14,9 +14,11 @@ builds it: arduino-cli, the size harness, body.bin and body.json), checks
 the kernel (the mind kernel's marker; this laptop's public key built in, if
 it has a key), then on the card:
 
-- ``kernel7.new`` written and read back, ``kernel7.old`` removed,
-  ``kernel7.img`` renamed to ``kernel7.old``, ``kernel7.new`` to
-  ``kernel7.img``: what ``kilo update --host`` has the mind do;
+- ``kernel7.new`` written and read back, then renamed over
+  ``kernel7.img``; a ``kernel7.old`` or ``kernel7.bad`` left from earlier
+  removed: no previous kernel is kept (a kernel that misbehaves is
+  replaced by building the wanted commit and writing it again; docs/laptop-
+  setup.md). What ``kilo update --host`` has the mind do;
 - ``body.json`` removed, ``body.bin`` written and read back, ``body.json``
   written last (so a manifest never pairs with half an image), and
   ``body-result.txt`` removed: at the next boot the mind decides afresh
@@ -33,7 +35,7 @@ decode FILE``.
 
 A PATH that does not look like Kilo's boot card is refused unless --force:
 it must hold kernel7.img and config.txt, no Raspberry Pi OS files, and some
-sign of Kilo (a mind kernel, kilorec/, body.json, kernel7.old).
+sign of Kilo (a mind kernel, kilorec/, body.json, body-result.txt).
 """
 
 from __future__ import annotations
@@ -51,7 +53,7 @@ from typing import Any, Callable
 
 from kilo import EXIT_ERR, EXIT_OK
 from kilo import kernel_image as KI
-from kilo.kernel_image import DEFAULT_KERNEL, KERNEL_DIR, KERNEL_FILE, KERNEL_NEW, KERNEL_OLD, has_marker
+from kilo.kernel_image import DEFAULT_KERNEL, KERNEL_DIR, KERNEL_FILE, KERNEL_NEW, KERNEL_STALE, has_marker
 from kilo.log import DEFAULT_DIR_TEXT
 from kilo.protocol import kilo_protocol as P
 from kilo.tools.body_image import IMAGE_FILE, MANIFEST_FILE
@@ -80,7 +82,7 @@ def add_parser(sub: Any) -> None:
         description="PATH is Kilo's SD card (its FAT boot partition) mounted on this laptop. Without --status or "
                     "--fetch: build the mind kernel (make -C kernel, with the NAME=VALUE options, e.g. "
                     "KILO_REAR_UP=1) and the body firmware (as kilo flash does), check them, and copy them onto "
-                    "the card with read-back: kernel7.img (the previous one kept as kernel7.old) and body.bin + "
+                    "the card with read-back: kernel7.img (no previous one kept) and body.bin + "
                     "body.json. At its next boot the Pi runs the new kernel, which flashes the body if the body "
                     "runs another build and writes what happened to body-result.txt. --status reads that, the "
                     "saved log and the recordings; --fetch copies the recordings to ~/kilo-logs.")
@@ -155,8 +157,7 @@ def check_card(path: Path, force: bool, force_dir: bool = False) -> list[str]:
     if pi_os:
         problems.append(f"{path} has {' and '.join(pi_os)}: a Raspberry Pi OS card, not Kilo's")
     if not missing:
-        signs = [(path / REC_DIR).is_dir(), (path / MANIFEST_FILE).exists(), (path / KERNEL_OLD).exists(),
-                 (path / RESULT_FILE).exists()]
+        signs = [(path / REC_DIR).is_dir(), (path / MANIFEST_FILE).exists(), (path / RESULT_FILE).exists()]
         if not any(signs):
             try:
                 with open(path / KERNEL_FILE, "rb") as f:
@@ -165,7 +166,7 @@ def check_card(path: Path, force: bool, force_dir: bool = False) -> list[str]:
                 pass
         if not any(signs):
             problems.append(f"{path}/{KERNEL_FILE} is not Kilo's mind kernel and the card has no {REC_DIR}/, "
-                            "body.json or kernel7.old: not Kilo's card? (the netboot loader's card: --force)")
+                            "body.json or body-result.txt: not Kilo's card? (the netboot loader's card: --force)")
     if problems and not force:
         raise CardError("; ".join(problems) + "; refusing (--force to write anyway)")
     return problems
@@ -195,18 +196,20 @@ def _sync() -> None:
 
 
 def install_kernel(card: Path, data: bytes, say: Callable[[str], None]) -> bool:
-    """kernel7.img := data, the old one kept as kernel7.old. False if it was already there."""
-    img, new, old = card / KERNEL_FILE, card / KERNEL_NEW, card / KERNEL_OLD
+    """kernel7.img := data: kernel7.new written and read back, then renamed over kernel7.img; a
+    kernel7.old or kernel7.bad left from earlier removed (no previous kernel is kept). False if it was
+    already there."""
+    img, new = card / KERNEL_FILE, card / KERNEL_NEW
+    stale = [n for n in KERNEL_STALE if (card / n).exists()]
+    for n in stale:
+        (card / n).unlink()
+    gone = f"; removed {' and '.join(stale)}" if stale else ""
     if img.is_file() and img.read_bytes() == data:
-        say(f"kernel: {img} is already this image ({len(data)} bytes); left as it is")
+        say(f"kernel: {img} is already this image ({len(data)} bytes); left as it is{gone}")
         return False
     write_verified(new, data)
-    if img.exists():
-        old.unlink(missing_ok=True)
-        os.replace(img, old)
     os.replace(new, img)
-    say(f"kernel: wrote {img} ({len(data)} bytes, crc32 {zlib.crc32(data):08x}, read back)"
-        + ("; the previous one is kernel7.old" if old.exists() else ""))
+    say(f"kernel: wrote {img} ({len(data)} bytes, crc32 {zlib.crc32(data):08x}, read back){gone}")
     return True
 
 
@@ -347,7 +350,7 @@ def next_boot_text(plan: Plan, built_kernel: bool) -> list[str]:
     if plan.kernel is not None:
         build = kernel_build_id() if built_kernel else None
         out.append("- the Pi starts the new mind kernel" + (f" (build {build})" if build else "")
-                   + "; the previous one stays on the card as kernel7.old.")
+                   + " (no previous kernel is kept: to go back, build that commit and write it).")
     if plan.body is not None:
         m = plan.body[1]
         out.append(f"- about 3 s in, the mind compares body.json (build {m.build:08x}) with the build the body "
@@ -415,7 +418,8 @@ def status_lines(card: Path, lines: int = 40) -> list[str]:
         data = img.read_bytes()
         out.append(f"kernel7.img: {len(data)} bytes, crc32 {zlib.crc32(data):08x}, "
                    + ("the mind kernel" if has_marker(data) else "NOT the mind kernel (the netboot loader?)")
-                   + ("; kernel7.old is the one before" if (card / KERNEL_OLD).exists() else ""))
+                   + "".join(f"; {n} is left from before (the next write removes it)" for n in KERNEL_STALE
+                             if (card / n).exists()))
     else:
         out.append("kernel7.img: MISSING: the Pi cannot boot this card")
     man = None
