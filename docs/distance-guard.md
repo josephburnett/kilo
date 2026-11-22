@@ -160,7 +160,7 @@ reading, not a missed echo. And no echo right after something closer than
 
 | Gait, level | Speed | Blue below (before 2026-11-19) | The quick stop's own way: planner / the guard allows | Stopped short of the wall (simulated, clean / noisy) |
 |---|---|---|---|---|
-| walk +5 | 96.8 mm/s | 200 mm (206) | 5 / 17 mm | 166 / 166 mm |
+| walk +5 | 72.5 mm/s (96.8 until 2026-11-22) | 200 mm (206) | 4 / 12 mm | 174 / 180 mm |
 | trot +4 | 180 mm/s | 200 mm (since 2026-11-22) | 10 / 28 mm | 150 / 136 mm |
 | trot +5 | 201.6 mm/s | 215 mm | 11 / 34 mm | 156 / 156 mm |
 | crawl +5 | 26.9 mm/s | 200 mm (200) | 10 / 20 mm | 196 / 192 mm |

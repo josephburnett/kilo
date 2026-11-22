@@ -126,10 +126,13 @@ def test_the_balance_loop_holds_on_three_feet():
 def test_the_fast_gaits_stay_up(pattern):
     sim = WalkSim(pattern)
     assert sim.run(TICKS) == TICKS
-    # the trot 2.5 deg at 144 mm/s, the walk 3.7 at 80 (on three feet for 60 ms with a fore leg up)
+    # the trot 2.5 deg at 144 mm/s, the walk (since 2026-11-22: always on three feet or four) 0.8 at 58
     assert not sim.fell() and sim.vb.max_tilt < 4.5 and sim.max_error() < 4.5
     two = [t for t in sim.gait() if bin(t.support).count("1") == 2]
-    assert two and all(t.support in (0b0101, 0b1010) for t in two)  # diagonal pairs: LF+RB, RF+LB
+    if pattern == "trot":
+        assert two and all(t.support in (0b0101, 0b1010) for t in two)  # diagonal pairs: LF+RB, RF+LB
+    else:
+        assert not two
     three = [t for t in sim.gait() if bin(t.support).count("1") == 3]
     assert bool(three) == (pattern == "walk")
 
@@ -210,8 +213,8 @@ def test_a_turn_in_place_then_straight_steering_then_stop(pattern):
     once, A6 A6 A6 steering left as tight as it goes, C6 x6 to the right,
     a gait change (the walk and the trot directly), B5 into backward, then
     the planned stop: all in one walk, up, near the plan, the straight walk
-    reached within 0.7 s of B7 (the trot, its strides 0.75 mm a tick: 1.4 s),
-    and the stop inside stop_timeout."""
+    reached within 1.4 s of B7 (the trot, its strides 0.75 mm a tick; the
+    walk: 1.6 s), and the stop inside stop_timeout."""
     from kilo.planner.walker import stop_timeout
     sim = WalkSim(pattern, "left")
     other = "trot" if pattern == "walk" else "walk"
@@ -235,9 +238,12 @@ def test_a_turn_in_place_then_straight_steering_then_stop(pattern):
             p.stop()
     n = sim.run(1400, each=each)
     assert sim.stream.ended == "stopped" and sim.stream.ok and not sim.fell()
-    assert reached["fwd"] * 20 < (1400 if pattern == "trot" else 700) and sim.planner.pattern.name == other
+    assert reached["fwd"] * 20 < (1600 if pattern == "walk" else 1400) and sim.planner.pattern.name == other
     assert (n - 850) * 0.02 < stop_timeout(sim.planner.timing().period_ms) - 1.0
-    assert sim.max_error() < 4.5 and sim.planner.stats["catches"] == 0 and sim.planner.stats["holds"] == 0
+    # the trot into the walk through the way home (2026-11-22) with the trot's slower strides: 4.5 in
+    # the virtual body, within the trot's straight-walk bound (5)
+    assert sim.max_error() < (5.0 if pattern == "trot" else 4.5) and sim.planner.stats["catches"] == 0 \
+        and sim.planner.stats["holds"] == 0
     assert sim.vb.feet_underruns == 0 and not sim.vb.feet_refused
 
 
@@ -297,7 +303,9 @@ def test_speed_and_gait_changes_mid_walk_stay_up():
             switched.pop("crawl", None)
     assert sim.run(1800, each=each) == 1800
     assert not sim.fell() and sim.max_error() < 6.5, sim.max_error()
-    assert switched["trot"] - 1000 < 30 and switched["walk"] - 1200 < 120  # direct: 0.6 s, 2.4 s at most
+    # between the walk and the trot through the legs' way home (since 2026-11-22): into the trot 2.2 s at
+    # most; out of the trot's long swing (184 mm/s: its strides shrink 0.75 mm a tick) WALKBACK
+    assert switched["trot"] - 1000 < 110 and switched["walk"] - 1200 < 120
     assert sim.planner.pattern.name == "crawl" and sim.planner.stats["catches"] == 0
     assert sim.vb.feet_underruns == 0 and not sim.vb.feet_refused
 

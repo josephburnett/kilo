@@ -904,7 +904,8 @@ check(abs(e["meas_mean_pitch"] - 4.0) < 1e-6 and abs(e["meas_mean_roll"] + 3.0) 
 check(abs(e["offset_pitch"] - (4.0 - e["pred_mean_pitch"])) <= 0.011 and
       abs(e["offset_roll"] - (-3.0 - e["pred_mean_roll"])) <= 0.011, "offset = measured - predicted, on average")
 check(e["rms_pitch"] >= abs(e["offset_pitch"]) - 0.01 and e["rms_roll"] >= abs(e["offset_roll"]) - 0.01, "rms >= |offset|")
-check({"RF+LB", "LF+RB"} <= set(s["by_phase"]), f"the walk's diagonal couplets: {sorted(s['by_phase'])}")
+check({"LB", "LF", "RB", "RF"} <= set(s["by_phase"]) and not {"RF+LB", "LF+RB"} & set(s["by_phase"]),
+      f"the walk's legs one at a time: {sorted(s['by_phase'])}")
 check(s["ticks_sent"] == int(res["sent"]) and int(res["skipped"]) == 0 and int(res["underruns"]) == 0, "the stream's counters")
 check(lag["model_ms"] == 50.0 and float(s["model"]["servo_tau_ms"]) == 70.0, "the model's servo response recorded")
 check("none" in s["by_phase"] and len({"LF", "RF", "RB", "LB"} & set(s["by_phase"])) >= 3,

@@ -100,7 +100,7 @@ constexpr double kStopGapMm = 100;        // left between the sensor and the obs
 constexpr double kReactS = 0.40;          // reading (80 ms + the median's 80 ms), link, the re-planned FEET
                                           //   (40 ms), the servos (120 ms), and a margin
 constexpr double kDecelWalkMmS2 = 400;    // the quick stop's deceleration, by gait: its way (the support feet's
-constexpr double kDecelTrotMmS2 = 700;    //   travel from the halt; test_guard prints it: walk 97 mm/s 5 mm, trot
+constexpr double kDecelTrotMmS2 = 700;    //   travel from the halt; test_guard prints it: walk 72.5 mm/s 4 mm, trot
                                           //   230 13 mm) at least doubled: the floor may need the room
 constexpr double kStopSlackMm = 5;        // ... plus this (the swing that lands, at any speed)
 constexpr double kCrawlStopMm = 20;       // the crawl's: its lean (up to 18 mm fore and aft) as the legs square up

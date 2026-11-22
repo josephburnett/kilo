@@ -504,6 +504,9 @@ error at the lift (the gate holds) and as catches.
 
 ## 12. Walking faster, from the first recordings (2026-11-16)
 
+*The walk of this section (diagonal couplets) was replaced on 2026-11-22
+by the lateral-sequence walk of §16; the crawl and the trot parts stand.*
+
 The owner, after run 4 (docs/fast-boot-first-boot-results.md): "The trot was
 better. Could try faster. Cats can definitely walk faster than that." The
 walk and the crawl of §11 lean the whole body over three feet before every
@@ -1575,3 +1578,277 @@ how early the foot on the side he leans toward touches down. The walk's
 recording (the mind keeps every walk; `kilo runs --host IP --fetch all`)
 gives the sway: `stridesim.py fit` folds it against the fitted pendulum.
 Write what you saw in a results file (`docs/trot-results.md`).
+
+## 16. A smoother walk: the cat's lateral sequence (2026-11-22)
+
+The owner: "I want you to research a smoother walk, less stutter
+stepping", and then: "you can even *replace* the current walk with the new
+experimental walk. I would prefer that." So the walk on C4 (and in the
+behaviours, the distance guard and `kilo walk --pattern walk`) is now the
+walk of this section; the walk of §12 (diagonal couplets) is gone from the
+code. `mind/tests/walkstudy.py` is the study; it keeps the old walk only
+as its baseline (`OLD_WALK`).
+
+**[measured]** marks numbers from the floor recordings of the old walk
+(`~/kilo-logs`, runs of 2026-11-16 to 11-21), **[model]** what the body
+model says about a plan, **[virtual body]** the simulators. The new walk
+has never walked on the floor.
+
+### 16.1 What the stutter is, in numbers
+
+`walkstudy.py floor` reads every recording with the walk in it (13 runs,
+copies counted once) and folds the straight forward walks at 80 mm/s (16
+cycles, after 0.8 s at the speed) by the walk's 24-tick cycle.
+
+What it is **not** [measured]:
+
+- **Not the balance layer.** 0 gate holds, 0 catches, 0 waits in every
+  walk run: the plan never paused a lift.
+- **Not the stream.** 0 FEET underruns; every FEET frame reached the body
+  80 to 108 ms before its tick; the body's queue held 1 to 4 ticks; every
+  cycle was exactly 24 ticks (480 ms). Nothing stopped and started.
+
+What it **is**:
+
+| measure | the old walk at 80 mm/s | source |
+|---|---|---|
+| footfalls | in pairs: a hind foot, then its diagonal fore foot 60 ms later, then 180 ms of nothing ("da-dum ... da-dum"), 8.4 footfalls a second | the plan |
+| stride | 24.8 mm, a fifth of the body's length | the plan |
+| time on two feet | a third of every cycle (8 ticks of 24), on a diagonal line | the plan |
+| the centre of mass with a fore leg up | 6.8 mm outside the three feet (7.5 at the top speed) | [model] |
+| the body's roll | 4.8° from side to side every cycle (sd 0.3° over 16 cycles); the plan predicted a flat body | [measured] |
+| fastest roll | 73°/s, in the two ticks after the left fore foot comes down | [measured] |
+| roll and pitch rate, rms | 36°/s | [measured] |
+| pitch | 1.9° up and down every cycle | [measured] |
+
+Read [inferred]: short, quick, uneven steps (the paired footfalls), with
+the body dropping toward the side whose feet are in the air while it stands
+on two feet or has its weight outside three, and snapping back when the
+next foot lands. That is what "stutter stepping" is in the data. The rock
+is very regular (sd 0.3°): it is the gait, not the floor or the servos
+having a bad moment.
+
+### 16.2 What a smoother walk is for this body (the research)
+
+**[E]** established (peer-reviewed or a textbook), **[R]** reasoned here
+from the body model.
+
+- **The lateral sequence keeps the weight inside the feet** [E]: of the
+  orders four legs can step in one at a time, the lateral sequence (a hind
+  foot, then the fore foot on the same side, then the other side: LB, LF,
+  RB, RF), evenly spaced, has the largest margin of static stability
+  (McGhee & Frank 1968, Math Biosci 3:331; it is the crawl's order too).
+  Cats walk in it (Hildebrand 1965, Science 150:701). Evenly spaced
+  footfalls are Hildebrand's "single-foot": every quarter cycle one foot
+  lands.
+- **Duty factor** [E]: with a duty factor (the share of the cycle a foot is
+  down) of 0.75 or more, no more than one foot is ever up. Under 0.75 there
+  are two-foot phases, which is where the old walk (0.67) rocked. The new
+  walk: 0.77.
+- **Where the feet stand** [R]: a foot spends its stance sliding from half
+  a stride ahead of its landing point to half a stride behind. If that
+  range is centred on the shoulders while the centre of mass is 7.4 mm
+  ahead of them (the model at the walk's height), each fore leg's swing
+  carries the weight toward the front diagonal edge (0.47 mm of margin lost
+  per mm). Centring the strides under the centre of mass (each foot lands
+  half a stride plus 7.4 mm ahead of its shoulder) makes the hind and fore
+  swings alike.
+- **What then limits the margin** [R]: at the hand-over from a fore leg to
+  the other side's hind leg (LF to RB, RF to LB) both swings rest on the
+  same diagonal edge from opposite sides, so the centre of mass is on that
+  edge at that instant: the margin is about 0 there whatever else is done,
+  and positive (up to 8 mm) at every other tick. Only longer four-foot time
+  lets the weight cross the diagonal with room to spare, which is the crawl
+  (slow, §11).
+- **Body sway, tried and dropped** [R, virtual body]: rolling the body away
+  from the swinging side (2 to 5°, in time with the cycle) gains at most
+  1 mm at the hand-over by the model; in the planner it made the margin
+  worse at every phase tried (-0.7 to -2.8 mm) and the roll 2 to 7 times
+  larger in the virtual body. A fore-aft surge (the body forward for hind
+  swings, back for fore swings) would make the body speed up and slow down
+  twice a cycle by about its own speed: stop-and-go, the opposite of
+  smooth. Neither is in the walk.
+- **A longer, slower step** [E, R]: cats lengthen the stride and keep the
+  swing about the same as they speed up (Goslow, Reinking & Stuart 1973).
+  Kilo's swing is limited by the servos (the body's 500°/s slew, §15.2): a
+  220 ms swing (11 ticks) carries a 54 mm stride with the lift tapered to
+  6 mm at 452°/s, about the trot's top.
+
+### 16.3 The walk as built
+
+| | the old walk (§12) | the walk (since 2026-11-22) |
+|---|---|---|
+| order | LB+RF, then RB+LF (the fore leg 60 ms after the hind) | LB, LF, RB, RF, one at a time (forward and backward) |
+| footfalls | pairs 60 ms apart, 180 ms between pairs | one every 240 ms, evenly |
+| swing | 150 ms (8 ticks) | 220 ms (11 ticks) |
+| four feet down | 1 tick between pairs | 1 tick between swings |
+| cycle | 460 ms (480 in ticks) | 960 ms |
+| feet on the ground | 2 to 4 | 3 or 4 |
+| duty factor | 0.67 | 0.77 |
+| where a foot lands | half a stride ahead of its shoulder | half a stride + 7.4 mm (the model's centre of mass) |
+| lift | 8 mm | 8 mm, tapering to 6 mm from a 40 to a 54 mm stride |
+| stride | 8 to 30 mm | 8 to 54 mm |
+| speeds | 26 to 97 mm/s, default 80 | 11 to 73 mm/s, default 58 |
+| remote levels 1..5 (C4) | 32, 56, 80, 92, 97 | 23.2, 40.6, 58, 66.7, 72.5 |
+| strides change | 1.5 mm a tick | 1.0 mm a tick (the stride builds up over about a cycle) |
+| to and from the trot | directly, at the next slot | through the legs' way home |
+
+The centre comes from `BodyModel.stance_com` (C++: `com()` at the walk's
+height), so when a self-measurement moves the model's centre of mass the
+walk's feet move with it. It moves 0.5 mm a tick toward its target, 0 once
+stopping or changing gait, so a stop still squares the legs under the
+shoulders. Everything else is the planner of §10 to §14: the fixed
+cadence (the body's balance loop never acts), the gate and the catch, the
+planned and the quick stop, steering, the turn in place.
+
+**A change between the walk and the trot now goes through the legs' way
+home** (the strides to 0, each leg steps under its shoulder, then the new
+gait starts), as a change into the crawl always has. Directly, the trot's
+pairs picked up the walk's feet spread over four phases and a foot waited
+a slot too long: up to 60 mm behind its shoulder, out of the leg's reach.
+
+### 16.4 The margins, and how much they depend on the model
+
+The smallest margin of the centre of mass inside the support while a leg
+is up, over 8 s of walking (`walkstudy.py margins`; [model]). The columns
+after "model" move the real centre of mass (or the feet) against the
+plan's model: the first self-measurement put the centre of mass 3.1 mm
+further back (4.3 mm ahead of the shoulders, not 7.4) and the feet 133 x
+69 mm apart, not 123 x 65 (docs/self-measurement-results.md; neither is in
+the model yet).
+
+| walk | speed | stride | cycle | footfall gaps | footfalls/s | on two feet | min margin, model | CoM 3.1 mm back | CoM 5 mm ahead | CoM 3 mm to the right | feet 133 x 69 | fastest joint |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| old | 32 | 9.9 | 460 ms | 60/180 ms | 8.4 | 34 % | -4.8 | -3.4 | -7.1 | -7.5 | -4.8 | 297°/s |
+| old | 56 | 17.4 | 460 ms | 60/180 ms | 8.4 | 34 % | -5.9 | -4.5 | -8.2 | -8.6 | -5.9 | 308°/s |
+| old | 80 | 24.8 | 460 ms | 60/180 ms | 8.4 | 34 % | -6.8 | -5.4 | -9.1 | -9.5 | -6.7 | 362°/s |
+| old | 97 | 30.0 | 460 ms | 60/180 ms | 8.4 | 34 % | -7.5 | -6.1 | -9.7 | -10.1 | -7.4 | 364°/s |
+| new | 23 | 17.2 | 960 ms | 240 ms | 4.1 | 0 % | -0.1 | -1.0 | -2.5 | -2.7 | -0.1 | 303°/s |
+| new | 41 | 30.0 | 960 ms | 240 ms | 4.1 | 0 % | +0.4 | -0.5 | -2.1 | -2.2 | +0.4 | 333°/s |
+| new | 58 | 42.9 | 960 ms | 240 ms | 4.1 | 0 % | +0.4 | -0.5 | -2.2 | -2.2 | +0.4 | 353°/s |
+| new | 67 | 49.4 | 960 ms | 240 ms | 4.1 | 0 % | +0.4 | -0.0 | -2.2 | -2.2 | +0.3 | 386°/s |
+| new | 73 | 54.0 | 960 ms | 240 ms | 4.1 | 0 % | +0.6 | +0.0 | -2.0 | -2.0 | +0.6 | 436°/s |
+
+Backward and turning in place (each walk in its one order; [model]):
+
+| walk | direction | speed | min margin | fastest joint |
+|---|---|---|---|---|
+| old | backward | 80 mm/s | -1.2 mm | 362°/s |
+| old | turning left in place | 80 mm/s | -4.1 mm | 316°/s |
+| new | backward | 58 mm/s | -5.7 mm | 353°/s |
+| new | turning left in place | 58 mm/s | -2.6 mm | 361°/s |
+| old | backward | 40 mm/s | -2.5 mm | 300°/s |
+| old | turning left in place | 40 mm/s | -3.8 mm | 297°/s |
+| new | backward | 40 mm/s | -4.1 mm | 333°/s |
+| new | turning left in place | 40 mm/s | -2.0 mm | 324°/s |
+
+Read: walking forward the new walk keeps the centre of mass inside the
+three feet by the model (closest, 0.1 mm outside to 0.6 inside, at the
+hand-over); the old walk had it 4.8 to 7.5 mm outside for 60 ms of every
+step and stood on two feet a third of the time. A centre of mass 3 mm off
+sideways or 5 mm further forward than the model costs about 2.5 mm: still
+2 to 3 times less outside than the old walk with the exact model. The
+self-measurement's centre of mass (3.1 mm back) costs under 1 mm; the wider
+feet nothing.
+
+**Backward** the lateral sequence becomes, relative to the direction of
+travel, the diagonal sequence, and its margin is like or worse than the
+old walk's (-4.1 mm at the distance guard's 40 mm/s against the old -2.5).
+A separate backward order (the time reverse, LB, RF, RB, LF) gives
+backward the forward margins, but in the planner its change of order at a
+direction change (B5 from a turn, the guard turning a walk backward) left
+a foot on the ground for two extra swings, up to 56 mm forward, with
+joints at 700°/s. It was dropped; the owner may want it back with a
+proper change-over (16.6).
+
+### 16.5 In the virtual body
+
+`walkstudy.py compare` ([virtual body]): 8 s of walking after 3 s of
+build-up; the roll's swing per cycle, the fastest roll and pitch rates and
+the rate rms (the measures of 16.1); the error against the prediction; the
+worst over the model errors (the centre of mass 3.1 mm back, 5 mm ahead,
+3 mm right, the wide feet, the servos slower and faster). Three physics:
+the virtual body's own (Physics), and the long-trot study's RockingPhysics
+(§15.3), which needs the mass this far inside three feet before they hold
+it (`inset_mm`): the study's 10 mm, and 3 mm.
+
+| walk | speed | physics | roll swing per cycle | fastest roll | fastest pitch | rate rms | error rms (roll) | largest error | worst of the model errors | holds / catches / falls (all cases) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| old | 80 | Physics | 3.51° | 55°/s | 32°/s | 21.2°/s | 1.79° | 3.7° | 4.3° | 1 / 0 / 0 |
+| old | 80 | RockingPhysics, 10 mm | 5.68° | 67°/s | 55°/s | 35.5°/s | 2.19° | 4.0° | 4.9° | 0 / 0 / 0 |
+| old | 80 | RockingPhysics, 3 mm | 3.74° | 54°/s | 62°/s | 28.4°/s | 1.96° | 3.6° | 3.9° | 1 / 0 / 0 |
+| new | 58 | Physics | 1.38° | 14°/s | 6°/s | 4.9°/s | 0.49° | 0.7° | 1.9° | 0 / 0 / 0 |
+| new | 58 | RockingPhysics, 10 mm | 5.87° | 80°/s | 46°/s | 28.6°/s | 1.38° | 4.6° | 4.6° | 0 / 0 / 0 |
+| new | 58 | RockingPhysics, 3 mm | 1.25° | 14°/s | 7°/s | 6.2°/s | 0.32° | 0.6° | 3.1° | 0 / 0 / 0 |
+| new | 73 | Physics | 1.00° | 14°/s | 7°/s | 5.5°/s | 0.30° | 0.5° | 2.2° | 0 / 0 / 0 |
+| new | 73 | RockingPhysics, 10 mm | 4.06° | 58°/s | 65°/s | 24.7°/s | 0.88° | 2.2° | 4.4° | 0 / 0 / 0 |
+| new | 73 | RockingPhysics, 3 mm | 1.00° | 14°/s | 8°/s | 6.0°/s | 0.25° | 0.5° | 2.6° | 0 / 0 / 0 |
+| old | 32 | Physics | 2.40° | 51°/s | 31°/s | 17.1°/s | 0.97° | 1.6° | 3.6° | 0 / 0 / 0 |
+| old | 32 | RockingPhysics, 10 mm | 5.35° | 72°/s | 62°/s | 34.5°/s | 2.16° | 4.2° | 4.7° | 0 / 0 / 0 |
+| old | 32 | RockingPhysics, 3 mm | 2.60° | 44°/s | 63°/s | 28.1°/s | 2.36° | 3.6° | 4.1° | 0 / 0 / 0 |
+| new | 23.2 | Physics | 2.03° | 22°/s | 10°/s | 7.5°/s | 0.73° | 1.1° | 3.3° | 0 / 0 / 0 |
+| new | 23.2 | RockingPhysics, 10 mm | 5.91° | 64°/s | 33°/s | 26.9°/s | 1.66° | 3.2° | 5.2° | 0 / 0 / 0 |
+| new | 23.2 | RockingPhysics, 3 mm | 4.07° | 55°/s | 64°/s | 17.6°/s | 1.11° | 2.6° | 4.6° | 0 / 0 / 0 |
+
+**How to read it, honestly.** The physics disagree, and the answer turns
+on one thing nobody has measured: how far inside three feet the weight
+must be before the third foot carries it. RockingPhysics with 10 mm is the
+closest of the three to the old walk's floor numbers (roll swing 5.7°
+against the floor's 4.8, rate rms 35.5°/s against 36), and in it the new
+walk rocks about as much as the old one (a roll swing of 5.9° at 58 mm/s
+and 4.1° at 73, against 5.7°; its fastest roll 80 and 58°/s against 67;
+the rate rms 20 to 30 % lower): with 10 mm every three-foot phase of any
+walk faster than the crawl rocks on a diagonal. With 3 mm, or in Physics,
+the new walk at 58 and 73 mm/s rocks 3 to 5 times less than the old one
+(roll swing 1.0 to 1.4° against 3.5 to 3.7, fastest roll 14°/s against 54
+to 55, rate rms 5 to 6°/s against 21 to 28). At its slowest level (23
+mm/s) with 3 mm it rocks more than the old walk's slowest (4.1° against
+2.6): the short stride there leaves the weight close to the edges longer. The
+self-measurement leans to the softer end (half of its edge tests leaned
+slowly instead of tipping, and its one timed tip was 6 times slower than
+the model's), but that is a hint, not a measurement. What does not depend
+on the physics: the evenly spaced footfalls, never two feet, half as many
+steps, each nearly twice as long, and no fall, catch or gate hold in any
+case (the old walk: one hold).
+
+### 16.6 What changed for the rest of Kilo
+
+- **Speeds.** The walk is slower (top 73 mm/s, was 97; default 58, was
+  80). The trot covers 58 mm/s and up, so the ladder crawl 9-27, walk
+  23-73, trot 58-202 has no gap.
+- **Backward** works as before (B5 past level 1; the distance guard's
+  backing off at 40 mm/s), in the same order, but with less margin than
+  the old walk (-4.1 mm against -2.5 at 40 mm/s; 16.4).
+- **Turning in place** (A6 / C6 from standing after the walk) works; its
+  margin is better than the old walk's (-2.6 mm against -4.1).
+- **From a turn to straight** takes up to 1.6 s (was 0.7): the strides are
+  longer and change 1 mm a tick.
+- **To and from the trot** (A4 while walking, C4 while trotting): through
+  the legs' way home (16.3), 1.5 to 2 s from the walk into the trot and 0.4 to 0.9 s from the trot into the walk, instead of under a second.
+- **The quick stop** (B6, C7, the guard): the foot in the air comes down
+  where it is and the feet stop sliding within 0.12 s, as before. In the
+  virtual body (momentum on, from every fourth tick of a cycle, the stop as
+  the C++ mind replans it, `stopsim.py`) the body is still 0.77 s after the stop is asked at 58 mm/s (median; worst 1.18 s) and 0.80 s at 72.5 (worst 1.22), having moved 7 to 8.5 mm (worst 13), the largest tilt 4.3°, no fall; all four feet are squared up and he stands after 1.3 to 1.5 s. That
+  is slower than the old walk's 0.45 s because each leg then squares up in
+  the walk's 240 ms beat and the body settles a few mm with each; the way
+  it travels is no longer. The planned stop takes about 2 s.
+- **The crawl** shares nothing with the walk but the planner: unchanged.
+- **The guard** (docs/distance-guard.md) needs nothing new: its stopping
+  distance for the walk (400 mm/s² deceleration) covers the planner's way
+  (test_guard passes).
+
+### 16.7 What is measured, what is not, and the floor test
+
+- **Measured:** the old walk's rock and timing (16.1).
+- **Model:** the margins (16.4), from a centre of mass that the first
+  self-measurement puts 3 mm further back and feet it puts wider apart.
+- **Not measured:** whether the third foot holds the weight with the margin
+  near 0 at the hand-over (the RockingPhysics question of 16.5); whether
+  the servos follow a 220 ms swing with its 6 to 8 mm lift; foot slip on a
+  54 mm stride; how the walk looks.
+
+The first floor try is docs/walk-trial.md: the walk on C4 at its levels,
+with a side video. Its recording settles 16.5: `walkstudy.py floor` folds
+the new walk's cycles by its own 48-tick cycle as it folds the old one's
+(the same roll swing, fastest roll and rate rms), so the two walks can be
+compared on the floor number for number.

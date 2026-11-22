@@ -15,7 +15,8 @@ How a tick is made (docs/walking-and-balance.md §10):
   touchdown it slides with the ground). Feet on the ground slide back at their side's stride
   speed (stride / stance time); a swinging foot lifts on a cosine profile
   (step height at mid-swing, zero speed at lift-off and touchdown) from
-  where it left the ground to half a stride ahead of its shoulder. Speed and
+  where it left the ground to half a stride ahead of its shoulder (the walk:
+  plus the model's centre of mass, patterns.Pattern.centre_com). Speed and
   direction change the stride targets, which move at most the pattern's
   stride_slew_mm per tick (1.5 mm in the walk and the trot, 0.5 in the
   crawl), and the stance time, which moves at most 2 % per tick, with each slot's
@@ -105,6 +106,7 @@ Z_RANGE = (30, 95)    # FEET z_mm
 ATT_MAX_DEG = 30.0    # FEET pitch / roll (the body refuses a FEET beyond it: BAD_ARG ends the stream)
 HEIGHT_SLEW_MM = 0.5  # per tick
 RECENTRED_MM = 1.5    # a stopping leg this close to its target does not step again
+CENTRE_SLEW_MM = 0.5  # the strides' centre (patterns.Pattern.centre_com) moves at most this much a tick
 SWITCH_SLACK_MM = 4.0  # a pattern change: every foot within the new half stride plus this (_switch_ok)
 STANCE_SLEW = 0.02    # the stance time (and with it the feet's slide) changes at most 2 % per tick
 LEAN_UNITS_PER_TICK = 4  # units of a lean solve (Planner._solve_steps) per tick
@@ -268,6 +270,7 @@ class Planner:
         self.h = model.stance_height(P.GAIT_STANCE_H_256) if start_height is None else float(start_height)
         self.s_cur = [0.0, 0.0]      # stride now, left and right
         self.s_tgt = [0.0, 0.0]
+        self.centre = 0.0            # mm ahead of its shoulder a swing's landing is centred (_centre_target)
         self.stance_ticks = 1.0      # a foot's time on the ground now (slewed toward stance_tgt)
         self.stance_tgt = 1.0
         self.lean = Lean()
@@ -471,6 +474,13 @@ class Planner:
     def _group(self) -> tuple:
         return self.pattern.groups[self.k]
 
+    def _centre_target(self) -> float:
+        """Where the swings' landings are centred, mm ahead of the shoulders: the model's centre of
+        mass in a centre_com pattern while it walks on, 0 once stopping or changing pattern."""
+        if not self.pattern.centre_com or self.stopping or self._pending_pattern is not None:
+            return 0.0
+        return self.model.stance_com(self.pattern.body_h_256)[0]
+
     def _home(self) -> bool:
         tol = self._recentred()
         return (all(abs(self.s_cur[i]) < 0.05 for i in (0, 1))
@@ -495,9 +505,13 @@ class Planner:
                 and abs(self.h - self.model.stance_height(p.body_h_256)) <= HEIGHT_SLEW_MM)
 
     def _direct_change(self) -> bool:
-        """The change under way goes straight over (no step home): both patterns have a fixed cadence."""
+        """The change under way goes straight over (no step home): both patterns have a fixed cadence
+        and as many groups (the walk's four one-leg slots leave its feet
+        spread over four phases, which a two-group gait cannot pick up without a foot waiting a slot
+        too long: through the way home, since 2026-11-22)."""
         p = self._pending_pattern
-        return p is not None and pat.fixed_cadence(p) and pat.fixed_cadence(self.pattern)
+        return (p is not None and pat.fixed_cadence(p) and pat.fixed_cadence(self.pattern)
+                and len(p.groups) == len(self.pattern.groups))
 
     def _first_group(self) -> int:
         """The group to start a new pattern with: the one whose feet are furthest behind."""
@@ -682,7 +696,7 @@ class Planner:
         side = 0 if LEFT[leg] else 1
         s = self.s_cur[side]
         if not self.is_trot:
-            return s / 2.0
+            return s / 2.0 + self.centre
         st = self._slot_s[side]
         if not self.cfg.trot_place or abs(st) < 1e-6:
             return s / 2.0
@@ -877,6 +891,7 @@ class Planner:
         swinging = False
         if not wait:
             self.s_cur, self.stance_ticks, self.h = self._slewed(self.s_cur, self.stance_ticks, self.h)
+            self.centre += max(-CENTRE_SLEW_MM, min(CENTRE_SLEW_MM, self._centre_target() - self.centre))
             if self.t < self.S or self.skip or self.finishing:
                 for leg in LEGS:
                     self.xg[leg] -= self._side_speed(leg)

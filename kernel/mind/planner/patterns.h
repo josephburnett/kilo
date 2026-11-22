@@ -46,6 +46,8 @@ struct Pattern {
   real step_h_long_mm;   // the lift at the longest stride (< 0: step_h_mm at every stride; step_height())
   real taper_from_mm;    // ...tapering from step_h_mm at this stride
   real stride_slew_mm;   // the strides move at most this much a tick (a speed, direction or steer change)
+  // patterns.py centre_com: the strides centred under the model's centre of mass (the walk)
+  bool centre_com;
 
   bool in_group(int k, int leg) const {
     for (int i = 0; i < group_size; i++)

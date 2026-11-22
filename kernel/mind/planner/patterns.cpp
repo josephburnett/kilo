@@ -6,16 +6,19 @@
 namespace kilo {
 namespace planner {
 
-// The walk lifts LB then RF 60 ms later, then RB and LF (diagonal couplets);
-// the trot the diagonal pairs LF+RB, RF+LB; the crawl LB, LF, RB, RF one at
-// a time with the lean. Values (and why) as in patterns.py's PATTERNS (the
-// walk's strides 1.5 mm a tick since 2026-11-17; the trot's 0.75, its build-up, an 8 mm lift at
+// The walk lifts LB, LF, RB, RF one at a time (the lateral sequence, evenly
+// spaced, the strides centred under the centre of mass); the trot the diagonal pairs LF+RB, RF+LB; the crawl LB, LF, RB, RF
+// one at a time with the lean. Values (and why) as in patterns.py's PATTERNS
+// (the walk: since 2026-11-22; the trot's strides 0.75 mm a tick, its build-up, an 8 mm lift at
 // every stride, 144 mm/s by default: its timing is trot.h's schedule, its swing_ms, stride_mm and
-// period_ms only its table entry's).
+// period_ms only its table entry's; since 2026-11-22).
 const Pattern kPatternTable[kPatterns] = {
-    {"walk", 2, 2, {{LB, RF}, {RB, LF}, {0, 0}, {0, 0}}, 150, 30, 8, 205, 460, 20, 310, false, 60, 80, -1, 0, 1.5},
-    {"trot", 2, 2, {{LF, RB}, {RF, LB}, {0, 0}, {0, 0}}, 160, 52, 8, 205, 360, 20, 250, false, 0, 144, -1, 0, 0.75},
-    {"crawl", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 300, 50, 15, 179, 2550, 0, 4000, true, 0, -1, -1, 0, 0.5},
+    {"walk", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 220, 54, 8, 205, 960, 20, 740, false, 0, 58, 6, 40, 1.0,
+     true},
+    {"trot", 2, 2, {{LF, RB}, {RF, LB}, {0, 0}, {0, 0}}, 160, 52, 8, 205, 360, 20, 250, false, 0, 144, -1, 0, 0.75,
+     false},
+    {"crawl", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 300, 50, 15, 179, 2550, 0, 4000, true, 0, -1, -1, 0, 0.5,
+     false},
 };
 
 const Pattern& default_pattern() { return kPatternTable[1]; }

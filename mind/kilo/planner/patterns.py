@@ -2,18 +2,17 @@
 §3, §10, §12; mind/README.md "Walking").
 
 A pattern is a sequence of swing groups: the legs that lift together, in
-order (in the walk the second leg of a pair lifts ``couple_ms`` after the
-first). Each group gets a slot of the cycle: a four-foot phase (the
-"shift": every foot down), then the swing part (``span_ms``: the swing and
-the couple), so
+order (a group's second leg may lift ``couple_ms`` after the first; no
+pattern uses that today). Each group gets a slot of the cycle: a four-foot
+phase (the "shift": every foot down), then the swing part (``span_ms``: the
+swing and the couple), so
 
     period = groups x (shift + span),   stance = period - swing.
 
-The swing time is fixed in the walk and the crawl (short enough for the
-body's tip time constant on two feet, long enough for the servos: the
-walk's fastest joint stays under 415 deg/s at every speed, under the
-body's 500 deg/s safety slew). The trot's swing grows with the speed
-instead (``swing_for``, the trot's schedule below; docs/walking-and-
+The swing time is fixed in the walk and the crawl (long enough for the
+servos: the walk's fastest joint stays under 460 deg/s at every speed,
+under the body's 500 deg/s safety slew). The trot's swing grows with the
+speed instead (``swing_for``, the trot's schedule below; docs/walking-and-
 balance.md §15): 8 ticks up to 150 mm/s, a tick more every 18 mm/s, at
 most 11, so its stride can grow to 52 mm without a joint passing that
 slew.
@@ -69,6 +68,10 @@ class Pattern:
     step_h_long_mm: float | None = None
     taper_from_mm: float = 0.0
     stride_slew_mm: float = 0.5  # the strides move at most this much a tick toward a new speed, direction or steer
+    # The strides centred under the centre of mass: every foot lands half a stride plus the model's
+    # centre of mass (BodyModel.stance_com, mm ahead of the shoulders' middle) ahead of its
+    # shoulder, so the feet's polygon is centred on it (the walk, since 2026-11-22).
+    centre_com: bool = False
 
     @property
     def span_ms(self) -> float:
@@ -81,15 +84,18 @@ class Pattern:
 # - crawl: the careful gait, one leg at a time in the lateral sequence LB,
 #   LF, RB, RF, statically stable: before each lift the body moves over the
 #   three feet that stay down (the lean). 9 to 27 mm/s.
-# - walk: a walk with diagonal couplets (Hildebrand's "trot-walk"; Petoi's
-#   own walk is one too): LB lifts, RF 60 ms after it, LB lands, RF lands,
-#   then RB and LF the same way. Four footfalls a cycle; on two diagonal
-#   feet for 90 ms of each 150 ms swing, on three for the 60 ms either side,
-#   no lean. The hind leg leads (a diagonal sequence, as primates walk; cats
-#   lead with the fore leg) because the centre of mass is ahead of the
-#   middle: on three feet with a hind leg up it is inside their triangle, with
-#   a fore leg up outside. Fixed cadence (460 ms cycle, duty 0.67); speed
-#   from the stride, 26 to 97 mm/s.
+# - walk (since 2026-11-22, §16): the cat's lateral-sequence walk, LB, LF,
+#   RB, RF one at a time, the footfalls evenly spaced: a 220 ms swing, then
+#   one tick on four feet (a 240 ms beat, a 960 ms cycle, duty factor 0.77).
+#   No lean and no couplets: three feet down (four for a tick), never two.
+#   With the strides centred under the centre of mass (centre_com) the plan
+#   keeps the centre of mass inside the three feet at every tick (closest,
+#   0.5 mm, at the hand-over from a fore leg to the other side's hind leg).
+#   Backward the same order (§16.6). Fixed cadence; speed from the
+#   stride, 11 to 73 mm/s (8 to 54 mm). It replaced the walk with diagonal
+#   couplets (LB, then RF 60 ms later; 150 ms swings; 460 ms cycle; 26 to 97
+#   mm/s), which stood on two feet 80 ms of every step and had the centre
+#   of mass up to 7.5 mm outside the three feet: the stutter (§16.1).
 # - trot: the diagonal pairs LF+RB, RF+LB, one tick on four feet, the swing
 #   growing with the speed (TrotConfig, swing_for; the "long trot" of
 #   2026-11-21, the only trot since 2026-11-22): the stride is the speed x
@@ -98,11 +104,12 @@ class Pattern:
 #   body, falling about its diagonal, ends upright (kilo.planner.plan
 #   TrotFit). docs/walking-and-balance.md §15.
 #
-# The walk moves its strides 1.5 mm a tick (stride_slew_mm, since
-# 2026-11-17), the trot 0.75 (its build-up), the crawl 0.5: a turn in place
-# to straight walking, a steer and a speed level take a cycle or two. The
-# strides stay inside the pattern's longest one whatever the change, so no
-# swing carries a foot further than at the top speed.
+# The walk moves its strides 1.0 mm a tick (stride_slew_mm; its cycle is
+# nearly three times the trot's: it builds up over a cycle), the trot 0.75
+# (its build-up), the crawl 0.5: a turn in place to straight walking, a
+# steer and a speed level take a cycle or two. The strides stay inside the
+# pattern's longest one whatever the change, so no swing carries a foot
+# further than at the top speed.
 #
 # Fixed cadence (the patterns without a lean): their four-foot phase stays
 # one tick at every speed, so the body's balance loop (which holds its
@@ -110,9 +117,10 @@ class Pattern:
 # them: in 4 to 8-tick four-foot phases it caught the tip of one diagonal
 # and put it into the next, the rocking of §11.
 PATTERNS: dict[str, Pattern] = {
-    "walk": Pattern("walk", ((LB, RF), (RB, LF)), swing_ms=150.0, stride_mm=30.0, step_h_mm=8.0,
-                    body_h_256=205, period_ms=460.0, shift_min_ms=20.0, stance_max_ms=310.0, lean=False,
-                    couple_ms=60.0, default_mm_s=80.0, stride_slew_mm=1.5),
+    "walk": Pattern("walk", ((LB,), (LF,), (RB,), (RF,)), swing_ms=220.0, stride_mm=54.0, step_h_mm=8.0,
+                    body_h_256=205, period_ms=960.0, shift_min_ms=20.0, stance_max_ms=740.0, lean=False,
+                    default_mm_s=58.0, step_h_long_mm=6.0, taper_from_mm=40.0, stride_slew_mm=1.0,
+                    centre_com=True),
     # the trot's swing_ms, stride_mm and period_ms are its table entry's (its timing is TrotConfig's)
     "trot": Pattern("trot", ((LF, RB), (RF, LB)), swing_ms=160.0, stride_mm=52.0, step_h_mm=8.0,
                     body_h_256=205, period_ms=360.0, shift_min_ms=20.0, stance_max_ms=250.0, lean=False,
