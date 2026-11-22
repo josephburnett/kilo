@@ -213,6 +213,26 @@ steady for more than 20 seconds): card into the laptop, and in `CARD`
 rename `kernel7.img` to `kernel7.bad` and `kernel7.old` to `kernel7.img`.
 That is the kernel from before.
 
+**If the new kernel misbehaves** (it starts, but Kilo does things nobody
+asked for, or ignores the remote): do the same rename to get the previous
+kernel back, then rebuild from nothing before writing again:
+`rm -rf kernel/build`, then `kilo card CARD ...`. This happened on
+2026-11-21: Kilo stood by himself, ignored every key and saved no
+recordings. The kernel had been rebuilt on top of an older build, and the
+kernel's build file was not tracking which files use which shared
+definitions, so some pieces were compiled against the old layout of the
+measurement code and some against the new. The build file is fixed
+(`-MMD -MP` in `kernel/Makefile`; `kernel/host/test.sh` fails if it goes
+missing), so a normal rebuild is now safe; a from-nothing build stays the
+first thing to try when a kernel that passes every laptop test behaves
+strangely on Kilo. The laptop's simulated Pi is built separately and does
+not show this kind of fault.
+
+**After any new kernel, check before trusting it:** power on with Kilo
+lying on the floor. He should mew, stay lying until a key is pressed, and
+answer keys. Back in the laptop, `kilo card CARD --status` should show a
+saved log for that boot naming the new build.
+
 **Who holds the card holds Kilo.** Whoever has Kilo's SD card in hand can
 put any kernel and any body firmware on it, and Kilo runs them at the next
 power-on without asking for a key. That was already true of the kernel
@@ -267,6 +287,13 @@ its drive letter (here `E:`) with
 `CARD` (used this way since 2026-11-21; `make mount` and `make unmount` in the clone's top folder run these two lines, `DRIVE=F` for another letter). Before ejecting, release it inside WSL with `sudo umount /mnt/e`, then
 eject the card from Windows (the tray's "Safely Remove"); step 4's
 `udisksctl` line does not apply.
+If the card cannot be mounted (no password at hand, or `/mnt/e` answers
+"No such device" after the card was taken out and `make mount` does not
+cure it), `tools/card-via-windows.sh` does the same job with Windows doing
+the copying, no `sudo` needed: `tools/card-via-windows.sh write
+KILO_REAR_UP=1` builds from nothing and writes with read-back,
+`... status` and `... fetch` are `kilo card`'s `--status` and `--fetch`.
+The script's header says how it works.
 For the direct cable, Windows gives the wired port a 169.254 address by
 itself when no router answers (it can take a minute); WSL reaches it
 through Windows, which may need WSL's "mirrored" networking mode (not
