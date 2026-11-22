@@ -51,6 +51,9 @@ c behaviours.nap.min_s 40.0
 c behaviours.greet.trick hi
 c behaviours.greet.cooldown_s 30.0
 c behaviours.startle.hold_s 2.0
+c alive.trick_every_s 40.0
+c alive.trick_speed 0.75
+c alive.tricks stretch,wash_face,pee,sniff,check_around
 w idle 1 0 0 0 0.35
 w explore 1 3 0 0 1.0
 w explore 1 1 0 0 0.2
@@ -5452,6 +5455,9 @@ c behaviours.nap.min_s 40.0
 c behaviours.greet.trick hi
 c behaviours.greet.cooldown_s 30.0
 c behaviours.startle.hold_s 2.0
+c alive.trick_every_s 40.0
+c alive.trick_speed 0.75
+c alive.tricks stretch,wash_face,pee,sniff,check_around
 w idle 1 0 0 0 0.35
 w explore 1 3 0 0 1.0
 w explore 1 1 0 0 0.2
@@ -6359,6 +6365,9 @@ c behaviours.nap.min_s 40.0
 c behaviours.greet.trick hi
 c behaviours.greet.cooldown_s 30.0
 c behaviours.startle.hold_s 2.0
+c alive.trick_every_s 40.0
+c alive.trick_speed 0.75
+c alive.tricks stretch,wash_face,pee,sniff,check_around
 w idle 1 0 0 0 0.35
 w explore 1 3 0 0 1.0
 w explore 1 1 0 0 0.2
@@ -6527,6 +6536,9 @@ c behaviours.nap.min_s 40.0
 c behaviours.greet.trick hi
 c behaviours.greet.cooldown_s 30.0
 c behaviours.startle.hold_s 2.0
+c alive.trick_every_s 40.0
+c alive.trick_speed 0.75
+c alive.tricks stretch,wash_face,pee,sniff,check_around
 w idle 1 0 0 0 0.35
 w explore 1 3 0 0 1.0
 w explore 1 1 0 0 0.2
@@ -10491,6 +10503,9 @@ c behaviours.nap.min_s 40.0
 c behaviours.greet.trick hi
 c behaviours.greet.cooldown_s 30.0
 c behaviours.startle.hold_s 2.0
+c alive.trick_every_s 40.0
+c alive.trick_speed 0.75
+c alive.tricks stretch,wash_face,pee,sniff,check_around
 w idle 1 0 0 0 0.35
 w explore 1 3 0 0 1.0
 w explore 1 1 0 0 0.2

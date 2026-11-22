@@ -57,6 +57,10 @@ const Personality kPersonality = {
     "hi",  // behaviours.greet.trick
     30.0,  // behaviours.greet.cooldown_s
     2.0,  // behaviours.startle.hold_s
+    40.0,  // alive.trick_every_s
+    0.75,  // alive.trick_speed
+    5,  // alive.tricks: how many
+    {"stretch", "wash_face", "pee", "sniff", "check_around"},  // alive.tricks
 };
 
 }  // namespace behaviour

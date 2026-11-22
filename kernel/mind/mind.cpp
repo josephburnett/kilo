@@ -44,7 +44,7 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
       posture_hook_(*this),
       sleep_(link_, walker_, clock, log_),
       guard_(link_, walker_, clock, log_),
-      alive_(link_, player_, log_, cfg.seed),
+      alive_(link_, player_, log_, cfg.seed, personality(cfg)),
       sound_(clock, log_, cfg.seed),
       chatter_(cfg.seed),
       recorder_(clock, link_) {
@@ -244,7 +244,7 @@ bool Mind::rested_pct(double* pct) const {
   return true;
 }
 
-// The remote's trick refusal (remote.h A2): the battery at rest, not the sag right after a walk.
+// The remote's trick refusal (remote.h A1): the battery at rest, not the sag right after a walk.
 bool Mind::rested_mv(uint16_t* mv) {
   const BodyState& b = link_.state();
   if (!b.has_telemetry || (b.telemetry.flags & KILO_TELEMETRY_FLAGS_NO_BATTERY)) return false;
@@ -848,6 +848,11 @@ void Mind::RunnerHook::stop() {
   m_.alive_.stop();
   m_.sitting_variant_ = false;
   m_.runner_by_guard_ = false;
+}
+
+// A5 while the runner runs: one of the alive layer's tricks (behaviour/alive.h).
+bool Mind::RunnerHook::trick(const char** what) {
+  return m_.alive_.request_trick((double)m_.clock_.now_us() / 1e6, what);
 }
 
 // The runner the guard started gives way to the walking keys (turn, back up; a forward key the guard

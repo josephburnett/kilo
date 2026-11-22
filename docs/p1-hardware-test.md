@@ -283,7 +283,7 @@ crossfades in and out, the end posture, TRICK_DONE reasons, gating and owner
 precedence, and a replay of all 13 library tricks (as the mind encodes them,
 also mirrored and at 1.5×) with every angle inside the joint limits and the
 frame timing exactly as the JSON says. What only Kilo can tell is whether the
-tricks look right: the imported durations (`LEGACY_STEP_MS` 5.5 ms, an
+tricks look right: the imported durations (`LEGACY_STEP_MS` 7.4 ms, an
 estimate), the clamped angles, and how the moves feel at full speed.
 
 **Before you start:** as for the balance test (charged battery, CH343 on the
@@ -376,7 +376,7 @@ kilo -v flash                                        # back to the new firmware
 
 (Legacy tokens: `k` + the legacy name; a trailing `R` mirrors, e.g. `khiR`.)
 Compare, per trick: the poses at each keyframe, the overall duration and
-rhythm (the new firmware's durations come from `LEGACY_STEP_MS` = 5.5 ms; if
+rhythm (the new firmware's durations come from `LEGACY_STEP_MS` = 7.4 ms; if
 the legacy one is consistently faster or slower, measure the ratio from the
 video and change `LEGACY_STEP_MS` in `mind/kilo/tricks/legacy.py`, re-run the
 importer, `python3 body/tools/gen_trick_library.py`), the loop count, and how

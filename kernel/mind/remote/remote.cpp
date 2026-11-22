@@ -261,8 +261,10 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
     note_ = "measurement stopped, ";
   }
   if (behaviour_ != nullptr && behaviour_->active()) {
-    if (key.kind == Kind::Behaviour) {
-      done("behaviour runner already running", false);
+    if (key.kind == Kind::Behaviour) {  // A5 again: one of the random mode's tricks (behaviour/alive.h)
+      const char* what = nullptr;
+      bool ok = behaviour_->trick(&what);
+      done(what != nullptr ? what : ok ? "random mode: a trick" : "random mode: no trick", !ok);
       return;
     }
     if (!stop_key(key) && !behaviour_->yields(key)) {

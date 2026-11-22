@@ -627,6 +627,8 @@ struct Golden {
         {"behaviours.nap.min_s", &Personality::nap_min_s},
         {"behaviours.greet.cooldown_s", &Personality::greet_cooldown_s},
         {"behaviours.startle.hold_s", &Personality::startle_hold_s},
+        {"alive.trick_every_s", &Personality::alive_trick_every_s},
+        {"alive.trick_speed", &Personality::alive_trick_speed},
     };
     for (const auto& d : kDoubles)
       if (key == d.key) {
@@ -639,7 +641,17 @@ struct Golden {
     else if (key == "behaviours.nap.posture") cfg.nap_posture = keep(v);
     else if (key == "behaviours.greet.trick") cfg.greet_trick = keep(v);
     else if (key == "behaviours.explore.looks") cfg.explore_looks = (uint32_t)num(v);
-    else if (key == "selector.urgent") {
+    else if (key == "alive.tricks") {  // the alive layer's (not the tree's): read, the names kept
+      cfg.n_alive_tricks = 0;
+      size_t at = 0;
+      while (at <= v.size() && cfg.n_alive_tricks < Personality::kMaxAliveTricks) {
+        size_t comma = v.find(',', at);
+        std::string one = v.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
+        if (!one.empty()) cfg.alive_tricks[cfg.n_alive_tricks++] = keep(one);
+        if (comma == std::string::npos) break;
+        at = comma + 1;
+      }
+    } else if (key == "selector.urgent") {
       cfg.urgent = 0;
       for (int b = 0; b < kBehaviours; b++)
         if (("," + v + ",").find("," + std::string(behaviour_name((uint8_t)b)) + ",") != std::string::npos)

@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <string>
 #include "behaviour/alive.h"
 #include "guard/guard.h"
 #include "mind.h"
@@ -32,6 +33,7 @@
 #include "remote/client.h"
 #include "tests/check.h"
 #include "tests/mind_rig.h"
+#include "tricks/library.h"
 #include "tricks/model.h"
 #include "util/str.h"
 
@@ -205,7 +207,7 @@ struct WallRig : MindRig {
     return std::prev(it)->second;
   }
   double gap() const { return wall_mm - max_travel; }
-  void key(uint16_t k) { MindRig::key(k, 60); }
+  void key(uint16_t k, uint32_t ms = 60) { MindRig::key(k, ms); }
   void pass() override {
     // the next TELEMETRY's range
     bool fresh = body.tick % 4 == 0;
@@ -356,6 +358,13 @@ void test_red_backs_off_then_sits() {  // the walk: the one gait that backs off 
   CHECK(r.log.has("guard action=backing") && r.log.has("guard zone=red"));
   std::printf("guard: RED at walk: backed off %.0f mm, then sat (final gap %.0f mm)\n", r.back_travel,
               r.wall_mm - r.travel);
+  // the runner the guard started is the random mode too: A5 plays one of its tricks
+  uint32_t played = r.mind.alive().tricks_played();
+  r.key(A5);
+  CHECK(r.log.has("remote A5 (0xE0, behaviour): random mode: ") && r.mind.behaviour_active());
+  r.run_ms(5000);
+  CHECKF(r.mind.alive().tricks_played() == played + 1 && std::strstr(r.mind.alive().last_trick(), "_sit") != nullptr,
+         "%u tricks, last %s", r.mind.alive().tricks_played(), r.mind.alive().last_trick());
 }
 
 void test_hold_refuses_forward_allows_turning_and_releases() {
@@ -1085,6 +1094,106 @@ void test_alive_through_the_mind() {
   CHECK(r2.mind.alive().moves() == r3.mind.alive().moves() && r2.mind.alive().last_move() == r3.mind.alive().last_move());
 }
 
+// The random mode's tricks (behaviour/alive.h, mind/kilo/tricks/alive_set.py): (a) now and then
+// one of them among the small moves, rare next to them, never twice the same in a row, at the
+// personality's speed, the sitting variant while sitting and the standing one (STANCE again
+// after) while standing; (b) A5 while the runner runs plays one at once, a press while one plays
+// queues the next, a press while one waits is refused; B6 stops the one playing with the runner.
+void test_alive_tricks_through_the_mind() {
+  const behaviour::Personality& p = behaviour::kPersonality;
+  CHECK(p.n_alive_tricks >= 3 && p.alive_trick_every_s >= 20 && p.alive_trick_speed > 0 && p.alive_trick_speed <= 1);
+  for (int i = 0; i < p.n_alive_tricks; i++)
+    for (const char* base : {"sit", "stand"}) {
+      char name[48];
+      std::snprintf(name, sizeof name, "alive_%s_%s", p.alive_tricks[i], base);
+      const tricks::Trick* t = tricks::find_trick(name);
+      CHECKF(t != nullptr && tricks::trick_problem(*t) == nullptr, "%s", name);
+      if (t != nullptr)
+        CHECKF(t->end_posture == (base[1] == 'i' ? KILO_POSTURE_SIT : KILO_POSTURE_STAND), "%s ends in %u", name,
+               (unsigned)t->end_posture);
+    }
+  const uint8_t q6 = (uint8_t)(p.alive_trick_speed * 64 + 0.5);
+  auto plays_at = [](WallRig& r, uint8_t speed) -> uint32_t {  // TRICK_PLAYs at this speed (the small moves: 1x)
+    uint32_t k = 0;
+    for (const Sent& s : r.body.sent)
+      if (s.type == KILO_MSG_TRICK_PLAY && s.payload.size() >= 3 && s.payload[2] == speed) k++;
+    return k;
+  };
+  // (a) five minutes in the random mode (sitting, and standing when the tree explores)
+  MindConfig cfg = WallRig::remote_cfg();
+  cfg.seed = 5;
+  WallRig r(cfg);
+  r.wall = false;
+  r.key(A5);
+  std::string last;
+  bool repeat = false, wrong = false;
+  uint32_t n = 0;
+  double first_at = 0;
+  for (int i = 0; i < 300000 / 4; i++) {
+    r.pass();
+    if (r.mind.alive().tricks_played() != n) {
+      n = r.mind.alive().tricks_played();
+      if (first_at == 0) first_at = (double)r.body.clock.t / 1e6;
+      std::string now = r.mind.alive().last_trick();
+      if (now == last) repeat = true;
+      const char* variant = r.mind.alive().standing() ? "_stand" : "_sit";  // the tree explores now and then
+      size_t vn = std::strlen(variant);
+      if (now.compare(0, 6, "alive_") != 0 || now.size() < vn || now.compare(now.size() - vn, vn, variant) != 0)
+        wrong = true;
+      last = now;
+    }
+  }
+  uint32_t moves = r.mind.alive().moves(), looks = r.mind.alive().looks();
+  std::printf("alive: %u tricks, %u small moves and %u looks in 300 s (the first trick at %.0f s)\n", n, moves, looks,
+              first_at);
+  CHECKF(n >= 3 && n <= 15 && !repeat && !wrong, "%u tricks, repeat %d, wrong %d", n, repeat, wrong);
+  CHECKF(moves >= 5 * n && moves + looks >= 15 * n, "%u moves, %u looks, %u tricks: the tricks are not rare", moves,
+         looks, n);
+  CHECK(r.mind.alive().trick_failures() == 0 && r.log.has("alive: trick "));
+  CHECKF(q6 != tricks::kSpeedUnity && (plays_at(r, q6) == n || plays_at(r, q6) + 1 == n), "%u plays at %u/64, %u tricks",
+         plays_at(r, q6), (unsigned)q6, n);
+  // (b) A5 while it runs: a trick now (the next pass that the player is free)
+  while (r.mind.player().busy()) r.pass();
+  uint32_t before = r.mind.alive().tricks_played();
+  r.key(A5, 200);
+  CHECKF(r.log.has("remote A5 (0xE0, behaviour): random mode: ") && r.mind.alive().tricks_played() == before + 1 &&
+             r.mind.alive().trick_playing(),
+         "%u -> %u", before, r.mind.alive().tricks_played());
+  std::string first = r.mind.alive().last_trick();
+  r.key(A5);  // while it plays: queued behind it
+  CHECK(r.mind.alive().trick_waiting() && r.log.has(" after the ") && r.mind.alive().tricks_played() == before + 1);
+  r.key(A5);  // one waits already: refused
+  CHECK(r.log.has("is already waiting") && r.mind.remote().last_failed() && r.mind.behaviour_active());
+  r.run_ms(1300);  // the first ends (the rig's TRICK_DONE 1 s after TRICK_PLAY): the queued one plays, another trick
+  CHECKF(r.mind.alive().tricks_played() == before + 2 && !r.mind.alive().trick_waiting() &&
+             first != r.mind.alive().last_trick(),
+         "%u, %s then %s", r.mind.alive().tricks_played(), first.c_str(), r.mind.alive().last_trick());
+  // B6 while one plays: TRICK_STOP, the runner stopped, standing
+  CHECK(r.mind.alive().trick_playing());
+  size_t stops = r.body.count(KILO_MSG_TRICK_STOP);
+  r.key(B6, 300);
+  CHECK(r.body.count(KILO_MSG_TRICK_STOP) > stops && !r.mind.behaviour_active());
+  r.run_ms(1500);  // its TRICK_DONE
+  CHECK(!r.mind.alive().trick_playing() && r.posture_goal() == KILO_POSTURE_STAND);
+  CHECK(r.log.has("remote B6 (0x02, stand): behaviour runner stopped"));
+  // standing (the tree's explore): A5 plays the standing variant, then STANCE again
+  r.key(A5, 2000);
+  CHECK(r.mind.behaviour_active());
+  CHECK(client_posture(r.mind.link(), nullptr, "stand"));
+  r.run_ms(4000);
+  CHECK(r.mind.alive().standing() && r.posture_goal() == KILO_POSTURE_STANCE);
+  while (r.mind.player().busy()) r.pass();
+  before = r.mind.alive().tricks_played();
+  r.key(A5, 200);
+  CHECKF(r.mind.alive().tricks_played() == before + 1 && std::strstr(r.mind.alive().last_trick(), "_stand") != nullptr,
+         "%s", r.mind.alive().last_trick());
+  r.run_ms(1500);  // done (in STAND): the layer takes STANCE again and goes on
+  CHECKF(r.mind.alive().standing() && r.posture_goal() == KILO_POSTURE_STANCE && !r.mind.alive().trick_playing(),
+         "standing %d, posture %d", r.mind.alive().standing(), r.posture_goal());
+  r.key(C7);  // C7: frozen, the runner stopped
+  CHECK(!r.mind.behaviour_active() && !r.mind.alive().trick_playing());
+}
+
 }  // namespace
 
 int main() {
@@ -1107,5 +1216,6 @@ int main() {
   test_low_at_rest_rests_and_the_eyes_are_orange();
   test_alive_moves();
   test_alive_through_the_mind();
+  test_alive_tricks_through_the_mind();
   return report("guard");
 }

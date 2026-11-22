@@ -2,7 +2,7 @@
 
 The first-version tricks (§5) are generated from legacy/InstinctNybble.h by
 `python -m kilo.tricks.import_legacy`; the authored ones (AUTHORED) by
-their design modules (`python -m kilo.tricks.rear_up`). The files are
+their design modules (`python -m kilo.tricks.rear_up`, `python -m kilo.tricks.alive_set`). The files are
 committed; edit the importer or the design module, not the JSON.
 """
 
@@ -34,12 +34,16 @@ FIRST_VERSION = {
 }
 LEGACY_ALIASES = {legacy: name for name, legacy in FIRST_VERSION.items()}
 
-# Tricks written for Kilo (no legacy skill): name -> the module that generates the JSON.
+# Tricks written for Kilo: name -> the module that generates the JSON.
 AUTHORED = {
     # the three stages of one trick (docs/rear-up-trick.md): 28, 40 and 54 deg
     "rear_up": "kilo.tricks.rear_up",
     "rear_up_2": "kilo.tricks.rear_up",
     "rear_up_3": "kilo.tricks.rear_up",
+    # the random mode's tricks (the remote's A5), from and back to SIT and STAND: legacy skills with
+    # the moves there and back (kilo.tricks.alive_set.SET; alive_set.names() is this order)
+    **{f"alive_{t}_{b}": "kilo.tricks.alive_set"
+       for t in ("stretch", "wash_face", "pee", "sniff", "check_around") for b in ("sit", "stand")},
 }
 
 
