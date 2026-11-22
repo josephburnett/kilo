@@ -14,7 +14,8 @@ params); the code reads it through the generated bindings and
 kilo.planner.model.BodyModel. ``apply`` is the only way a measurement gets
 in: it edits that one file and regenerates the bindings, the vendored
 copies, the planner's and the other golden vectors, the rear-up's keyframes
-and the mind's trick table. It never commits and never touches Kilo or his
+and the mind's trick table, the intent layer's moves (stand, sit, rest; the
+righting experiment's) and its state estimate's table. It never commits and never touches Kilo or his
 card: the owner looks at ``git diff``, runs the test suites and decides.
 ``--dry-run`` does all of it in a temporary copy of the checkout and changes
 nothing here.
@@ -401,7 +402,10 @@ def _metrics_of(tree: Path) -> dict:
     return json.loads(r.stdout)
 
 
-VECTORS = ("planner", "measure", "behaviour", "perception")
+VECTORS = ("planner", "measure", "behaviour", "perception", "intent")
+# The intent layer's moves and the righting experiment's, planned and checked on the model (committed JSON that
+# kernel/mind/intent/gen_intent.py reads): re-planned before the intent tables are generated.
+INTENT_PLANS = ("kilo.intent.moves", "kilo.intent.righting")
 
 
 def regenerate(tree: Path, rear_up: bool, say=print) -> tuple[list[str], str]:
@@ -417,11 +421,6 @@ def regenerate(tree: Path, rear_up: bool, say=print) -> tuple[list[str], str]:
     if not step("protocol/gen.py", _run(tree, ["protocol/gen.py"])):
         return failed, "not run"
     step("protocol/vendor.py", _run(tree, ["protocol/vendor.py"]))
-    for name in VECTORS:
-        gen = tree / "kernel" / "host" / "tests" / f"gen_{name}_vectors.py"
-        if gen.exists():
-            say(f"  the {name} golden vectors")
-            step(gen.name, _run(tree, [str(gen)], stdout=gen.with_name(f"{name}_vectors.txt")))
     verdict = "not run (--no-rear-up)"
     if rear_up:
         say("  the rear-up's keyframes and its checks (several minutes)")
@@ -432,6 +431,16 @@ def regenerate(tree: Path, rear_up: bool, say=print) -> tuple[list[str], str]:
             failed.append("kilo.tricks.rear_up: " + (r.stderr or r.stdout).strip().splitlines()[-1][:300])
     say("  the mind's trick table (kernel/mind/tricks/gen_library.py)")
     step("gen_library.py", _run(tree, ["kernel/mind/tricks/gen_library.py"]))
+    for mod in INTENT_PLANS:
+        say(f"  the moves {mod} plans and checks on the model (a minute or two)")
+        step(mod, _run(tree, ["-m", mod, "--write"], cwd=tree / "mind"))
+    say("  the state estimate's table and the intents (kernel/mind/intent/gen_intent.py)")
+    step("gen_intent.py", _run(tree, ["kernel/mind/intent/gen_intent.py"]))
+    for name in VECTORS:
+        gen = tree / "kernel" / "host" / "tests" / f"gen_{name}_vectors.py"
+        if gen.exists():
+            say(f"  the {name} golden vectors")
+            step(gen.name, _run(tree, [str(gen)], stdout=gen.with_name(f"{name}_vectors.txt")))
     return failed, verdict
 
 

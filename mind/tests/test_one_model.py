@@ -261,3 +261,5 @@ def test_model_apply_dry_run_changes_nothing_and_reports():
     assert "centre of mass, standing: 7.4 -> 4.3 mm ahead" in text
     assert "crawl" in text and "trot: still off: com_x_mm 3.5 vs 4.33" in text
     assert "Dry run: nothing was changed" in text and "FAILED" not in text
+    # the intent layer is made from the model too (kernel/host/test.sh checks gen_intent.py and its vectors)
+    assert "gen_intent.py" in text and "the intent golden vectors" in text and "kilo.intent.moves" in text

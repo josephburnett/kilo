@@ -324,6 +324,11 @@ def test_limits_and_unmeasured_are_said():
     th[f.names.index("com_z")] = -40.0   # where Kilo's first run ended: the end of the range
     th[f.names.index("sag")] = ST.SAG_MIN  # rigid legs are a value, not a limit
     assert f.limits(th) == {"com_z": True}
+    # within one +- of the stop is at the stop too (Kilo's runs of 2026-11-22: -39.0 +- 8.1 against -40)
+    th[f.names.index("com_z")] = -39.0
+    assert f.limits(th) == {} and f.limits(th, {"com_z": 8.1}) == {"com_z": True}
+    assert f.limits(th, {"com_z": 0.5}) == {}
+    th[f.names.index("com_z")] = -40.0
     res = F.FitResult(values=f.values(th), sd={n: 0.1 for n in f.names}, model=dict(f.mv), names=list(f.names),
                       cov=np.eye(len(f.names)), rms_tick_deg=0.1, rms_model_deg=None, inflation=1.0, n_ticks=1,
                       crossings=[], tip_rate={}, walks=[], notes=[], iterations=1, at_limit=f.limits(th))

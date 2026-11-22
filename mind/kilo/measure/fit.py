@@ -878,13 +878,21 @@ class Fitter:
         th, it2 = self._lm(th, max_iter)
         return self.result(th, it1 + it2)
 
-    def limits(self, th: np.ndarray) -> dict:
+    def limits(self, th: np.ndarray, sd: dict | None = None) -> dict:
+        """The parameters that ended at a limit of their range: within
+        LIMIT_FRACTION of it, or (given their +- ``sd``) within one +- of
+        it. A value one +- from its stop is held there by the stop, not by
+        the data, and the curvature's +- means nothing (Kilo's runs of
+        2026-11-22: com_z -39.0 +- 8.1 against the stop at -40 read as
+        "differs")."""
         out = {}
         for j, n in enumerate(self.names):
             lo, hi = self.bounds[n]
             if not (math.isfinite(lo) and math.isfinite(hi)):
                 continue
             tol = LIMIT_FRACTION * (hi - lo)
+            if sd is not None:
+                tol = max(tol, sd.get(n, 0.0))
             p = BY_NAME.get(n)
             at_lo = th[j] - lo <= tol and not (p is not None and p.lo_is_value)
             if at_lo or hi - th[j] <= tol:
@@ -965,7 +973,7 @@ class Fitter:
                          rms_model_deg=pred_rms, inflation=infl, n_ticks=len(allt) // 2, crossings=crossings,
                          tip_rate=tip_rates(self.runs, v), walks=[w.name for w in self.walks], notes=notes,
                          iterations=iterations, battery_mv=(min(batt), max(batt)) if batt else None,
-                         at_limit=self.limits(th), unmeasured=dict(self.unmeasured), sigma_hold_deg=s_h, n_holds=nh, repeatability=dict(self.rep),
+                         at_limit=self.limits(th, sd), unmeasured=dict(self.unmeasured), sigma_hold_deg=s_h, n_holds=nh, repeatability=dict(self.rep),
                          hysteresis=hysteresis(self.runs), check=self.held_out(th),
                          x_scale_check=self.x_scale_check(th, s_h))
 
