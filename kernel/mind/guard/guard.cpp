@@ -278,7 +278,7 @@ void DistanceGuard::back_off(uint64_t now, const char* why) {
   hisses_++;
   backs_++;
   planner::WalkGoal g = walker_.goal();
-  if (!walker_.active()) {  // standing: a slow walk (the walk pattern: three feet down most of the time)
+  if (!walker_.active()) {  // standing: a slow walk (the walk pattern: three feet down at every tick)
     g = planner::WalkGoal();
     g.pattern = planner::find_pattern("walk");
   }

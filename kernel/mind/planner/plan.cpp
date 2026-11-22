@@ -280,6 +280,7 @@ void Planner::start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tic
   }
   h_ = start_height < 0 ? model_.stance_height(KILO_GAIT_STANCE_H_256) : start_height;
   s_cur_[0] = s_cur_[1] = s_tgt_[0] = s_tgt_[1] = 0;
+  centre_ = 0;
   stance_ticks_ = stance_tgt_ = 1;
   lean_ = lean_from_ = lean_to_ = Lean();
   tr_ticks_ = 1;
@@ -337,8 +338,11 @@ int Planner::offset(int leg) const {
   return (i > 0 ? i : 0) * couple_ticks();
 }
 
+// plan.py _direct_change: both fixed cadence and as many groups (not into or out of the walk's four
+// one-leg slots, since 2026-11-22: through the way home)
 bool Planner::direct_change() const {
-  return pending_ != nullptr && fixed_cadence(*pending_) && fixed_cadence(*pattern_);
+  return pending_ != nullptr && fixed_cadence(*pending_) && fixed_cadence(*pattern_) &&
+         pending_->n_groups == pattern_->n_groups;
 }
 
 // plan.py _switch_ok: the strides no longer than the new pattern walks at
@@ -568,10 +572,20 @@ real Planner::land_for(int side) const {
   return s > 0 ? m_min(s / (real)2.0 + (real)6.0, m_max((real)0.0, x)) : m_max(s / (real)2.0 - (real)6.0, m_min((real)0.0, x));
 }
 
+// plan.py _centre_target: the model's centre of mass in a centre_com pattern while it walks on (the
+// walk), 0 once stopping or changing pattern.
+real Planner::centre_target() const {
+  if (!pattern_->centre_com || stopping_ || pending_ != nullptr) return 0;
+  real xs[kLegs] = {0, 0, 0, 0};
+  real z = model_.stance_height(pattern_->body_h_256);
+  real zs[kLegs] = {z, z, z, z};
+  return model_.com(xs, zs).x;
+}
+
 real Planner::target_x(int leg) const {
   int side = kLeft[leg] ? 0 : 1;
   real s = s_cur_[side];
-  if (!long_trot()) return s / (real)2.0;
+  if (!long_trot()) return s / (real)2.0 + centre_;
   real st = slot_s_[side];
   if (m_fabs(st) < (real)1e-6) return s / (real)2.0;
   // the slot's landing: its shift from half a stride, scaled with the stride as it slews
@@ -838,6 +852,7 @@ const TickPlan& Planner::next() {
   bool swinging = false;
   if (!wait) {
     slewed(s_cur_, &stance_ticks_, &h_);
+    centre_ += m_max(-kCentreSlewMm, m_min(kCentreSlewMm, centre_target() - centre_));
     if (t_ < S_ || skip_ || finishing_) {
       for (int leg = 0; leg < kLegs; leg++) xg_[leg] -= side_speed(leg);
     } else {

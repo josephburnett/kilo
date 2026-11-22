@@ -63,6 +63,7 @@ constexpr int kZMin = 30, kZMax = 95;   // FEET z_mm
 constexpr real kAttMaxDeg = 30;         // FEET pitch / roll: the body refuses a FEET beyond it
 constexpr real kHeightSlewMm = (real)0.5;
 constexpr real kRecentredMm = (real)1.5;  // a stopping leg this close to its target does not step again
+constexpr real kCentreSlewMm = (real)0.5;  // the strides' centre (Pattern::centre_com) moves at most this a tick
 constexpr real kSwitchSlackMm = (real)4.0;  // a pattern change: every foot within the new half stride plus this
 constexpr real kStanceSlew = (real)0.02;
 constexpr int kLeanUnitsPerTick = 4;      // units of a lean solve per tick
@@ -306,6 +307,7 @@ class Planner {
   real tip_toward(int leg) const;
   real side_speed(int leg) const { return s_cur_[kLeft[leg] ? 0 : 1] / stance_ticks_; }
   real target_x(int leg) const;
+  real centre_target() const;  // plan.py _centre_target
 
   static constexpr int kHistMax = 32;
 
@@ -323,6 +325,7 @@ class Planner {
   real h_ = 0;
   real s_cur_[2] = {};   // stride now, left and right
   real s_tgt_[2] = {};
+  real centre_ = 0;      // mm ahead of its shoulder a swing's landing is centred (centre_target())
   real stance_ticks_ = 1;  // a foot's time on the ground now (slewed toward stance_tgt_)
   real stance_tgt_ = 1;
   Lean lean_, lean_from_, lean_to_;
