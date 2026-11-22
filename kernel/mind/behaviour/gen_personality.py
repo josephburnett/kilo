@@ -95,6 +95,10 @@ def personality_struct(cfg) -> str:
         ("behaviours.greet.trick", f'"{bh["greet"]["trick"]}"'),
         ("behaviours.greet.cooldown_s", d(bh["greet"]["cooldown_s"])),
         ("behaviours.startle.hold_s", d(bh["startle"]["hold_s"])),
+        ("alive.trick_every_s", d(cfg["alive"]["trick_every_s"])),
+        ("alive.trick_speed", d(cfg["alive"]["trick_speed"])),
+        ("alive.tricks: how many", str(len(cfg["alive"]["tricks"]))),
+        ("alive.tricks", "{" + ", ".join(f'"{t}"' for t in cfg["alive"]["tricks"]) + "}"),
     ]
     return "{\n" + "\n".join(f"    {v},  // {k}" for k, v in fields) + "\n}"
 

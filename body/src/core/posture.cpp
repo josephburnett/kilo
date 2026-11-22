@@ -17,9 +17,12 @@ struct PostureRow {
 
 // The legacy recovery behaviour `rc` (legacy/InstinctNybble.h; legacy
 // reaction.h plays it whenever |roll| > 90 deg, mirrored at random) is rows
-// RC_ROW.. of the same table, converted the way the mind's importer converts
-// behaviours (mind/kilo/tricks/legacy.py: dur = ceil(round(maxDelta /
-// (speed/4)) * 5.5 ms / 20 ms) from `up`, hold = |delay| * 50 ms / 20 ms):
+// RC_ROW.. of the same table, converted with the trick importer's rule of
+// 2026-10 (dur = ceil(round(maxDelta / (speed/4)) * 5.5 ms / 20 ms) from `up`,
+// hold = |delay| * 50 ms / 20 ms; mind/kilo/tricks/legacy.py now times a
+// legacy pass at 7.4 ms and counts steps + 1 passes, docs/timing-vs-legacy.md
+// section 4, which would make the moves 14, 7 and 24 ticks; the body's fall
+// recovery keeps these):
 // legacy rows {30,-74,34, 30,30,-30,-30, 30,30,-59,-31} speed 8 delay 12,
 // {62,0,-20, -3,-99,115,0, 81,9,-9,-71} speed 32 delay 10, {0,17,0, up}
 // speed 8. Angles verbatim in canonical order (RB shoulder 115 is clamped to

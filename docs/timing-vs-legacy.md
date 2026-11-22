@@ -6,7 +6,7 @@
 3. The old steps are also 2-2.5 times longer (walk 74 mm, trot 86 mm; Kilo 30 / 35 mm), and its trot keeps feet on the ground 70% of the time (Kilo's 55%). A guess, not tested: the wobbling comes from that shorter ground time, not from the speed.
 4. Kilo can't copy the old timing with the old step sizes. Its 50-per-second update would need 2-4 times the joint speed its safety limit allows. The old firmware asked the servos for more than they can do. The proposal (on a branch, not to flash before a measurement) uses the old timing with small steps.
 **Contradicted by observation (2026-10-12, later the same evening):** the owner, who knows the original's gait by eye, watched Kilo trot at a 0.5 s cycle and said it was clearly FASTER than the original, so the 0.24 s legacy trot estimate below is wrong, most likely because the per-pass loop time is far longer than the 4.8-10.6 ms assumed. Nothing in the gait rows is to be trusted until the legacy firmware is timed on Kilo (`kilo flash --legacy`, stand, stopwatch or video; then flash back). The duty (ground share) and stride figures come from the frame tables and do not depend on the loop time.
-5. Tricks already run at about the old speed (0.7-1.0 of the old time on the best estimate). Posture changes take 0.5 s on Kilo and 0.2-0.4 s on the old firmware.
+5. Tricks: until 2026-11-22 the importer made them 0.7-1.0 of the old time (four errors, §4), and the stretch went back to standing at once where the old firmware held it. Now every row takes the old firmware's time (on the central estimate of its speed, never filmed) and the stretch holds. Posture changes take 0.5 s on Kilo and 0.2-0.4 s on the old firmware.
 
 Labels used below: **[measured]** = seen on the robot; **[code]** = worked out
 from the source in this repo; **[assumed]** = a typical figure for the chip or
@@ -149,40 +149,83 @@ on the branch):
 
 ## 4. Tricks [code]
 
-A legacy behaviour frame is `transform()` at `speed/4` degrees per step
-(each step writes all 16 joints with a cosine ease, `steps + 1` passes), then
-`delay(|delay| × 50 ms)`. One step costs 16 × (cos + float maths + one servo
-write) ≈ **5.6 / 7.4 / 10.2 ms** (fast / central / slow; no IMU reads inside).
-The importer (`mind/kilo/tricks/legacy.py`) uses `LEGACY_STEP_MS = 5.5` (an
-estimate; the planned calibration by filming has not been done) and maps the
-delay exactly (50 ms = 2.5 ticks).
+**How the old firmware times a trick.** A trick (a "behaviour" in the old
+tables) is a list of rows. For each row `perform()` (`legacy/skill.h`)
+calls `transform()` (`legacy/motion.h`) and then waits:
 
-| Trick (remote key) | Legacy total, fast / central / slow (s) | Kilo (s) | Kilo ÷ legacy central |
-|---|---|---|---|
-| hi (4) | 1.7 / 2.2 / 3.0 | 2.2 | 1.0 |
-| push_up `pu` (5) | 3.6 / 4.8 / 6.5 | 3.4 | 0.71 |
-| pee (6) | 2.1 / 2.6 / 3.4 | 2.2 | 0.82 |
-| wash_face `wsf` (7) | 3.3 / 4.0 / 5.1 | 3.7 | 0.92 |
-| check_around `ck` | 1.5 / 2.0 / 2.7 | 1.4 | 0.72 |
-| sniff `snf` | 1.5 / 1.9 / 2.7 | 1.5 | 0.76 |
-| scratch `scrh` | 1.1 / 1.5 / 2.0 | 1.4 | 0.99 |
-| stretch `str` (3), a posture | 0.30 / 0.39 / 0.54 to get there, then held until the next command | 0.50 there, then straight back to STAND | 1.3 for the move |
-| butt_up (8), a posture | 0.26 / 0.34 / 0.47 | 0.50 | 1.5 |
+1. It finds the largest change of any of the 16 joints from where the last
+   row left them (the head and the four never-used slots 4-7 count too).
+2. It moves in `steps = round(largest change / (speed / 4))` steps, writing
+   all 16 joints on each pass with a cosine ease, `steps + 1` passes in all.
+   So the row's `speed` byte is degrees per pass times 4: speed 8 is 2 degrees
+   a pass.
+3. Then `delay(|delay| × 50 ms)`.
+4. A loop (`loopCycle`) plays its rows again; on a repeat its first row is
+   reached from its last row, so that move is usually much shorter than the
+   first time.
 
-Both start from `up`. The legacy `balance` is a posture equal to `up` (no
-move). Where the differences come from:
-- `LEGACY_STEP_MS` 5.5 ms vs the central 7.4: Kilo's moves are up to 1.35×
-  faster.
-- Legacy runs `steps + 1` passes (`s = 0..steps`); the importer counts
-  `steps`, so each frame is 6-10 ms short.
-- Each Kilo move is rounded up to whole 20 ms ticks, up to 20 ms per frame.
-- Loops: the importer sizes a loop's first frame from the frame before it
-  in the file, but on a repeat the legacy firmware moves there from the
-  loop's last frame. In `hi`, frame 2 is 300 ms every time on Kilo. On the
-  legacy repeats it is about 90 ms (22° instead of 105°), so `hi` comes out
-  equal only because the two errors cancel.
-- `stretch` still ends at once: the single-frame posture hold noted in
-  `docs/p1-hardware-test-results.md` is not in the importer yet.
+One pass costs 16 × (a `cos()`, the float maths, `calibratedPWM()`'s EEPROM
+reads and one PCA9685 write at 500 kHz) with the IR interrupt's share:
+**5.6 / 7.4 / 10.2 ms** (fast / central / slow, typical ATmega328P costs;
+no IMU reads inside a trick, so the ultrasonic caveat of §1 does not apply).
+The importer (`mind/kilo/tricks/legacy.py`) uses the central **7.4 ms**
+(`LEGACY_STEP_MS`). Nobody has timed the old firmware doing a trick; filming
+it (§6) would replace the figure.
+
+**What the importer did until 2026-11-22, and why the tricks were off.**
+Four errors, found by replaying the old firmware's loop row by row
+(`legacy.legacy_timing`):
+
+- 5.5 ms a pass instead of 7.4: every move 26 % short.
+- `steps` passes instead of `steps + 1`: 7 ms short on every row.
+- Only the 11 driven joints counted in the largest change, not all 16.
+- A loop's first row had one duration, sized for the first time through, so
+  the repeats were too slow (`hi`: 300 ms each time, where the original takes
+  about 90 on a repeat), which hid the other errors in some totals.
+
+The ticks were rounded up (up to 20 ms a row too long). And the two posture
+tricks (`stretch`, `butt_up`) were the clearest case of "way too fast": the
+old firmware moved there and **held** the pose until the next command; the
+port moved there in 0.5 s and went straight back to STAND (the owner saw
+this on 2026-10-11: `docs/p1-hardware-test-results.md`).
+
+**Now.** The importer replays the old loop: every row timed from where the
+row before left the legs, `steps + 1` passes of 7.4 ms, rounded to the
+nearest tick, finite loops unrolled (one keyframe per row played, so each
+repeat has its own, true, duration), and the two posture tricks hold 2 s.
+`mind/tests/test_tricks.py` holds every row to the old firmware's time to
+within half a tick.
+
+| Trick (old remote key) | Old firmware, fast / central / slow (s) | Kilo before | Kilo now | Now ÷ old central |
+|---|---|---|---|---|
+| hi (4) | 1.71 / 2.21 / 3.00 | 2.22 | 2.24 | 1.01 |
+| push_up `pu` (5) | 3.65 / 4.76 / 6.48 | 3.38 | 4.80 | 1.01 |
+| pee (6) | 2.12 / 2.64 / 3.45 | 2.16 | 2.66 | 1.01 |
+| wash_face `wsf` (7) | 3.28 / 4.02 / 5.16 | 3.70 | 4.04 | 1.00 |
+| check_around `ck` | 1.51 / 1.96 / 2.66 | 1.40 | 1.98 | 1.01 |
+| sniff `snf` | 1.46 / 1.92 / 2.65 | 1.46 | 1.88 | 0.98 |
+| scratch `scrh` | 1.10 / 1.46 / 2.01 | 1.44 | 1.44 | 0.99 |
+| stretch `str` (3), a posture | 0.30 / 0.39 / 0.54 to get there, then held until the next command | 0.5 there, then straight back | 0.5 there, held 2 s, then back (2.5) | |
+| butt_up (8), a posture | 0.26 / 0.34 / 0.47 there, then held | 0.5, straight back | 0.5, held 2 s (2.5) | |
+
+All start from `up`. The legacy `balance` is a posture equal to `up`.
+
+**The random mode's tricks** (`mind/kilo/tricks/alive_set.py`,
+kernel/mind/README.md "The random mode's tricks") are built from the same
+rows with the same timing, from SIT or STAND and back, and the alive layer
+plays them at 0.75 × (`personality.yaml` `alive.trick_speed`), so they take a
+third longer than the original:
+
+| Trick | From SIT at 1× / as played (s) | From STAND at 1× / as played (s) |
+|---|---|---|
+| stretch | 3.40 / 4.58 | 2.90 / 3.90 |
+| wash_face | 4.52 / 6.12 | 4.54 / 6.14 |
+| pee | 3.66 / 4.96 | 3.16 / 4.28 |
+| sniff | 2.88 / 3.94 | 2.38 / 3.26 |
+| check_around | 2.98 / 4.02 | 2.48 / 3.34 |
+
+(From SIT most of them stand up first, at the original's posture rate; all of
+them go back to where they started at that rate, never quicker than 0.5 s.)
 
 ## 5. Postures and the head
 
@@ -200,4 +243,6 @@ One video would replace them: flash the legacy firmware (`kilo flash
 --legacy`), put Kilo on its stand, send `kwkF` (and `ktrF`), film the side,
 and count leg cycles in the first 3 s and again after 10 s (the ultrasonic
 caveat). Then `kilo -v flash` to go back. Filming `khi` the same way would
-calibrate `LEGACY_STEP_MS` for the tricks.
+calibrate `LEGACY_STEP_MS` (7.4 ms, `mind/kilo/tricks/legacy.py`) for the tricks: count the frames from the first
+move to the last; then change it and re-run `python -m kilo.tricks.import_legacy` and
+`python -m kilo.tricks.alive_set` (from `mind/`) and `kernel/mind/tricks/gen_library.py`.
