@@ -17,6 +17,13 @@
 //   SoundPlayer  what Kilo says and when (sound/): B2, waking, the
 //                behaviour's purrs, the guard's hiss; the output from the
 //                platform (MindConfig.sound_output), the sounds the build packed
+//   Estimator    the state estimate (intent/estimate.h): STANDING, SITTING,
+//                RESTING, on a side, ... from every TELEMETRY; it always runs
+//                and only reads (a log line, a MARK and a counter per change)
+//   Intent       "be standing / sitting / resting" (intent/intent.h): with
+//                MindConfig.intent the remote's B6 and A7, the behaviour's
+//                stand, sit and rest and the guard's sit go through it
+//                (docs/intent.md); without, nothing calls it
 //
 //   static Mind mind(serial, clock, platform_log, &listener, cfg);  // ~150 KB: static
 //   mind.attach_log(new LogEntry[LogRing::kLines], LogRing::kLines);  // the log's history, once
@@ -52,6 +59,7 @@
 #include "behaviour/alive.h"
 #include "behaviour/runner.h"
 #include "guard/guard.h"
+#include "intent/intent.h"
 #include "link/serial_link.h"
 #include "measure/measure.h"
 #include "net/host_server.h"
@@ -75,6 +83,7 @@ struct MindConfig {
   bool remote = false;          // the IR remote's keys act (the kernel turns it on)
   bool behaviour = false;       // the behaviour runner from the start (the remote's A5 starts it too)
   uint8_t rear_up_key = 0;      // the stage the remote's A2 starts, 1-3, 0 off (KILO_REAR_UP; remote/keys.h): off until the trials
+  bool intent = false;          // stand, sit and rest go through the intents (intent/intent.h; KILO_INTENT): off until tried on Kilo
   double balance_kp = -1;       // >= 0: SET_BALANCE on with this Kp from the start
   uint64_t seed = 0;            // the behaviour RNG's seed (logged)
   const behaviour::Personality* personality = nullptr;  // null: behaviour::kPersonality
@@ -103,6 +112,7 @@ class Mind final : public LinkListener,
                    public guard::GuardHost,
                    public sound::SoundHost,
                    public measure::MeasureObserver,
+                   public intent::IntentHost,
                    public CalGate {
  public:
   static constexpr uint64_t kRunnerStallUs = 1000000;       // the runner's last tick at most this old
@@ -183,6 +193,20 @@ class Mind final : public LinkListener,
   void measure_line(const char* line) override { recorder_.note(line); }
   void measure_end(const char* line, const char* reason, bool ok) override { recorder_.measure_end(line, reason, ok); }
   measure::Measure& measure() { return measure_; }
+  // intent::IntentHost
+  void intent_moves() override;
+  void intent_mark(const char* line) override { recorder_.note(line); }
+  intent::Estimator& estimator() { return estimator_; }
+  intent::Intent& intent() { return intent_; }
+  // What the mind last asked the body for, as the state estimate's prior (kilo.intent.replay rebuilds it
+  // the same way): the SET_POSTURE goal latched; else, after a trick that ended DONE or STOPPED, its end
+  // posture; after EVENT RECOVERED stand, after RECOVERY_FAILED rest; nothing while a walk, a trick or the
+  // self-measurement runs or after a fall.
+  intent::Cmd intent_cmd() const;
+  // A posture by name, as the remote's keys, the behaviour layer and the guard ask for it: with
+  // MindConfig.intent "stand", "sit" and "rest" are intents (be(STANDING) ...), everything else and
+  // everything without it the body's own posture change (client_posture). who: for the log.
+  bool posture(const char* name, int8_t balance, const char* who);
 
   guard::DistanceGuard& guard() { return guard_; }
   sound::SoundPlayer& sound() { return sound_; }
@@ -224,6 +248,15 @@ class Mind final : public LinkListener,
    private:
     Mind& m_;
     char what_[48] = {};
+  };
+  // the remote's posture keys (remote.h PostureHook): through posture() above
+  class PostureHookImpl final : public remote::PostureHook {
+   public:
+    explicit PostureHookImpl(Mind& m) : m_(m) {}
+    bool posture(const char* name, const char* who) override { return m_.posture(name, -1, who); }
+
+   private:
+    Mind& m_;
   };
   // the remote's B1 (remote.h MeasureHook)
   class MeasureHookImpl final : public remote::MeasureHook {
@@ -271,6 +304,12 @@ class Mind final : public LinkListener,
   remote::RemoteControl remote_;
   measure::Measure measure_;
   MeasureHookImpl measure_hook_;
+  intent::Estimator estimator_;
+  intent::Intent intent_;
+  PostureHookImpl posture_hook_;
+  intent::Cmd prior_ = intent::Cmd::None;  // intent_cmd() when no SET_POSTURE goal is latched
+  uint32_t state_entered_[intent::kStates] = {};  // how often the estimate entered each state (METRICS "state:")
+  void estimate_step(const kilo_telemetry_t& t);
   power::Sleep sleep_;  // light sleep after A7 or lying idle (power/sleep.h)
   guard::DistanceGuard guard_;
   behaviour::Alive alive_;

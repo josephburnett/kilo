@@ -8,8 +8,12 @@ rest:
   host channel (below);
 - **the reference implementations** the C++ mind was ported from and is
   tested against: the walk planner (`kilo/planner/`), perception
-  (`kilo/perception/`), behaviour (`kilo/behaviour/`) and the trick model
-  (`kilo/tricks/`). `kernel/host/tests/gen_*_vectors.py` run them to make
+  (`kilo/perception/`), behaviour (`kilo/behaviour/`), the trick model
+  (`kilo/tricks/`) and the state estimate and intents (`kilo/intent/`,
+  docs/intent.md: `python -m kilo.intent.moves` plans and checks the moves
+  between the postures from the body model, `python -m kilo.intent.replay
+  FILE.krec` runs the state estimate over a recording).
+  `kernel/host/tests/gen_*_vectors.py` run them to make
   the golden vectors the C++ tests check, and `kernel/host/test.sh` fails
   when the committed vectors are stale;
 - **the trick library** (`kilo/tricks/library/*.json`), from which

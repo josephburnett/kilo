@@ -621,7 +621,14 @@ void RemoteControl::act() {
   const char* why = nullptr;
   switch (key_->kind) {
     case Kind::Posture: {
-      bool ok = client_posture(link_, &walker_, key_->name);
+      bool ok;
+      if (posture_hook_ != nullptr) {
+        char who[24];
+        format(who, sizeof who, "remote %s", key_->grid);
+        ok = posture_hook_->posture(key_->name, who);
+      } else {
+        ok = client_posture(link_, &walker_, key_->name);
+      }
       format(what, sizeof what, "posture %s%s", key_->name, ok ? "" : " failed: the link refused SET_POSTURE");
       done(what, !ok);
       return;

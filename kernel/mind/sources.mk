@@ -94,3 +94,11 @@ MIND_SRCS += \
 MIND_SRCS += \
 	mind/measure/script.cpp \
 	mind/measure/measure.cpp
+
+# What state Kilo is in and how he gets to the one he is asked for (intent/, docs/intent.md): the state
+# estimate (always on, read only) and the intents (MindConfig.intent, KILO_INTENT), their tables generated
+# by intent/gen_intent.py from mind/kilo/intent.
+MIND_SRCS += \
+	mind/intent/intent.gen.cpp \
+	mind/intent/estimate.cpp \
+	mind/intent/intent.cpp

@@ -20,6 +20,9 @@
 #   5. P3: the generated trick and personality tables and the perception and behaviour golden
 #      vectors up to date with the Python reference in mind/kilo (their unit tests run in 1.); IR keys, the
 #      behaviour runner and perception against the virtual body (vbody.core --control).
+#   6. Intents (docs/intent.md): the generated tables and vectors up to date; kilo-mind-host --intent
+#      against the virtual body: B6 from LIMP and A7 are the model's moves, a fall onto his side is
+#      seen by the state estimate and waited out (the body's fall reflex), then he stands.
 #
 #   kernel/host/test.sh
 #   PYTHON=/path/to/python   interpreter with the mind's dependencies (default: this checkout's
@@ -688,8 +691,9 @@ echo "   card route: flashed at start, the same build left alone, a failure reco
 echo "== P3: generated tables up to date (tricks, personality)"
 "$PYTHON" "$REPO/kernel/mind/tricks/gen_library.py" --check  # (each generator imports this checkout's mind/)
 "$PYTHON" "$REPO/kernel/mind/behaviour/gen_personality.py" --check
-echo "== P3: golden vectors up to date with the Python reference (perception, behaviour, planner, measure)"
-for v in perception behaviour planner measure; do  # (the planner's takes about 1 s)
+"$PYTHON" "$REPO/kernel/mind/intent/gen_intent.py" --check
+echo "== P3: golden vectors up to date with the Python reference (perception, behaviour, planner, measure, intent)"
+for v in perception behaviour planner measure intent; do  # (the planner's takes about 1 s)
     vectors_current "$v"
 done
 
@@ -1086,5 +1090,46 @@ f = json.load(open(sys.argv[1]))
 assert [(x["name"], x["address"], x["port"], x["build"]) for x in f] == [("kilo.local", "192.168.88.9", 5300, "2d7789e1")], f
 print(f"   kilo find: {f[0]['name']} {f[0]['address']} port {f[0]['port']} build {f[0]['build']} ({f[0]['via']})")
 EOF
+
+echo "== intents: kilo-mind-host --intent against the virtual body (B6 from LIMP, A7, B6, a fall onto his left side, B6)"
+start_ctl_body "$OUT/vbody_intent.log"
+trap stop_body EXIT
+run_mind "$OUT/host_intent.log" --remote --intent --seed 3 --duration 31
+sleep 2
+ctl ir 0x02                   # B6 from LIMP: REST first (a move is refused in LIMP), then the model's move
+sleep 6
+ctl ir 0xA2                   # A7: be RESTING
+sleep 4.5
+ctl ir 0x02                   # B6: be STANDING
+sleep 4.5
+ctl att 0 88                  # he falls onto his left side: the body's fall reflex takes the joints
+sleep 1.5
+ctl ir 0x02                   # B6 while he lies there: the intent waits for the reflex
+sleep 4
+ctl att 0 0                   # righted
+wait_mind "$OUT/host_intent.log"
+stop_body
+trap - EXIT
+grep -E " state: | intent: " "$OUT/host_intent.log"
+expect "$OUT/host_intent.log" "state estimate on; intents ON" "intents on"
+expect "$OUT/host_intent.log" "state: MOVING -> RESTING \(pitch \+0\.0 roll \+0\.0, asked none" "limp at the start reads RESTING"
+expect "$OUT/host_intent.log" "intent: be STANDING \(remote B6; he is RESTING\)" "B6 is an intent"
+expect "$OUT/host_intent.log" "intent: the servos are off: REST first" "REST before a move from LIMP"
+expect "$OUT/host_intent.log" "intent: step 1: RESTING -> STANDING by the move intent_rest_to_stand" "the model's move from REST"
+expect "$OUT/host_intent.log" "trick intent_rest_to_stand: TRICK_DONE DONE" "the body played it"
+expect "$OUT/host_intent.log" "state: MOVING -> STANDING \(pitch \+0\.0 roll \+0\.0, asked stand, confidence 100\)" "the estimate saw him stand"
+expect "$OUT/host_intent.log" "intent: STANDING reached \(1 step" "STANDING reached"
+expect "$OUT/host_intent.log" "intent: step 1: STANDING -> RESTING by the move intent_stand_to_rest" "A7's move"
+expect "$OUT/host_intent.log" "intent: RESTING reached \(1 step" "RESTING reached"
+expect "$OUT/host_intent.log" "event FELL arg=1" "the body's fall reflex tripped"
+expect "$OUT/host_intent.log" "state: STANDING -> ON_LEFT_SIDE \(pitch \+0\.0 roll \+88\.0, asked none, confidence 90\)" "the estimate saw him on his side"
+expect "$OUT/host_intent.log" "intent: step 1: he is ON_LEFT_SIDE: waiting for the body's fall reflex to right him" "the intent waited for the reflex"
+expect "$OUT/host_intent.log" "event RECOVERED" "the reflex righted him"
+[ "$(grep -c "intent: STANDING reached" "$OUT/host_intent.log")" -eq 3 ] ||
+    { echo "FAILED: STANDING was not reached three times (from LIMP, from REST, after the fall)"; cat "$OUT/host_intent.log"; exit 1; }
+if grep -Eq "intent: .*(given up|meant to end)" "$OUT/host_intent.log"; then
+    echo "FAILED: an intent failed a step or gave up"; cat "$OUT/host_intent.log"; exit 1
+fi
+echo "   intents: stood from LIMP and from REST by the model's moves, rested, waited out a fall on his side"
 
 echo "== all kernel host tests passed"

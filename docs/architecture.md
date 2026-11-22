@@ -1812,6 +1812,40 @@ again on Kilo.
 **What is not on the model yet.** The postures (stand, sit, rest), the 13
 stock tricks, the sitting fidgets and getting up after a fall are still
 tables of joint angles (`body/src/core/posture.cpp`, the trick library).
+The way from one posture to another is on it since 2026-11-21, behind a
+switch (below).
+
+**The state estimate and intents** (`docs/intent.md`, `mind/kilo/intent/`,
+`kernel/mind/intent/`). Two things read the model at build time and are
+generated into the mind (`kernel/mind/intent/gen_intent.py`):
+
+- *The state estimate*, always on and read-only: from every TELEMETRY it
+  says whether Kilo is STANDING, SITTING, RESTING, on a side, on his back,
+  on end, MOVING or UNKNOWN. The upright states come from the model: the
+  3-D rest finder (`kilo.tricks.stance.rest`) on each posture's joints
+  gives the attitude the IMU should read, with a tolerance (8 degrees for
+  what the model still gets wrong against the recordings, plus three times
+  the recordings' spread); the posture last asked for is a prior, never the
+  answer. The fallen states come from the attitude alone, in the body's
+  conventions (`body/src/core/attitude.h`). Each change is a log line
+  (`state: A -> B (...)`), a MARK in the flight recorder and a counter.
+  STANDING and RESTING are both level: only the prior tells them apart.
+- *Intents*, with `KILO_INTENT=1` (default 0, until tried on Kilo): the
+  remote's B6 and A7, the behaviour's stand, sit and rest and the guard's
+  sit become `be(STANDING | SITTING | RESTING)`: read the state, take the
+  first step toward the goal from a generated table, play it, read the
+  state again, go on from where he is; three failed steps and it gives up
+  (REST). A step is a *move* planned from the model
+  (`kilo.intent.moves`: the order of the leg joints that keeps the centre
+  of mass furthest inside the feet, at least 10 mm in the rest finder, then
+  played over every band of `kilo.tricks.dynamics` as the rear-up is: no
+  fall, no stop, ends in the target state), played by the trick player; or
+  the body's own posture change where no checked move leads (today only
+  from UNKNOWN; REST to SIT goes through STANDING by two checked moves); or,
+  from a fallen state, waiting for the body's fall reflex: a placeholder
+  that the mind's own righting move replaces in one table entry
+  (`RIGHTING` in `mind/kilo/intent/graph.py`). The end postures are still
+  the body's tables, and nothing was removed from the body.
 
 **How a measurement gets in.** Remote key B1 (Kilo measures himself,
 `docs/self-measurement.md`) → `kilo measure fetch` or `kilo measure fit`
