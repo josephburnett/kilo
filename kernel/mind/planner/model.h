@@ -73,6 +73,9 @@ struct BodyModel {
   real com_dx_mm = (real)KILO_MODEL_CORRECTION_COM_DX_MM;  // the whole robot's centre of mass, forward
   real com_dy_mm = (real)KILO_MODEL_CORRECTION_COM_DY_MM;  // ...to the left
   real com_dz_mm = (real)KILO_MODEL_CORRECTION_COM_DZ_MM;  // ...up
+  // each servo's own performance, by legacy joint id 0..15 (model.py; none measured yet: all as the robot's)
+  real servo_lag_d_ms[16] = KILO_MODEL_CORRECTION_SERVO_LAG_D_MS_INIT;  // later than servo_lag_ms
+  real servo_tau_d_ms[16] = KILO_MODEL_CORRECTION_SERVO_TAU_D_MS_INIT;  // slower than servo_tau_ms
 
   real total_g() const;
   V2 hip(int leg) const;  // shoulder axle (x, y) in the body frame
@@ -85,6 +88,9 @@ struct BodyModel {
     return kGmmS2 * lever_mm / (com_height_mm * com_height_mm + lever_mm * lever_mm);
   }
   real lag_ticks(real tick_ms = 20) const { return servo_lag_ms / tick_ms; }  // the dead time
+  // One servo's (legacy joint id 0..15): the robot's plus its own difference (model.py joint_lag_ms).
+  real joint_lag_ms(int joint) const { return servo_lag_ms + servo_lag_d_ms[joint & 15]; }
+  real joint_tau_ms(int joint) const { return servo_tau_ms + servo_tau_d_ms[joint & 15]; }
   // Ticks until a commanded move has nearly arrived (dead time + 1.5 time constants).
   int settle_ticks(real tick_ms = 20) const {
     real t = (servo_lag_ms + (real)1.5 * servo_tau_ms) / tick_ms - (real)1e-9;

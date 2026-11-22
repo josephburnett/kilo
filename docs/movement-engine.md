@@ -225,6 +225,57 @@ fixed number from the self-measurement: it did not change with the battery
 when facing a wall (80 ms cadence), as progress smaller than commanded;
 that is a later addition.
 
+### Each servo: its own lag and strength
+
+The servo lead above is one number for the whole robot. The owner's rule
+(2026-11-22): the model must have a place for each servo's own lag and its
+own strength, because one slow or weak servo is enough to tip a move that
+loads it (the rear-up of 2026-11-22 rolled left as the hind legs pushed;
+docs/rear-up-trick-results.md).
+
+**Where it lives.** In the one body model, `protocol/spec.toml`
+`[model.correction]`, by the body's joint id 0..15 (the same numbering as
+the servo zeros): `servo_lag_d_ms` (this servo starts moving this much later
+than the robot's `servo_lag_ms`), `servo_tau_d_ms` (it closes the gap this
+much slower than `servo_tau_ms`) and `servo_give` (it gives under load this
+many times the legs' `sag_deg_per_kg_cm`). The defaults (0, 0, 1) say every
+servo is the robot's, which is all that has been measured, so nothing Kilo
+does changes until a measurement says otherwise. Python `BodyModel`
+(`joint_lag_ms`, `joint_tau_ms`, `joint_sag`) and C++
+`kernel/mind/planner/model.h` (`joint_lag_ms`, `joint_tau_ms`) read them;
+`kilo model show` lists them; `kilo model apply` writes them from a fit
+file's `lag_d_ms:JOINT`, `tau_d_ms:JOINT` and `give:JOINT` numbers (JOINT a
+name such as `lb_knee`). The tricks' model (`kilo.tricks.dynamics`) already
+plays each servo with its own lag, time constant and give when they
+differ.
+
+**Who uses it, and how.** The knowledge stays in the model; the mind plans
+with it; the board does not need it (it holds poses and corrects what is
+left):
+
+- the walk's planner sends each joint its own lead: a servo 30 ms slower
+  gets its command 30 ms earlier, so the legs arrive together;
+- a move that loads one side (the rear-up's push, getting up) is checked in
+  the tricks' model with that side's give and lag, and paced so the slower
+  side keeps up: the move's duration is set by the slowest servo it loads;
+- the engine's observer compares the attitude it predicts (with each
+  servo's numbers) against the measured one; a residual that grows only
+  when one leg is loaded points at that leg.
+
+**How it would be measured** (not built yet). The present self-measurement
+moves legs in pairs (front against back, left against right), so it sees
+the robot's lag and give, not a servo's. The step that would: on four
+feet, the body 10 mm forward so that each hind leg carries about a third of
+the weight, one hind leg at a time lengthened 3 mm in one tick and held,
+then shortened back; the IMU's roll and pitch over the next 300 ms give
+that leg's dead time and time constant (the moment the tilt starts and how
+fast it gets there), and the held tilt against the model's gives its give
+under that load. Then the same for each front leg, the body 10 mm back.
+Eight short steps, each a 3 mm move on four feet (no tip possible), about
+15 s in all; comparing left with right needs no absolute model, only the
+two answers. The 25-per-second telemetry limits the timing to about 20 ms,
+which is enough for the 40 ms or more that would matter.
+
 ### Lying down and getting up
 
 The lying simulator reproduces none of the four recorded rc get-ups

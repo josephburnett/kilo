@@ -29,6 +29,10 @@ limit of the fit, and inside what is plausible for Kilo):
     imu_pitch, imu_roll   [model.correction] imu_*_deg (with the floor's slope, unless the fit had a
                           turned run)
     lag_ms, tau_ms        [model] servo_lag_ms, servo_tau_ms (whole ms)
+    lag_d_ms:JOINT, tau_d_ms:JOINT, give:JOINT
+                          one servo's own (JOINT a joint name, e.g. lag_d_ms:lb_knee): [model.correction]
+                          servo_lag_d_ms, servo_tau_d_ms (ms, later / slower than the robot's) and
+                          servo_give (times the legs' sag), at that joint's legacy id
     length, track         the LEG_LB_MM and LEG_W_MM params' defaults (whole mm). These are also the
                           BODY's parameters: its firmware changes, and a body that has saved its own
                           values keeps them until they are set (kilo param).
@@ -62,7 +66,10 @@ VIEW_FIT = {"com_x_mm": "com_x", "com_dx_mm": "com_x", "com_dy_mm": "com_y", "co
 # What is plausible for Kilo, by what is written: outside it a fitted number is left out (a fit that ran into
 # its own limit, or a run that went wrong).
 PLAUSIBLE = {"com": (-20.0, 20.0), "sag": (0.0, 10.0), "twist": (-4.0, 4.0), "imu": (-10.0, 10.0),
-             "lag": (10.0, 200.0), "tau": (10.0, 300.0), "length": (100.0, 150.0), "track": (55.0, 80.0)}
+             "lag": (10.0, 200.0), "tau": (10.0, 300.0), "length": (100.0, 150.0), "track": (55.0, 80.0),
+             "lag_d": (-40.0, 150.0), "tau_d": (-50.0, 200.0), "give": (0.2, 5.0)}
+# per-servo fit parameters "KIND:joint" -> ([model.correction] key, digits)
+PER_SERVO = {"lag_d_ms": ("servo_lag_d_ms", 0), "tau_d_ms": ("servo_tau_d_ms", 0), "give": ("servo_give", 2)}
 
 
 def add_parser(sub: Any) -> None:
@@ -265,6 +272,13 @@ def _floats(s: str) -> list[float]:
     return [float(x) for x in s.strip("[]").split(",")]
 
 
+def _joint_id(name: str) -> int | None:
+    """A joint's legacy id 0..15 from its name (lb_knee), or None."""
+    from kilo.tricks.model import JOINT_IDS
+
+    return JOINT_IDS.get(name)
+
+
 def plan_changes(fit: dict, spec_text: str) -> list[Change]:
     """What applying ``fit`` would write, parameter by parameter (nothing is written here)."""
     fp = fit["parameters"]
@@ -315,6 +329,25 @@ def plan_changes(fit: dict, spec_text: str) -> list[Change]:
         new = int(round(float(p["value"])))
         out.append(Change(name, f"servo timing {key}", int(float(toml_get(spec_text, "model", key))), new,
                           float(p.get("sd", 0.0)), take(name, kind, new)))
+    for kind, (key, nd) in PER_SERVO.items():
+        old = _floats(toml_get(spec_text, "model.correction", key))
+        new, sds, why = list(old), [], []
+        for name in fp:
+            k, _, joint = name.partition(":")
+            if k != kind:
+                continue
+            j = _joint_id(joint)
+            p = fp[name]
+            v = round(float(p["value"]), nd) + 0.0
+            w = "no such joint" if j is None else take(name, kind.split("_ms")[0], v)
+            if w:
+                why.append(f"{joint}: {w}")
+                continue
+            new[j] = v
+            sds.append(float(p.get("sd", 0.0)))
+        if sds or why:
+            out.append(Change(kind, f"each servo's {key} (by joint id)", old, new, max(sds, default=0.0),
+                              "" if sds else "; ".join(why)))
     for name, param in (("length", "LEG_LB_MM"), ("track", "LEG_W_MM")):
         if name not in fp:
             continue
@@ -325,7 +358,7 @@ def plan_changes(fit: dict, spec_text: str) -> list[Change]:
                           take(name, name, new)))
     known = {c.fit for c in out}
     for name in fp:
-        if name not in known:
+        if name not in known and name.partition(":")[0] not in known:
             out.append(Change(name, "", why_not="no place in the model (the measurement's own number)"))
     return out
 
@@ -348,6 +381,11 @@ def edit_spec(text: str, changes: list[Change], source: str) -> str:
         elif c.fit in ("lag_ms", "tau_ms"):
             key = {"lag_ms": "servo_lag_ms", "tau_ms": "servo_tau_ms"}[c.fit]
             text = about_set(toml_set(text, "model", key, str(int(c.new))), key, source)
+        elif c.fit in PER_SERVO:
+            key = PER_SERVO[c.fit][0]
+            text = about_set(toml_set(text, "model.correction", key,
+                                      "[" + ", ".join(repr(float(v)) for v in c.new) + "]"),
+                             f"correction.{key}", source)
         elif c.fit in ("length", "track"):
             text = param_set(text, {"length": "LEG_LB_MM", "track": "LEG_W_MM"}[c.fit], str(int(c.new)))
     return text

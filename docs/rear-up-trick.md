@@ -124,15 +124,15 @@ it.
    him 15 mm away from rocking at "gather", where he rocked every time. So
    every check now runs in a model with the give in it, fitted to the
    recordings.
-2. **His centre of mass is about 5.5 mm further back and 5 mm further to
-   the right** than the planner's model. That made "lift_r" (the right hind
-   foot in the air) a coin flip: 3 of 7 plays went over. On the tripod it
-   rolls him to the right, more the softer his legs and the higher he sits.
-   So on the tripod the left hind leg is 2.5 mm shorter than the right: he
-   leans left by that much, which in the fitted case puts him level. (The
-   tail could move its tip under the centre of mass, but which way a
-   positive tail angle swings the tip is not known; see the end of section
-   2.)
+2. **His centre of mass is about 5.5 mm further back** than the planner's
+   model. That made "lift_r" (the right hind foot in the air) a coin flip:
+   3 of 7 plays went over. (That fit also put it 5 mm to the right, and the
+   tripod leaned him left against it, the left hind leg 2.5 mm shorter; the
+   self-measurement of 2026-11-22 found it in the middle, and that lean
+   tipped him left twice: docs/rear-up-trick-results.md. Both hind legs are
+   alike now.) On the tripod a millimetre of leg or of centre of mass to one
+   side is worth about a degree of roll, and the legs' give makes it grow,
+   so the Pi watches the roll while the hind legs push (section 8).
 3. The walking planner keeps its own centre of mass: the fitted one lives
    only in the trick's model (`kilo.tricks.dynamics.FITTED`), so the walks
    you tuned do not change.
@@ -600,7 +600,9 @@ keeps him on his four feet at "gather", which is how the second design's
 checks passed it.
 
 **Fitted** (what the recordings say about Kilo): the centre of mass 5.5 mm
-further back and 5 mm further right than `kilo.planner.model`; the legs give
+further back than `kilo.planner.model` (the fit also said 5 mm to the
+right; the self-measurement of 2026-11-22 found it in the middle, and the
+trick is now judged with it there, `kilo.tricks.rear_up.MODEL`); the legs give
 4 degrees per kg cm (3.5 to 4.5 fit); the tail droops 16 degrees, not 18.
 Not separated by the data: further back and softer look alike at "gather";
 right of centre and a left/right difference in the legs look alike; the
@@ -640,22 +642,22 @@ pitch and roll:
 - cut short half way into and at the end of every keyframe (the fitted case
   and the three worst corners): down on its feet, sitting, the roll within
   20 degrees;
-- he ends sitting on his feet every time;
-- with the right hind shoulder not re-seated, a guard stops him and he sits.
+- while the hind legs push in "up", the roll moves less than the push
+  watch's 3.5 degrees, by at least half a degree, in every case;
+- he ends sitting on his feet every time.
 
-**What the checks found** (stage 1): in every one of the 22 cases, and from SIT, he is on the tripod by 2.8 s (the paws are off the floor by 1.9 s; by 2.6 s in the softest cases, where a front knee brushes the floor as the paws fold) and holds at +21.7 to +24.9 degrees nose up. The roll at the hold reads -2.9 to +4.6 (the IMU's +2 included; the worst are the soft-and-right corner and the centre of mass only 2 mm right). The hind feet slide 3 to 19 mm (19 on the slippery floor), the tail tip 20 to 100 mm as the hips rise. The most a leg servo carries is 2.0 kg cm (the right hind shoulder, the rear-corner case, as he settles back down). Cut short at any of the 64 points checked, he sits; the largest roll on the way down is 9.4 degrees (soft-and-right, stopped on the tripod). Before the re-seat the roll limit stops him in the crouch; he rolls to 17 degrees coming down and sits.
+**What the checks found** (stage 1, 2026-11-22, both hind legs alike): in every one of the 22 cases, and from SIT, he is on the tripod by 2.8 s (the paws are off the floor by 1.9 s; by 2.6 s in the softest cases, where a front knee brushes the floor as the paws fold) and holds at +22.2 to +25.5 degrees nose up. The roll at the hold reads -1.1 to +4.6 (the IMU's +2 included; the worst are the centre of mass 3 mm to a side). While the hind legs push, the roll moves at most 3.0 degrees (soft-and-right), under the push watch's 3.5. The most a leg servo carries is about 1.6 kg cm. Cut short at any of the 64 points checked, he sits; the largest roll on the way down is 7.4 degrees (soft-and-right, stopped at "up").
 
-**Stages 2 and 3**: stage 2 holds at +34.2 to +37.2 in 21 of the 22 cases; in the soft-and-right corner he holds it, then rolls past 8 degrees on the way down and the roll limit stops him: he sits. Stage 3 holds at +48.6 to +51.3 in 20 of 22; with the centre of mass only 2 mm right the top's guard sees him leaning left 6.4 degrees and stops him, and soft-and-right is stopped by the roll limit on the way down; he sits both times. With the centre of mass 10 mm lower the tail carries only 10 g at the top: he is close to tipping forward, onto the folded paws. Cut short anywhere (96 and 128 points): he sits; the largest roll on the way down 13 degrees (soft-and-right).
+**Stages 2 and 3** (2026-11-22, both hind legs alike): in the fitted case they hold at "mid" (+34.7 to +37.7 over the cases) and at "top" (+49.0 to +51.8); in the cases with the centre of mass 3 mm to a side, or soft and to the right, a guard or the roll limit may stop them and he comes down sitting (the roll reaches 8 to 12 degrees on the way down there). Cut short anywhere (96 and 128 points): he sits; the largest roll on the way down 12.3 degrees (soft-and-right).
 
-**The roll, and the lean.** On the tripod his weight is on the hind feet
-and the tail tip, and the hind legs give under it. The centre of mass 5 mm
-right of centre loads the right hind leg more; it gives more; he rolls
-right, which loads it more again. Without the lean (the left hind leg 2.5
-mm shorter on the tripod) the model rolls him 2 degrees right in the fitted
-case and up to 18 in the soft-and-right corner at stage 1. The higher he
-sits, the softer this gets: at stages 2 and 3 a millimetre of lean or of
-centre of mass moves the roll by about 2.5 degrees, which is why those
-stages are the ones a guard may stop.
+**The roll.** On the tripod his weight is on the hind feet and the tail
+tip, and the hind legs give under it. A centre of mass to one side loads
+that hind leg more; it gives more; he rolls that way, which loads it more
+again. At stage 1 a millimetre of centre of mass (or of one leg's length)
+moves the roll by about a degree; the 3 mm cases roll him 2.6 degrees while
+the legs push. The higher he sits, the softer this gets: at stages 2 and 3
+about 2.5 degrees per millimetre, which is why those stages are the ones a
+guard may stop.
 
 **The tail** (unchanged, section 2): it stays at 0; turned aside under load
 the floor's push would turn it further out.
@@ -666,7 +668,14 @@ The body plays the keyframes by itself; the Pi watches the pitch and roll
 it reports 25 times a second. Each guard is at a keyframe where Kilo holds
 still: over the second half of the hold the pitch must average inside the
 guard's window, and the roll must stay within 6 degrees. And over the whole
-play, a roll past 8 degrees twice in a row. When a check fails, the Pi sends
+play, a roll past 8 degrees twice in a row. And the push watch on "up":
+from the moment the hind legs start pushing him onto the tripod until the
+hold's second half, the roll may move at most 3.5 degrees from what it was
+just before the push (whatever lean he brought into it); past that twice in
+a row he is stopped at once (`guard up: roll +X deg, +Y while it moved
+(limit 3.5)`). A tip there grows 20 to 40 degrees a second (2026-11-22): the
+8 degree limit came 0.1 s too late and he rolled on to 30 degrees before he
+sat. When a check fails, the Pi sends
 the same stop as C7 (Kilo sits down over the trick's stop time) and logs
 `trick rear_up: guard NAME: nose up X deg outside LO..HI: stopping` (or the
 roll); the recording keeps it.
@@ -706,9 +715,10 @@ top by its guard's name (`up`, `mid`, `top`).
   the front feet slid back); higher: he went further back than the model
   says (the tail or the rear corner lower than modelled). Tell me which.
 - **"guard paws: ..."**: the paws did not come up or he rocked further.
-- **"guard up: roll ..."** (or mid, top): he rolled on the tripod: which
-  side (the sign: + is his left side down)? That is the lean (section 7)
-  telling us about his centre of mass; the numbers let me correct it.
+- **"guard up: roll ..."** (or mid, top), **or "... while it moved"**: he
+  rolled on the tripod or while pushing onto it: which side (the sign: + is
+  his left side down)? A slow-motion video from behind tells whether one hind
+  leg lags the other (docs/rear-up-trick-results.md, 2026-11-22).
 - **He rocks right over the tail** (catch him): C7, stop the trials, tell
   me the stage.
 - **A foot slides during the push**: a less slippery floor.

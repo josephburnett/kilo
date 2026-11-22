@@ -147,6 +147,10 @@ class BodyModel:
     leg_dz_mm: tuple = tuple(float(v) for v in P.MODEL_CORRECTION_LEG_DZ_MM)  # each leg longer than commanded
     imu_pitch_deg: float = float(P.MODEL_CORRECTION_IMU_PITCH_DEG)  # TELEMETRY standing level (nose down +)
     imu_roll_deg: float = float(P.MODEL_CORRECTION_IMU_ROLL_DEG)    # ...(right side up +)
+    # each servo's own performance, by legacy joint id 0..15 (none measured yet: all as the whole robot's)
+    servo_lag_d_ms: tuple = tuple(float(v) for v in P.MODEL_CORRECTION_SERVO_LAG_D_MS)  # later than servo_lag_ms
+    servo_tau_d_ms: tuple = tuple(float(v) for v in P.MODEL_CORRECTION_SERVO_TAU_D_MS)  # slower than servo_tau_ms
+    servo_give: tuple = tuple(float(v) for v in P.MODEL_CORRECTION_SERVO_GIVE)  # times sag_deg_per_kg_cm
     # ---- the rest of the body (spec [model.servo], .tail, .outline, .inertia, .sensor) ----
     czp: tuple = tuple(P.MODEL_SERVO_CZP)  # Kilo's servo zeros by legacy joint id (EEPROM, 2026-10-10)
     reseated_rb_shoulder_czp: int = P.MODEL_SERVO_RESEATED_RB_SHOULDER_CZP  # ...the right hind shoulder's, re-seated
@@ -225,6 +229,24 @@ class BodyModel:
     def lag_ticks(self, tick_ms: float = 20.0) -> float:
         """The dead time in ticks."""
         return self.servo_lag_ms / tick_ms
+
+    # ---- each servo (spec [model.correction] servo_*; legacy joint id 0..15) ----
+    def joint_lag_ms(self, joint: int) -> float:
+        """This servo's dead time: the robot's plus its own difference."""
+        return self.servo_lag_ms + self.servo_lag_d_ms[joint]
+
+    def joint_tau_ms(self, joint: int) -> float:
+        """This servo's time constant."""
+        return self.servo_tau_ms + self.servo_tau_d_ms[joint]
+
+    def joint_sag(self, joint: int) -> float:
+        """How much this servo gives under load, deg per kg cm."""
+        return self.sag_deg_per_kg_cm * self.servo_give[joint]
+
+    @property
+    def servos_alike(self) -> bool:
+        """No servo measured as different from the others (the defaults)."""
+        return not any(self.servo_lag_d_ms) and not any(self.servo_tau_d_ms) and all(g == 1.0 for g in self.servo_give)
 
     def settle_ticks(self, tick_ms: float = 20.0) -> int:
         """Ticks until a commanded move has nearly arrived (the dead time and

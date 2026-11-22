@@ -86,19 +86,31 @@ class Guard:
     must average inside ``nose_up`` = (lo, hi) degrees, and |roll| must stay
     at most ``roll_max``; otherwise the mind sends TRICK_STOP (over the
     trick's stop_ticks, down to its end posture). The frame's hold must be
-    at least GUARD_MIN_HOLD ticks. ``name`` is for the logs."""
+    at least GUARD_MIN_HOLD ticks. ``name`` is for the logs.
+
+    ``push_roll`` (deg, 0 = none) also watches the frame's MOVE: from its
+    start up to the hold's second half, the roll may change by at most this
+    much from the last reading before the move (the roll he brings into it,
+    whatever it is); past it on two readings in a row the mind stops the
+    trick. It catches a tip while the legs push, before it gathers speed
+    (the rear-up of 2026-11-22: the roll grew 9 deg in 0.35 s)."""
     frame: int
     nose_up: tuple
     roll_max: float
     name: str = ""
+    push_roll: float = 0.0
 
     def to_dict(self) -> dict:
-        return {"frame": self.frame, "name": self.name, "nose_up": [_num(v) for v in self.nose_up],
-                "roll_max": _num(self.roll_max)}
+        d = {"frame": self.frame, "name": self.name, "nose_up": [_num(v) for v in self.nose_up],
+             "roll_max": _num(self.roll_max)}
+        if self.push_roll:
+            d["push_roll"] = _num(self.push_roll)
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Guard":
-        return cls(frame=d["frame"], nose_up=tuple(d["nose_up"]), roll_max=d["roll_max"], name=d.get("name", ""))
+        return cls(frame=d["frame"], nose_up=tuple(d["nose_up"]), roll_max=d["roll_max"], name=d.get("name", ""),
+                   push_roll=d.get("push_roll", 0.0))
 
 
 GUARD_MIN_HOLD = 20  # ticks (0.4 s): the guard averages the second half of the hold

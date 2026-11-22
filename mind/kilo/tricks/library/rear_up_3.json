@@ -6,7 +6,7 @@
     "doc": "docs/rear-up-trick.md",
     "stage": 3,
     "design_version": 3,
-    "model": "kilo.tricks.dynamics FITTED",
+    "model": "kilo.tricks.rear_up MODEL",
     "requires": "the right hind shoulder (joint 10) reaching -78 deg: calibration offset +7..+25 (kilo cal show), docs/rear-up-trick.md section 2",
     "keyframes": [
       "look",
@@ -29,22 +29,22 @@
     ],
     "predicted_pitch_deg": [
       -1.9,
-      0.3,
+      0.0,
       7.1,
       7.0,
       6.4,
-      23.3,
-      27.8,
-      35.7,
-      41.4,
-      49.9,
-      44.2,
-      37.3,
-      30.9,
-      25.5,
+      23.8,
+      27.9,
+      36.2,
+      42.0,
+      50.4,
+      44.7,
+      37.8,
+      31.4,
+      25.9,
       10.5,
       6.3,
-      30.8
+      31.7
     ]
   },
   "notes": [
@@ -94,7 +94,8 @@
         19.5,
         27
       ],
-      "roll_max": 6
+      "roll_max": 6,
+      "push_roll": 3.5
     },
     {
       "frame": 7,
@@ -122,15 +123,15 @@
     {"dur": 18, "hold": 20, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": 0, "tail": 0, "lf_shoulder": -29, "rf_shoulder": -29, "rb_shoulder": -76, "lb_shoulder": -76, "lf_knee": 45, "rf_knee": 45, "rb_knee": -63, "lb_knee": -63}},
     {"dur": 12, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -10, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -29, "rb_shoulder": -76, "lb_shoulder": -76, "lf_knee": -25, "rf_knee": 45, "rb_knee": -63, "lb_knee": -63}},
     {"dur": 12, "hold": 20, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -15, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -76, "lb_shoulder": -76, "lf_knee": -25, "rf_knee": -25, "rb_knee": -63, "lb_knee": -63}},
-    {"dur": 25, "hold": 200, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -25, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -52, "lb_shoulder": -56, "lf_knee": -25, "rf_knee": -25, "rb_knee": -52, "lb_knee": -48}},
-    {"dur": 20, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -30, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -44, "lb_shoulder": -48, "lf_knee": -25, "rf_knee": -25, "rb_knee": -41, "lb_knee": -36}},
-    {"dur": 25, "hold": 200, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -30, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -29, "lb_shoulder": -33, "lf_knee": -25, "rf_knee": -25, "rb_knee": -47, "lb_knee": -42}},
-    {"dur": 25, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -35, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -14, "lb_shoulder": -18, "lf_knee": -25, "rf_knee": -25, "rb_knee": -47, "lb_knee": -41}},
-    {"dur": 32, "hold": 100, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -40, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": 5, "lb_shoulder": 0, "lf_knee": -25, "rf_knee": -25, "rb_knee": -61, "lb_knee": -52}},
-    {"dur": 32, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -35, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -14, "lb_shoulder": -18, "lf_knee": -25, "rf_knee": -25, "rb_knee": -47, "lb_knee": -41}},
-    {"dur": 25, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -30, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -29, "lb_shoulder": -33, "lf_knee": -25, "rf_knee": -25, "rb_knee": -47, "lb_knee": -42}},
-    {"dur": 25, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -30, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -44, "lb_shoulder": -48, "lf_knee": -25, "rf_knee": -25, "rb_knee": -41, "lb_knee": -36}},
-    {"dur": 20, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -25, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -52, "lb_shoulder": -56, "lf_knee": -25, "rf_knee": -25, "rb_knee": -52, "lb_knee": -48}},
+    {"dur": 25, "hold": 200, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -25, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -52, "lb_shoulder": -52, "lf_knee": -25, "rf_knee": -25, "rb_knee": -52, "lb_knee": -52}},
+    {"dur": 19, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -30, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -44, "lb_shoulder": -44, "lf_knee": -25, "rf_knee": -25, "rb_knee": -41, "lb_knee": -41}},
+    {"dur": 25, "hold": 200, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -30, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -29, "lb_shoulder": -29, "lf_knee": -25, "rf_knee": -25, "rb_knee": -47, "lb_knee": -47}},
+    {"dur": 25, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -35, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -14, "lb_shoulder": -14, "lf_knee": -25, "rf_knee": -25, "rb_knee": -47, "lb_knee": -47}},
+    {"dur": 32, "hold": 100, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -40, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": 5, "lb_shoulder": 5, "lf_knee": -25, "rf_knee": -25, "rb_knee": -61, "lb_knee": -61}},
+    {"dur": 32, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -35, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -14, "lb_shoulder": -14, "lf_knee": -25, "rf_knee": -25, "rb_knee": -47, "lb_knee": -47}},
+    {"dur": 25, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -30, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -29, "lb_shoulder": -29, "lf_knee": -25, "rf_knee": -25, "rb_knee": -47, "lb_knee": -47}},
+    {"dur": 25, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -30, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -44, "lb_shoulder": -44, "lf_knee": -25, "rf_knee": -25, "rb_knee": -41, "lb_knee": -41}},
+    {"dur": 19, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -25, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -52, "lb_shoulder": -52, "lf_knee": -25, "rf_knee": -25, "rb_knee": -52, "lb_knee": -52}},
     {"dur": 25, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": -15, "tail": 0, "lf_shoulder": -15, "rf_shoulder": -15, "rb_shoulder": -76, "lb_shoulder": -76, "lf_knee": -25, "rf_knee": -25, "rb_knee": -63, "lb_knee": -63}},
     {"dur": 15, "hold": 0, "easing": "cosine", "joints": {"head_pan": 0, "head_tilt": 0, "tail": 0, "lf_shoulder": -29, "rf_shoulder": -29, "rb_shoulder": -76, "lb_shoulder": -76, "lf_knee": 45, "rf_knee": 45, "rb_knee": -63, "lb_knee": -63}},
     {"dur": 25, "hold": 0, "easing": "cosine", "joints": {"head_pan": 10, "head_tilt": -20, "tail": -60, "lf_shoulder": 30, "rf_shoulder": 30, "rb_shoulder": -80, "lb_shoulder": -80, "lf_knee": 60, "rf_knee": 60, "rb_knee": 45, "lb_knee": 45}}

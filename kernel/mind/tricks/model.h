@@ -35,12 +35,16 @@ extern const uint8_t kCanonical[KILO_JOINT_COUNT];
 // mind-side only): over the second half of frame `frame`'s hold the
 // TELEMETRY nose-up pitch (-pitch) must average inside lo..hi and |roll|
 // stay within roll_max (all a16, 1/16 deg), or the player sends TRICK_STOP.
+// push_a16 (0 = none; model.py Guard.push_roll): from the start of the
+// frame's move to that window the roll may move at most this far from the
+// last reading before the move (two readings in a row past it: stop).
 struct TrickGuard {
   uint8_t frame;
   int16_t lo_a16;
   int16_t hi_a16;
   int16_t roll_a16;
   const char* name;
+  int16_t push_a16 = 0;
 };
 
 struct Trick {
@@ -81,6 +85,10 @@ class GuardWatch {
   uint8_t n_ = 0;
   uint64_t from_us_[kMaxGuards] = {};
   uint64_t decide_us_[kMaxGuards] = {};
+  uint64_t move_us_[kMaxGuards] = {};  // the guarded frame's move starts (push_a16)
+  int16_t roll0_[kMaxGuards] = {};     // the last roll before it
+  bool have_roll0_[kMaxGuards] = {};
+  uint8_t push_over_[kMaxGuards] = {};
   int32_t sum_[kMaxGuards] = {};
   uint16_t count_[kMaxGuards] = {};
   bool done_[kMaxGuards] = {};

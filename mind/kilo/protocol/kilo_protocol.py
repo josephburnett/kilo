@@ -3065,6 +3065,9 @@ MODEL_CORRECTION_SAG_DEG_PER_KG_CM = 0.0
 MODEL_CORRECTION_LEG_DZ_MM = (0.0, 0.0, 0.0, 0.0)
 MODEL_CORRECTION_IMU_PITCH_DEG = 0.0
 MODEL_CORRECTION_IMU_ROLL_DEG = 0.0
+MODEL_CORRECTION_SERVO_LAG_D_MS = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+MODEL_CORRECTION_SERVO_TAU_D_MS = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+MODEL_CORRECTION_SERVO_GIVE = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
 MODEL_SERVO_CZP = (73, 69, 85, 90, 45, 135, 45, 135, 111, 83, 116, 82, 141, 67, 127, 59)
 MODEL_SERVO_RESEATED_RB_SHOULDER_CZP = 88
 MODEL_TAIL_PIVOT_X_MM = -70.5
@@ -3123,6 +3126,9 @@ MODEL_ABOUT: dict[str, tuple[str, str, str]] = {
     'correction.leg_dz_mm': ('each leg longer than commanded (left front, right front, right back, left back)', 'mm', 'nothing applied yet'),
     'correction.imu_pitch_deg': ('what the tilt sensor reads nose-down when he stands level', 'deg', 'nothing applied yet'),
     'correction.imu_roll_deg': ('...and rolled (right side up +)', 'deg', 'nothing applied yet'),
+    'correction.servo_lag_d_ms': ('each servo (joint id 0..15) starts this much later than servo_lag_ms', 'ms', 'nothing measured per servo yet'),
+    'correction.servo_tau_d_ms': ('...and closes the gap this much slower than servo_tau_ms', 'ms', 'nothing measured per servo yet'),
+    'correction.servo_give': ('...and gives under load this many times sag_deg_per_kg_cm', '', 'nothing measured per servo yet'),
     'servo.czp': ("each servo's zero, by joint id 0..15", 'servo deg', "Kilo's EEPROM, read 2026-10-10"),
     'servo.reseated_rb_shoulder_czp': ("the right hind shoulder's zero after it was re-seated", 'servo deg', 'read from the plays since 2026-11-19, not confirmed'),
     'tail.pivot_x_mm': ("the tail's pivot, forward of the shoulders' middle", 'mm', "the owner's ruler, 2026-11-16"),
