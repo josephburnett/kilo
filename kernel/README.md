@@ -134,8 +134,9 @@ card stays (the script says so). The script never partitions or
 formats. It refuses anything that is not the root of a mounted vfat
 filesystem, and any partition holding files other than Pi boot files, so a
 Raspberry Pi OS card (it has `cmdline.txt` and `overlays/`) is refused rather
-than losing its Linux `kernel7.img`; `kernel7.old` and `kernel7.new`, which
-`kilo update` leaves, are accepted (and kept). `--force-dir` skips the mount
+than losing its Linux `kernel7.img`; a `kernel7.old`, `kernel7.bad` or
+`kernel7.new` left from earlier updates is accepted (and kept: the next
+`kilo update` or `kilo card` removes the first two). `--force-dir` skips the mount
 checks; it exists for testing on a plain directory and is not for real
 cards. `make -C kernel card` stages both cards' files in
 `build/card/netboot/` and `build/card/kernel/`, for copying by hand.
@@ -770,7 +771,7 @@ Ethernet ("Network bring-up").
 | `remote` | on | the IR remote drives Kilo; logged `IR remote on` |
 | `balance_kp` | 0.99 | SET_BALANCE on at start, logged `balance on by default (Kp 253/256)` |
 | `behaviour` | off; `make -C kernel KILO_BEHAVIOUR=1` turns it on | the remote's A5 starts the runner at run time either way. While it runs, A5 plays one of its tricks and the remote's keys other than B6, A7 and C7 (which stop it) are ignored. Built in, the kernel logs `Kilo mind, build ... (behaviour runner on)` |
-| `rear_up_key` | 0 (off); `make -C kernel KILO_REAR_UP=1` (or `2`, `3`) turns it on at that stage | the remote's A2 starts the rear-up trick only when switched on (docs/rear-up-trick.md, the switch): off until the owner's staged trials are done, A2 does nothing like the other keys of rows 1-3. The value is the stage: 1 `rear_up` (28 degrees), 2 `rear_up_2` (40), 3 `rear_up_3` (54). `kilo-mind-host`'s switch is `--rear-up[=N]`. Built in, the kernel logs `Kilo mind, build ... (rear-up key A2 on: rear_up_2, stage 2)` |
+| `rear_up_key` | 0 (off); `make -C kernel KILO_REAR_UP=1` (or `2`, `3`) turns it on at that stage | the remote's A1 starts the rear-up trick only when switched on (docs/rear-up-trick.md, the switch): off until the owner's staged trials are done, A1 does nothing like the other keys of rows 1-3. The value is the stage: 1 `rear_up` (28 degrees), 2 `rear_up_2` (40), 3 `rear_up_3` (54). `kilo-mind-host`'s switch is `--rear-up[=N]`. Built in, the kernel logs `Kilo mind, build ... (rear-up key A1 on: rear_up_2, stage 2)` |
 | `intent` | off; `make -C kernel KILO_INTENT=1` turns it on | stand, sit and rest as intents (docs/intent.md): the remote's B6 and A7, the behaviour's postures and the guard's sit go through the state estimate and the moves planned from the body model, instead of the body's own posture change. Off until the first floor try. The state estimate itself always runs and only logs (`state: MOVING -> STANDING (...)`). `kilo-mind-host`'s switch is `--intent`. Built in, the kernel logs `Kilo mind, build ... (intents on: stand, sit and rest are moves from the model)`; either way the mind logs `state estimate on; intents ON ...` or `... intents off ...` |
 | `seed` | 32 bits from the hardware RNG | the behaviour runner logs it (`seed N`, at boot or in the remote's A5 line), so a run can be replayed on the laptop |
 | `stats_period_ms` | 1000 | a STATS_REQ to the body each second, logged `body STATS: ...`, as `kilo-mind-host` does |
@@ -807,57 +808,58 @@ floor only, never on a desk.**
 | C6 | 0xC2 | the same as A6, to the right |
 | A5 | 0xE0 | start the behaviour runner (Kilo acting on his own, `mind/behaviour/`). While it runs, B6, A7 and C7 stop it and then do their own job, A5 again makes him do one of the original Nybble's tricks at random (kernel/mind/README.md "The random mode's tricks"), and the other keys are ignored (the distance guard's sitting lets the walking keys through: docs/distance-guard.md) |
 | B5 | 0xA8 | slower: one speed level down, past the slowest into backward. While turning in place: stop turning and walk straight backward |
-| C5 | 0x90 | the quick stop, then the calibration posture (CALIB) |
+| C5 | 0x90 | the quick stop, then the calibration posture (CALIB). C5 again, with no other key pressed in between: Kilo measures himself (below) |
 | A4 | 0x68 | trot |
 | B4 | 0x98 | crawl |
 | C4 | 0xB0 | walk |
-| A2 | 0x10 | rear up, only when switched on (below); otherwise nothing |
 | B2 | 0x38 | a meow (docs/sound.md). It moves nothing, so it works at any time, also while Kilo walks |
-| A1 | 0x42 | the long trot (below): a trot with a longer stride, built up a step at a time |
-| B1 | 0x4A | Kilo measures himself (docs/self-measurement.md): from a stand on a flat floor, about 80 s of small poses, then he stands. Any key stops it at once (B1 again too) and he stands; B6, A7 and C7 then also do their own job. Refused below 7400 mV at rest, on USB power, or when he is not standing level and still |
-| A3, B3, C3, C2, C1 | | nothing (logged as ignored) |
+| A1 | 0x42 | experiment key ("A"): rear up, only when switched on (below); otherwise nothing. A2 until 2026-11-22 |
+| B1 | 0x4A | experiment key ("B"): kept for the righting experiment; until that is built in, nothing |
+| C1 | 0x52 | experiment key, free: nothing |
+| A3, B3, C3, A2, C2 | | nothing (logged as ignored) |
+
+Row 1 holds the owner's experiments, one experiment a key.
+
+**Kilo measures himself** (C5 twice; docs/self-measurement.md). The first
+C5 takes the calibration posture as always. A second C5 with no other key
+pressed in between makes him stand, and once he is still (from 1.5 s on, at
+most 6 s) about 80 s of small poses start on a flat floor; then he stands.
+Any key stops it at once (C5 again too) and he stands; B6, A7 and C7 then
+also do their own job. A key pressed while he is getting still cancels it.
+Refused (he stays standing, the log says why) below 7400 mV at rest, on USB
+power, or when he does not stand level and still.
 
 **Gait keys** (A4, B4, C4). Standing: walk forward in that gait at level
 +3. Walking in another gait: change to it and keep the speed level, the
-direction and the steer (between the walk and the trot at the next step;
-into or out of the crawl once every leg has stepped home, up to about 5 s).
+direction and the steer (into or out of the walk or the crawl once every
+leg has stepped home: about 0.4 to 0.9 s from the trot into the walk, 1.5
+to 2 s from the walk into the trot, up to about 5 s out of the crawl).
 The gait already in use: walk straight forward again at the same speed
 (from a turn, a steer or from backward); already straight forward, nothing
 changes.
 
-**The long trot** (A1; docs/walking-and-balance.md section 15, the first
-floor try: docs/long-trot-trial.md). A trot whose stride (how far a foot
-travels in one step) is longer: its foot stays in the air longer (the
-"swing": 9 to 11 ticks of 20 ms instead of the trot's 8), so the servos can
-carry it further without turning faster, and each pair of feet lands where
-the body's sideways sway ends upright. From standing or from any gait, A1
-walks straight forward at its first stage. It starts with the trot's swing
-and makes it one tick longer each step. It has three stages, forward only:
+**The trot** (A4; docs/walking-and-balance.md section 15: the "long trot"
+of 2026-11-21, the only trot since 2026-11-22). Diagonal pairs of feet step
+together. Its foot stays in the air (the "swing") 8 ticks of 20 ms up to
+150 mm/s and longer above (10 ticks at +4, 11 at +5), so the stride (how far
+a foot travels in one step) can grow to 50 mm without the servos turning
+faster; the swing grows one tick a step. Each pair of feet lands where the
+body's sideways sway ends upright. At +4 and +5 it steers one step only
+(its balance was worked out for straight walking: a sharper steer is eased
+to one step as B7 goes up, and the log says so; B5 back to +3 to steer
+more), and backward it goes to -3 only (144 mm/s). For something very
+close the distance guard only stops it (no backing off: its strides turn
+round slowly).
 
-| Stage | Speed | Swing | Stride | Cycle (each pair once) |
-|---|---|---|---|---|
-| 1 (A1) | 160 mm/s | 9 ticks (180 ms) | 33.6 mm | 400 ms |
-| 2 (B7) | 180 mm/s | 10 ticks (200 ms) | 41.4 mm | 440 ms |
-| 3 (B7 again) | 200 mm/s | 11 ticks (220 ms) | 50 mm | 480 ms |
-
-The trot at the same speed takes 30 to 38 mm strides. B5 goes a stage down;
-at stage 1 it goes into the trot at 144 mm/s (the swing shortens a tick a
-step first), and from there B5 works as in the trot. A6 and C6 steer it one
-step only (the inner stride a quarter shorter): its balance was worked out
-for straight walking. A4, B4 or C4 change to that gait at its level +3. B6,
-A7, C5 and C7 stop it with the quick stop, as the trot; the distance guard
-stops it as the trot, and for something very close it only stops (no
-backing off: it turns round slowly). Standing after a long trot, A6 and C6
-turn in place in the trot.
-
-**Speed levels.** Levels +1 to +5 walk forward at 0.4, 0.7, 1, 1.3 and 1.6
-times the trot's default speed (the walk's and the crawl's: 0.4, 0.7, 1,
-1.15, 1.25), and -1 to -5 walk backward at the same factors. There is no
-level 0: from +1, B5 goes to -1, and from -1, B7 goes to +1. B7 stops at +5
-and B5 at -5. The planner limits each gait's speed (mind/planner/),
-and the log line shows the real speed. In mm/s, levels 1 to 5: crawl 8.9,
-15.6, 22.2, 25.6, 26.9; walk 32, 56, 80, 92, 97; trot 57.6, 100.8, 144,
-187.2, 230.4.
+**Speed levels.** Levels +1 to +5 walk forward at 0.4, 0.7, 1, 1.25 and
+1.4 times the trot's default speed (the walk's and the crawl's: 0.4, 0.7,
+1, 1.15, 1.25), and -1 to -5 walk backward at the same factors (the trot to
+-3). There is no level 0: from +1, B5 goes to -1, and from -1, B7 goes to
++1. B7 stops at +5 and B5 at -5. The planner limits each gait's speed
+(mind/planner/), and the log line shows the real speed. In mm/s, levels 1
+to 5: crawl 8.9, 15.6, 22.2, 25.6, 26.9; walk 23.2, 40.6, 58, 66.7, 72.5 (since
+2026-11-22; the walk of docs/walking-and-balance.md §16); trot 57.6,
+100.8, 144, 180, 201.6.
 
 **Steering.** While walking forward or backward, each press of A6 or C6
 bends the path one step further that way, up to 3 each way; the other key
@@ -874,12 +876,12 @@ ends in STANCE (the standing pose the walk uses) with the servos on. Every
 stop sets the speed level back to +3, the heading to straight and the steer
 to 0. A playing trick is stopped first (TRICK_STOP).
 
-**The rear-up key.** A2 is off unless the kernel is built with
+**The rear-up key.** A1 is off unless the kernel is built with
 `KILO_REAR_UP=1`, `2` or `3` (`rear_up_key` in "The Mind's settings";
-docs/rear-up-trick.md). Switched on, A2 stops a walk and rears Kilo up to
-stage 1. A2 again while he goes up to or holds a stage's top takes him on
-to the next stage, up to the one built in; A2 at any other moment, B6 or C7
-bring him down to SIT. A2 is refused below 7400 mV (the highest battery
+docs/rear-up-trick.md). Switched on, A1 stops a walk and rears Kilo up to
+stage 1. A1 again while he goes up to or holds a stage's top takes him on
+to the next stage, up to the one built in; A1 at any other moment, B6 or C7
+bring him down to SIT. A1 is refused below 7400 mV (the highest battery
 reading of the last 20 s at rest) and on USB power.
 
 ### Boot probe
@@ -909,14 +911,15 @@ flashed into it. A laptop is set up for all three by
 
 **Network.** The laptop sends the image over the host channel (the
 encrypted, key-checked connection on port 5300). The mind checks it and
-writes `kernel7.new`, reads it back, renames (`kernel7.old` kept) and
-reboots ("Updating the kernel over the network"), or flashes the body
+writes `kernel7.new`, reads it back, renames it to `kernel7.img` (no
+previous kernel kept) and reboots ("Updating the kernel over the network"), or flashes the body
 through its UART and the body's RESET line ("Flashing the body").
 
 **Card.** With Kilo off, the card goes into the laptop's reader and
 `kilo card PATH` (mind/kilo/cli_card.py) builds both programs and writes
-them with read-back: `kernel7.new`, `kernel7.img` renamed to `kernel7.old`,
-`kernel7.new` to `kernel7.img` (what the mind does for an update), then
+them with read-back: `kernel7.new`, renamed over `kernel7.img`, a
+`kernel7.old` or `kernel7.bad` left from earlier removed (no previous
+kernel is kept, as for an update), then
 `body.bin` and `body.json` (manifest last), and removes the last
 `body-result.txt`. At the next power-on the Pi boots the new kernel, which
 flashes the body from the card if it runs another build ("From the SD card
@@ -928,7 +931,7 @@ route needs none). A path that does not look like Kilo's card is refused
 unless `--force`: it must be the root of a mounted FAT partition (on
 Linux), hold `kernel7.img` and `config.txt`, no Raspberry Pi OS files
 (`cmdline.txt`, `overlays/`), and a sign of Kilo (the mind kernel's marker,
-`kilorec/`, `body.json` or `kernel7.old`).
+`kilorec/`, `body.json` or `body-result.txt`).
 
 **Direct cable.** The network route over one cable: with no DHCP lease
 three seconds after the Ethernet link comes up, the mind takes
@@ -1123,8 +1126,11 @@ default. The core's side is `mind/update/updater.*` (`mind/README.md`
    KILO-MIND-KERNEL-1 kernel/build/kernel7.img` (a count above 0) and the
    same on `kernel/build/netboot/kernel7.img` (0).
 3. **Write** `kernel7.new`, **read it back** and compare its length and
-   CRC-32, then **install**: remove `kernel7.old` if there is one, rename
-   `kernel7.img` to `kernel7.old`, `kernel7.new` to `kernel7.img`. FatFs
+   CRC-32, then **install**: remove a `kernel7.old` or `kernel7.bad` left
+   from earlier, rename `kernel7.img` to `kernel7.old` (for the swap only),
+   `kernel7.new` to `kernel7.img`, then remove `kernel7.old`: no previous
+   kernel is kept on the card (to go back, build the wanted commit and
+   update again: docs/laptop-setup.md). FatFs
    writes the file's data, FAT and directory entry by `f_close`, and
    `f_unlink`/`f_rename` sync the volume before they return. Every step is
    logged (`update: ...`, with its time in ms), and `UPDATE_STATUS` reports
@@ -1143,8 +1149,9 @@ so does a failed removal of `kernel7.old` or a failed first rename
 to `kernel7.img` (`INSTALL_FAILED`). Only if that fails too is the card left
 without `kernel7.img` (`CARD_BROKEN`, logged as an error): then, and after
 a bad kernel that boots but does not work (the check proves the file is a
-mind kernel, not that it runs), the card goes into a reader
-(docs/fast-boot-first-boot.md step 13, "If it fails").
+mind kernel, not that it runs), the card goes into a reader and the wanted
+kernel is built and written there (docs/laptop-setup.md, "If the new
+kernel misbehaves").
 
 **The SD writes are sliced**: the updater writes or reads 16 KB per main
 loop pass (`KernelUpdater::kSliceBytes`), so the net task runs between
@@ -1446,8 +1453,9 @@ compiled but has never run.
   `kernel7.img` is untouched, but FatFs updates the FAT in place, so a cut
   while `kernel7.new` is written could still damage the partition. Between
   the two renames (milliseconds) a cut leaves no `kernel7.img`. Either way:
-  a card reader. A kernel that boots but does not work cannot fall back to
-  `kernel7.old` by itself: the GPU firmware boots `kernel7.img` only.
+  a card reader. A kernel that boots but does not work cannot fall back by
+  itself: the GPU firmware boots `kernel7.img` only, and no previous kernel
+  is kept.
 - **Loader on the 2 B.** Not run on hardware yet (docs/fast-boot.md §7). If it
   fails, write `kernel7.img` to the card with `make-sd.sh --kernel`.
 - **Licence.** Circle is GPLv3, so any `kernel7.img` that links it is too,

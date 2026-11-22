@@ -359,7 +359,6 @@ def metrics() -> dict:
     while at least three are down (the planner asks for PlannerConfig.margin_mm), and the largest
     lean it plans. Run by ``apply`` in the tree before and after (a subprocess: the model is read
     at import)."""
-    from kilo.planner import longtrot as lt
     from kilo.planner import patterns as pat
     from kilo.planner.model import VIEWS, BodyModel
     from kilo.planner.plan import Planner
@@ -368,16 +367,15 @@ def metrics() -> dict:
     cx, cy, ch = m.stance_com()
     out: dict = {"stance_com": [round(cx, 2), round(cy, 2), round(ch, 2)], "total_g": round(m.total_g, 1),
                  "walks": {}, "views": {}}
-    for name in (*pat.PATTERN_NAMES, "longtrot"):
-        p = (lt.LongTrotPlanner(m, "forward", None, tick=1000, pattern="longtrot") if name == "longtrot"
-             else Planner(m, name, "forward", None, tick=1000))
+    for name in pat.PATTERN_NAMES:
+        p = Planner(m, name, "forward", None, tick=1000)
         worst, pitch, roll = None, 0.0, 0.0
         for _ in range(600):
             t = p.next()
             if bin(t.support).count("1") >= 3:
                 worst = t.margin if worst is None else min(worst, t.margin)
             pitch, roll = max(pitch, abs(t.plan_pitch)), max(roll, abs(t.plan_roll))
-        out["walks"][name] = {"static": bool((lt.LONG_TROT if name == "longtrot" else pat.pattern(name)).lean),
+        out["walks"][name] = {"static": bool(pat.pattern(name).lean),
                               "min_margin_mm": None if worst is None else round(worst, 2),
                               "max_pitch_deg": round(pitch, 2), "max_roll_deg": round(roll, 2)}
     for name in VIEWS:

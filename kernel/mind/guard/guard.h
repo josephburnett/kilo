@@ -45,12 +45,11 @@
 //      (Walker::halt), then sit and the behaviour runner's sitting variant
 //      (GuardHost::sit_and_behave). RED: back off (the walk turns backward
 //      at kBackSpeedMmS for kBackS, about kBackMm; no rear sensor, so short
-//      and slow), the quick stop, then as BLUE; the crawl and the long trot
-//      only stop (their strides turn round at 0.5 and 0.75 mm a tick: 4 s
-//      and 1.5 s before they would go back; the long trot's quick stop has
-//      him still in about 0.6 s). The long trot's BLUE is the trot's
-//      (stop_way_mm: its quick stop moves him 10 mm at most in the planner,
-//      16 in the virtual body, as the trot at 187 to 230 mm/s);
+//      and slow), the quick stop, then as BLUE; the crawl and the trot
+//      only stop (their strides turn round at 0.5 and 0.75 mm a tick: 4 s,
+//      and 0.7 to 1.5 s, before they would go back; the trot's quick stop
+//      has him still in 0.2 to 0.6 s), so backing off is the walk's alone
+//      (since 2026-11-22: the trot that backed off was replaced);
 //    - turning in place: RED only (a hand in his face): the quick stop, then
 //      sit (a wall seen while turning is not a reason to stop turning);
 //    - walking backward: nothing (he is going away; the eyes show it);
@@ -101,7 +100,7 @@ constexpr double kStopGapMm = 100;        // left between the sensor and the obs
 constexpr double kReactS = 0.40;          // reading (80 ms + the median's 80 ms), link, the re-planned FEET
                                           //   (40 ms), the servos (120 ms), and a margin
 constexpr double kDecelWalkMmS2 = 400;    // the quick stop's deceleration, by gait: its way (the support feet's
-constexpr double kDecelTrotMmS2 = 700;    //   travel from the halt; test_guard prints it: walk 97 mm/s 5 mm, trot
+constexpr double kDecelTrotMmS2 = 700;    //   travel from the halt; test_guard prints it: walk 72.5 mm/s 4 mm, trot
                                           //   230 13 mm) at least doubled: the floor may need the room
 constexpr double kStopSlackMm = 5;        // ... plus this (the swing that lands, at any speed)
 constexpr double kCrawlStopMm = 20;       // the crawl's: its lean (up to 18 mm fore and aft) as the legs square up

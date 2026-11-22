@@ -280,6 +280,7 @@ void Planner::start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tic
   }
   h_ = start_height < 0 ? model_.stance_height(KILO_GAIT_STANCE_H_256) : start_height;
   s_cur_[0] = s_cur_[1] = s_tgt_[0] = s_tgt_[1] = 0;
+  centre_ = 0;
   stance_ticks_ = stance_tgt_ = 1;
   lean_ = lean_from_ = lean_to_ = Lean();
   tr_ticks_ = 1;
@@ -301,7 +302,7 @@ void Planner::start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tic
   has_job_ = has_next_ = false;
   has_last_ = false;
   stats_ = {0, 0, 0, m_inf()};
-  lw_ = lw_tgt_ = kLtWMin;
+  lw_ = lw_tgt_ = kTrotWMin;
   land_[0] = land_[1] = slot_s_[0] = slot_s_[1] = 0;
   apply_timing();
   stance_ticks_ = stance_tgt_;
@@ -315,7 +316,7 @@ void Planner::start(const Pattern& p, Direction d, real speed_mm_s, uint32_t tic
 // plan.py _shift_for: a slot's four-foot ticks for the stance time now, so
 // the shift follows the stance time as it slews after a speed change.
 int Planner::shift_for(real stance) const {
-  if (long_trot()) return 1;  // the long trot: one tick on four feet at every speed
+  if (trot()) return 1;  // the trot: one tick on four feet at every speed
   real n = pattern_->n_groups;
   real w = pattern_->swing_ms;
   int st = round_i(((stance * kTickMs + w) / n - pattern_->span_ms()) / kTickMs);
@@ -323,7 +324,7 @@ int Planner::shift_for(real stance) const {
 }
 
 int Planner::swing_ticks() const {
-  if (long_trot()) return lw_;
+  if (trot()) return lw_;
   int w = round_i(pattern_->swing_ms / kTickMs);
   return w > 2 ? w : 2;
 }
@@ -337,16 +338,19 @@ int Planner::offset(int leg) const {
   return (i > 0 ? i : 0) * couple_ticks();
 }
 
+// plan.py _direct_change: both fixed cadence and as many groups (not into or out of the walk's four
+// one-leg slots, since 2026-11-22: through the way home)
 bool Planner::direct_change() const {
-  return pending_ != nullptr && fixed_cadence(*pending_) && fixed_cadence(*pattern_);
+  return pending_ != nullptr && fixed_cadence(*pending_) && fixed_cadence(*pattern_) &&
+         pending_->n_groups == pattern_->n_groups;
 }
 
 // plan.py _switch_ok: the strides no longer than the new pattern walks at
 // this speed (+ a tick's slew), every foot within its half stride (+
 // kSwitchSlackMm) of its shoulder, the body at its height.
 bool Planner::switch_ok(const Pattern& p) const {
-  if (long_trot() && lw_ > kLtWMin) return false;  // out of the long trot once its swing is the trot's again
-  real st = pattern_timing(p, speed_mm_s_, direction_).stride_mm;
+  if (trot() && lw_ > kTrotWMin) return false;  // out of the trot once its swing is 8 ticks again
+  real st = planner::timing(p, speed_mm_s_, direction_).stride_mm;
   for (int i = 0; i < 2; i++)
     if (!(m_fabs(s_cur_[i]) <= st + pattern_->stride_slew_mm)) return false;
   for (int leg = 0; leg < kLegs; leg++)
@@ -376,17 +380,17 @@ int Planner::first_group() const {
 
 void Planner::apply_timing() {
   Timing tm = timing();
-  if (long_trot()) {  // longtrot.py LongTrotPlanner._apply_timing
+  if (trot()) {  // plan.py Planner._apply_trot_timing
     bool direct = pending_ != nullptr && direct_change();
-    lw_tgt_ = direct ? kLtWMin : long_swing_for(tm.speed_mm_s);  // out of it directly: the trot's swing first
-    stance_tgt_ = (real)lw_tgt_ + kLtStancePlus;
+    lw_tgt_ = direct ? kTrotWMin : trot_swing_for(tm.speed_mm_s);  // out of it directly: the trot's swing first
+    stance_tgt_ = (real)lw_tgt_ + kTrotStancePlus;
     if (homing()) {
       s_tgt_[0] = s_tgt_[1] = 0;
     } else if (direct) {
-      real st = m_min(tm.stride_mm, pattern_timing(*pending_, speed_mm_s_, direction_).stride_mm);
+      real st = m_min(tm.stride_mm, planner::timing(*pending_, speed_mm_s_, direction_).stride_mm);
       side_strides(direction_, st, s_tgt_, steer_, st);
     } else {  // steering: the outer side's stride capped for the swing too
-      side_strides(direction_, tm.stride_mm, s_tgt_, steer_, kLtStridePerTick * (real)lw_tgt_ - (real)0.5);
+      side_strides(direction_, tm.stride_mm, s_tgt_, steer_, kTrotStridePerTick * (real)lw_tgt_ - (real)0.5);
     }
     has_next_ = false;
     return;
@@ -397,7 +401,7 @@ void Planner::apply_timing() {
   if (stopping_ || (pending_ != nullptr && !direct_change())) {
     s_tgt_[0] = s_tgt_[1] = 0;
   } else if (pending_ != nullptr) {  // changing directly: no stride longer than the new pattern's (a steer's outer side too)
-    real st = m_min(tm.stride_mm, pattern_timing(*pending_, speed_mm_s_, direction_).stride_mm);
+    real st = m_min(tm.stride_mm, planner::timing(*pending_, speed_mm_s_, direction_).stride_mm);
     side_strides(direction_, st, s_tgt_, steer_, st);
   } else {
     side_strides(direction_, tm.stride_mm, s_tgt_, steer_, pattern_->stride_mm);
@@ -490,20 +494,20 @@ bool Planner::home() const {
 
 bool Planner::homing() const { return stopping_ || (pending_ != nullptr && !direct_change()); }
 
-// longtrot.py LongTrotPlanner._start_slot: the slot as plan.py's, then in the long trot this slot's
+// plan.py Planner._start_slot: the slot (_next_slot), then in the trot this slot's
 // swing: the speed's (going home the shortest), at most a tick longer than the last slot's (the
 // build-up) and at most a tick shorter, always long enough for the step it carries (a square-up, a
-// stride still growing or shrinking, steering), and away from the steady long trot long enough for no
-// joint to pass kLtJointDegPerTick a tick.
+// stride still growing or shrinking, steering), and away from the steady trot long enough for no
+// joint to pass kTrotJointDegPerTick a tick.
 void Planner::start_slot() {
   const bool hold = halting_ && halt_t_ < kHaltHoldTicks;  // the quick stop's hold: no group steps
   start_slot_base();
-  if (!long_trot()) {
-    lw_ = kLtWMin;
+  if (!trot()) {
+    lw_ = kTrotWMin;
     return;
   }
   const bool going_home = homing();
-  int w = going_home ? kLtWMin : (lw_tgt_ < lw_ + 1 ? lw_tgt_ : lw_ + 1);
+  int w = going_home ? kTrotWMin : (lw_tgt_ < lw_ + 1 ? lw_tgt_ : lw_ + 1);
   const int g = hold ? (k_ + 1) % pattern_->n_groups : k_;
   real to[kLegs] = {};
   for (int i = 0; i < pattern_->group_size; i++) {
@@ -519,14 +523,14 @@ void Planner::start_slot() {
       to[leg] = m_fabs(lc - xg_[leg]) > m_fabs(lt - xg_[leg]) ? lc : lt;
     }
     real d = m_fabs(to[leg] - xg_[leg]) + m_fabs(sc) / m_max((real)1.0, stance_ticks_);
-    int need = ceil_i(d / kLtStepMmPerTick - (real)1e-9);
+    int need = ceil_i(d / kTrotStepMmPerTick - (real)1e-9);
     if (need > w) w = need;
   }
   if (lw_ - 1 > w) w = lw_ - 1;
-  if (w > kLtWMax + 2) w = kLtWMax + 2;
-  if (w < kLtWMin) w = kLtWMin;
-  if (going_home || pending_ != nullptr) {  // not the steady long trot: the joints checked along the path
-    for (; w < kLtWMax + 2; w++) {
+  if (w > kTrotWMax + 2) w = kTrotWMax + 2;
+  if (w < kTrotWMin) w = kTrotWMin;
+  if (going_home || pending_ != nullptr) {  // not the steady trot: the joints checked along the path
+    for (; w < kTrotWMax + 2; w++) {
       bool ok = true;
       for (int i = 0; i < pattern_->group_size && ok; i++) ok = swing_ok(pattern_->groups[g][i], to[pattern_->groups[g][i]], w);
       if (ok) break;
@@ -540,9 +544,9 @@ void Planner::start_slot() {
 }
 
 // A w-tick swing from where the foot is to `to` (the cosine path, the pattern's lift, the height now)
-// turns no joint more than kLtJointDegPerTick a tick.
+// turns no joint more than kTrotJointDegPerTick a tick.
 bool Planner::swing_ok(int leg, real to, int w) const {
-  const real lim = radians(kLtJointDegPerTick);
+  const real lim = radians(kTrotJointDegPerTick);
   const real x0 = xg_[leg], h = h_, lift = pattern_->step_h_mm;
   real a1, a2;
   model_.ik(leg, x0, h, &a1, &a2);
@@ -563,15 +567,25 @@ bool Planner::swing_ok(int leg, real to, int w) const {
 real Planner::land_for(int side) const {
   real s = s_tgt_[side];
   if (homing() || m_fabs(s) < (real)1e-6) return s / (real)2.0;
-  real v = s / (((real)lw_tgt_ + kLtStancePlus) * kTickMs / (real)1000.0);
+  real v = s / (((real)lw_tgt_ + kTrotStancePlus) * kTickMs / (real)1000.0);
   real x = fit_land_x(lw_tgt_, v);
   return s > 0 ? m_min(s / (real)2.0 + (real)6.0, m_max((real)0.0, x)) : m_max(s / (real)2.0 - (real)6.0, m_min((real)0.0, x));
+}
+
+// plan.py _centre_target: the model's centre of mass in a centre_com pattern while it walks on (the
+// walk), 0 once stopping or changing pattern.
+real Planner::centre_target() const {
+  if (!pattern_->centre_com || stopping_ || pending_ != nullptr) return 0;
+  real xs[kLegs] = {0, 0, 0, 0};
+  real z = model_.stance_height(pattern_->body_h_256);
+  real zs[kLegs] = {z, z, z, z};
+  return model_.com(xs, zs).x;
 }
 
 real Planner::target_x(int leg) const {
   int side = kLeft[leg] ? 0 : 1;
   real s = s_cur_[side];
-  if (!long_trot()) return s / (real)2.0;
+  if (!trot()) return s / (real)2.0 + centre_;
   real st = slot_s_[side];
   if (m_fabs(st) < (real)1e-6) return s / (real)2.0;
   // the slot's landing: its shift from half a stride, scaled with the stride as it slews
@@ -838,6 +852,7 @@ const TickPlan& Planner::next() {
   bool swinging = false;
   if (!wait) {
     slewed(s_cur_, &stance_ticks_, &h_);
+    centre_ += m_max(-kCentreSlewMm, m_min(kCentreSlewMm, centre_target() - centre_));
     if (t_ < S_ || skip_ || finishing_) {
       for (int leg = 0; leg < kLegs; leg++) xg_[leg] -= side_speed(leg);
     } else {

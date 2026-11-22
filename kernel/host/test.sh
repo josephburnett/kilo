@@ -451,10 +451,10 @@ wait "$MIND_PID" || true
 stop_body
 trap - EXIT
 cmp "$UP/kernel7.img" "$UP/card/kernel7.img" || { echo "FAILED: kernel7.img is not the image sent"; exit 1; }
-[ "$(cat "$UP/card/kernel7.old")" = "OLD KERNEL" ] || { echo "FAILED: kernel7.old is not the previous kernel"; exit 1; }
+[ ! -e "$UP/card/kernel7.old" ] || { echo "FAILED: the previous kernel kept as kernel7.old"; exit 1; }
 [ ! -e "$UP/card/kernel7.new" ] || { echo "FAILED: kernel7.new left on the card"; exit 1; }
 cmp "$REPO/kernel/boot/config.txt" "$UP/card/config.txt" || { echo "FAILED: config.txt changed"; exit 1; }
-echo "   the card: kernel7.img the new kernel, kernel7.old the previous one, no kernel7.new"
+echo "   the card: kernel7.img the new kernel, no kernel7.old, no kernel7.new"
 expect "$UP/cli_update.txt" "update: writing kernel7.new: [0-9]+ of 200000 bytes" "progress: writing"
 expect "$UP/cli_update.txt" "update: kernel7.new written \(200000 bytes\); reading it back" "progress: written"
 expect "$UP/cli_update.txt" "update: kernel7.new read back: 200000 bytes, crc32 [0-9a-f]{8}; installing" "progress: read back"
@@ -462,7 +462,7 @@ expect "$UP/cli_update.txt" "update: DONE: kernel7.img on the SD card is the new
 expect "$UP/cli_update.txt" "update: the mind is rebooting into it" "the reboot announced"
 expect "$UP/cli_update.txt" "update: the mind is back after [0-9.]+ s: mind build [0-9a-f]{8}" "the mind's build after"
 expect "$UP/mind.log" "update: kernel7.new read back: 200000 bytes" "the mind's read-back"
-expect "$UP/mind.log" "update: kernel7.img -> kernel7.old" "the first rename"
+expect "$UP/mind.log" "update: kernel7.img -> kernel7.old \(for the swap\)" "the first rename"
 expect "$UP/mind.log" "update: installed: kernel7.img is the new kernel" "installed"
 expect "$UP/mind.log" "kernel updated on the SD card: rebooting into it \(REST latched\)" "REST before the reboot"
 expect "$UP/mind.log" "kernel update installed in --card: exiting with status 3" "the host program's line"
@@ -636,9 +636,9 @@ mark = P.HOST_UPDATE_MARKER.encode()
 EOF
 KPY -m kilo.cli card "$CR/card" --force-dir --kernel "$CR/kernel7.img" --image "$FL/body.bin" | tee "$CR/write.txt"
 cmp "$CR/kernel7.img" "$CR/card/kernel7.img" && cmp "$FL/body.bin" "$CR/card/body.bin" \
-    && grep -q "old kernel" "$CR/card/kernel7.old" || { echo "FAILED: kilo card: the card's files"; ls -l "$CR/card"; exit 1; }
+    && [ ! -e "$CR/card/kernel7.old" ] || { echo "FAILED: kilo card: the card's files"; ls -l "$CR/card"; exit 1; }
 expect "$CR/write.txt" "kernel: this laptop's key \([0-9a-f]+\) is built in" "kilo card: the key check"
-expect "$CR/write.txt" "the previous one is kernel7.old" "kilo card: kernel7.old kept"
+expect "$CR/write.txt" "no previous kernel is kept" "kilo card: no previous kernel kept"
 expect "$CR/write.txt" "compares body.json \(build $FLASH_BUILD\)" "kilo card: what the next boot does"
 set +e
 KPY -m kilo.cli card "$CR/card" --kernel "$CR/kernel7.img" --image "$FL/body.bin" > "$CR/notmounted.txt" 2>&1
@@ -704,7 +704,7 @@ for v in perception behaviour planner measure intent; do  # (the planner's takes
 done
 
 # The virtual body from this checkout's mind/ with its control FIFO (CoreBody.serve_control):
-# `ctl ir 0x10` sends EVENT IR_KEY, `ctl att 40 0` tilts the scripted IMU.
+# `ctl ir 0x02` sends EVENT IR_KEY, `ctl att 40 0` tilts the scripted IMU.
 FIFO="$OUT/control.fifo"
 start_ctl_body() {  # start_ctl_body <log>
     rm -f "$FIFO"
@@ -723,14 +723,15 @@ ctl ir 0x02                   # B6: stand (from LIMP)
 sleep 1
 ctl ir 0x68                   # A4: trot forward at 1x
 sleep 2
-ctl ir 0x62                   # B7: faster (1.3x)
+ctl ir 0x62                   # B7: faster (1.25x)
 sleep 0.5
 ctl ir 0xA8                   # B5: slower (1x)
 sleep 0.5
 ctl ir 0x22                   # A6: steer left (walking: the path bends, no stop)
 sleep 1
 ctl ir 0x18                   # B3: row 3, nothing
-ctl ir 0x10                   # A2: nothing either (the rear-up key is off without --rear-up)
+ctl ir 0x42                   # A1: nothing either (the rear-up key is off without --rear-up)
+ctl ir 0x10                   # A2: nothing (the rear-up until 2026-11-22)
 ctl ir 0x02                   # B6: stand (the quick stop, then the posture)
 sleep 4
 ctl ir 0x68                   # A4: trot forward again, at 1x
@@ -753,52 +754,49 @@ grep -E "remote|trick|walk|behaviour" "$OUT/host_ir.log"
 expect "$OUT/host_ir.log" "remote B6 \(0x02, stand\): posture stand" "B6 stood"
 expect "$OUT/host_ir.log" "remote A4 \(0x68, trot\): walk forward \(trot\) 144\.0 mm/s" "A4 walked"
 expect "$OUT/host_ir.log" "walk trot forward at 144\.0 mm/s" "the trot started"
-expect "$OUT/host_ir.log" "remote B7 \(0x62, faster\): speed 1\.3x \(trot 187\.2 mm/s forward\)" "B7 sped up"
+expect "$OUT/host_ir.log" "remote B7 \(0x62, faster\): speed 1\.25x \(trot 180\.0 mm/s forward\)" "B7 sped up"
 expect "$OUT/host_ir.log" "remote B5 \(0xA8, slower\): speed 1x \(trot 144\.0 mm/s forward\)" "B5 slowed"
 expect "$OUT/host_ir.log" "remote A6 \(0x22, turn left\): walk forward \(trot\) 144\.0 mm/s, steering left 1" "A6 steered"
 expect "$OUT/host_ir.log" "remote B3 \(0x18, none\): ignored \(no action on this key\)" "B3 did nothing"
-expect "$OUT/host_ir.log" "remote A2 \(0x10, none\): ignored \(no action on this key\)" "A2 did nothing (rear-up key off)"
+expect "$OUT/host_ir.log" "remote A1 \(0x42, none\): ignored \(no action on this key\)" "A1 did nothing (rear-up key off)"
+expect "$OUT/host_ir.log" "remote A2 \(0x10, none\): ignored \(no action on this key\)" "A2 did nothing"
 expect "$OUT/host_ir.log" "walk ended: stopped" "the quick stop"
 expect "$OUT/host_ir.log" "remote C7 \(0xE2, freeze\): frozen \(walk: the quick stop\): only B6 or A7 act now" "C7 froze"
 [ "$(grep -c "I walk ended: stopped" "$OUT/host_ir.log")" -ge 2 ] ||
     { echo "FAILED: the freeze's quick stop did not end the walk (stopped)"; cat "$OUT/host_ir.log"; exit 1; }
 expect "$OUT/host_ir.log" "remote B7 \(0x62, faster\): ignored \(frozen: B6 or A7 to go on\)" "B7 ignored while frozen"
 expect "$OUT/host_ir.log" "remote A7 \(0xA2, sleep\): unfrozen, posture rest" "A7 rested"
-expect "$OUT/host_ir.log" "remote C5 \(0x90, calibration posture\): posture calib" "C5 took the calibration posture"
+expect "$OUT/host_ir.log" "remote C5 \(0x90, calibration posture\): posture calib \(C5 again: measure himself\)" "C5 took the calibration posture"
 expect "$OUT/host_ir.log" "remote A5 \(0xE0, behaviour\): behaviour runner started" "A5 started the runner"
 expect "$OUT/host_ir.log" "behaviour: idle \(free\)" "the runner ran"
 expect "$OUT/host_ir.log" "remote B6 \(0x02, stand\): behaviour runner stopped, posture stand" "B6 stopped the runner"
 if grep -Eq "decode errors [1-9]|remote .*failed|no longer stamping" "$OUT/host_ir.log"; then echo "FAILED: errors"; exit 1; fi
 
-echo "== P3 integration: A1, the long trot, against the virtual body (its stages, out into the trot, the quick stop)"
+echo "== P3 integration: the trot's long swing against the virtual body (+4, +5, down again, the quick stop)"
 start_ctl_body "$OUT/vbody_lt.log"
 trap stop_body EXIT
 run_mind "$OUT/host_lt.log" --remote --seed 3 --duration 11
 sleep 1
 ctl ir 0x02                   # B6: stand (from LIMP)
 sleep 1
-ctl ir 0x42                   # A1: the long trot, stage 1 (160 mm/s)
-sleep 2.5
-ctl ir 0x62                   # B7: stage 2 (180 mm/s)
+ctl ir 0x68                   # A4: the trot at 1x (144 mm/s)
 sleep 1.5
-ctl ir 0x62                   # B7: stage 3 (200 mm/s)
+ctl ir 0x62                   # B7: +4 (180 mm/s, a 10-tick swing)
 sleep 1.5
-ctl ir 0xA8                   # B5: stage 2
+ctl ir 0x62                   # B7: +5 (201.6 mm/s, 11 ticks)
+sleep 2
+ctl ir 0xA8                   # B5: +4
 sleep 0.3
-ctl ir 0xA8                   # B5: stage 1
-sleep 0.3
-ctl ir 0xA8                   # B5: out of it, the trot at 1x
+ctl ir 0xA8                   # B5: 1x
 sleep 1.5
 ctl ir 0x02                   # B6: the quick stop, then stand
 wait_mind "$OUT/host_lt.log"
 stop_body
 trap - EXIT
 grep -E "remote|walk" "$OUT/host_lt.log"
-expect "$OUT/host_lt.log" "remote A1 \(0x42, long trot\): walk forward \(longtrot\) 160\.0 mm/s" "A1 walked"
-expect "$OUT/host_lt.log" "walk longtrot forward at 160\.0 mm/s" "the long trot started"
-expect "$OUT/host_lt.log" "remote B7 \(0x62, faster\): speed stage 2 \(longtrot 180\.0 mm/s forward\)" "B7: stage 2"
-expect "$OUT/host_lt.log" "remote B7 \(0x62, faster\): speed stage 3 \(longtrot 200\.0 mm/s forward\)" "B7: stage 3"
-expect "$OUT/host_lt.log" "remote B5 \(0xA8, slower\): speed 1x \(trot 144\.0 mm/s forward\): out of the long trot" "B5: the trot"
+expect "$OUT/host_lt.log" "remote B7 \(0x62, faster\): speed 1\.25x \(trot 180\.0 mm/s forward\)" "B7: +4"
+expect "$OUT/host_lt.log" "remote B7 \(0x62, faster\): speed 1\.4x \(trot 201\.6 mm/s forward\)" "B7: +5"
+expect "$OUT/host_lt.log" "remote B5 \(0xA8, slower\): speed 1x \(trot 144\.0 mm/s forward\)" "B5: 1x"
 expect "$OUT/host_lt.log" "walk ended: stopped" "the quick stop"
 if grep -Eq "decode errors [1-9]|remote .*failed|no longer stamping|underruns [1-9]|refused FEET" "$OUT/host_lt.log"; then
     echo "FAILED: errors"; exit 1
@@ -906,7 +904,8 @@ check(abs(e["meas_mean_pitch"] - 4.0) < 1e-6 and abs(e["meas_mean_roll"] + 3.0) 
 check(abs(e["offset_pitch"] - (4.0 - e["pred_mean_pitch"])) <= 0.011 and
       abs(e["offset_roll"] - (-3.0 - e["pred_mean_roll"])) <= 0.011, "offset = measured - predicted, on average")
 check(e["rms_pitch"] >= abs(e["offset_pitch"]) - 0.01 and e["rms_roll"] >= abs(e["offset_roll"]) - 0.01, "rms >= |offset|")
-check({"RF+LB", "LF+RB"} <= set(s["by_phase"]), f"the walk's diagonal couplets: {sorted(s['by_phase'])}")
+check({"LB", "LF", "RB", "RF"} <= set(s["by_phase"]) and not {"RF+LB", "LF+RB"} & set(s["by_phase"]),
+      f"the walk's legs one at a time: {sorted(s['by_phase'])}")
 check(s["ticks_sent"] == int(res["sent"]) and int(res["skipped"]) == 0 and int(res["underruns"]) == 0, "the stream's counters")
 check(lag["model_ms"] == 50.0 and float(s["model"]["servo_tau_ms"]) == 70.0, "the model's servo response recorded")
 check("none" in s["by_phase"] and len({"LF", "RF", "RB", "LB"} & set(s["by_phase"])) >= 3,
@@ -927,13 +926,13 @@ EOF
 grep "loop: " "$OUT/host_walks.log" | awk '{for(i=1;i<=NF;i++) if($i=="max") m=($(i+1)>m?$(i+1):m)} END {print "   mind.poll max over the run: " m " us"}'
 
 # ---- the flight recorder: a trick by the remote, every record, the card, the next boot ----------------
-# The rear-up key on (--rear-up): A2 plays rear_up on the virtual body (which plays it tick-exact but
+# The rear-up key on (--rear-up): A1 plays rear_up on the virtual body (which plays it tick-exact but
 # does not tip: its IMU stays level), so the trick's first guard ("back", which wants 3.5..12.5 deg
 # nose up; the level IMU reads 0) stops it: TRICK_STOP, STOPPED, the guard in the log. Then the
 # recorder's status, a time range fetched and decoded, the metrics, the log's whole history, the card
 # saver on (kilo-mind-host's --card DIR stands for the SD card), and a second boot on the same card
 # that lists the first boot's run and shows its log (kilo log --previous).
-echo "== flight recorder: a trick (A2), kilo runs/record/metrics/log --host, the card, the next boot"
+echo "== flight recorder: a trick (A1), kilo runs/record/metrics/log --host, the card, the next boot"
 REC="$OUT/flight"
 rm -rf "$REC"
 mkdir -p "$REC/card"
@@ -947,7 +946,7 @@ F="127.0.0.1:$FPORT"
 sleep 1
 ctl ir 0x02                   # B6: stand
 sleep 1
-ctl ir 0x10                   # A2: rear_up (stage 1)
+ctl ir 0x42                   # A1: rear_up (stage 1)
 for _ in $(seq 1 120); do grep -q "TRICK_DONE" "$OUT/host_flight.log" && break; sleep 0.25; done
 expect "$OUT/host_flight.log" "trick rear_up: guard back: nose up 0.0 deg outside 3.5..12.5: stopping" \
     "the mind's guard stopped the trick"
@@ -972,11 +971,11 @@ expect "$OUT/flight_range.txt" "run +1 trick" "the range holds the trick run"
 KRANGE="$(ls "$REC"/range/rec-*.krec)"
 KPY -m kilo.cli record decode "$KRANGE" --csv "$OUT/flight_range.csv" > /dev/null
 KPY -m kilo.cli record decode "$KRANGE" --log > "$OUT/flight_range_log.txt"
-expect "$OUT/flight_range_log.txt" "remote A2 \(0x10, rear up\)" "the decoded range: the remote's line for A2"
+expect "$OUT/flight_range_log.txt" "remote A1 \(0x42, rear up\)" "the decoded range: the remote's line for A1"
 KPY -m kilo.cli --host "$F" metrics | tee "$OUT/flight_metrics.txt"
 expect "$OUT/flight_metrics.txt" "^[a-z_]+: " "kilo metrics: group lines"
 KPY -m kilo.cli log --host "$F" --no-follow --save "$REC/logs" > "$OUT/flight_log.txt"
-expect "$OUT/flight_log.txt" "I remote A2 \(0x10, rear up\)" "kilo log --host: the session's key in the history"
+expect "$OUT/flight_log.txt" "I remote A1 \(0x42, rear up\)" "kilo log --host: the session's key in the history"
 expect "$OUT/flight_log.txt" "I trick rear_up: TRICK_DONE STOPPED" "kilo log --host: the trick's end in the history"
 ls "$REC"/logs/kilo-*.log > /dev/null || { echo "FAILED: kilo log --save wrote nothing"; exit 1; }
 KPY -m kilo.cli --host "$F" record save on | tee "$OUT/flight_save.txt"
@@ -1022,7 +1021,7 @@ expect "$OUT/flight2_runs.txt" "^b1:1 .*trick +rear_up stage 1 .*card +STOPPED" 
 KPY -m kilo.cli log --host "$F" --previous > "$OUT/flight2_prev.txt"
 head -3 "$OUT/flight2_prev.txt"
 expect "$OUT/flight2_prev.txt" "boot 1's log as saved on the SD card" "kilo log --previous"
-expect "$OUT/flight2_prev.txt" "remote A2 \(0x10, rear up\)" "the previous boot's log: the key"
+expect "$OUT/flight2_prev.txt" "remote A1 \(0x42, rear up\)" "the previous boot's log: the key"
 wait_mind "$OUT/host_flight2.log"
 stop_body
 trap - EXIT
@@ -1036,13 +1035,13 @@ expect "$OUT/card_fetch.txt" "boot 1: [0-9]+ bytes, [0-9]+ blocks, 1 runs -> .*r
 CREC="$(ls "$REC"/cardfetch/run-b1-*-trick-1.krec)"
 KPY -m kilo.cli log trick "$CREC" > "$OUT/card_trick.txt"
 expect "$OUT/card_trick.txt" "trick run 1: rear_up stage 1 of 1" "kilo log trick on the card's run"
-expect "$REC/cardfetch/kilo-card-b1.log" "remote A2 \(0x10, rear up\)" "kilo card --fetch: boot 1's saved log"
-# ---- Kilo measures himself (docs/self-measurement.md): B1 on the Python virtual body's walking physics --------
+expect "$REC/cardfetch/kilo-card-b1.log" "remote A1 \(0x42, rear up\)" "kilo card --fetch: boot 1's saved log"
+# ---- Kilo measures himself (docs/self-measurement.md): C5 twice on the Python virtual body's walking physics --------
 # Its centre of mass 4 mm back and 3 mm right of the model and its IMU 1.5 / -2 deg off; the routine runs in
 # kilo-mind-host, kilo measure fetch downloads the run and fits it: the fit must find them.
-echo "== self-measurement: B1 on the virtual body's physics, kilo measure fetch --host (download and fit)"
+echo "== self-measurement: C5 twice on the virtual body's physics, kilo measure fetch --host (download and fit)"
 start_body "$OUT/vbody_measure.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u "$HERE/tests/measure_body.py" \
-    --dcom -4 -3 0 --imu 1.5 -2 --b6-at 1.5 --b1-at 4
+    --dcom -4 -3 0 --imu 1.5 -2 --c5-at 1.5 --c5-again-at 4
 trap stop_body EXIT
 MEAS="$OUT/measure"
 rm -rf "$MEAS"
@@ -1056,10 +1055,10 @@ KPY -m kilo.cli --host "127.0.0.1:$MPORT" measure fetch --out "$MEAS" 2>&1 | tee
 kill "$MIND_PID" 2>/dev/null || true; wait "$MIND_PID" 2>/dev/null || true
 stop_body
 trap - EXIT
-grep -E "remote B|measure" "$OUT/host_measure.log" | sed 's/^/   /' | head -12
-expect "$OUT/host_measure.log" "remote B1 \(0x4A, measure\): measuring \(about 80 s; any key stops it\)" "B1 started it"
+grep -E "remote C5|measure" "$OUT/host_measure.log" | sed 's/^/   /' | head -12
+expect "$OUT/host_measure.log" "remote C5 \(0x90, calibration posture\): standing, measuring \(about 80 s; any key stops it\)" "C5 twice started it"
 expect "$OUT/host_measure.log" "measure: done \([0-9]+ ticks, [0-9]+ s, 8 tips\)" "it ran to its end, every sweep tipped"
-expect "$OUT/measure_runs.txt" "self-measurement \(B1\)" "kilo runs lists it"
+expect "$OUT/measure_runs.txt" "self-measurement \(C5 twice\)" "kilo runs lists it"
 expect "$OUT/measure_fit.txt" "measure 1: [0-9]+ bytes in [0-9.]+ s -> .*run-[0-9-]+-measure-1\.krec" "fetched"
 expect "$OUT/measure_fit.txt" "^com_x +mm" "the fit's table"
 "$PYTHON" - "$(ls "$MEAS"/run-*-measure-1.fit.json)" <<'EOF'

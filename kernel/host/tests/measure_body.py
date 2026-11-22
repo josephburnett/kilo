@@ -2,9 +2,10 @@
 """The Python virtual body (kilo.vbody.sim) on a pty for the self-measurement
 loop in kernel/host/test.sh: its walking physics with the centre of mass
 moved and the IMU offset, so the fit (kilo measure fetch) has something to
-find; B6 and then B1 pressed on the remote at the times given.
+find; C5 pressed twice on the remote at the times given (the calibration
+posture, then the self-measurement: the mind stands him first).
 
-  measure_body.py --dcom -4 -3 0 --imu 1.5 -2 --b6-at 1.5 --b1-at 3.5
+  measure_body.py --dcom -4 -3 0 --imu 1.5 -2 --c5-at 1.5 --c5-again-at 3.5
 
 Prints "virtual body on /dev/pts/N" and runs until killed. The physics' feet
 edge is not inset (kilo.vbody.physics inset_mm: the support polygon as the
@@ -30,8 +31,8 @@ def main() -> int:
     ap.add_argument("--imu", type=float, nargs=2, default=(0.0, 0.0), metavar=("PITCH", "ROLL"))
     ap.add_argument("--lag-ms", type=float, default=50.0)
     ap.add_argument("--tau-ms", type=float, default=70.0)
-    ap.add_argument("--b6-at", type=float, default=1.5)
-    ap.add_argument("--b1-at", type=float, default=3.5)
+    ap.add_argument("--c5-at", type=float, default=1.5)
+    ap.add_argument("--c5-again-at", type=float, default=3.5)
     a = ap.parse_args()
     vfeet.FeetPlayer.PHYSICS = functools.partial(Physics, inset_mm=0.0)
     model = simulate.moved_model(BodyModel(), *a.dcom)
@@ -39,7 +40,7 @@ def main() -> int:
     vb = VirtualBody(t, model=model, imu_offset=tuple(a.imu), lag_ms=a.lag_ms, tau_ms=a.tau_ms).start()
     print(f"virtual body on {path} (centre of mass moved {tuple(a.dcom)} mm, IMU off {tuple(a.imu)} deg)", flush=True)
     t0 = time.monotonic()
-    pending = sorted([(a.b6_at, 0x02), (a.b1_at, 0x4A)])
+    pending = sorted([(a.c5_at, 0x90), (a.c5_again_at, 0x90)])
     try:
         while True:
             now = time.monotonic() - t0

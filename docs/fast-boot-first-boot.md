@@ -452,8 +452,9 @@ laptop and no network. Nothing needs the card reader unless it goes wrong.
 
 **Kernel update**: the mind writes a new `kernel7.img` onto its own card.
 It writes the new one as `kernel7.new`, reads it back to check it, and
-only then renames the old `kernel7.img` to `kernel7.old` and the new one to
-`kernel7.img`. Then it restarts into it.
+only then renames it to `kernel7.img` in place of the old one (no previous
+kernel is kept: any kernel can be built again from git). Then it restarts
+into it.
 
 With the mind running from step 6 and its address from step 8, on the
 laptop:
@@ -470,7 +471,7 @@ when flashing Kilo's board) and Kilo lies down. The laptop prints lines
 starting `update:`, then
 
 ```
-update: DONE: kernel7.img on the SD card is the new kernel (... bytes, crc32 ... read back); the previous one is kernel7.old
+update: DONE: kernel7.img on the SD card is the new kernel (... bytes, crc32 ... read back)
 update: the mind is rebooting into it
 update: the mind is back after ... s: mind build ...
 ```
@@ -500,8 +501,9 @@ or a Pi that does not come back (the light steady for more than 20 s
 after the restart): then put the card in a card reader and copy the files
 of `kernel/build/card/netboot/` (the loader) or `kernel/build/card/kernel/`
 (the mind), made by `make -C kernel card` (step 1), onto the card's FAT
-partition, replacing what is there. `kernel7.old`, if the card has one, is
-the kernel from before the update: renaming it to `kernel7.img` also works.
+partition, replacing what is there. To go back to an earlier mind kernel,
+build that commit and write it (docs/laptop-setup.md, "If the Pi does not
+start").
 
 ### 14. Optional: after a walk or a trick: plug the cable in, fetch, analyse
 
@@ -509,7 +511,7 @@ The mind records everything while it runs (the *flight recorder*), so you
 can play with Kilo with the remote and no cable, then look at what
 happened. Words used:
 
-- **Run**: one walk (from a gait key to its stop) or one trick (from A2 to
+- **Run**: one walk (from a gait key to its stop) or one trick (from A1 to
   its end), a stretch of the recording. Each has a number.
 - **Recording**: what the mind wrote down from the moment it started:
   every message between the Pi and Kilo's board (each 20 ms tick: where

@@ -21,7 +21,7 @@ what is done on this machine (keys, SD cards, downloaded recordings).
     kilo power | FILE.krec   light sleep and the battery's trend (kilo.cli_power, docs/power.md)
     kilo sound [status|list|play NAME|on|off|volume N]   Kilo's sounds (kilo.cli_sound, docs/sound.md)
     kilo model show [--fit FILE] | apply FILE.fit.json [--dry-run]   the one body model (kilo.cli_model)
-    kilo measure plan|fit FILE...|fetch|simulate   Kilo's self-measurement, B1 (kilo.cli_measure,
+    kilo measure plan|fit FILE...|fetch|simulate   Kilo's self-measurement, C5 twice (kilo.cli_measure,
                                    docs/self-measurement.md)
     kilo log summary|replay|plot|walk|trick|run FILE ...   (walk, trick, run: a .krec from kilo runs --fetch)
     kilo log [--lines N] [--previous [BOOT]] ... --host IP   the mind's log (kilo.cli_host)
@@ -111,7 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     __import__("kilo.cli_record").cli_record.add_parsers(sub)  # kilo runs (walks), record, bench, metrics
     __import__("kilo.cli_power").cli_power.add_parsers(sub)  # kilo power: light sleep, the battery trend
-    __import__("kilo.cli_measure").cli_measure.add_parser(sub)  # kilo measure: the self-measurement (B1)
+    __import__("kilo.cli_measure").cli_measure.add_parser(sub)  # kilo measure: the self-measurement (C5 twice)
     __import__("kilo.cli_model").cli_model.add_parser(sub)  # kilo model: the one body model, show / apply
 
     s = sub.add_parser("flash", help="build the body firmware and flash it through the mind, or put it on the "

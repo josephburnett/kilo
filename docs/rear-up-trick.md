@@ -1,10 +1,10 @@
-# Rear-up trick: sitting up on the hind feet and the tail (A2)
+# Rear-up trick: sitting up on the hind feet and the tail (A1)
 
 Kilo's first authored trick: Kilo sits back on its two hind feet and the tip
 of its tail, front paws off the floor, holds, comes back down and ends
-**sitting**. One key starts it: **A2** (column A, row 2 from the bottom).
-It goes up **one stage at a time**: A2 takes him to stage 1 and he holds it;
-A2 again while he holds takes him on to the next stage, as high as the build
+**sitting**. One key starts it: **A1** (column A, the bottom row; the owner's "A", the first experiment key; A2 until 2026-11-22).
+It goes up **one stage at a time**: A1 takes him to stage 1 and he holds it;
+A1 again while he holds takes him on to the next stage, as high as the build
 allows (section 3). B6 or C7 bring him down from any stage.
 
 **This is the third design (2026-11-21).** The second design took 12.5 s to
@@ -31,14 +31,14 @@ It comes in **three stages**, three heights:
 
 Each stage does exactly what the stage below does on the way up and then
 goes higher. In `rear_up_2` and `rear_up_3` each lower stage's top is held
-for 4 seconds: that is the time to press A2 to go on.
+for 4 seconds: that is the time to press A1 to go on.
 
 **Try stage 1 first.** It is the one the checks hold to every case they know
 (section 7). Stages 2 and 3 reach their tops in the model's fitted case and
 in most of its other cases, and in the rest a check stops them and he sits
 down.
 
-**A2 is switched off** until you switch it on (section 3). Write what you
+**A1 is switched off** until you switch it on (section 3). Write what you
 see in `docs/rear-up-trick-results.md`. Nothing here is timed: every step
 waits for you.
 
@@ -139,7 +139,7 @@ it.
 
 **How it comes down.** At the end of the hold, the way up backwards: the
 hind legs fold and he sits back on his rear ("settle"), the paws come down
-to the floor in front of him ("drop"), and he sits (SIT). A2 again, B6, A7,
+to the floor in front of him ("drop"), and he sits (SIT). A1 again, B6, A7,
 C7, or the body losing the Pi make the body move every joint in a straight
 line to SIT instead, over 1.5 s (stage 1), 2 s (stage 2) or 2.5 s (stage 3).
 The model checks that line from half way into and the end of every
@@ -152,7 +152,7 @@ keyframe: he ends sitting on his feet every time (section 7).
   rolls up to 17 degrees while he comes down, and ends sitting.
 - The pitch never goes past 55 degrees; the fall detector (75 degrees)
   stays armed.
-- A2 refuses to start below 7400 mV on the battery at rest (the highest
+- A1 refuses to start below 7400 mV on the battery at rest (the highest
   reading of the last 20 seconds).
 
 ### Your photo: Kilo standing by itself at 54 degrees (2026-11-16)
@@ -278,7 +278,7 @@ numbers), `tail_point` and `tail_cone` (the sweep).
 The frame's rear corner and the Pi's outline are still estimates (they
 never touch the floor in any case checked).
 
-### The right hind shoulder (do this before switching A2 on)
+### The right hind shoulder (do this before switching A1 on)
 
 **What is wrong.** Each servo turns as far as its pulse says, and the body
 keeps every pulse between 500 and 2500 microseconds (the legacy firmware
@@ -386,34 +386,34 @@ If your servo's shaft has a different number of teeth, what matters is the
 end result in step 5. `docs/calibration.md` has the commands in general and
 the other joints' numbers.
 
-## 3. The A2 switch, and the stage
+## 3. The A1 switch, and the stage
 
-A2 is off unless it is switched on, in both places the remote is handled.
+A1 is off unless it is switched on, in both places the remote is handled.
 The switch's value is the **highest stage allowed**: 1, 2 or 3.
 
 **Stepping through the stages (the mind on the Pi).** With the switch at
-N, A2 from standing plays the stage-N trick, which first goes to stage 1
+N, A1 from standing plays the stage-N trick, which first goes to stage 1
 and holds it 4 seconds:
 
-- A2 while he goes up to or holds stage 1 (or 2): he goes on to the next
+- A1 while he goes up to or holds stage 1 (or 2): he goes on to the next
   stage when the hold ends (the trick's own checks of the pitch and roll at
   each stage's top still run, and stop him if he is not where the model
   says);
-- no A2 in that time: about 0.3 s before the hold would end, the mind stops
+- no A1 in that time: about 0.3 s before the hold would end, the mind stops
   the trick and he comes down to SIT from where he is (the same straight
   move every stop takes, checked by the model from every keyframe);
 - at the highest stage he holds 2 seconds and comes down by himself;
-- A2 at any other moment (on the way up between two stages, or at the
+- A1 at any other moment (on the way up between two stages, or at the
   highest stage), B6 or C7: down at once.
 
 So with the switch at 3 you can do stage 1, look, and only then go on; one
 build does all three. The log says each step: `remote: rear_up: up to stage
-1 (of 3)`, `rear_up: stage 1 (of 3): A2 to go on`, `rear_up: on to stage 2
-(of 3)`, `rear_up: held stage 1 without A2: coming down`, `rear_up: coming
+1 (of 3)`, `rear_up: stage 1 (of 3): A1 to go on`, `rear_up: on to stage 2
+(of 3)`, `rear_up: held stage 1 without A1: coming down`, `rear_up: coming
 down (stage 2 allowed)`; each is also a mark in the trick's flight-recorder
 run (section 6), next to the key that caused it. The run list (`kilo runs
 --host`) and the fetched run (`kilo log run FILE`) name the highest stage
-A2 allowed in that run, not the build's: `rear_up stage 1 of 3`, or
+A1 allowed in that run, not the build's: `rear_up stage 1 of 3`, or
 `rear_up stage 2 of 3 (reached 1)` when he came down before stage 2's top.
 (Recordings from before 2026-11-21 show the build's stage: `rear_up_3
 stage 3`.)
@@ -426,16 +426,16 @@ make -C kernel KILO_REAR_UP=1
 ```
 
 For stage 2, `KILO_REAR_UP=2`; for stage 3, `KILO_REAR_UP=3`. At boot it
-logs which: `Kilo mind, build ... (rear-up key A2 on: rear_up_2, stage 2)`.
-Built without it (`make -C kernel`), A2 is off again. Any other value stops
+logs which: `Kilo mind, build ... (rear-up key A1 on: rear_up_2, stage 2)`.
+Built without it (`make -C kernel`), A1 is off again. Any other value stops
 the build with an error.
 
-With the switch off, pressing A2 logs `remote A2 (0x10, none): ignored (no
-action on this key)` and nothing moves. With it on, A2 logs `remote A2
-(0x10, rear up): trick rear_up started (6 s; ...)` at 1, and at 2 and 3
-`remote A2 (0x10, rear up 3): trick rear_up_3 started: up to stage 1 (A2
+With the switch off, pressing A1 logs `remote A1 (0x42, none): ignored (no
+action on this key)` and nothing moves. With it on, A1 logs `remote A1
+(0x42, rear up): trick rear_up started (6 s; ...)` at 1, and at 2 and 3
+`remote A1 (0x42, rear up 3): trick rear_up_3 started: up to stage 1 (A1
 while he holds it: on, up to 3; ...)`. (At boot the mind still logs
-`rear-up key A2 on: rear_up_3, stage 3`: read it as "up to stage 3".)
+`rear-up key A1 on: rear_up_3, stage 3`: read it as "up to stage 3".)
 
 Switch it on only for the trials of section 5, and leave it on afterwards
 only at a stage that has gone well.
@@ -462,26 +462,26 @@ only at a stage that has gone well.
 
 ## 5. The trials
 
-Do each step until it looks the same twice. After every press of A2:
+Do each step until it looks the same twice. After every press of A1:
 `kilo runs --host kilo.local --fetch last` (section 6); its keyframe table
 shows the measured pitch against the model's at each keyframe, and the log
 shows any guard that stopped the trick.
 
 **Step 1: onto the rear (stage 1, keyframes 0-4).** Build with
-`KILO_REAR_UP=1`. Press A2, and press it again (or C7) once both paws are
+`KILO_REAR_UP=1`. Press A1, and press it again (or C7) once both paws are
 folded (about 2 s). Watch: does the head come up first, the body crouch,
 then rock back onto its rear without the hind feet moving? Do the paws fold
 one after the other? The recorded roll should stay within 2 degrees of what
 it reads standing.
 
-**Step 2: all of stage 1.** Press A2 once and let it play (6.3 s). At about
+**Step 2: all of stage 1.** Press A1 once and let it play (6.3 s). At about
 2.5 s the hips rise and he sits on the hind feet and the tail tip; he should
 hold still for 2 s at about 23 degrees nose up, then sit back, put the paws
 down and sit.
 
 **Steps 3-4: stages 2 and 3** (`KILO_REAR_UP=3` once, for both), only after
-stage 1 has gone well twice: press A2; at stage 1's hold, A2 again: he goes
-on to stage 2 and holds it; let him come down (no A2), or A2 again for stage
+stage 1 has gone well twice: press A1; at stage 1's hold, A1 again: he goes
+on to stage 2 and holds it; let him come down (no A1), or A1 again for stage
 3. The tail tip slides forward as he rises. Without the second press he
 comes down from stage 1 after its 4 s. Kneel close behind and to his right
 for these: in the model it is the higher stages that can roll to his right.
@@ -688,12 +688,12 @@ top by its guard's name (`up`, `mid`, `top`).
 
 ## When it goes wrong
 
-- **A2 does nothing, the log says "A2 (0x10, none): ignored"**: the switch
+- **A1 does nothing, the log says "A1 (0x42, none): ignored"**: the switch
   is off (section 3).
-- **A2 says "refused: battery ... mV at rest"**: charge the battery (the
+- **A1 says "refused: battery ... mV at rest"**: charge the battery (the
   reading at rest, not the moment after a walk, is what counts).
-- **He came down from stage 1 when you wanted stage 2**: press A2 while he
-  holds (the log says `rear_up: stage 1 (of 3): A2 to go on`); a press
+- **He came down from stage 1 when you wanted stage 2**: press A1 while he
+  holds (the log says `rear_up: stage 1 (of 3): A1 to go on`); a press
   earlier on the way up (before his last move up to the stage) brings him
   down instead.
 - **"roll ... past 8" in the crouch, or "guard back: roll ..."**: a hind

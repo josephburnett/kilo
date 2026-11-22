@@ -841,7 +841,7 @@ void test_update_channel() {
     }
     CHECKF(writing >= 12 && verifying >= 12, "%d writing, %d verifying statuses", writing, verifying);
   }
-  CHECK(r.store.files["kernel7.img"] == k && r.store.text("kernel7.old") == "OLD" && !r.store.has("kernel7.new"));
+  CHECK(r.store.files["kernel7.img"] == k && !r.store.has("kernel7.old") && !r.store.has("kernel7.new"));
   CHECK(r.server.reboot_requested() && !r.server.link_paused());
   CHECK(r.capture.has("kernel updated on the SD card: rebooting into it (REST latched)"));
   // Rebooting: no new flash or update.

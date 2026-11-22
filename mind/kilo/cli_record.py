@@ -155,7 +155,7 @@ def local_id(info: Any) -> int:
 def describe(info: Any) -> dict[str, Any]:
     d = walkrec.info_dict(info)
     d["kind"] = "trick" if info.flags & P.WalkFlags.TRICK else "walk"
-    if "measure" in d:  # the self-measurement (B1): a trick-kind run labelled measure=self
+    if "measure" in d:  # the self-measurement (C5 twice): a trick-kind run labelled measure=self
         d["kind"] = "measure"
     d["boot"] = boot_of(info) or None
     d["run"] = local_id(info)
@@ -176,7 +176,7 @@ def _row(info: Any, when: float | None) -> str:
     if "TRUNCATED" in flags:
         state += " (TRUNCATED: its start is gone)"
     if d["kind"] == "measure":
-        what = "self-measurement (B1)"
+        what = "self-measurement (C5 twice)"
     elif d["kind"] == "trick":
         if d.get("of"):  # the stage allowed in the run: "rear_up stage 1 of 3"
             what = trickrec.trick_label(d.get("trick", "?"), d.get("stage"), d.get("of"), d.get("reached"))

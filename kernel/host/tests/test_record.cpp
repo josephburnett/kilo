@@ -244,45 +244,37 @@ uint16_t trick_done_arg(const char* name, uint8_t reason) {
   return (uint16_t)(tricks::trick_id_for(*t) | (reason << 8));
 }
 
-// A1: a long-trot run is labelled so, also when the walk went into it from the trot and out again.
-void test_long_trot_runs() {
+// A trot run: its label and its marks (+4: the timing mark at the change says speed_set=180.0 and the
+// swing it has then: the swing grows a tick a step from there).
+void test_trot_runs() {
   MindConfig cfg;
   cfg.remote = true;
   Rig r(cfg);
   r.start();
   r.run_ms(2000);
   record::Recorder& rec = r.mind.recorder();
-  r.body.event(KILO_EVENT_IR_KEY, 0x42);  // A1: the long trot
+  r.body.event(KILO_EVENT_IR_KEY, 0x68);  // A4: the trot at +3
   r.run_ms(3000);
-  r.body.event(KILO_EVENT_IR_KEY, 0x62);  // B7: stage 2
-  r.run_ms(1500);
+  r.body.event(KILO_EVENT_IR_KEY, 0x62);  // B7: +4, 180 mm/s
+  r.run_ms(2500);
   r.body.event(KILO_EVENT_IR_KEY, 0x02);  // B6: the quick stop
   for (int k = 0; k < 400 && r.mind.walker().active(); k++) r.run_ms(20);
   r.run_ms((uint32_t)(record::Recorder::kPostRollUs / 1000) + 100);
   const record::Run* run = rec.find(1);
   CHECK(run != nullptr && run->kind == KILO_RUN_KIND_WALK && (run->flags & KILO_WALK_FLAGS_ENDED_OK));
   std::string text(run->text, run->text_len);
-  CHECKF(text.find("gait=longtrot dir=forward speed=180.0") == 0 && text.find(" end=stopped") != std::string::npos,
+  CHECKF(text.find("gait=trot dir=forward speed=180.0") == 0 && text.find(" end=stopped") != std::string::npos,
          "%s", text.c_str());
   std::vector<Rec> rs = r.records();
   const Rec* st = mark(rs, "stream");
-  CHECKF(st != nullptr && st->payload.find("pattern=longtrot") != std::string::npos, "%s", st ? st->payload.c_str() : "-");
-  CHECK(r.ring_has("walk longtrot forward at 160.0 mm/s"));
-  // the trot, into the long trot and out again: still a long-trot run
-  r.body.event(KILO_EVENT_IR_KEY, 0x68);  // A4: trot
-  r.run_ms(2000);
-  r.body.event(KILO_EVENT_IR_KEY, 0x42);  // A1
-  r.run_ms(2000);
-  r.body.event(KILO_EVENT_IR_KEY, 0xA8);  // B5: out into the trot
-  r.run_ms(2000);
-  r.body.event(KILO_EVENT_IR_KEY, 0x02);
-  for (int k = 0; k < 400 && r.mind.walker().active(); k++) r.run_ms(20);
-  r.run_ms((uint32_t)(record::Recorder::kPostRollUs / 1000) + 100);
-  run = rec.find(2);
-  CHECK(run != nullptr);
-  text.assign(run->text, run->text_len);
-  CHECKF(text.find("gait=longtrot dir=forward speed=144.0") == 0, "%s", text.c_str());
-  CHECK(std::strcmp(r.mind.walker().planner().pattern().name, "trot") == 0);
+  CHECKF(st != nullptr && st->payload.find("pattern=trot") != std::string::npos, "%s", st ? st->payload.c_str() : "-");
+  bool at_180 = false;
+  for (const Rec& m : rs)
+    if (m.payload.compare(0, 7, "timing ") == 0 && m.payload.find(" speed_set=180.0 ") != std::string::npos &&
+        m.payload.find(" swing_ticks=") != std::string::npos)
+      at_180 = true;
+  CHECK(at_180);
+  CHECK(r.ring_has("walk trot forward at 144.0 mm/s"));
 }
 
 void test_trick_runs() {
@@ -293,8 +285,8 @@ void test_trick_runs() {
   r.start();
   r.run_ms(500);
   record::Recorder& rec = r.mind.recorder();
-  // 1. A2: rear_up plays and ends DONE
-  r.body.event(KILO_EVENT_IR_KEY, 0x10);
+  // 1. A1: rear_up plays and ends DONE
+  r.body.event(KILO_EVENT_IR_KEY, 0x42);
   r.run_ms(200);
   CHECK(r.mind.player().playing() && rec.in_run());
   r.body.mode = KILO_MODE_TRICK;
@@ -334,8 +326,8 @@ void test_trick_runs() {
       tel_in++;
   CHECKF(tel_in >= 150, "%zu TELEMETRY during the play", tel_in);
 
-  // 2. A2 again, then B6: stopped by B6, the key marked in the run
-  r.body.event(KILO_EVENT_IR_KEY, 0x10);
+  // 2. A1 again, then B6: stopped by B6, the key marked in the run
+  r.body.event(KILO_EVENT_IR_KEY, 0x42);
   r.run_ms(300);
   CHECK(r.mind.player().playing());
   r.body.mode = KILO_MODE_TRICK;
@@ -356,10 +348,10 @@ void test_trick_runs() {
              e2->payload.find("end reason=STOPPED") == 0,
          "%s / %s", k2 ? k2->payload.c_str() : "-", e2 ? e2->payload.c_str() : "-");
 
-  // 3. a low battery: A2 refused, a REFUSED run (the battery at rest: 7000 mV for 20 s)
+  // 3. a low battery: A1 refused, a REFUSED run (the battery at rest: 7000 mV for 20 s)
   r.body.batt_mv = 7000;
   r.run_ms(21000);
-  r.body.event(KILO_EVENT_IR_KEY, 0x10);
+  r.body.event(KILO_EVENT_IR_KEY, 0x42);
   r.run_ms(100);
   const record::Run* run3 = rec.find(3);
   CHECK(run3 != nullptr && std::string(run3->text, run3->text_len) == "trick=rear_up end=REFUSED" &&
@@ -386,8 +378,8 @@ void stats_lines(Mind& m) {
   logf(s, LogLevel::Info, "loop 890/s: period max 1500 mean 1123 us, work max 300 mean 40 us, mind.poll max 280 mean 25 us; 0 clients");
 }
 
-// The rear-up's stages from the remote (KILO_REAR_UP=3: A2 plays rear_up_3, which holds stage 1's and
-// stage 2's tops for 4 s each): without A2 in a hold he comes down from it; A2 in the hold goes on;
+// The rear-up's stages from the remote (KILO_REAR_UP=3: A1 plays rear_up_3, which holds stage 1's and
+// stage 2's tops for 4 s each): without A1 in a hold he comes down from it; A1 in the hold goes on;
 // each stage a line and a mark in the trick's run, and the run's label and its end MARK say the highest
 // stage allowed (not the build's three): "trick=rear_up_3 stage=1 of=3". The battery at rest decides
 // the refusal: a sag right after a walk does not refuse it.
@@ -424,7 +416,7 @@ void test_rear_up_stages() {
     r.run_ms(500);
     r.body.batt_mv = 7300;  // the sag right after a walk: at rest it was 8000 a moment ago
     r.run_ms(200);
-    r.body.event(KILO_EVENT_IR_KEY, 0x10);  // A2
+    r.body.event(KILO_EVENT_IR_KEY, 0x42);  // A1
     r.run_ms(200);
     CHECKF(r.mind.player().playing(), "presses %d: not playing (%s)", presses, r.mind.remote().last());
     r.run_ms(20);
@@ -448,22 +440,22 @@ void test_rear_up_stages() {
     };
     // into stage 1's hold
     while (at_ms() < ends_at_ms(up) - 2000) run(20);
-    CHECK(r.ring_has("remote: rear_up: stage 1 (of 3): A2 to go on") && r.body.count(KILO_MSG_TRICK_STOP) == 0);
+    CHECK(r.ring_has("remote: rear_up: stage 1 (of 3): A1 to go on") && r.body.count(KILO_MSG_TRICK_STOP) == 0);
     CHECKF(label(r) == "trick=rear_up_3 stage=1 of=3", "%s", label(r).c_str());
     if (presses >= 1) {
-      r.body.event(KILO_EVENT_IR_KEY, 0x10);
+      r.body.event(KILO_EVENT_IR_KEY, 0x42);
       r.run_ms(100);
       CHECK(r.ring_has("remote: rear_up: on to stage 2 (of 3)"));
       CHECKF(label(r) == "trick=rear_up_3 stage=2 of=3 reached=1", "%s", label(r).c_str());
     }
     while (at_ms() < ends_at_ms(up) + 200) run(20);
-    if (presses == 0) {  // no A2: down from stage 1, before its hold ended
-      CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1 && r.ring_has("remote: rear_up: held stage 1 without A2: coming down"));
+    if (presses == 0) {  // no A1: down from stage 1, before its hold ended
+      CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1 && r.ring_has("remote: rear_up: held stage 1 without A1: coming down"));
       r.body.mode = KILO_MODE_IDLE;
       r.body.event(KILO_EVENT_TRICK_DONE, (int16_t)trick_done_arg("rear_up_3", KILO_TRICK_DONE_REASON_STOPPED));
       r.run_ms(4000);
       std::vector<Rec> rs = r.records();
-      CHECK(has_mark(rs, "rear_up: up to stage 1 (of 3)") && has_mark(rs, "rear_up: held stage 1 without A2"));
+      CHECK(has_mark(rs, "rear_up: up to stage 1 (of 3)") && has_mark(rs, "rear_up: held stage 1 without A1"));
       // the owner's runs of 2026-11-20: "rear_up: up to stage 1 (of 3)" listed as "stage 3"
       CHECKF(label(r) == "trick=rear_up_3 stage=1 of=3 end=STOPPED", "%s", label(r).c_str());
       CHECK(has_mark(rs, "stage allowed=1 reached=1 of=3") && has_mark(rs, "trick id=1 format=2 trick=rear_up_3 stage=1 of=3 ") &&
@@ -472,15 +464,15 @@ void test_rear_up_stages() {
     }
     CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 0);
     while (at_ms() < ends_at_ms(mid) - 2000) run(20);
-    CHECK(r.ring_has("remote: rear_up: stage 2 (of 3): A2 to go on"));
+    CHECK(r.ring_has("remote: rear_up: stage 2 (of 3): A1 to go on"));
     if (presses == 2) {
-      r.body.event(KILO_EVENT_IR_KEY, 0x10);
+      r.body.event(KILO_EVENT_IR_KEY, 0x42);
       r.run_ms(100);
       CHECK(r.ring_has("remote: rear_up: on to stage 3 (of 3)"));
     }
     while (at_ms() < ends_at_ms(mid) + 200) run(20);
     if (presses == 1) {
-      CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1 && r.ring_has("remote: rear_up: held stage 2 without A2: coming down"));
+      CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1 && r.ring_has("remote: rear_up: held stage 2 without A1: coming down"));
       CHECKF(label(r) == "trick=rear_up_3 stage=2 of=3", "%s", label(r).c_str());
       continue;
     }
@@ -554,7 +546,7 @@ void test_play_session_log() {
     r.body.pitch = 0;
     run_s(10);
   }
-  hold(0x10, 1);  // A2: rear_up
+  hold(0x42, 1);  // A1: rear_up
   r.body.mode = KILO_MODE_TRICK;
   r.body.pitch = -7 * 16;  // the pitch its guards expect: on his rear (back, paws), then on the tripod (up)
   run_s(3);
@@ -877,7 +869,7 @@ int main() {
   test_flight_store();
   test_records_from_boot();
   test_walk_run();
-  test_long_trot_runs();
+  test_trot_runs();
   test_trick_runs();
   test_rear_up_stages();
   test_play_session_log();

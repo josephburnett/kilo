@@ -34,16 +34,15 @@
 //   from home steps there (the crawl at its fastest cadence), the body
 //   levels, done. A leg caught on its way stays where it landed.
 //
-// - The long trot (kLongTrot, longtrot.h; plan.py's LongTrotPlanner in
-//   mind/kilo/planner/longtrot.py, which this matches tick for tick): the
-//   swing's length varies (swing_ticks(): the speed's, at most a tick longer
-//   than the last slot's, long enough for its step, and away from the steady
-//   long trot long enough for no joint to pass kLtJointDegPerTick a tick), one
-//   tick on four feet, each pair landing at fit_land_x() instead of half a
-//   stride ahead. Changes to and from the walk and the trot go straight over
-//   (out of it once its swing is 8 ticks again); to and from the crawl
-//   through the legs' way home. In the walk, the trot and the crawl nothing of
-//   this applies.
+// - The trot (is_trot(), trot.h; plan.py's Planner, which this matches tick
+//   for tick): the swing's length varies (swing_ticks(): the speed's, at
+//   most a tick longer than the last slot's, long enough for its step, and
+//   away from the steady trot long enough for no joint to pass
+//   kTrotJointDegPerTick a tick), one tick on four feet, each pair landing
+//   at fit_land_x() instead of half a stride ahead. Changes to and from the
+//   walk go straight over (out of the trot once its swing is 8 ticks again);
+//   to and from the crawl through the legs' way home. In the walk and the
+//   crawl nothing of this applies.
 //
 // Fixed-size state, no heap. Planner::next() is what the Walker calls once
 // per tick, about five ticks ahead of the body.
@@ -51,7 +50,7 @@
 #define KILO_MIND_PLANNER_PLAN_H
 #include <stdint.h>
 #include "planner/fmath.h"
-#include "planner/longtrot.h"
+#include "planner/trot.h"
 #include "planner/model.h"
 #include "planner/patterns.h"
 
@@ -63,6 +62,7 @@ constexpr int kZMin = 30, kZMax = 95;   // FEET z_mm
 constexpr real kAttMaxDeg = 30;         // FEET pitch / roll: the body refuses a FEET beyond it
 constexpr real kHeightSlewMm = (real)0.5;
 constexpr real kRecentredMm = (real)1.5;  // a stopping leg this close to its target does not step again
+constexpr real kCentreSlewMm = (real)0.5;  // the strides' centre (Pattern::centre_com) moves at most this a tick
 constexpr real kSwitchSlackMm = (real)4.0;  // a pattern change: every foot within the new half stride plus this
 constexpr real kStanceSlew = (real)0.02;
 constexpr int kLeanUnitsPerTick = 4;      // units of a lean solve per tick
@@ -248,11 +248,11 @@ class Planner {
   // Plan the next tick (tick()) and advance.
   const TickPlan& next();
 
-  // The pattern's timing at the speed set (the long trot's own: pattern_timing()).
-  Timing timing() const { return pattern_timing(*pattern_, speed_mm_s_, direction_); }
+  // The pattern's timing at the speed set and the direction (the trot's slower backward).
+  Timing timing() const { return planner::timing(*pattern_, speed_mm_s_, direction_); }
   int swing_ticks() const;
   bool changing() const { return pending_ != nullptr; }
-  bool long_trot() const { return is_long_trot(*pattern_); }
+  bool trot() const { return is_trot(*pattern_); }
   bool stopping() const { return stopping_; }
   bool halting() const { return halting_; }
   int halt_ticks() const { return halt_t_; }  // ticks planned since the halt
@@ -291,7 +291,7 @@ class Planner {
   real recentred() const { return halting_ ? kHaltSquareMm : kRecentredMm; }
   void apply_timing();
   void start_slot();
-  void start_slot_base();  // plan.py Planner._start_slot (start_slot adds the long trot's swing)
+  void start_slot_base();  // plan.py Planner._start_slot (start_slot adds the trot's swing)
   bool homing() const;      // every leg goes home: a stop, or a change into or out of the crawl
   bool swing_ok(int leg, real to, int w) const;
   real land_for(int side) const;
@@ -306,6 +306,7 @@ class Planner {
   real tip_toward(int leg) const;
   real side_speed(int leg) const { return s_cur_[kLeft[leg] ? 0 : 1] / stance_ticks_; }
   real target_x(int leg) const;
+  real centre_target() const;  // plan.py _centre_target
 
   static constexpr int kHistMax = 32;
 
@@ -323,6 +324,7 @@ class Planner {
   real h_ = 0;
   real s_cur_[2] = {};   // stride now, left and right
   real s_tgt_[2] = {};
+  real centre_ = 0;      // mm ahead of its shoulder a swing's landing is centred (centre_target())
   real stance_ticks_ = 1;  // a foot's time on the ground now (slewed toward stance_tgt_)
   real stance_tgt_ = 1;
   Lean lean_, lean_from_, lean_to_;
@@ -360,10 +362,10 @@ class Planner {
   TickPlan last_ = {};
   bool has_last_ = false;
   PlannerStats stats_ = {};
-  // the long trot (longtrot.py LongTrotPlanner): this slot's swing ticks (kLtWMin while not in it), the
-  // speed's, and this slot's landing per side (left, right) for the target stride at its start
-  int lw_ = kLtWMin;
-  int lw_tgt_ = kLtWMin;
+  // the trot (plan.py Planner): this slot's swing ticks (kTrotWMin while not in it), the speed's,
+  // and this slot's landing per side (left, right) for the target stride at its start
+  int lw_ = kTrotWMin;
+  int lw_tgt_ = kTrotWMin;
   real land_[2] = {};
   real slot_s_[2] = {};
 };

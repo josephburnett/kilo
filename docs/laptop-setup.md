@@ -161,8 +161,10 @@ the card route.
    It builds the kernel and the body firmware (a few minutes the first
    time), checks the kernel (that it is the mind kernel, and that the
    laptop's key is built in if the laptop has one), copies both onto the
-   card, reads each back to compare, and keeps the previous kernel as
-   `kernel7.old`. It ends by saying what the next power-on will do.
+   card and reads each back to compare. The new kernel replaces the old
+   one: no previous kernel is kept on the card (every kernel can be built
+   again from git, below), and a `kernel7.old` or `kernel7.bad` left from
+   earlier is removed. It ends by saying what the next power-on will do.
    Kernel build options go after `CARD`, for example
    `kilo card CARD KILO_REAR_UP=1` (the options are listed at the top of
    `kernel/Makefile`). `--no-build` copies the last builds instead;
@@ -209,14 +211,36 @@ A refusal (battery low, files damaged) is checked afresh at every
 power-on.
 
 **If the Pi does not start** after a new kernel (the green light stays
-steady for more than 20 seconds): card into the laptop, and in `CARD`
-rename `kernel7.img` to `kernel7.bad` and `kernel7.old` to `kernel7.img`.
-That is the kernel from before.
+steady for more than 20 seconds), **or the new kernel misbehaves** (it
+starts, but Kilo does things nobody asked for, or ignores the remote): put
+back a kernel that worked by building it again from git and writing it.
+The card keeps no previous kernel; git keeps them all. Each kernel's
+"build" (the 8 letters and digits `kilo status --host` and the saved logs
+show, for example `c527a97d`) is the git commit it was built from.
 
-**If the new kernel misbehaves** (it starts, but Kilo does things nobody
-asked for, or ignores the remote): do the same rename to get the previous
-kernel back, then rebuild from nothing before writing again:
-`rm -rf kernel/build`, then `kilo card CARD ...`. This happened on
+1. Switch Kilo off, put the card in the laptop (`CARD` as above).
+2. Find the commit to go back to: the build of the last kernel that
+   worked. `git log --oneline` lists the commits, newest first; or ask
+   Claude which one.
+3. Build that commit from nothing and write only the kernel (the body's
+   firmware on the card stays):
+
+   ```
+   $ cd ~/OpenCat
+   $ git switch --detach COMMIT
+   $ rm -rf kernel/build
+   $ kilo card CARD --no-body
+   $ git switch main
+   ```
+
+   `COMMIT` is the build from step 2. Kernel build options go after
+   `CARD` as before (for example `KILO_REAR_UP=1`).
+4. Eject the card, put it back in the Pi, switch Kilo on and check it as
+   below.
+
+When the newest kernel misbehaves, first try it once more built from
+nothing (`rm -rf kernel/build`, then `kilo card CARD ...` on `main`).
+This happened on
 2026-11-21: Kilo stood by himself, ignored every key and saved no
 recordings. The kernel had been rebuilt on top of an older build, and the
 kernel's build file was not tracking which files use which shared

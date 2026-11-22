@@ -11,9 +11,8 @@ namespace kilo {
 namespace remote {
 
 const double kSpeedFactors[kSpeedSteps] = {0.4, 0.7, 1.0, 1.15, 1.25};
-const double kTrotSpeedFactors[kSpeedSteps] = {0.4, 0.7, 1.0, 1.3, 1.6};  // 57.6 .. 230.4 mm/s
+const double kTrotSpeedFactors[kSpeedSteps] = {0.4, 0.7, 1.0, 1.25, 1.4};  // 57.6 .. 201.6 mm/s: 8, 8, 8, 10, 11-tick swings
 const double kSteerLevels[kSteerSteps] = {0.25, 0.5, 1.0};
-const double kLongTrotSpeeds[kLongTrotStages] = {160.0, 180.0, 200.0};  // longtrot.py STAGES: 9, 10, 11-tick swings
 
 const double* speed_factors(const planner::Pattern& p) {
   return str_eq(p.name, "trot") ? kTrotSpeedFactors : kSpeedFactors;
@@ -21,7 +20,7 @@ const double* speed_factors(const planner::Pattern& p) {
 
 namespace {
 constexpr uint64_t kTrickStopWaitUs = 2000000;  // TRICK_STOP's ACK and the TRICK_DONE it brings
-constexpr uint64_t kStepLeadUs = 300000;  // a lower stage's hold: down this long before it ends without A2
+constexpr uint64_t kStepLeadUs = 300000;  // a lower stage's hold: down this long before it ends without A1
 const char* const kStageTop[] = {"up", "mid", "top"};  // rear_up.py: each stage's top frame (its last guard)
 
 // The frame of stage k's top in trick t (its guard named so), -1 if none.
@@ -37,6 +36,7 @@ int iabs(int v) { return v < 0 ? -v : v; }
 void format_speed(char* buf, uint32_t cap, double mm_s) { format_fixed(buf, cap, d_iround(mm_s * 10.0), 1); }
 
 bool stop_key(const Key& k) { return k.kind == Kind::Posture && (str_eq(k.name, "stand") || str_eq(k.name, "rest")); }
+bool calib_key(const Key& k) { return k.kind == Kind::Posture && str_eq(k.name, "calib"); }
 }  // namespace
 
 double stop_timeout_s(double period_ms) {
@@ -58,11 +58,29 @@ bool RemoteControl::direction(planner::Direction* d) const {
 }
 
 double RemoteControl::speed_mm_s() const {
-  if (planner::is_long_trot(*pattern_)) {
-    int k = iabs(level_) < kLongTrotStages ? iabs(level_) : kLongTrotStages;
-    return kLongTrotSpeeds[k - 1];
-  }
   return speed_factors(*pattern_)[iabs(level_) - 1] * (double)planner::default_speed(*pattern_);
+}
+
+// The steer levels allowed now: the trot's long swing (+4, +5) at most kTrotFastSteerSteps.
+int RemoteControl::steer_most() const {
+  return planner::is_trot(*pattern_) && level_ > kTrotLongFrom - 1 ? kTrotFastSteerSteps : kSteerSteps;
+}
+
+// The steer eased to what steer_most() allows (true if it was); before every walk the remote starts.
+bool RemoteControl::limit_steer() {
+  int most = steer_most();
+  if (iabs(steer_) <= most) return false;
+  steer_ = steer_ > 0 ? most : -most;
+  return true;
+}
+
+void RemoteControl::key_seen(const Key& key) {
+  if (!calib_key(key)) calib_held_ = false;
+}
+
+bool RemoteControl::calib_held() const {
+  const Goal* g = const_cast<SerialLink&>(link_).goal(KILO_MSG_SET_POSTURE);
+  return calib_held_ && g != nullptr && g->len >= 2 && g->payload[1] == KILO_POSTURE_CALIB;
 }
 
 double RemoteControl::steer_value() const {
@@ -120,6 +138,7 @@ bool RemoteControl::perform(const Key& key, uint16_t arg) {
     freeze(key, arg);
     return true;
   }
+  if (phase_ == Phase::MeasureStand) done("measure cancelled (a key was pressed): standing", false);
   if (phase_ == Phase::Idle && n_ == 0) {
     begin(key, arg);
     return true;
@@ -157,44 +176,12 @@ void RemoteControl::done(const char* what, bool failed) {
 // The walk as it now is ("walk forward (trot) 55.6 mm/s, steering left 1").
 void RemoteControl::walk_done(const char* suffix, const char* prefix) {
   char what[112], v[16], st[24];
-  planner::Timing t = planner::pattern_timing(*pattern_, (planner::real)speed_mm_s(), dir());
+  planner::Timing t = planner::timing(*pattern_, (planner::real)speed_mm_s(), dir());
   format_speed(v, sizeof v, (double)t.speed_mm_s);
   steer_text(st, sizeof st);
   format(what, sizeof what, "%swalk %s (%s) %s mm/s%s%s", prefix, planner::direction_name(dir()), pattern_->name, v,
          st, suffix);
   done(what, false);
-}
-
-// Into the long trot (A1): its first stage, straight forward, the steer at most its one level.
-void RemoteControl::long_trot_start() {
-  level_ = 1;
-  heading_ = Heading::Straight;
-  if (iabs(steer_) > kLongTrotSteerSteps) steer_ = steer_ > 0 ? kLongTrotSteerSteps : -kLongTrotSteerSteps;
-}
-
-// B7 / B5 in the long trot: a stage up or down; B5 at the first stage: the trot at 1x (144 mm/s),
-// from where B5 goes on as in the trot.
-void RemoteControl::long_trot_speed(bool up) {
-  int l = up ? (level_ < kLongTrotStages ? level_ + 1 : level_) : (level_ > 1 ? level_ - 1 : 0);
-  const char* end = l == level_ ? ": already the top stage" : "";
-  const char* out = "";
-  if (l == 0) {
-    pattern_ = planner::find_pattern("trot");
-    level_ = kDefaultLevel;
-    out = ": out of the long trot";
-  } else {
-    level_ = l;
-  }
-  const char* why = end[0] == '\0' ? walker_.start(walk_goal()) : nullptr;
-  char stage[24], v[16], st[24], what[128];
-  if (planner::is_long_trot(*pattern_)) format(stage, sizeof stage, "stage %d", level_);
-  else format(stage, sizeof stage, "1x");
-  planner::Timing t = planner::pattern_timing(*pattern_, (planner::real)speed_mm_s(), dir());
-  format_speed(v, sizeof v, (double)t.speed_mm_s);
-  steer_text(st, sizeof st);
-  format(what, sizeof what, "speed %s (%s %s mm/s %s%s)%s%s%s%s", stage, pattern_->name, v,
-         planner::direction_name(dir()), st, end, out, why != nullptr ? ": walk failed: " : "", why != nullptr ? why : "");
-  done(what, why != nullptr);
 }
 
 void RemoteControl::freeze(const Key& key, uint16_t arg) {
@@ -241,6 +228,7 @@ void RemoteControl::freeze(const Key& key, uint16_t arg) {
   format(what + n, sizeof what - n, "): only B6 or A7 act now");
   reset_motion();
   frozen_ = true;
+  calib_held_ = false;
   done(what, false);
 }
 
@@ -258,9 +246,11 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
     frozen_ = false;
     note_ = "unfrozen, ";
   }
+  const bool second_c5 = calib_key(key) && calib_held();  // C5 again, no key between: the self-measurement
+  calib_held_ = false;
   if (measure_ != nullptr && measure_->active()) {  // every key stops it first (into STAND)
     measure_->stop(text_);
-    if (key.kind == Kind::Measure) {
+    if (calib_key(key)) {
       done("measurement stopped: standing", false);
       return;
     }
@@ -286,8 +276,10 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
   }
   switch (key.kind) {
     case Kind::Posture:
+      measure_next_ = second_c5;
+      stop_then_act(now);
+      return;
     case Kind::Behaviour:
-    case Kind::Measure:
     case Kind::Righting:
       stop_then_act(now);
       return;
@@ -320,7 +312,6 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
         bool same = p == pattern_;
         int was_level = level_, was_steer = steer_;
         Heading was_heading = heading_;
-        bool was_long = planner::is_long_trot(*pattern_);
         pattern_ = p;
         if (same) {  // that gait already: straight forward at the level's magnitude, no steer
           heading_ = Heading::Straight;
@@ -330,17 +321,12 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
             walk_done(": unchanged");
             return;
           }
-        } else if (planner::is_long_trot(*p)) {  // into the long trot: its first stage, straight
-          long_trot_start();
-        } else if (was_long) {  // out of it: the gait's 1x, forward
-          level_ = kDefaultLevel;
         }
         act();
         return;
       }
       reset_motion();
       pattern_ = p;
-      if (planner::is_long_trot(*p)) long_trot_start();
       break;  // a trick first, then the walk (act)
     }
     case Kind::Turn: {
@@ -355,12 +341,11 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
           act();
           return;
         }
-        // walking forward or backward: steer a level that way, without stopping (the long trot: one)
-        int most = planner::is_long_trot(*pattern_) ? kLongTrotSteerSteps : kSteerSteps;
+        // walking forward or backward: steer a level that way, without stopping (the trot at +4, +5: one)
+        int most = steer_most();
         int sv = h == Heading::Left ? (steer_ < most ? steer_ + 1 : steer_) : (steer_ > -most ? steer_ - 1 : steer_);
         if (sv == steer_) {
-          walk_done(most < kSteerSteps ? ": already the tightest (the long trot steers one level)"
-                                       : ": already the tightest");
+          walk_done(most < kSteerSteps ? ": already the tightest at this speed (B5 for more)" : ": already the tightest");
           return;
         }
         steer_ = sv;
@@ -369,7 +354,6 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
       }
       reset_motion();
       heading_ = h;
-      if (planner::is_long_trot(*pattern_)) pattern_ = planner::find_pattern("trot");  // turns in place in the trot
       break;
     }
     case Kind::Speed: {
@@ -393,27 +377,25 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
         walk_done("", "turn ended: ");
         return;
       }
-      if (planner::is_long_trot(*pattern_)) {
-        long_trot_speed(up);
-        return;
-      }
       int l = level_;
+      int back_most = planner::is_trot(*pattern_) ? kTrotBackSteps : kSpeedSteps;  // the trot backward: its 8-tick swing
       if (up) {
         l = l == -1 ? 1 : l < kSpeedSteps ? l + 1 : l;
       } else {
-        l = l == 1 ? -1 : l > -kSpeedSteps ? l - 1 : l;
+        l = l == 1 ? -1 : l > -back_most ? l - 1 : l;
       }
       const char* end = l == level_ ? (up ? ": already the fastest" : ": already the fastest back") : "";
       level_ = l;
+      const char* eased = limit_steer() ? ", the steer eased to 1 (the trot's long swing)" : "";
       const char* why = nullptr;
       if (end[0] == '\0') why = walker_.start(walk_goal());
-      char factor[16], v[16], st[24], what[128];
+      char factor[16], v[16], st[24], what[160];
       behaviour::format_g(factor, sizeof factor, speed_factors(*pattern_)[iabs(level_) - 1]);
-      planner::Timing t = planner::timing(*pattern_, (planner::real)speed_mm_s());
+      planner::Timing t = planner::timing(*pattern_, (planner::real)speed_mm_s(), dir());
       format_speed(v, sizeof v, (double)t.speed_mm_s);
       steer_text(st, sizeof st);
-      format(what, sizeof what, "speed %s%sx (%s %s mm/s %s%s)%s%s%s", level_ < 0 ? "-" : "", factor, pattern_->name,
-             v, planner::direction_name(dir()), st, end, why != nullptr ? ": walk failed: " : "",
+      format(what, sizeof what, "speed %s%sx (%s %s mm/s %s%s)%s%s%s%s", level_ < 0 ? "-" : "", factor, pattern_->name,
+             v, planner::direction_name(dir()), st, end, eased, why != nullptr ? ": walk failed: " : "",
              why != nullptr ? why : "");
       done(what, why != nullptr);
       return;
@@ -479,6 +461,18 @@ void RemoteControl::step() {
       if (now < deadline_) return;
       act();
       return;
+    case Phase::MeasureStand: {  // the second C5: standing, then the self-measurement once he is still
+      if (now < measure_from_ + kMeasureSettleUs) return;
+      const char* why = measure_ != nullptr ? measure_->start() : "no self-measurement";
+      char what[112];
+      if (why == nullptr) {
+        done("standing, measuring (about 80 s; any key stops it)", false);
+      } else if (now >= deadline_) {
+        format(what, sizeof what, "standing, measure refused: %s", why);
+        done(what, true);
+      }
+      return;
+    }
   }
 }
 
@@ -540,13 +534,13 @@ void RemoteControl::start_trick() {
   step_reached_ = 0;
   if (stages > 0 && notes_ != nullptr) notes_->trick_stage(step_play_, step_allowed_, step_reached_, step_max_);
   if (stages > 1) {
-    format(what, sizeof what, "trick %s started: up to stage 1 (A2 while he holds it: on, up to %d; B6 or C7 bring "
+    format(what, sizeof what, "trick %s started: up to stage 1 (A1 while he holds it: on, up to %d; B6 or C7 bring "
            "him down)", key_->name, stages);
     char line[64];
     format(line, sizeof line, "rear_up: up to stage 1 (of %d)", stages);
     step_note(line);
   } else {
-    format(what, sizeof what, "trick %s started (%u s; A2 again, B6 or C7 bring it down)", key_->name,
+    format(what, sizeof what, "trick %s started (%u s; A1 again, B6 or C7 bring it down)", key_->name,
            (unsigned)((ticks * KILO_TICK_MS + 500u) / 1000u));
   }
   done(what, false);
@@ -580,7 +574,7 @@ int RemoteControl::step_at(uint64_t* hold_end_us) const {
   return 0;
 }
 
-// Every pass: a lower stage's hold about to end without A2: down (TRICK_STOP); a stage's top reached
+// Every pass: a lower stage's hold about to end without A1: down (TRICK_STOP); a stage's top reached
 // or the play over: a line and a mark.
 void RemoteControl::step_gate() {
   if (step_trick_ == nullptr) return;
@@ -606,16 +600,25 @@ void RemoteControl::step_gate() {
     }
     char what[64];
     format(what, sizeof what, "rear_up: stage %d (of %d)%s", k, step_max_,
-           k < step_max_ && step_allowed_ == k ? ": A2 to go on" : "");
+           k < step_max_ && step_allowed_ == k ? ": A1 to go on" : "");
     step_note(what);
   }
   if (k < step_max_ && step_allowed_ == k && clock_.now_us() + kStepLeadUs >= end) {
     char what[72];
-    format(what, sizeof what, "rear_up: held stage %d without A2: coming down", k);
+    format(what, sizeof what, "rear_up: held stage %d without A1: coming down", k);
     step_note(what);
     step_trick_ = nullptr;  // (stop_trick's own note would repeat it)
     player_.stop();  // over the trick's stop_ticks, to SIT
   }
+}
+
+bool RemoteControl::take_posture(const char* name) {
+  if (posture_hook_ != nullptr) {
+    char who[24];
+    format(who, sizeof who, "remote %s", key_->grid);
+    return posture_hook_->posture(name, who);
+  }
+  return client_posture(link_, &walker_, name);
 }
 
 void RemoteControl::act() {
@@ -624,15 +627,22 @@ void RemoteControl::act() {
   const char* why = nullptr;
   switch (key_->kind) {
     case Kind::Posture: {
-      bool ok;
-      if (posture_hook_ != nullptr) {
-        char who[24];
-        format(who, sizeof who, "remote %s", key_->grid);
-        ok = posture_hook_->posture(key_->name, who);
-      } else {
-        ok = client_posture(link_, &walker_, key_->name);
+      if (measure_next_) {  // the second C5: stand (the routine starts from STAND), then measure (step())
+        measure_next_ = false;
+        if (!take_posture("stand")) {
+          done("measure failed: the link refused SET_POSTURE stand", true);
+          return;
+        }
+        phase_ = Phase::MeasureStand;
+        measure_from_ = clock_.now_us();
+        deadline_ = measure_from_ + kMeasureWaitUs;
+        logf(log_, LogLevel::Info, "remote %s: standing, then the self-measurement", text_);
+        return;
       }
-      format(what, sizeof what, "posture %s%s", key_->name, ok ? "" : " failed: the link refused SET_POSTURE");
+      bool ok = take_posture(key_->name);
+      calib_held_ = ok && calib_key(*key_);
+      format(what, sizeof what, "posture %s%s%s", key_->name, ok ? "" : " failed: the link refused SET_POSTURE",
+             calib_held_ ? " (C5 again: measure himself)" : "");
       done(what, !ok);
       return;
     }
@@ -648,13 +658,6 @@ void RemoteControl::act() {
       done(what, !ok);
       return;
     }
-    case Kind::Measure: {
-      why = measure_ != nullptr ? measure_->start() : "no self-measurement";
-      if (why == nullptr) format(what, sizeof what, "measuring (about 80 s; any key stops it)");
-      else format(what, sizeof what, "measure refused: %s", why);
-      done(what, why != nullptr);
-      return;
-    }
     case Kind::Righting: {
       why = righting_ != nullptr ? righting_->start() : "no righting";
       if (why == nullptr) format(what, sizeof what, "righting (the experiment; any key but B1 stops it)");
@@ -664,6 +667,7 @@ void RemoteControl::act() {
     }
     case Kind::Gait:
     case Kind::Turn: {
+      limit_steer();
       why = walker_.start(walk_goal());
       if (why != nullptr) {
         reset_motion();

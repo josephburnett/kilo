@@ -229,9 +229,9 @@ boolean CKernel::Initialize (void)
 	m_Watch.m_pLog = m_pLog;
 	m_pMind->set_tap (&m_Watch);
 
-	static const char *const RearUp[] = {"", " (rear-up key A2 on: rear_up, stage 1)",
-					     " (rear-up key A2 on: rear_up_2, stage 2)",
-					     " (rear-up key A2 on: rear_up_3, stage 3)"};
+	static const char *const RearUp[] = {"", " (rear-up key A1 on: rear_up, stage 1)",
+					     " (rear-up key A1 on: rear_up_2, stage 2)",
+					     " (rear-up key A1 on: rear_up_3, stage 3)"};
 	logf (*m_pLog, LogLevel::Info, "Kilo mind, build %08x%s%s%s (%s)", (unsigned) KILO_BUILD,
 	      KILO_BEHAVIOUR ? " (behaviour runner on)" : "", RearUp[KILO_REAR_UP],
 	      KILO_INTENT ? " (intents on: stand, sit and rest are moves from the model)" : "",

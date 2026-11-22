@@ -43,7 +43,7 @@ using namespace kilo::guard;
 namespace {
 
 // keys (remote/keys.h)
-constexpr uint16_t A1 = 0x42, A4 = 0x68, B4 = 0x98, C4 = 0xB0, B7 = 0x62, B5 = 0xA8, A6 = 0x22, C6 = 0xC2, B6 = 0x02, A5 = 0xE0, C7 = 0xE2;
+constexpr uint16_t A4 = 0x68, B4 = 0x98, C4 = 0xB0, B7 = 0x62, B5 = 0xA8, A6 = 0x22, C6 = 0xC2, B6 = 0x02, A5 = 0xE0, C7 = 0xE2;
 constexpr int kLagTicks = 6;  // the servos: 50 ms dead time + 70 ms (model.h), about 6 ticks
 
 struct Lcg {
@@ -117,8 +117,8 @@ void test_zones() {
   CHECK(still(Zone::Red, 120) == Zone::Red && still(Zone::Red, 121) == Zone::Blue);
   CHECK(still(Zone::Green, 60) == Zone::Red);
   // the thresholds: never below kBlueMinMm; faster is further
-  CHECK(blue_mm("trot", 0) == kBlueMinMm && blue_mm("trot", 230.4) > blue_mm("trot", 187.2));
-  CHECK(blue_mm("walk", 97) <= blue_mm("trot", 230.4) && blue_mm("crawl", 27) == kBlueMinMm);
+  CHECK(blue_mm("trot", 0) == kBlueMinMm && blue_mm("trot", 201.6) > blue_mm("trot", 180.0));
+  CHECK(blue_mm("walk", 97) <= blue_mm("trot", 201.6) && blue_mm("crawl", 27) == kBlueMinMm);
   std::printf("guard: BLUE at walk 97 mm/s %.0f, trot 144 %.0f, trot 180 %.0f, trot 200 %.0f, crawl 27 %.0f mm\n",
               blue_mm("walk", 97), blue_mm("trot", 144), blue_mm("trot", 180), blue_mm("trot", 200),
               blue_mm("crawl", 27));
@@ -130,10 +130,11 @@ void test_zones() {
 void test_stop_way_against_the_planner() {
   for (const char* g : {"walk", "trot", "crawl"}) {
     const planner::Pattern* pat = planner::find_pattern(g);
-    for (double f : {0.4, 1.0, 1.25, 1.3, 1.6}) {  // the trot's remote levels +1, +3, +4 and +5: 1.3, 1.6
+    for (double f : {0.4, 1.0, 1.25, 1.4}) {  // the remote's levels +1, +3, +4 and +5 (the trot's +5: 1.4)
       if (f > 1.25 && !str_eq(g, "trot")) continue;  // the walk and the crawl top at 1.25 (their +5)
       for (double steer : {0.0, 0.25, 1.0}) {  // straight, and steered (A6 level 1 and 3) at the top speeds
         if (steer != 0 && f < 1.25) continue;
+        if (steer > 0.25 && str_eq(g, "trot")) continue;  // the trot's long swing (+4, +5) steers one level
         double v = 0, worst = 0, planned = 0, ticks = 0;
         int period = (int)(planner::timing(*pat, (planner::real)(planner::default_speed(*pat) * f)).period_ms / 20);
         for (int quick = 0; quick < 2; quick++)
@@ -170,44 +171,6 @@ void test_stop_way_against_the_planner() {
       }
     }
   }
-}
-
-// The long trot's quick stop (A1's three stages, straight and at its one steer level) against the
-// guard's way for it (the trot's): from every second tick of a cycle.
-void test_long_trot_stop_way_against_the_planner() {
-  for (double v : {160.0, 180.0, 200.0})
-    for (double steer : {0.0, 0.25}) {
-      double worst = 0, ticks = 0, sv = 0;
-      int period = (int)(planner::pattern_timing(planner::kLongTrot, (planner::real)v).period_ms / 20);
-      for (int at = 0; at < period; at += 2) {
-        planner::Planner p;
-        p.start(planner::kLongTrot, planner::Direction::Forward, (planner::real)v, 0, -1, (planner::real)steer);
-        planner::TickPlan prev = p.next();
-        for (int t = 0; t < 250 + at; t++) prev = p.next();
-        sv = (double)p.timing().speed_mm_s;
-        p.halt();
-        double moved = 0;
-        int t = 0;
-        for (; t < 1000 && !p.done(); t++) {
-          planner::TickPlan cur = p.next();
-          double sum = 0;
-          int n = 0;
-          for (int i = 0; i < planner::kLegs; i++)
-            if ((prev.support & cur.support) & (1 << i)) {
-              sum += prev.x[i] - cur.x[i];
-              n++;
-            }
-          if (n) moved += sum / n;
-          prev = cur;
-        }
-        if (moved > worst) worst = moved, ticks = t;
-      }
-      CHECKF(stop_way_mm("longtrot", sv) >= worst, "longtrot %.0f steer %.2f: planner %.1f mm, guard %.1f mm", sv,
-             steer, worst, stop_way_mm("longtrot", sv));
-      std::printf("guard: longtrot %5.1f mm/s steer %.2f: the quick stop %4.1f mm, done in %3.0f ticks (guard allows "
-                  "%4.1f), BLUE below %3.0f mm\n", sv, steer, worst, ticks, stop_way_mm("longtrot", sv),
-                  blue_mm("longtrot", sv));
-    }
 }
 
 // ---- the Mind walking at a wall ----------------------------------------------------------
@@ -320,7 +283,7 @@ Approach approach(uint16_t gait_key, double wall_mm, const Run& run = Run()) {
   r.outliers = run.outliers;
   r.dropouts = run.dropouts;
   r.key(gait_key);
-  for (int l = 3; l < run.level; l++) r.key(B7);  // the long trot: from its stage 1 (+1), each a stage
+  for (int l = 3; l < run.level; l++) r.key(B7);
   for (int i = 0; i < (run.steer < 0 ? -run.steer : run.steer); i++) r.key(run.steer > 0 ? A6 : C6);
   Approach a = {};
   for (int i = 0; i < 90000 / 4 && !a.held; i++) {
@@ -340,8 +303,8 @@ Approach approach(uint16_t gait_key, double wall_mm, const Run& run = Run()) {
 }
 
 void test_approach_each_gait_at_top_speed() {
-  // level +4 and +5 (the trot 187.2 and 230.4 mm/s), straight and steered (A6 / C6 while walking:
-  // still a forward walk for the guard)
+  // level +4 and +5 (the trot 180 and 201.6 mm/s: its long swing), straight and steered (A6 / C6
+  // while walking: still a forward walk for the guard; the trot at +4, +5 one level)
   struct G {
     const char* name;
     uint16_t key;
@@ -349,9 +312,7 @@ void test_approach_each_gait_at_top_speed() {
     int level, steer;
   } gaits[] = {{"walk", C4, 700, 5, 0},  {"trot", A4, 900, 4, 0},  {"trot", A4, 1000, 5, 0},
                {"crawl", B4, 420, 5, 0}, {"walk", C4, 700, 5, 3},  {"trot", A4, 900, 4, 1},
-               {"trot", A4, 1000, 5, 1}, {"trot", A4, 1000, 5, -2}, {"trot", A4, 1000, 5, 3},
-               // the long trot (A1 starts at its stage 1, each B7 a stage more: level 4 is stage 2, 5 stage 3)
-               {"longtrot", A1, 900, 4, 0}, {"longtrot", A1, 1000, 5, 0}, {"longtrot", A1, 1000, 5, 1}};
+               {"trot", A4, 1000, 5, 1}, {"trot", A4, 1000, 5, -1}};
   for (const G& g : gaits) {
     for (int noisy = 0; noisy < 2; noisy++) {
       Run run;
@@ -377,10 +338,10 @@ void test_approach_each_gait_at_top_speed() {
   }
 }
 
-void test_red_backs_off_then_sits() {
+void test_red_backs_off_then_sits() {  // the walk: the one gait that backs off (the trot and the crawl only stop)
   WallRig r(WallRig::remote_cfg());
   r.wall_mm = 5000;
-  r.key(A4);
+  r.key(C4);
   r.run_ms(3000);
   CHECK(r.mind.walker().active());
   r.wall_mm = r.body_pos() + 130;  // a box put down right in front of him
@@ -395,7 +356,7 @@ void test_red_backs_off_then_sits() {
   CHECK((r.posture_goal() == KILO_POSTURE_SIT || r.mind.alive().sitting()) && r.mind.sitting_variant());
   CHECKF(r.back_travel > 5 && r.back_travel < 120, "backed %.0f mm", r.back_travel);
   CHECK(r.log.has("guard action=backing") && r.log.has("guard zone=red"));
-  std::printf("guard: RED at trot: backed off %.0f mm, then sat (final gap %.0f mm)\n", r.back_travel,
+  std::printf("guard: RED at walk: backed off %.0f mm, then sat (final gap %.0f mm)\n", r.back_travel,
               r.wall_mm - r.travel);
   // the runner the guard started is the random mode too: A5 plays one of its tricks
   uint32_t played = r.mind.alive().tricks_played();
@@ -638,8 +599,7 @@ void test_hand_in_face_walking_every_gait() {
     const char* name;
     uint16_t key;
     int steer;
-  } gaits[] = {{"trot", A4, 0}, {"walk", C4, 0}, {"crawl", B4, 0}, {"trot", A4, 2}, {"walk", C4, -1},
-               {"longtrot", A1, 0}, {"longtrot", A1, 1}};
+  } gaits[] = {{"trot", A4, 0}, {"walk", C4, 0}, {"crawl", B4, 0}, {"trot", A4, 2}, {"walk", C4, -1}};
   for (const G& g : gaits) {
     for (int red = 0; red < 2; red++) {
       WallRig r(WallRig::remote_cfg());
@@ -651,8 +611,8 @@ void test_hand_in_face_walking_every_gait() {
       r.fixed_mm = red ? 100 : 180;  // a hand put in front of his face, held there as he comes
       uint32_t hisses = r.mind.guard().hisses();
       double t_act = run_until(r, 3000, [&] { return r.mind.guard().action() != Action::Watch; });
-      // the crawl and the long trot, very close: they stop (reversing takes 4 s, 1.5 s)
-      bool slow = std::strcmp(g.name, "crawl") == 0 || std::strcmp(g.name, "longtrot") == 0;
+      // the crawl and the trot, very close: they stop (reversing takes 4 s, 0.7 to 1.5 s)
+      bool slow = std::strcmp(g.name, "crawl") == 0 || std::strcmp(g.name, "trot") == 0;
       bool backs = red && !slow;
       double t_halt = run_until(r, 3000, [&] { return r.mind.walker().planner().halting() || backs; });
       CHECKF(t_act >= 0 && t_act < 0.45, "%s steer %d %s: reacted after %.2f s", g.name, g.steer, red ? "RED" : "BLUE",
@@ -1240,7 +1200,6 @@ int main() {
   test_filter();
   test_zones();
   test_stop_way_against_the_planner();
-  test_long_trot_stop_way_against_the_planner();
   test_approach_each_gait_at_top_speed();
   test_red_backs_off_then_sits();
   test_hold_refuses_forward_allows_turning_and_releases();

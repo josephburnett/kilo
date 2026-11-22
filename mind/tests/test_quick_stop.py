@@ -20,8 +20,11 @@ def top(pattern: str) -> float:
     return pat.timing(pattern, stopsim.level_speed(pattern, 5)).speed_mm_s
 
 
-@pytest.mark.parametrize("pattern,limit_s", [("trot", 0.6), ("walk", 0.45), ("crawl", 3.3)])
-def test_quick_stop_at_top_speed(pattern, limit_s):
+# the walk (since 2026-11-22: one leg at a time, a 240 ms beat): still within 1.3 s, its legs square up
+# in its own beat and the body settles a few mm with each (the old walk's was 0.45 s); its roll
+# 4.5 deg beyond the walk's own (the square-up's steps on three feet)
+@pytest.mark.parametrize("pattern,limit_s,att_deg", [("trot", 0.6, 3.0), ("walk", 1.3, 4.5), ("crawl", 3.3, 3.0)])
+def test_quick_stop_at_top_speed(pattern, limit_s, att_deg):
     v = top(pattern)
     period = int(round(pat.timing(pattern, v).period_ms / 20))
     for at in range(0, period, max(1, period // 6)):
@@ -29,7 +32,7 @@ def test_quick_stop_at_top_speed(pattern, limit_s):
         p = stopsim.one(pattern, v, "forward", "planned", at)
         assert q["ended"] == "stopped" and not q["fell"], (at, q)
         assert q["stopped_s"] <= limit_s and q["way_mm"] <= p["way_mm"] + 1, (at, q, p)
-        assert q["dpitch"] <= 3.0 and q["droll"] <= 3.0, (at, q)  # beyond the walk's own sway, the model's
+        assert q["dpitch"] <= att_deg and q["droll"] <= att_deg, (at, q)  # beyond the walk's own sway, the model's
 
 
 def test_the_feet_stop_sliding_in_halt_ticks_and_no_foot_lifts_in_the_hold():
@@ -60,7 +63,7 @@ def test_the_feet_stop_sliding_in_halt_ticks_and_no_foot_lifts_in_the_hold():
 
 
 def test_halt_during_the_planned_stop_and_twice():
-    p = Planner(BodyModel(), "trot", "forward", 187.2)
+    p = Planner(BodyModel(), "trot", "forward", 180.0)
     for _ in range(80):
         p.next()
     p.stop()

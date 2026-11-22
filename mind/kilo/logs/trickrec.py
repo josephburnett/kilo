@@ -8,7 +8,7 @@ OUT.png]`` prints it again (``kilo log run FILE`` picks walk or trick).
 What the mind records for a trick (protocol/spec.toml [host] "The flight
 recorder"): RUN begin/end around it, the MARK lines ``trick`` (which trick,
 its id and CRC, the stage for rear_up, the battery and the body's mode at
-the start, who started it), ``stage`` (the rear-up from the remote: A2
+the start, who started it), ``stage`` (the rear-up from the remote: A1
 allowed a higher stage, or a stage's top was reached), ``frames`` (each keyframe's move and hold in
 ticks of 20 ms at 1x), ``play`` (the moment the body acknowledged
 TRICK_PLAY: keyframe 0 starts there), ``key`` (each remote key that came

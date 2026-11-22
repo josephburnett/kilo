@@ -431,7 +431,7 @@ void test_chatter() {
 
 // ---- the Mind's hooks -------------------------------------------------------------------------
 
-constexpr uint8_t kA7 = 0xA2, kB6 = 0x02, kA4 = 0x68, kB2 = 0x38, kA5 = 0xE0;
+constexpr uint8_t kA7 = 0xA2, kB6 = 0x02, kA4 = 0x68, kB2 = 0x38, kA5 = 0xE0, kC4 = 0xB0;
 
 struct Rig {
   FakeBody body;
@@ -547,7 +547,7 @@ void test_mind_guard_hiss() {
   MindConfig c = Rig::remote_cfg();
   Rig r(c);
   r.run_ms(1500);
-  r.key(kA4);  // trot forward
+  r.key(kC4);  // walk forward (the walk backs off from RED; the trot and the crawl only stop)
   r.run_ms(1500);
   CHECK(r.mind.walker().active());
   r.body.dist_mm = 120;  // very close: RED

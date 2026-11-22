@@ -97,7 +97,7 @@ been told to hold.
 - **The band is wide (11.9 degrees)** because the model is still off by up
   to 8 degrees for a posture: the model has him resting crooked (its left
   front knee stops short of its angle) where Kilo lies nearly level, and it
-  has no IMU offset yet. Once a self-measurement (B1) has been put into the
+  has no IMU offset yet. Once a self-measurement (C5 twice) has been put into the
   model (`kilo model apply`), the band can come down
   (`MODEL_ERROR_DEG` in `mind/kilo/intent/estimate.py`).
 
@@ -130,7 +130,7 @@ The log's first lines then say `intents ON`. Without it (the default):
 | **A7** (rest, then sleep) | the body turns every joint straight to REST | "be RESTING"; the servos still go off a few seconds after he lies still |
 | the behaviour runner (A5) asking for stand, sit or rest | the body's own change | the same intents |
 | the distance guard sitting him down | the body's own change to SIT | "be SITTING" |
-| **C5** (calibration posture), walking keys, the rear-up (A2), B1 | unchanged | unchanged; they drop an intent that is still on its way |
+| **C5** (calibration posture; twice: the self-measurement), walking keys, the rear-up (A1) | unchanged | unchanged; they drop an intent that is still on its way |
 
 There is no sit key on the remote; sitting comes from the behaviour runner
 and the guard.
@@ -158,7 +158,7 @@ and the guard.
 "Be RESTING" and "be SITTING" work the same way. From REST to SIT and back
 he goes through standing (two moves): no direct move passed the check.
 
-Any key stops a walk as before. A walking key, the rear-up or B1 while a
+Any key stops a walk as before. A walking key, the rear-up or the self-measurement while a
 move is playing stops the move and drops the intent.
 
 ## What is planned from the model today, and what is not

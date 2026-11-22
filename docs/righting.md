@@ -9,6 +9,8 @@ simulator still cannot reproduce the getting-ups recorded on Kilo (see
 soft floor, with you watching.
 
 Without the experiment Kilo gets up as before: the body's own fixed move.
+You reported on 2026-11-22 that this built-in getting-up "didn't work 100%
+of the time" (your words; no count was given).
 
 ## Words used here
 
