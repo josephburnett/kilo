@@ -5,22 +5,25 @@
 namespace kilo {
 namespace planner {
 
-// The walk lifts LB then RF 60 ms later, then RB and LF (diagonal couplets);
-// the trot the diagonal pairs LF+RB, RF+LB; the crawl LB, LF, RB, RF one at
-// a time with the lean. Values (and why) as in patterns.py's PATTERNS (the
-// trot's 44 mm stride and its lift tapering from 8 mm at 35 mm to 6 at 44,
-// the strides' 1.5 mm a tick in the walk and the trot: since 2026-11-17).
+// The walk lifts LB, LF, RB, RF one at a time (the lateral sequence, evenly
+// spaced, the strides centred under the centre of mass); the trot the diagonal pairs LF+RB, RF+LB; the crawl LB, LF, RB, RF
+// one at a time with the lean. Values (and why) as in patterns.py's PATTERNS
+// (the trot's 44 mm stride and its lift tapering from 8 mm at 35 mm to 6 at
+// 44, its strides' 1.5 mm a tick: since 2026-11-17; the walk: since 2026-11-22).
 const Pattern kPatternTable[kPatterns] = {
-    {"walk", 2, 2, {{LB, RF}, {RB, LF}, {0, 0}, {0, 0}}, 150, 30, 8, 205, 460, 20, 310, false, 60, 80, -1, 0, 1.5},
-    {"trot", 2, 2, {{LF, RB}, {RF, LB}, {0, 0}, {0, 0}}, 150, 44, 8, 205, 340, 20, 190, false, 0, 144, 6, 35, 1.5},
-    {"crawl", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 300, 50, 15, 179, 2550, 0, 4000, true, 0, -1, -1, 0, 0.5},
+    {"walk", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 220, 54, 8, 205, 960, 20, 740, false, 0, 58, 6, 40, 1.0,
+     true},
+    {"trot", 2, 2, {{LF, RB}, {RF, LB}, {0, 0}, {0, 0}}, 150, 44, 8, 205, 340, 20, 190, false, 0, 144, 6, 35, 1.5,
+     false},
+    {"crawl", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 300, 50, 15, 179, 2550, 0, 4000, true, 0, -1, -1, 0, 0.5,
+     false},
 };
 
 // longtrot.py LONG_TROT: the trot's pairs, an 8 mm lift at every stride (no taper: its swing is
 // longer), the strides 0.75 mm a tick (the build-up), 144 mm/s by default (the planner's timing
 // for it is longtrot.h's long_timing(); swing_ms, stride_mm and period_ms are its table entry's).
 const Pattern kLongTrot = {"longtrot", 2, 2, {{LF, RB}, {RF, LB}, {0, 0}, {0, 0}}, 160, 52, 8, 205, 360, 20, 250,
-                           false, 0, 144, -1, 0, 0.75};
+                           false, 0, 144, -1, 0, 0.75, false};
 
 const Pattern& default_pattern() { return kPatternTable[1]; }
 

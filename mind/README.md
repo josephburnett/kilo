@@ -165,28 +165,30 @@ settled from, or a reboot.
 a slot: first a *shift* (all four feet down while the body moves over the
 feet that will stay down), then the *swing* (the leg or pair in the air).
 So one cycle is `slots x (shift + swing)` and each foot is on the ground
-for the cycle less its swing. In the walk the pair's second leg lifts
-60 ms after the first, which makes each slot 60 ms longer. The code is
-`kilo/planner/patterns.py`:
+for the cycle less its swing. The code is `kilo/planner/patterns.py`:
 
 | pattern | lifts (in order) | swing | stride | step height | body height | cycle at the default speed | default speed | speed range |
 |---|---|---|---|---|---|---|---|---|
 | trot | LF+RB, RF+LB (diagonal pairs) | 150 ms | up to 44 mm (27.4 by default; 35 until 2026-11-17) | 8 mm, tapering to 6 mm from a 35 mm to a 44 mm stride | 205/256 of (L1 + L2) = 76 mm | 340 ms at every speed (shift 20) | 144 mm/s | 42..232 mm/s (184 until 2026-11-17) |
-| walk | LB then RF 60 ms later, RB then LF (diagonal couplets) | 150 ms | up to 30 mm (24.8 by default) | 8 mm | 205/256 = 76 mm | 460 ms at every speed (shift 20) | 80 mm/s | 26..97 mm/s |
+| walk | LB, LF, RB, RF (one leg at a time, the footfalls evenly spaced; backward LB, RF, RB, LF), the strides centred under the centre of mass | 220 ms | up to 54 mm (42.9 by default) | 8 mm | 205/256 = 76 mm | 960 ms at every speed (shift 20) | 58 mm/s | 11..73 mm/s |
 | crawl | LB, LF, RB, RF (one leg at a time, with the lean) | 300 ms | 50 mm | 15 mm | 179/256 = 66 mm | 2550 ms (shift 338) | 22.2 mm/s | 2..26.9 mm/s |
 
 (Legs: LF left front, RF right front, RB right back, LB left back. L1 + L2
 = 45 + 50 mm, Kilo's measured legs; heights are from the shoulder axle to
 the centre of the foot disc, the floor is 6 mm lower.)
 
-Since 2026-11-16 (docs/walking-and-balance.md §12) the walk is a diagonal
-pair at a time like the trot, but the hind leg lifts 60 ms before its
-diagonal fore leg, so the feet land in four beats and the body stands on
-three feet, then two, then three in each swing. It does not lean first: it
-is the gait for 30 to 100 mm/s. The crawl is the careful gait, statically
+Since 2026-11-22 (docs/walking-and-balance.md §16) the walk is the cat's
+lateral-sequence walk: one leg at a time, a foot down every 240 ms, always
+three feet on the ground (four for one tick between swings), never two, and
+each foot lands half a stride plus the model's centre of mass (7.4 mm) ahead
+of its shoulder, so the feet stay centred under the body's weight: by the
+model the centre of mass never leaves the three feet. It does not lean
+first: it is the gait for 10 to 73 mm/s. (It replaced a walk with diagonal
+couplets, 2026-11-16 to 11-22, that stood on two feet a third of the time:
+the stutter of §16.1.) The crawl is the careful gait, statically
 stable, one leg at a time with the lean (below). What limits each top
 speed, as far as the virtual body can show: the walk and the trot, the
-servos (the fastest joint at 365 and 476°/s at their tops, under the body's
+servos (the fastest joint at 448 and 476°/s at their tops, under the body's
 500°/s slew; the floor runs of 2026-11-15 asked 414 and kept up; the trot's
 476 since 2026-11-17 has not run on the floor, docs/walking-and-balance.md
 §13); the crawl, the body's move over the next three feet before each lift
@@ -204,12 +206,13 @@ stride / speed, the shift takes up the rest of the slot); slower than its
 longest ground time (4000 ms) the stride shrinks, down to 8 mm; faster than
 its stride at the shortest shift allows (240 ms), the speed is capped. The
 speed can change at any tick while walking (the stride moves at most 1.5 mm
-per tick toward the new one in the walk and the trot, 0.5 mm in the crawl,
+per tick toward the new one in the trot, 1 mm in the walk, 0.5 mm in the crawl,
 and the crawl's ground time at most 2 % per tick, so nothing jumps); a
-direction change and a steer do the same. A change between the walk and
-the trot takes over at the next slot once the strides fit the new gait
-(under a second); a change into or out of the crawl goes through the legs'
-way home: the strides go to 0 and each leg steps under its shoulder as for
+direction change and a steer do the same. A change between the trot and
+the long trot takes over at the next slot once the strides fit the new gait
+(under a second); a change into or out of the walk or the crawl goes
+through the legs' way home (the walk's four one-leg slots and the trot's
+pairs do not hand over directly, since 2026-11-22): the strides go to 0 and each leg steps under its shoulder as for
 a stop, then the new pattern starts from its first lift. A turn in place
 moves each side 0.8 of the stride. **Steering** (since 2026-11-17; the
 remote's A6 / C6 while walking): a forward or backward walk bends with S

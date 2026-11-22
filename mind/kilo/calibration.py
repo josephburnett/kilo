@@ -255,7 +255,7 @@ ASKED: dict[str, dict[int, Asked]] = {
         11: Asked(-79.1, -2.8, 'crawl -2', 'longtrot stage 3 steer -0.25'),
         12: Asked(-14.9, 53.1, 'crawl -2', 'crawl -5'),
         13: Asked(-15.0, 51.1, 'crawl turn 2', 'crawl -1 steer 0.5'),
-        14: Asked(-33.4, 22.4, 'longtrot stage 3 steer 0.25', 'crawl +1 steer 0.25'),
+        14: Asked(-38.0, 22.4, 'walk -2 steer 1', 'crawl +1 steer 0.25'),
         15: Asked(-35.6, 20.8, 'longtrot stage 3 steer -0.25', 'crawl +4'),
     },
     'tricks': {

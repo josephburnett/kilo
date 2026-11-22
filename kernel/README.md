@@ -819,8 +819,9 @@ floor only, never on a desk.**
 
 **Gait keys** (A4, B4, C4). Standing: walk forward in that gait at level
 +3. Walking in another gait: change to it and keep the speed level, the
-direction and the steer (between the walk and the trot at the next step;
-into or out of the crawl once every leg has stepped home, up to about 5 s).
+direction and the steer (into or out of the walk or the crawl once every
+leg has stepped home: about 0.4 to 0.9 s from the trot into the walk, 1.5
+to 2 s from the walk into the trot, up to about 5 s out of the crawl).
 The gait already in use: walk straight forward again at the same speed
 (from a turn, a steer or from backward); already straight forward, nothing
 changes.
@@ -856,7 +857,8 @@ times the trot's default speed (the walk's and the crawl's: 0.4, 0.7, 1,
 level 0: from +1, B5 goes to -1, and from -1, B7 goes to +1. B7 stops at +5
 and B5 at -5. The planner limits each gait's speed (mind/planner/),
 and the log line shows the real speed. In mm/s, levels 1 to 5: crawl 8.9,
-15.6, 22.2, 25.6, 26.9; walk 32, 56, 80, 92, 97; trot 57.6, 100.8, 144,
+15.6, 22.2, 25.6, 26.9; walk 23.2, 40.6, 58, 66.7, 72.5 (since 2026-11-22;
+the walk of docs/walking-and-balance.md §16); trot 57.6, 100.8, 144,
 187.2, 230.4.
 
 **Steering.** While walking forward or backward, each press of A6 or C6

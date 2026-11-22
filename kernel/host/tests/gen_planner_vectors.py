@@ -146,6 +146,9 @@ def scenarios() -> None:
     scenario("trot", "trot", script=[("run", 60), ("speed", 90.0), ("run", 45), ("speed", 10.0), ("run", 60),
                                      ("stop",), ("until_done", 400)])
     scenario("walk", "walk", script=[("run", 200), ("stop",), ("until_done", 700)])
+    # the walk (since 2026-11-22): forward, backward, forward again at its top, the stop
+    scenario("walk_fwd_back", "walk", script=[("run", 150), ("dir", "back"), ("run", 150), ("dir", "forward"),
+                                              ("speed", 73.0), ("run", 120), ("stop",), ("until_done", 700)])
     scenario("crawl", "crawl", script=[("run", 250), ("speed", 4.0), ("run", 50)])
     # directions: back, the turns, march; from a tick near the u16 wrap
     scenario("trot_turns", "trot", "back", tick=65500, script=[("run", 40), ("dir", "left"), ("run", 50),
@@ -161,13 +164,13 @@ def scenarios() -> None:
     scenario("trot_to_walk", "trot", "left", script=[("run", 50), ("pattern", "walk"), ("run", 200)])
     scenario("walk_to_trot", "walk", script=[("run", 20), ("pattern", "crawl"), ("run", 10), ("pattern", "trot"),
                                              ("run", 80)])
-    scenario("walk_to_crawl", "walk", speed=97.0, script=[("run", 37), ("pattern", "crawl"), ("run", 260)])
+    scenario("walk_to_crawl", "walk", speed=73.0, script=[("run", 37), ("pattern", "crawl"), ("run", 260)])
     scenario("crawl_to_walk", "crawl", script=[("run", 130), ("pattern", "walk"), ("run", 300), ("pattern", "trot"),
                                                ("run", 60)])
     # speed changes while the next slot's lean is being solved
     scenario("crawl_speeds", "crawl", script=[("run", 70), ("speed", 6.0), ("run", 70), ("speed", 11.0),
                                               ("run", 70), ("speed", 40.0), ("run", 40)])
-    scenario("walk_speeds", "walk", script=[("run", 50), ("speed", 30.0), ("run", 70), ("speed", 97.0), ("run", 70)])
+    scenario("walk_speeds", "walk", script=[("run", 50), ("speed", 30.0), ("run", 70), ("speed", 73.0), ("run", 70)])
     # the attitude error: the gate holds the lift, the catch lands the foot
     scenario("crawl_gate_catch", "crawl", script=[("observe", 0.0, 8.0), ("run", 40), ("observe", 0.0, 0.0),
                                                   ("run", 2), ("observe", -3.0, 6.0), ("run", 4),
@@ -187,12 +190,12 @@ def scenarios() -> None:
     # a turn in place, then straight on (the remote's B7 while turning)
     scenario("trot_turn_go", "trot", "right", script=[("run", 60), ("dir", "forward"), ("run", 60)])
     # the quick stop (halt: the remote's B6 and C7, the distance guard) at every gait and phase:
-    # mid-swing, in the shift, the walk's second leg not yet lifted, during the planned stop, steering,
+    # mid-swing, in the shift, the walk at several points of its slot, during the planned stop, steering,
     # turning, the crawl mid-lean, at the top speeds
     for n in (3, 7, 12, 20, 31):
         scenario(f"trot_halt_{n}", "trot", speed=230.4, script=[("run", 40 + n), ("halt",), ("until_done", 200)])
-    for n in (0, 3, 5, 9):
-        scenario(f"walk_halt_{n}", "walk", speed=97.0, script=[("run", 44 + n), ("halt",), ("until_done", 200)])
+    for n in (0, 3, 6, 9, 11):
+        scenario(f"walk_halt_{n}", "walk", speed=73.0, script=[("run", 96 + n), ("halt",), ("until_done", 200)])
     for n in (0, 9, 21, 40):
         scenario(f"crawl_halt_{n}", "crawl", speed=27.0, script=[("run", 130 + n), ("halt",), ("until_done", 600)])
     scenario("trot_stop_halt", "trot", speed=187.2, script=[("run", 60), ("stop",), ("run", 7), ("halt",),
@@ -200,7 +203,7 @@ def scenarios() -> None:
     scenario("trot_steer_halt", "trot", speed=230.4, script=[("steer", 0.5), ("run", 63), ("halt",), ("halt",),
                                                               ("until_done", 200)])
     scenario("trot_turn_halt", "trot", "left", script=[("run", 45), ("halt",), ("until_done", 200)])
-    scenario("walk_back_halt", "walk", "back", script=[("run", 50), ("halt",), ("until_done", 200)])
+    scenario("walk_back_halt", "walk", "back", script=[("run", 100), ("halt",), ("until_done", 200)])
     # the body tipping toward the legs that square up: caught, they stay where they land (the end comes)
     scenario("crawl_halt_catch", "crawl", script=[("run", 140), ("halt",), ("observe", 0.0, 9.0), ("run", 30),
                                                   ("observe", -8.0, -9.0), ("until_done", 600)])
