@@ -8,6 +8,10 @@
 //   KILO_BEHAVIOUR      the behaviour runner from boot
 //   KILO_REAR_UP        the remote's A2 rear-up key and its stage, 0 off
 //                       (docs/rear-up-trick.md, the switch)
+//   KILO_INTENT         stand, sit and rest as intents: the state estimate
+//                       and the moves planned from the body model
+//                       (mind/intent/intent.h, docs/intent.md; 0: postures
+//                       change as before, the estimate only logs)
 //   KILO_RECORD_SAVE    the flight recorder's card saver from the start
 //                       (mind/record/saver.h; else off until `kilo record
 //                       save on --host`, remembered as kilorec/SAVE_ON)
@@ -27,6 +31,7 @@
 #define KILO_SRC_OPTIONS_H
 
 #if !defined(KILO_PLANNER_BENCH) || !defined(KILO_BEHAVIOUR) || !defined(KILO_REAR_UP) || \
+	!defined(KILO_INTENT) || \
 	!defined(KILO_RECORD_SAVE) || !defined(KILO_LIGHT_SLEEP) || !defined(KILO_SOUND) || \
 	!defined(KILO_SOUND_KEEP_RUNNING) || !defined(KILO_MDNS) || !defined(KILO_BOOT_PROBE)
 #error "a KILO_ build switch is missing: kernel/Makefile defines them all (KILO_DEFS)"
@@ -34,6 +39,10 @@
 
 #if KILO_REAR_UP < 0 || KILO_REAR_UP > 3
 #error "KILO_REAR_UP must be 0, 1, 2 or 3"
+#endif
+
+#if KILO_INTENT < 0 || KILO_INTENT > 1
+#error "KILO_INTENT must be 0 or 1"
 #endif
 
 #endif

@@ -198,6 +198,7 @@ boolean CKernel::Initialize (void)
 	Config.remote = RemoteOn;
 	Config.behaviour = KILO_BEHAVIOUR != 0;
 	Config.rear_up_key = (uint8_t) KILO_REAR_UP;
+	Config.intent = KILO_INTENT != 0;
 	Config.balance_kp = BalanceKp;
 	// The behaviour RNG's seed: 32 bits, so that the logged seed (the
 	// runner logs it as %u) replays the same choices.
@@ -230,8 +231,9 @@ boolean CKernel::Initialize (void)
 	static const char *const RearUp[] = {"", " (rear-up key A2 on: rear_up, stage 1)",
 					     " (rear-up key A2 on: rear_up_2, stage 2)",
 					     " (rear-up key A2 on: rear_up_3, stage 3)"};
-	logf (*m_pLog, LogLevel::Info, "Kilo mind, build %08x%s%s (%s)", (unsigned) KILO_BUILD,
+	logf (*m_pLog, LogLevel::Info, "Kilo mind, build %08x%s%s%s (%s)", (unsigned) KILO_BUILD,
 	      KILO_BEHAVIOUR ? " (behaviour runner on)" : "", RearUp[KILO_REAR_UP],
+	      KILO_INTENT ? " (intents on: stand, sit and rest are moves from the model)" : "",
 	      KiloMindKernelMarker);
 	for (unsigned i = 0; i < kAuthorizedKeyCount; i++)
 	{

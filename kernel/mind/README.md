@@ -49,6 +49,10 @@ sound/            Kilo's sounds: the player (requests, families, the queue, the 
 remote/           the IR key map and RemoteControl; client.cpp: BodyClient's posture/balance/look
 measure/          the self-measurement (B1): the script (a port of mind/kilo/measure/script.py) and its run;
                   docs/self-measurement.md
+intent/           the state estimate (always on, read only: a port of mind/kilo/intent/estimate.py) and the
+                  intents "be standing / sitting / resting" (MindConfig.intent, KILO_INTENT; intent.h), their
+                  tables in intent.gen.cpp from intent/gen_intent.py (the model's predictions, the moves checked
+                  against it, the first step from every state to every goal); docs/intent.md
 mind.h, mind.cpp  Mind: all of the above, the link and the laptop server in one object
 util/dmath, str   double helpers with Python's sums (dmath), string compare (str)
 proto/            vendored by protocol/vendor.py: never edit; run python3 protocol/vendor.py
@@ -606,6 +610,10 @@ behaviour runner (`remote/remote.h` says what each key does):
 | B2 | a meow: one of the meow family, picked at random (`sound/`, docs/sound.md); it moves nothing, so it plays at once, also while a walk or the behaviour runs |
 | B1 | the self-measurement (`measure/`, docs/self-measurement.md): small poses streamed as FEET with the balance off, recorded as a run of its own; any key stops it into STAND |
 | rows 1-3 but A1, B1, A2 and B2 | nothing (logged as ignored) |
+
+With intents on (`MindConfig.intent`, `KILO_INTENT=1`; docs/intent.md) the posture of B6 and of A7 is not the
+SET_POSTURE goal but `be(STANDING)` and `be(RESTING)` (`intent/intent.h`, through the remote's `PostureHook`):
+the log line is the same (`remote B6 (0x02, stand): posture stand`), followed by the intent's own lines.
 
 The remote's waits are phases of `poll()` and keys that come
 meanwhile queue (4); C7 does not queue: it cancels

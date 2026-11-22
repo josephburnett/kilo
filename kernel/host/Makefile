@@ -70,6 +70,8 @@ TESTS += test_guard
 TESTS += test_sound
 # Kilo measures himself (measure/): the script against the Python, its poses' safety, B1 in the Mind.
 TESTS += test_measure
+# The state estimate and the intents (intent/): the Python reference's vectors, the tables, B6 and A7 in the Mind.
+TESTS += test_intent
 
 .PHONY: all check bench freestanding clean
 all: $(B)/kilo-mind-host $(B)/walk-demo
@@ -214,6 +216,7 @@ ALLOWED += exp log sin cos sincos
 # (their recipes expand these at run time).
 FLOAT_ONLY := mind/remote/% mind/record/% mind/net/host_% mind/power/% mind/mind.o mind/guard/% mind/behaviour/alive.o \
               mind/measure/% \
+              mind/intent/% \
               mind/sound/%
 DBL_OBJS := $(filter-out $(addprefix $(B)/san/,$(FLOAT_ONLY)),$(DBL_OBJS))
 BENCH_DBL_OBJS := $(filter-out $(addprefix $(B)/obj/,$(FLOAT_ONLY)),$(BENCH_DBL_OBJS))

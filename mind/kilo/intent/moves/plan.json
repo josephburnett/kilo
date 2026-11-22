@@ -1,0 +1,233 @@
+{
+ "made_by": "python -m kilo.intent.moves --write",
+ "margin_min_mm": 10.0,
+ "roll_max_deg": 25.0,
+ "moves": [
+  {
+   "move": "stand_to_sit",
+   "from": "STANDING",
+   "to": "SITTING",
+   "shipped": true,
+   "stages": [
+    [
+     "front shoulders",
+     "front knees",
+     "hind shoulders",
+     "hind knees"
+    ]
+   ],
+   "margin_mm": {
+    "model": 31.87,
+    "tricks view": 26.88
+   },
+   "one_stage_margin_mm": {
+    "model": 31.87,
+    "tricks view": 26.88
+   },
+   "dynamics": {
+    "bands": 21,
+    "failed": [],
+    "end_nose_up_deg": [
+     26.1,
+     26.6
+    ],
+    "end_roll_deg": [
+     -0.0,
+     1.8
+    ],
+    "max_roll_deg": 1.9,
+    "max_torque_kg_cm": 0.81
+   },
+   "trick": "intent_stand_to_sit"
+  },
+  {
+   "move": "stand_to_rest",
+   "from": "STANDING",
+   "to": "RESTING",
+   "shipped": true,
+   "stages": [
+    [
+     "front shoulders",
+     "front knees"
+    ],
+    [
+     "hind shoulders",
+     "hind knees"
+    ]
+   ],
+   "margin_mm": {
+    "model": 10.31,
+    "tricks view": 12.39
+   },
+   "one_stage_margin_mm": {
+    "model": 7.14,
+    "tricks view": 9.33
+   },
+   "dynamics": {
+    "bands": 21,
+    "failed": [],
+    "end_nose_up_deg": [
+     -1.8,
+     -1.1
+    ],
+    "end_roll_deg": [
+     -8.8,
+     -6.5
+    ],
+    "max_roll_deg": 8.8,
+    "max_torque_kg_cm": 0.87
+   },
+   "trick": "intent_stand_to_rest"
+  },
+  {
+   "move": "sit_to_stand",
+   "from": "SITTING",
+   "to": "STANDING",
+   "shipped": true,
+   "stages": [
+    [
+     "front shoulders",
+     "front knees",
+     "hind shoulders",
+     "hind knees"
+    ]
+   ],
+   "margin_mm": {
+    "model": 31.87,
+    "tricks view": 26.88
+   },
+   "one_stage_margin_mm": {
+    "model": 31.87,
+    "tricks view": 26.88
+   },
+   "dynamics": {
+    "bands": 21,
+    "failed": [],
+    "end_nose_up_deg": [
+     -2.0,
+     -1.9
+    ],
+    "end_roll_deg": [
+     0.0,
+     2.0
+    ],
+    "max_roll_deg": 2.1,
+    "max_torque_kg_cm": 0.95
+   },
+   "trick": "intent_sit_to_stand"
+  },
+  {
+   "move": "sit_to_rest",
+   "from": "SITTING",
+   "to": "RESTING",
+   "shipped": false,
+   "stages": [
+    [
+     "front shoulders",
+     "front knees",
+     "hind shoulders",
+     "hind knees"
+    ]
+   ],
+   "margin_mm": {
+    "model": 4.98,
+    "tricks view": 7.15
+   },
+   "one_stage_margin_mm": {
+    "model": 4.98,
+    "tricks view": 7.15
+   },
+   "dynamics": {
+    "bands": 21,
+    "failed": [],
+    "end_nose_up_deg": [
+     -1.8,
+     -0.9
+    ],
+    "end_roll_deg": [
+     -8.8,
+     -6.0
+    ],
+    "max_roll_deg": 8.8,
+    "max_torque_kg_cm": 0.82
+   },
+   "why_not": "the centre of mass comes within 5.0 mm of the support's edge in the model (needs 10); the centre of mass comes within 7.2 mm of the support's edge in the tricks view (needs 10)"
+  },
+  {
+   "move": "rest_to_stand",
+   "from": "RESTING",
+   "to": "STANDING",
+   "shipped": true,
+   "stages": [
+    [
+     "hind shoulders",
+     "hind knees"
+    ],
+    [
+     "front shoulders",
+     "front knees"
+    ]
+   ],
+   "margin_mm": {
+    "model": 10.28,
+    "tricks view": 12.36
+   },
+   "one_stage_margin_mm": {
+    "model": 7.13,
+    "tricks view": 9.32
+   },
+   "dynamics": {
+    "bands": 21,
+    "failed": [],
+    "end_nose_up_deg": [
+     -2.0,
+     -1.9
+    ],
+    "end_roll_deg": [
+     0.0,
+     1.8
+    ],
+    "max_roll_deg": 8.8,
+    "max_torque_kg_cm": 0.84
+   },
+   "trick": "intent_rest_to_stand"
+  },
+  {
+   "move": "rest_to_sit",
+   "from": "RESTING",
+   "to": "SITTING",
+   "shipped": false,
+   "stages": [
+    [
+     "front shoulders",
+     "front knees",
+     "hind shoulders",
+     "hind knees"
+    ]
+   ],
+   "margin_mm": {
+    "model": 5.0,
+    "tricks view": 7.17
+   },
+   "one_stage_margin_mm": {
+    "model": 5.0,
+    "tricks view": 7.17
+   },
+   "dynamics": {
+    "bands": 21,
+    "failed": [],
+    "end_nose_up_deg": [
+     26.1,
+     26.6
+    ],
+    "end_roll_deg": [
+     -0.0,
+     1.8
+    ],
+    "max_roll_deg": 8.8,
+    "max_torque_kg_cm": 0.78
+   },
+   "why_not": "the centre of mass comes within 5.0 mm of the support's edge in the model (needs 10); the centre of mass comes within 7.2 mm of the support's edge in the tricks view (needs 10)"
+  }
+ ]
+}

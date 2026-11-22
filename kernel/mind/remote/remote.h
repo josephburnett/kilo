@@ -141,6 +141,16 @@ class BehaviourHook {
   ~BehaviourHook() = default;
 };
 
+// A posture key's action, when the owner wants it (the Mind's, with intents on: docs/intent.md): in
+// place of the SET_POSTURE goal the remote latches itself. False: refused.
+class PostureHook {
+ public:
+  virtual bool posture(const char* name, const char* who) = 0;
+
+ protected:
+  ~PostureHook() = default;
+};
+
 // The self-measurement routine, as the remote starts and stops it (the Mind's). Not pure (as BehaviourHook).
 class MeasureHook {
  public:
@@ -182,6 +192,8 @@ class RemoteControl {
   void set_behaviour(BehaviourHook* hook) { behaviour_ = hook; }
   void set_trick_notes(TrickNotes* notes) { notes_ = notes; }
   void set_measure(MeasureHook* hook) { measure_ = hook; }
+  // The posture keys' action goes to hook (null, the default: the remote's own SET_POSTURE).
+  void set_posture_hook(PostureHook* hook) { posture_hook_ = hook; }
 
   // Carry out a key's action (now, or after the ones queued; C7 at once).
   // False when the queue is full (the key is dropped, and logged).
@@ -270,6 +282,7 @@ class RemoteControl {
   uint32_t actions_ = 0, failures_ = 0;
   TrickNotes* notes_ = nullptr;
   MeasureHook* measure_ = nullptr;
+  PostureHook* posture_hook_ = nullptr;
 };
 
 }  // namespace remote

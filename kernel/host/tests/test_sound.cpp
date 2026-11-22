@@ -505,9 +505,9 @@ void test_mind_ready_and_b2() {
   CHECK(!r.mind.walker().active() && !r.mind.remote().busy());
   // the metrics line, after the power lines
   uint32_t n = r.mind.metric_lines();
-  CHECK(n == 11 + power::Sleep::kMetricLines + 1);
+  CHECK(n == 11 + power::Sleep::kMetricLines + 3);  // (then the state estimate's and the intents': test_intent)
   char line[256];
-  r.mind.metric_line(n - 1, line, 201);
+  r.mind.metric_line(n - 3, line, 201);
   CHECKF(std::strncmp(line, "sound: on=1 volume=70 sounds=7 ", 31) == 0 && std::strstr(line, " played=2 ") != nullptr,
          "%s", line);
   r.mind.metric_line(11, line, 201);

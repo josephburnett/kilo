@@ -57,6 +57,11 @@ OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/
 #   KILO_REAR_UP=0|1|2|3    the remote's A2 starts the rear_up trick at that stage: 1 rear_up (28 deg),
 #                           2 rear_up_2 (40 deg), 3 rear_up_3 (54 deg) (default 0: A2 does nothing
 #                           until the staged trials of docs/rear-up-trick.md are done)
+#   KILO_INTENT=0|1         stand, sit and rest are intents (docs/intent.md): the remote's B6 and A7, the
+#                           behaviour's postures and the guard's sit go through the state estimate and
+#                           the moves planned from the body model (default 0: postures change as before,
+#                           until the first floor try of docs/intent.md is done; the state estimate itself
+#                           always runs and only logs)
 #   KILO_RECORD_SAVE=0|1    save the flight recorder to the SD card from the start (default 0: off until
 #                           `kilo bench sd --host` has measured the card and `kilo record save on --host`)
 #   KILO_LIGHT_SLEEP=1|0    light sleep: the servos off 3 s after the remote's A7 (or 2 min lying idle in REST),
@@ -72,12 +77,16 @@ KILO_PLANNER_BENCH ?= 1
 KILO_MDNS ?= 1
 KILO_BEHAVIOUR ?= 0
 KILO_REAR_UP ?= 0
+KILO_INTENT ?= 0
 KILO_RECORD_SAVE ?= 0
 KILO_LIGHT_SLEEP ?= 1
 KILO_SOUND ?= 1
 KILO_SOUND_IDLE ?= stop
 ifeq ($(filter 0 1 2 3,$(KILO_REAR_UP)),)
 $(error KILO_REAR_UP must be 0, 1, 2 or 3)
+endif
+ifeq ($(filter 0 1,$(KILO_INTENT)),)
+$(error KILO_INTENT must be 0 or 1)
 endif
 ifeq ($(filter 0 1,$(KILO_SOUND)),)
 $(error KILO_SOUND must be 0 or 1)
@@ -91,7 +100,7 @@ else ifneq ($(KILO_BODY_SERIAL),auto)
 $(error KILO_BODY_SERIAL must be auto or pl011)
 endif
 KILO_DEFS += -DKILO_BOOT_PROBE=$(KILO_BOOT_PROBE) -DKILO_PLANNER_BENCH=$(KILO_PLANNER_BENCH) -DKILO_MDNS=$(KILO_MDNS) \
-	-DKILO_BEHAVIOUR=$(KILO_BEHAVIOUR) -DKILO_REAR_UP=$(KILO_REAR_UP) -DKILO_RECORD_SAVE=$(KILO_RECORD_SAVE) -DKILO_LIGHT_SLEEP=$(KILO_LIGHT_SLEEP) \
+	-DKILO_BEHAVIOUR=$(KILO_BEHAVIOUR) -DKILO_REAR_UP=$(KILO_REAR_UP) -DKILO_INTENT=$(KILO_INTENT) -DKILO_RECORD_SAVE=$(KILO_RECORD_SAVE) -DKILO_LIGHT_SLEEP=$(KILO_LIGHT_SLEEP) \
 	-DKILO_SOUND=$(KILO_SOUND) -DKILO_SOUND_KEEP_RUNNING=$(if $(filter run,$(KILO_SOUND_IDLE)),1,0)
 
 # Kilo's sounds (docs/sound.md): the PWM sound device (src/sound.cpp, Circle's lib/sound) and the

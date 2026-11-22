@@ -691,7 +691,7 @@ void test_metric_lines() {
   r.run_ms(120000);
   r.key(kB6);
   uint32_t n = r.mind.metric_lines();
-  CHECK(n == 11 + power::Sleep::kMetricLines + 1);  // then the sound line (test_sound)
+  CHECK(n == 11 + power::Sleep::kMetricLines + 3);  // then the sound line (test_sound), state and intents (test_intent)
   std::vector<std::string> got;
   for (uint32_t i = 0; i < n; i++) {
     char line[256];

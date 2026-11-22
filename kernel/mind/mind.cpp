@@ -40,6 +40,8 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
       remote_(link_, walker_, player_, clock, log_),
       measure_(link_, clock, log_),
       measure_hook_(*this),
+      intent_(link_, clock, log_, player_, walker_, estimator_),
+      posture_hook_(*this),
       sleep_(link_, walker_, clock, log_),
       guard_(link_, walker_, clock, log_),
       alive_(link_, player_, log_, cfg.seed),
@@ -54,6 +56,8 @@ Mind::Mind(Serial& serial, Clock& clock, Log& platform_log, Listener* listener, 
   remote_.set_trick_notes(this);
   remote_.set_measure(&measure_hook_);
   measure_.set_observer(this);
+  intent_.set_host(this);
+  if (cfg.intent) remote_.set_posture_hook(&posture_hook_);  // B6, A7: be(STANDING), be(RESTING)
   recorder_.set_metrics(&metrics_);
   host_.attach_metrics(*this);
   host_.attach_guard(guard_);
@@ -134,6 +138,10 @@ void Mind::start() {
          personality(cfg_).name);
   if (cfg_.remote) logf(log_, LogLevel::Info, "IR remote on");
   logf(log_, LogLevel::Info,
+       "state estimate on; intents %s (docs/intent.md)",
+       cfg_.intent ? "ON: stand, sit and rest are moves planned from the model (B6, A7, the behaviour, the guard)"
+                   : "off: postures change as before (KILO_INTENT=1 turns them on)");
+  logf(log_, LogLevel::Info,
        "distance guard %s (walking forward BLUE from %d mm, RED below %d mm; otherwise BLUE below %d, RED below %d; "
        "docs/distance-guard.md)",
        guard_.enabled() ? "on" : "off", (int)guard::kBlueMinMm, (int)guard::kRedMm, (int)guard::kBlueStillMm,
@@ -187,6 +195,14 @@ void Mind::poll() {
   if (measure_.active() && host_controls()) measure_.stop("a laptop client taking the body");
   measure_.poll();
   player_.poll();
+  if (intent_.active()) {
+    // someone else took the body: the intent is dropped (a move under way is stopped)
+    if (host_controls()) intent_.cancel("a laptop client took the body");
+    else if (measure_.active()) intent_.cancel("the self-measurement started");
+    else if (walker_.active()) intent_.cancel("a walk started");
+    else if (player_.busy() && player_.result().play != intent_.known_play()) intent_.cancel("a trick started");
+  }
+  intent_.poll();
   if (flinch_pending_ && !player_.busy()) {
     flinch_pending_ = false;
     if (!alive_.flinch()) logf(log_, LogLevel::Warn, "guard: the lean back was not played");
@@ -196,7 +212,8 @@ void Mind::poll() {
   {
     const behaviour::Choice* c = runner_.record().choice;
     bool calm = c != nullptr && (c->chosen == behaviour::kIdle || c->chosen == behaviour::kExplore);
-    alive_.poll((double)clock_.now_us() / 1e6, behaviour_active() && !host_controls(), calm, head_held(2));
+    alive_.poll((double)clock_.now_us() / 1e6, behaviour_active() && !host_controls() && !intent_.active(), calm,
+                head_held(2));
   }
   battery_step();
   head_for_walk();
@@ -206,7 +223,8 @@ void Mind::poll() {
   card_safe_ = safe_for_card(clock_.now_us());
   if (saver_ != nullptr) saver_->poll(card_safe_, body_limp());
   power::Activity act;  // after the saver: a save it was asked for has started by now
-  act.busy = walker_.active() || player_.busy() || remote_.busy() || measure_.active() || behaviour_active();
+  act.busy = walker_.active() || player_.busy() || remote_.busy() || measure_.active() || behaviour_active() ||
+             intent_.active();
   act.host_events = host_.stats().accepted + host_.stats().requests;
   act.host_clients = listener_ != nullptr ? host_.clients() : 0;
   act.host_holds = host_controls();
@@ -332,7 +350,55 @@ void Mind::on_hello(const kilo_hello_t& hello, bool solicited) {
   if (tap_ != nullptr) tap_->on_hello(hello, solicited);
 }
 
+// The state estimate's prior (mind.h).
+intent::Cmd Mind::intent_cmd() const {
+  const Goal* g = const_cast<SerialLink&>(link_).goal(KILO_MSG_SET_POSTURE);
+  if (g != nullptr && g->len >= 2) return intent::cmd_of_posture(g->payload[1]);
+  if (walker_.active() || measure_.active() || player_.busy()) return intent::Cmd::None;
+  return prior_;
+}
+
+// The state estimate, every TELEMETRY: it only reads. A change is a log line, a MARK and a counter.
+void Mind::estimate_step(const kilo_telemetry_t& t) {
+  if (const_cast<SerialLink&>(link_).goal(KILO_MSG_SET_POSTURE) != nullptr || walker_.active() || measure_.active())
+    prior_ = intent::Cmd::None;  // (a later trick's end, or the fall reflex's, sets it again)
+  intent::Cmd cmd = intent_cmd();
+  intent::Sample s = {link_.state().telemetry_at_us, t.pitch, t.roll, t.rate_pitch, t.rate_roll, t.rate_yaw, t.mode,
+                      cmd};
+  intent::State before = estimator_.state();
+  if (!estimator_.feed(s)) return;
+  const intent::Estimate& e = estimator_.estimate();
+  if ((int)e.state < intent::kStates) state_entered_[(int)e.state]++;
+  char p[12], r[12], l[120];
+  format_fixed(p, sizeof p, (int32_t)t.pitch * 10 / 16, 1, true);
+  format_fixed(r, sizeof r, (int32_t)t.roll * 10 / 16, 1, true);
+  logf(log_, LogLevel::Info, "state: %s -> %s (pitch %s roll %s, asked %s, confidence %u)", intent::state_name(before),
+       intent::state_name(e.state), p, r, intent::cmd_name(cmd), (unsigned)e.confidence);
+  format(l, sizeof l, "state to=%s from=%s pitch_a16=%d roll_a16=%d asked=%s confidence=%u", intent::state_name(e.state),
+         intent::state_name(before), (int)t.pitch, (int)t.roll, intent::cmd_name(cmd), (unsigned)e.confidence);
+  recorder_.note(l);
+}
+
+void Mind::intent_moves() { percepts_.notify_self_motion(seconds(this), kPostureMoveS); }
+
+// A posture by name (mind.h): an intent when they are on and the name is one of the three states.
+bool Mind::posture(const char* name, int8_t balance, const char* who) {
+  if (cfg_.intent) {
+    intent::State goal = str_eq(name, "stand") || str_eq(name, "balance") ? intent::State::Standing
+                         : str_eq(name, "sit") ? intent::State::Sitting
+                         : str_eq(name, "rest") ? intent::State::Resting
+                                                : intent::State::Unknown;
+    if (goal != intent::State::Unknown) {
+      if (str_eq(name, "balance") && balance < 0) balance = 1;
+      return intent_.be(goal, balance, who);
+    }
+    intent_.cancel("another posture was asked for");
+  }
+  return client_posture(link_, &walker_, name, balance);
+}
+
 void Mind::on_telemetry(const kilo_telemetry_t& t) {
+  estimate_step(t);
   walker_.on_telemetry(t);
   measure_.on_telemetry(t);
   sleep_.on_telemetry(t);
@@ -357,6 +423,20 @@ void Mind::on_event(const kilo_event_t& e) {
   measure_.on_event(e);
   host_.on_body_event(e);
   player_.on_event(e);
+  intent_.on_event(e);
+  // the state estimate's prior when no posture goal is latched (intent_cmd())
+  if (e.code == KILO_EVENT_TRICK_DONE) {
+    uint8_t reason = (uint8_t)((uint16_t)e.arg >> 8);
+    const tricks::Trick* t = player_.trick();
+    bool ended = reason == KILO_TRICK_DONE_REASON_DONE || reason == KILO_TRICK_DONE_REASON_STOPPED;
+    prior_ = ended && t != nullptr ? intent::cmd_of_posture(t->end_posture) : intent::Cmd::None;
+  } else if (e.code == KILO_EVENT_FELL) {
+    prior_ = intent::Cmd::None;
+  } else if (e.code == KILO_EVENT_RECOVERED) {
+    prior_ = intent::Cmd::Stand;  // the body's fall reflex ends in STAND
+  } else if (e.code == KILO_EVENT_RECOVERY_FAILED) {
+    prior_ = intent::Cmd::Rest;   // ...or in REST, then LIMP
+  }
   if (n_events_ == behaviour::Snapshot::kEvents) {
     for (int i = 1; i < n_events_; i++) events_[i - 1] = events_[i];
     n_events_--;
@@ -459,7 +539,7 @@ void named(char* out, uint32_t n, size_t* len, const record::NamedCounts& c) {
 }  // namespace
 
 // 0-10 the Mind's, then the power lines (11-14), then sound (15): test_power and test_guard index them.
-uint32_t Mind::metric_lines() { return 11 + power::Sleep::kMetricLines + 1; }
+uint32_t Mind::metric_lines() { return 11 + power::Sleep::kMetricLines + 3; }
 
 void Mind::metric_line(uint32_t i, char* out, uint32_t n) {
   const record::Metrics& m = metrics_;
@@ -543,6 +623,24 @@ void Mind::metric_line(uint32_t i, char* out, uint32_t n) {
     default:
       if (i < 11 + power::Sleep::kMetricLines) sleep_.metric_line(i - 11, out, n);  // power, power_hw, battery, power_segments
       else if (i == 11 + power::Sleep::kMetricLines) sound_.metrics_line(out, n);
+      else if (i == 12 + power::Sleep::kMetricLines) {
+        // the state estimate (how often each state was entered), then the intents (docs/intent.md)
+        const intent::Estimate& e = estimator_.estimate();
+        len = format(out, n, "state: now=%s confidence=%u changes=%u", intent::state_name(e.state),
+                     (unsigned)e.confidence, (unsigned)estimator_.changes());
+        for (int k = 0; k < intent::kStates; k++)
+          if (state_entered_[k] != 0 && len < n)
+            len += format(out + len, n - len, " %s=%u", intent::state_name((intent::State)k),
+                          (unsigned)state_entered_[k]);
+      } else if (i == 13 + power::Sleep::kMetricLines) {
+        const intent::Intent::Counters& c = intent_.counters();
+        format(out, n,
+               "intents: on=%u asked=%u reached=%u gave_up=%u cancelled=%u moves=%u body_postures=%u reflex_waits=%u "
+               "failed_steps=%u",
+               cfg_.intent ? 1u : 0u, (unsigned)c.asked, (unsigned)c.reached, (unsigned)c.gave_up,
+               (unsigned)c.cancelled, (unsigned)c.moves, (unsigned)c.postures, (unsigned)c.reflex_waits,
+               (unsigned)c.failed_steps);
+      }
       return;
   }
 }
@@ -706,14 +804,14 @@ void Mind::sit_and_behave() {
   sitting_variant_ = true;
   if (behaviour_active()) {
     runner_.context().data.forget_goals();  // the tree re-asserts its posture, now as a sit
-    bool ok = client_posture(link_, &walker_, "sit");
+    bool ok = posture("sit", -1, "guard");
     logf(log_, LogLevel::Info, "guard: the behaviour runner goes on sitting%s", ok ? "" : " (SIT refused)");
     return;
   }
   const char* what = nullptr;
   bool ok = runner_hook_.start(&what);
   runner_by_guard_ = ok;
-  if (ok) client_posture(link_, &walker_, "sit");
+  if (ok) posture("sit", -1, "guard");
   logf(log_, ok ? LogLevel::Info : LogLevel::Warn, "guard: behaviour runner %s (sitting variant%s%s)",
        ok ? "started" : "not started", what != nullptr ? ": " : "", what != nullptr ? what : "");
 }
@@ -786,7 +884,7 @@ bool Mind::Body::posture(const char* name, int8_t balance) {
     name = "sit";
     balance = -1;
   }
-  bool ok = client_posture(m_.link_, &m_.walker_, name, balance);
+  bool ok = m_.posture(name, balance, "behaviour");
   logf(m_.log_, ok ? LogLevel::Info : LogLevel::Warn, "behaviour: posture %s%s%s", name, balance == 1 ? " +balance" : "",
        ok ? "" : ": refused");
   return ok;
