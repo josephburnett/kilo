@@ -38,7 +38,9 @@ written down yet, and the side video below has not been taken.
 
 ## The try
 
-1. Put Kilo at one end of the clear floor, facing along the tape.
+1. Put Kilo at one end of the clear floor, facing along the tape, and
+   switch him on. His eyes stay dark until he is ready, then turn steady
+   green (`docs/signals.md`); keys work from then on.
 2. **B6**: he stands.
 3. Start the phone's video (see "The measurement").
 4. **C4**: he starts walking forward at the default speed (58 mm a

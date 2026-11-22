@@ -517,7 +517,7 @@ uploads it, so a `Trick` is already in wire form (the TRICK_BEGIN fields and
 the 14 B keyframes exactly as Python's `Trick.begin()` and
 `Keyframe.to_wire()` make them). `tricks/gen_library.py` writes
 `library.gen.{h,cpp}` from `mind/kilo/tricks/library/*.json` (26 tricks,
-188 frames, about 3.4 KB of tables), with Python's CRC, trick_id and duration
+202 frames, about 3.6 KB of tables), with Python's CRC, trick_id and duration
 for the tests:
 
 ```
@@ -602,8 +602,8 @@ move, he does one of the original Nybble's tricks:
 
 | Trick | What he does | From sitting | From standing |
 |---|---|---|---|
-| stretch | front low, rear high, head up (the original's `str`), held 2 s | stands up first | as the original |
-| wash_face | sits and licks a front paw, then rubs his face with it (`wsf`) | as the original | sits first (the original's own first row) |
+| stretch | front low, rear high, head up (the original's `str`), held 2 s; at the end of the hold his rear shakes a little (3 quick swings, the hind feet 4 mm forward and back, the tail with them: not the original's) | stands up first | as the original |
+| wash_face | sits and lifts his left front paw beside his muzzle three times, then puts it down (`wsf`; the original's head turned into the paw, which bumped his head, so here it faces straight ahead, 14 mm from the paw) | as the original | sits first (the original's own first row) |
 | pee | lifts a hind leg (`pee`) | stands up first | as the original |
 | sniff | head down, sniffing the floor (`snf`) | stands up first | as the original |
 | check_around | looks round to each side (`ck`) | stands up first | as the original |
@@ -613,7 +613,9 @@ move, he does one of the original Nybble's tricks:
 - They are the library's `alive_<name>_sit` and `alive_<name>_stand`, written by
   `mind/kilo/tricks/alive_set.py` from the original skill tables with the
   original's timing (`mind/README.md` "The original firmware's trick timing"), each checked against the
-  body model (`mind/tests/test_alive_tricks.py`). Left out: `butt_up` (it asks
+  body model (`mind/tests/test_alive_tricks.py`): standing on his feet, and the
+  head at least 10 mm from the front legs whichever way the head's pan turns
+  (that way is not known). Left out: `butt_up` (it asks
   for more than the front shoulders reach and the model puts him on three feet),
   `scratch` (the model has him tip 7.7 mm onto a foot when the hind leg comes up),
   `hi` and `push_up` (not a cat's idle moves).

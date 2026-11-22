@@ -40,11 +40,12 @@
 // The signals (CardFlashHost::card_signal, signal/signal.h, docs/signals.md):
 // before a flash Flashing (the eyes steady white), then kAnnounceUs for the
 // Mind to send it before the flasher takes the line (the body cannot drive
-// its lights while it is reprogrammed: they keep that white); after it Done
-// (three green flashes, the trill) or Failed (three red, the hiss); Refused
-// (three purple, the hiss) for a refusal. Nothing else while the flash
-// runs: the main loop pauses everything on the link meanwhile, the sound
-// player too.
+// its lights while it is reprogrammed: they keep that white); after it
+// nothing when it worked (the white lasts until the Mind's ready, which
+// waits for this check: Mind::hold_ready) or Failed (three red, the hiss);
+// Refused (three purple, the hiss) for a refusal. Nothing else while the
+// flash runs: the main loop pauses everything on the link meanwhile, the
+// sound player too.
 #ifndef KILO_MIND_FLASH_CARDFLASH_H
 #define KILO_MIND_FLASH_CARDFLASH_H
 #include <stdint.h>

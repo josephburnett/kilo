@@ -346,8 +346,7 @@ void CardFlash::finish_flash() {
   if (s.phase == KILO_FLASH_PHASE_DONE) {
     format(why_, sizeof why_, "flashed build %08x; the body's HELLO after it reports build %08x reset %s",
            (unsigned)s.build, (unsigned)s.fw_build, reset_cause_name(s.reset_cause));
-    record(CardOutcome::Flashed, why_);
-    tell(signals::Signal::Done, "card flash done");
+    record(CardOutcome::Flashed, why_);  // no signal: the Mind's ready (dark -> green) follows, which ends the white
   } else {
     format(why_, sizeof why_, "the flash FAILED: %s (STK500 command %02x, attempt %u of %u)", flash_error_name(s.error),
            (unsigned)s.stk_cmd, (unsigned)s.attempt, (unsigned)Flasher::kAttempts);

@@ -668,7 +668,9 @@ expect "$CR/boot1.mind.log" "boot flash check: the body runs build 56424f44, the
     "boot 1: the check flashes"
 expect "$CR/boot1.mind.log" "flash: done in [0-9]+ ms: HELLO build $FLASH_BUILD reset FLASHED" "boot 1: flashed"
 expect "$CR/boot1.mind.log" "boot flash check: wrote body-result.txt \(outcome flashed" "boot 1: the result written"
-expect "$CR/boot1.mind.log" "sound play name=trill asked=trill why=card flash done" "boot 1: the trill"
+awk '/boot flash check: wrote body-result.txt \(outcome flashed/ {w = 1} /signal ready why=ready/ {if (w) ok = 1; else early = 1}
+     END {exit !(ok && !early)}' "$CR/boot1.mind.log" \
+    || { echo "FAILED: boot 1: ready (the eyes green) not once after the flash"; exit 1; }
 expect "$CR/card/body-result.txt" "^body after: build $FLASH_BUILD reset FLASHED" "body-result.txt: the HELLO after"
 KPY -m kilo.cli card "$CR/card" --force-dir --status | tee "$CR/status1.txt"
 expect "$CR/status1.txt" "body-result.txt: outcome FLASHED \(about the body.json on the card now\)" "--status: flashed"

@@ -161,10 +161,10 @@ hand's width of space all round.
 
    (`KILO_RECORD_SAVE=1` saves the flight recorder to the card, so the try
    can be read afterwards.)
-2. Card into Kilo, switch on. The first start after a new card also
-   updates the body's program: wait until his eyes have been steady white
-   for a while (the update) and then given three quick green flashes (the
-   update is done); after that they stay green. Three red flashes instead
+2. Card into Kilo, switch on. His eyes stay dark until he is ready, then
+   turn steady green. The first start after a new card also updates the
+   body's program first: his eyes are steady white for a while (the
+   update), then steady green (done, ready). Three red flashes instead
    mean the update failed: stop here and read the card on the laptop
    (`docs/laptop-setup.md` step 6).
 3. Press **B6** (column B, sixth row from the bottom): he stands.

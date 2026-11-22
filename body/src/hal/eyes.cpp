@@ -5,8 +5,13 @@
 
 #if KILO_EYES
 // D7 = PD7. PORTD is shared with the buzzer ISR's D5 toggle: only sbi/cbi
-// here (hal/gpio.h).
-void eyes_init(void) { DDRD |= _BV(7); }
+// here (hal/gpio.h). Then dark: after a reset (a flash from the SD card, the
+// watchdog) the LEDs, still powered, would keep the colour they last had
+// until the mind sends one; dark is "not ready" (docs/signals.md).
+void eyes_init(void) {
+  DDRD |= _BV(7);
+  eyes_show(0, 0, 0, 0);
+}
 
 // One byte, MSB first, interrupts already off. Cycles after the sbi: a 0
 // goes low after 5 (312 ns), a 1 after 12 (750 ns); a bit is 22 (1.375 us).
