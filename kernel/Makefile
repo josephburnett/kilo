@@ -54,8 +54,8 @@ OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/
 #   KILO_PLANNER_BENCH=1|0  time the walking planner once at boot, no body involved (default 1)
 #   KILO_MDNS=1|0           answer mDNS queries for kilo.local and the _kilo._tcp service (default 1)
 #   KILO_BEHAVIOUR=0|1      run the behaviour runner from boot (default 0; the remote's A5 starts it too)
-#   KILO_REAR_UP=0|1|2|3    the remote's A2 starts the rear_up trick at that stage: 1 rear_up (28 deg),
-#                           2 rear_up_2 (40 deg), 3 rear_up_3 (54 deg) (default 0: A2 does nothing
+#   KILO_REAR_UP=0|1|2|3    the remote's A1 starts the rear_up trick at that stage: 1 rear_up (28 deg),
+#                           2 rear_up_2 (40 deg), 3 rear_up_3 (54 deg) (default 0: A1 does nothing
 #                           until the staged trials of docs/rear-up-trick.md are done)
 #   KILO_INTENT=0|1         stand, sit and rest are intents (docs/intent.md): the remote's B6 and A7, the
 #                           behaviour's postures and the guard's sit go through the state estimate and

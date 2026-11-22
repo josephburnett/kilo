@@ -72,6 +72,20 @@ How a tick is made (docs/walking-and-balance.md §10):
   crawl at its fastest cadence), the body levels and ``done`` is set, as
   for the stop. A leg caught on its way (the body tipping toward it) stays
   where it landed: the quick stop never steps it again (STANCE sets it).
+- **The trot** (docs/walking-and-balance.md §15; the "long trot" of
+  2026-11-21, the only trot since 2026-11-22): its swing grows with the
+  speed (patterns.swing_for), at most a tick longer than the step before
+  (the build-up) and a tick shorter, one tick on four feet; each diagonal
+  pair lands where the body, falling about the line between its two feet
+  as an inverted pendulum, ends the diagonal upright (TrotFit.land_x:
+  x_c + k v tau ahead of its shoulder, the pendulum fitted to the floor
+  recordings of the trot); each swing is long enough for the step it
+  carries (a square-up from a long stride, a stride still growing or
+  shrinking, a steer's outer side), and one that is not the steady trot's
+  (a square-up, the way home into the crawl, the swing shortening on the
+  way out of the trot) long enough for no joint to turn more than
+  TrotConfig.joint_deg_per_tick along its path. Out of the trot directly
+  (into the walk) once its swing is back to 8 ticks.
 - **The sent attitude** stays inside FEET's +-30 deg (the body refuses a
   FEET beyond it).
 """
@@ -83,8 +97,8 @@ import math
 from dataclasses import dataclass
 
 from kilo.planner import patterns as pat
-from kilo.planner.model import (FRONT, LEFT, LEGS, BodyModel, _solve3, fit_attitude, hull, leg_lengths, stability,
-                                world_points)
+from kilo.planner.model import (FRONT, G_MM_S2, LEFT, LEGS, BodyModel, _solve3, fit_attitude, hull, leg_lengths,
+                                stability, view_numbers, world_points)
 from kilo.protocol import kilo_protocol as P
 
 X_RANGE = (-60, 60)   # FEET x_mm (spec range)
@@ -100,6 +114,66 @@ HALT_TICKS = 6        # the quick stop: the strides go to 0 in this many ticks (
 HALT_HOLD_TICKS = 10  # ... and all four feet stay down this long from the halt (200 ms) ...
 HALT_SQUARE_MM = 5.0  # ... then a leg further than this from under its shoulder steps to it
 HALT_NOT_LIFTED = -1000  # caught[leg] tick for a leg the quick stop keeps down (it slides, never lifts)
+
+
+# The trot's fitted pendulum: its numbers are the "trot" view of the body model (protocol/spec.toml
+# [model.views.trot]): its centre of mass disagrees with the model's own, and stays the trot's until
+# a self-measurement settles it (kilo model show). The diagonal's direction is the model's foot rectangle.
+_FIT = view_numbers("trot")
+_TRACK, _LENGTH = BodyModel().track_mm, BodyModel().length_mm
+
+
+@dataclass(frozen=True)
+class TrotFit:
+    """The trot's rock, fitted to the floor recordings of 2026-11-15..17
+    (mind/tests/stridesim.py fit): an inverted pendulum about the
+    diagonal, from upright at each diagonal's start, as if it stood on the
+    diagonal ``extra_ms`` longer than the plan's two-foot ticks (the
+    rotation is not stopped at each touchdown), its mass ``com_x_mm`` ahead
+    of the shoulders' middle, the tip clamped at ``clamp_deg`` (the falling
+    side's foot reaching the ground early)."""
+    com_x_mm: float = _FIT["com_x_mm"]
+    extra_ms: float = _FIT["extra_ms"]
+    clamp_deg: float = _FIT["clamp_deg"]
+    com_h_mm: float = _FIT["com_h_mm"]
+
+    @property
+    def tau_s(self) -> float:
+        return math.sqrt(self.com_h_mm / G_MM_S2)
+
+    def two_foot_s(self, swing_ticks: int) -> float:
+        """The effective time on one diagonal: the plan's two-foot ticks (the swing less its last,
+        whose foot is down) plus extra_ms."""
+        return ((swing_ticks - 1) * pat.TICK_MS + self.extra_ms) / 1000.0
+
+    def k(self, swing_ticks: int) -> float:
+        x = self.two_foot_s(swing_ticks) / self.tau_s
+        return (math.sinh(x) - x) / (math.cosh(x) - 1.0)
+
+    def gain_deg_per_mm(self, swing_ticks: int) -> float:
+        """Tip (deg of roll) at a diagonal's end per mm the pair lands off the balanced point."""
+        x = self.two_foot_s(swing_ticks) / self.tau_s
+        line, roll = _TRACK / math.hypot(_TRACK, _LENGTH), _LENGTH / math.hypot(_TRACK, _LENGTH)
+        return math.degrees(line * (math.cosh(x) - 1.0) * roll / self.com_h_mm)
+
+    def tip_deg(self, swing_ticks: int, speed_mm_s: float, land_mm: float, clamp: bool = True) -> float:
+        """The tip at a diagonal's end (deg; + toward the front foot in the air) for a pair landing
+        ``land_mm`` ahead of its shoulders, walking at ``speed_mm_s`` (+ forward)."""
+        x = self.two_foot_s(swing_ticks) / self.tau_s
+        line, roll = _TRACK / math.hypot(_TRACK, _LENGTH), _LENGTH / math.hypot(_TRACK, _LENGTH)
+        # the mass starts the diagonal (com_x - land) x 0.467 from its line toward the front foot in
+        # the air and crosses it at 0.467 x the speed (both signed: + forward)
+        hphi = line * ((self.com_x_mm - land_mm) * (math.cosh(x) - 1.0)
+                       + speed_mm_s * self.tau_s * (math.sinh(x) - x))
+        a = math.degrees(roll * hphi / self.com_h_mm)
+        return self.clamp_deg * math.tanh(a / self.clamp_deg) if clamp else a
+
+    def land_x(self, swing_ticks: int, speed_mm_s: float) -> float:
+        """Where a pair walking at ``speed_mm_s`` (+ forward) lands for no tip (mm ahead of its shoulders)."""
+        return self.com_x_mm + self.k(swing_ticks) * speed_mm_s * self.tau_s
+
+
+TROT_FIT = TrotFit()
 
 
 @dataclass
@@ -143,6 +217,7 @@ class PlannerConfig:
     catch_deg: float = 7.0        # a swinging leg lands at once when the body tips toward it this far
     lean: bool = True             # False: the same steps without the body's move (comparisons, tests)
     shift_ms: float | None = None  # a fixed four-foot shift (None: from the speed); 0 = the old tables' walk
+    trot_place: bool = True       # the trot's pairs land where the falling body will be (False: half a stride ahead)
 
 
 def smooth(s: float) -> float:
@@ -170,9 +245,16 @@ class _LeanJob:
 class Planner:
     def __init__(self, model: BodyModel, pattern: str = pat.DEFAULT_PATTERN, direction: str = "forward",
                  speed_mm_s: float | None = None, tick: int = 0, config: PlannerConfig | None = None,
-                 start_height: float | None = None, steer: float = 0.0):
+                 start_height: float | None = None, steer: float = 0.0, trot: pat.TrotConfig | None = None,
+                 fit: TrotFit = TROT_FIT):
         self.model = model
         self.cfg = config or PlannerConfig()
+        self.trot = trot or pat.TROT
+        self.fit = fit
+        self._w = self.trot.w_min        # the trot: this slot's swing ticks (w_min while not in the trot)
+        self._w_tgt = self.trot.w_min    # ... the speed's
+        self._land = [0.0, 0.0]          # ... this slot's landing x per side (left, right) ...
+        self._slot_s = [0.0, 0.0]        # ... for this stride (the target at the slot's start)
         self.tick = tick
         # the lift's start after the lean's move (ticks; negative: before its end)
         self.lead = int(round(pat.LEAN_LEAD_MS / pat.TICK_MS))
@@ -231,7 +313,13 @@ class Planner:
 
     # ---- commands ----------------------------------------------------------------------
     @property
+    def is_trot(self) -> bool:
+        return pat.is_trot(self.pattern)
+
+    @property
     def swing_ticks(self) -> int:
+        if self.is_trot:
+            return self._w
         return max(2, int(round(self.pattern.swing_ms / pat.TICK_MS)))
 
     @property
@@ -253,10 +341,17 @@ class Planner:
         return self._pending_pattern is not None
 
     def timing(self) -> pat.Timing:
-        return pat.timing(self.pattern, self.speed_mm_s)
+        return pat.timing(self.pattern, self.speed_mm_s, self.direction)
+
+    def _homing(self) -> bool:
+        """Every leg goes home: a stop, or a change into or out of the crawl."""
+        return self.stopping or (self._pending_pattern is not None and not self._direct_change())
 
     def _apply_timing(self) -> None:
         tm = self.timing()
+        if self.is_trot:
+            self._apply_trot_timing(tm)
+            return
         shift = tm.shift_ms if self.cfg.shift_ms is None else self.cfg.shift_ms
         n = len(self.pattern.groups)
         self.stance_tgt = (n * (shift + self.pattern.span_ms) - self.pattern.swing_ms) / pat.TICK_MS
@@ -266,11 +361,27 @@ class Planner:
             # changing: no stride longer than the new pattern's at this speed
             # (it switches once the strides and the feet allow, _switch_ok)
             # (a steer's outer side too: _switch_ok)
-            st = min(tm.stride_mm, pat.timing(self._pending_pattern, self.speed_mm_s).stride_mm)
+            st = min(tm.stride_mm, pat.timing(self._pending_pattern, self.speed_mm_s, self.direction).stride_mm)
             self.s_tgt = list(pat.side_strides(self.direction, st, self.steer, cap=st))
         else:
             self.s_tgt = list(pat.side_strides(self.direction, tm.stride_mm, self.steer, cap=self.pattern.stride_mm))
         self._next = None  # the next slot's lean was solved for the old timing
+
+    def _apply_trot_timing(self, tm: pat.Timing) -> None:
+        pend = self._pending_pattern
+        direct = pend is not None and self._direct_change()
+        # out of the trot directly: the swing back to 8 ticks first
+        self._w_tgt = self.trot.w_min if direct else pat.swing_for(tm.speed_mm_s, self.trot)
+        self.stance_tgt = self._w_tgt + pat.STANCE_PLUS
+        if self._homing():
+            self.s_tgt = [0.0, 0.0]
+        elif direct:
+            st = min(tm.stride_mm, pat.timing(pend, self.speed_mm_s, self.direction).stride_mm)
+            self.s_tgt = list(pat.side_strides(self.direction, st, self.steer, cap=st))
+        else:
+            cap = self.trot.stride_per_tick * self._w_tgt - 0.5  # steering: the outer side's stride too
+            self.s_tgt = list(pat.side_strides(self.direction, tm.stride_mm, self.steer, cap=cap))
+        self._next = None
 
     def set_speed(self, speed_mm_s: float) -> None:
         self.speed_mm_s = abs(float(speed_mm_s))
@@ -384,15 +495,18 @@ class Planner:
         no longer than it walks at this speed (+ a tick's slew), every
         foot is within half of that stride (+ SWITCH_SLACK_MM) of its
         shoulder, so its first swings carry no foot further than its own do,
-        and the body is at its height (a lower crawl's lean reaches further)."""
-        st = pat.timing(p, self.speed_mm_s).stride_mm
+        and the body is at its height (a lower crawl's lean reaches further).
+        Out of the trot only once its swing is 8 ticks again."""
+        if self.is_trot and self._w > self.trot.w_min:
+            return False
+        st = pat.timing(p, self.speed_mm_s, self.direction).stride_mm
         return (all(abs(v) <= st + self.pattern.stride_slew_mm for v in self.s_cur)
                 and all(abs(x) <= st / 2 + SWITCH_SLACK_MM for x in self.xg)
                 and abs(self.h - self.model.stance_height(p.body_h_256)) <= HEIGHT_SLEW_MM)
 
     def _direct_change(self) -> bool:
         """The change under way goes straight over (no step home): both patterns have a fixed cadence
-        and as many groups (the trot and the long trot; the walk's four one-leg slots leave its feet
+        and as many groups (the walk's four one-leg slots leave its feet
         spread over four phases, which a two-group gait cannot pick up without a foot waiting a slot
         too long: through the way home, since 2026-11-22)."""
         p = self._pending_pattern
@@ -412,6 +526,11 @@ class Planner:
         return best
 
     def _start_slot(self) -> None:
+        hold = self.halting and self.halt_t < HALT_HOLD_TICKS  # the quick stop's hold: no group steps
+        self._next_slot()
+        self._size_trot_swing(hold)
+
+    def _next_slot(self) -> None:
         self._job = None
         if self._pending_pattern is not None and self._direct_change() and self._switch_ok(self._pending_pattern):
             self.pattern, self._pending_pattern = self._pending_pattern, None
@@ -484,6 +603,65 @@ class Planner:
                 self.levelling = True
             self.tr_ticks = max(1, tr, self.S - (self.settle if tr else 0))
 
+    def _size_trot_swing(self, hold: bool) -> None:
+        """The trot: this slot's swing, the speed's (going home the shortest), at most a tick longer
+        than the last slot's (the build-up) and at most a tick shorter, but always long enough for the
+        step it carries (a square-up from a long stride, a stride still growing, steering)."""
+        if not self.is_trot:
+            self._w = self.trot.w_min
+            return
+        homing = self._homing()
+        w = self.trot.w_min if homing else min(self._w_tgt, self._w + 1)  # the build-up: a tick a step
+        n = len(self.pattern.groups)
+        group = self.pattern.groups[(self.k + 1) % n] if hold else self._group()
+        to = {}
+        for leg in group:
+            side = 0 if LEFT[leg] else 1
+            sc = self.s_cur[side]
+            if homing or not self.cfg.trot_place:
+                to[leg] = sc / 2.0
+            else:
+                # the landing at the target stride, or (slowing: the stride shrinks 0.75 mm a tick,
+                # the swing a tick a step) at the stride now, whichever is further from the foot
+                lt, st = self._land_for(side), self.s_tgt[side]
+                lc = sc / 2.0 - (st / 2.0 - lt) * min(1.0, max(0.0, sc / st)) if abs(st) > 1e-6 else sc / 2.0
+                to[leg] = lc if abs(lc - self.xg[leg]) > abs(lt - self.xg[leg]) else lt
+            d = abs(to[leg] - self.xg[leg]) + abs(sc) / max(1.0, self.stance_ticks)
+            w = max(w, int(math.ceil(d / self.trot.step_mm_per_tick - 1e-9)))
+        w = max(self.trot.w_min, min(self.trot.w_max + 2, max(w, self._w - 1)))
+        if homing or self._pending_pattern is not None:  # not the steady trot: the joints checked
+            while w < self.trot.w_max + 2 and not all(self._swing_ok(leg, to[leg], w) for leg in group):
+                w += 1
+        self._w = w
+        for side in (0, 1):
+            self._land[side] = self._land_for(side)
+            self._slot_s[side] = self.s_tgt[side]
+
+    def _swing_ok(self, leg: int, to: float, w: int) -> bool:
+        """A swing of ``w`` ticks from where the foot is to ``to`` (the plan's cosine path, the
+        pattern's lift, the height now) turns no joint more than joint_deg_per_tick a tick."""
+        lim = math.radians(self.trot.joint_deg_per_tick)
+        x0, h, lift = self.xg[leg], self.h, self.pattern.step_h_mm
+        a = self.model.ik(leg, x0, h)
+        for j in range(1, w + 1):
+            b = self.model.ik(leg, x0 + (to - x0) * smooth(j / w),
+                              h - lift * (1.0 - math.cos(2.0 * math.pi * j / w)) / 2.0)
+            if abs(b[0] - a[0]) > lim or abs(b[1] - a[1]) > lim:
+                return False
+            a = b
+        return True
+
+    def _land_for(self, side: int) -> float:
+        """Where this side's trot pair lands at the target stride (mm ahead of its shoulder)."""
+        s = self.s_tgt[side]
+        if self._homing() or not self.cfg.trot_place or abs(s) < 1e-6:
+            return s / 2.0
+        v = s / ((self._w_tgt + pat.STANCE_PLUS) * pat.TICK_MS / 1000.0)
+        x = self.fit.land_x(self._w_tgt, v)
+        # no further out than half a stride + 6 mm; going forward never behind the shoulder, going
+        # backward never ahead of it
+        return min(s / 2.0 + 6.0, max(0.0, x)) if s > 0 else max(s / 2.0 - 6.0, min(0.0, x))
+
     def _move_ticks(self, a: Lean, b: Lean, height: float) -> int:
         """Ticks the body needs to move from lean a to lean b on a smooth
         (cosine) profile: a side or an end that drops falls no faster than
@@ -503,7 +681,9 @@ class Planner:
         """A slot's four-foot ticks for the stance time now (ticks): the shift
         follows the stance time as it slews after a speed change, so the feet
         on the ground slide one stride per cycle and the next swing never has
-        to carry a foot further than a stride in its fixed time."""
+        to carry a foot further than a stride in its fixed time. The trot: one tick."""
+        if self.is_trot:
+            return 1
         n = len(self.pattern.groups)
         w = self.pattern.swing_ms
         return max(0, int(round(((stance * pat.TICK_MS + w) / n - self.pattern.span_ms) / pat.TICK_MS)))
@@ -513,7 +693,16 @@ class Planner:
         return self.s_cur[0 if LEFT[leg] else 1] / self.stance_ticks
 
     def _target_x(self, leg: int) -> float:
-        return self.s_cur[0 if LEFT[leg] else 1] / 2.0 + self.centre
+        side = 0 if LEFT[leg] else 1
+        s = self.s_cur[side]
+        if not self.is_trot:
+            return s / 2.0 + self.centre
+        st = self._slot_s[side]
+        if not self.cfg.trot_place or abs(st) < 1e-6:
+            return s / 2.0
+        # the slot's landing: its shift from half a stride, scaled with the stride as it slews (a
+        # stop asked mid-swing keeps it: the swing's path does not jump)
+        return s / 2.0 - (st / 2.0 - self._land[side]) * min(1.0, max(0.0, s / st))
 
     def _slewed(self, s, stance: float, h: float):
         """One tick of the strides, the stance time and the height toward

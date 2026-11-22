@@ -1,7 +1,9 @@
-# Self-measurement: Kilo measures himself (B1)
+# Self-measurement: Kilo measures himself (C5 twice)
 
-Press **B1** (column B, bottom row) with Kilo standing on a flat, hard
-floor. For about a minute and a quarter he leans in small stairs, twists,
+Press **C5** (column C, row 5 from the bottom: the calibration posture) and
+then **C5 again**, with no other key in between, with Kilo on a flat, hard
+floor. The first press is the calibration posture, as always; the second
+makes him stand up and, once he is still, starts the routine. For about a minute and a quarter he leans in small stairs, twists,
 spreads his feet, and lifts one foot at a time a few millimetres while he
 slides his body over the others; then he stands. Afterwards, on the
 laptop, `kilo measure fit` (from the card) or `kilo measure fetch` (over
@@ -21,7 +23,11 @@ What you need to do, in short:
    rug, not a slope), with about **30 cm clear** around him. He moves his
    body a few centimetres and does not walk.
 2. Battery charged (he refuses below 7.4 V, as for the rear-up).
-3. Press **B6**, let him stand still for two seconds, press **B1**.
+3. Press **C5** (he takes the calibration posture), then **C5** again
+   whenever you are ready: he stands, and once he has been still for about
+   a second and a half the routine starts by itself. Any other key pressed
+   between the two C5s makes the next C5 a first press again (the
+   calibration posture). (B1 started it until 2026-11-22.)
 4. Watch. It is longer than before: **75 to 90 seconds**. Stop him
    whenever you like (below). Picking him up is fine: he stops and stands.
    **One thing to note while you watch**: each time a foot comes up
@@ -38,7 +44,7 @@ What you need to do, in short:
    Write what you saw and the table it prints in
    `docs/self-measurement-results.md`.
 
-No step is timed: he waits for B1, and the laptop waits for you.
+No step is timed: he waits for the second C5, and the laptop waits for you.
 
 ## Words used here
 
@@ -129,8 +135,9 @@ only 3 mm.)
 
 ## How to stop him
 
-- **Any key** on the remote stops it at once and he stands. B1 again is
-  the usual way. B6 (stand), A7 (sleep) and C7 (freeze) then also do their
+- **Any key** on the remote stops it at once and he stands. C5 again is
+  the usual way (it only stops it; it does not take the calibration
+  posture). B6 (stand), A7 (sleep) and C7 (freeze) then also do their
   own job; the other keys only stop it.
 - **Picking him up** is fine: the tilt goes far from what the model
   expects (or past 25 degrees) and he stops and stands. Put him back down
@@ -140,14 +147,20 @@ only 3 mm.)
 - He also stops by himself if the body leaves the stream, the link drops,
   or the Pi's loop stalls.
 
-He will not start (and nothing moves) when: the battery is under 7.4 V at
-rest; he is on USB power; he is not standing (B6 first); he is tilted more
-than 10 degrees, or has moved more than 3 degrees in the last second
-(still settling, in a hand, on a slope). While he walks, B1 stops the walk
-first and then usually refuses (he has not stood still for a second yet):
-press it again. While the behaviour runner (A5) runs, B1 is ignored: B6
-first. The remote's log line says why
-(`kilo log --host ...`): `remote B1 (0x4A, measure): measure refused: ...`.
+After the second C5 he stands (the routine starts from standing), then
+the routine is asked to start every moment from 1.5 s on. It will not start
+(he stays standing, nothing else moves) when: the battery is under 7.4 V
+at rest; he is on USB power; he is still tilted more than 10 degrees, or
+moving more than 3 degrees within a second, 6 s after the second C5
+(settling, in a hand, on a slope). A key pressed while he settles cancels
+it. While the behaviour runner (A5) runs, C5 is ignored: B6 first. The
+remote's log line says why (`kilo log --host ...`): `remote C5 (0x90,
+calibration posture): standing, measure refused: ...`.
+
+From the calibration posture to standing is the body's own posture change,
+the same as pressing B6 there; the routine's first part (75 ticks of
+holding level at the walking stance) only starts once he stands still, as
+when B1 started it from standing.
 
 ## Safety, in numbers
 
@@ -410,7 +423,7 @@ Not measured, and why:
 ## What is recorded
 
 The run is in the flight recorder like a walk or a trick: `kilo runs
---host ...` lists it as `self-measurement (B1)`, `kilo runs --fetch`,
+--host ...` lists it as `self-measurement (C5 twice)`, `kilo runs --fetch`,
 `kilo card CARD --fetch` and `kilo measure fetch` get it. In it: which
 script it played and its tip rule (`measure ... script=2 ...`), every
 foot position sent and the attitude the walks' (rigid) model predicts for
@@ -423,8 +436,8 @@ ended (`end reason=DONE|STOPPED|FELL|ABORTED`).
 ## Where it lives
 
 - The routine on the Pi: `kernel/mind/measure/` (`script.h`: the parts and
-  their poses; `measure.h`: starting, streaming, the tip, stopping), B1 in
-  `kernel/mind/remote/`.
+  their poses; `measure.h`: starting, streaming, the tip, stopping), C5
+  twice in `kernel/mind/remote/`.
 - The same script in Python (and the first design's, for its recordings),
   the tip rule's reference, the statics (how he stands on his feet with
   springy legs), the fit and the simulation: `mind/kilo/measure/`.

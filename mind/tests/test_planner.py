@@ -78,10 +78,11 @@ def test_stability_margin():
 # ---- patterns and speed --------------------------------------------------------------------------
 
 def test_pattern_tables_and_default_timing():
-    # the tables of 2026-11-16 (before: trot 35 mm / 393 ms at 144 mm/s, top 152; walk one leg at a
-    # time with the lean, 40 mm / 2550 ms at 17.8, top 21.5; the crawl unchanged)
+    # the tables of 2026-11-16 (walk one leg at a time with the lean before, 40 mm / 2550 ms at 17.8,
+    # top 21.5; the crawl unchanged) and the trot of 2026-11-22 (test_trot.py: its swing grows with the
+    # speed, 8 ticks at 144 mm/s on a 9.5-tick stance)
     t = pat.timing("trot")
-    assert (round(t.stride_mm, 2), round(t.period_ms), t.shift_ms) == (27.36, 340, 20)
+    assert (round(t.stride_mm, 2), round(t.period_ms), t.shift_ms) == (27.36, 350, 20)
     assert t.speed_mm_s == pytest.approx(144.0, abs=0.1)
     assert pat.PATTERNS["trot"].groups == ((LF, RB), (RF, LB)) and pat.PATTERNS["trot"].couple_ms == 0
     # the walk (since 2026-11-22): the lateral sequence one leg at a time, the strides centred under
@@ -90,7 +91,7 @@ def test_pattern_tables_and_default_timing():
     assert wp.groups == ((LB,), (LF,), (RB,), (RF,)) and wp.couple_ms == 0 and wp.centre_com
     assert [pat.step_height(wp, s) for s in (30, 40, 47, 54)] == [8, 8, 7, 6]
     assert pat.PATTERNS["crawl"].groups == ((LB,), (LF,), (RB,), (RF,))
-    assert [pat.PATTERNS[p].swing_ms for p in ("trot", "walk", "crawl")] == [150, 220, 300]
+    assert [pat.PATTERNS[p].swing_ms for p in ("trot", "walk", "crawl")] == [160, 220, 300]
     assert not pat.PATTERNS["walk"].lean and not pat.PATTERNS["trot"].lean and pat.PATTERNS["crawl"].lean
     w = pat.timing("walk")
     assert (round(w.stride_mm, 1), round(w.period_ms), w.shift_ms) == (42.9, 960, 20)
@@ -99,13 +100,10 @@ def test_pattern_tables_and_default_timing():
     assert (c.stride_mm, round(c.period_ms)) == (50, 2550) and c.speed_mm_s == pytest.approx(22.2, abs=0.1)
     assert pat.PATTERNS["crawl"].body_h_256 == 179 and pat.PATTERNS["walk"].body_h_256 == 205
     ranges = {n: pat.speed_range(n) for n in pat.PATTERN_NAMES}
-    # the trot's top since 2026-11-17: a 44 mm stride (35 before: 184.2 mm/s), its lift tapering
-    # from 8 mm at 35 mm to 6 mm at 44 (the swing's fastest joint stays under 9.6 deg a tick)
-    assert ranges["trot"] == pytest.approx((42.1, 231.6), abs=0.1)
-    tr = pat.PATTERNS["trot"]
-    assert [pat.step_height(tr, s) for s in (8, 35, 39.5, 44, 50)] == [8, 8, 7, 6, 6]
-    assert pat.step_height(pat.PATTERNS["crawl"], 50) == 15
-    assert [pat.PATTERNS[n].stride_slew_mm for n in ("walk", "trot", "crawl")] == [1.0, 1.5, 0.5]
+    # the trot's top: 207 mm/s, a 51.8 mm stride on an 11-tick swing, the lift 8 mm at every stride
+    assert ranges["trot"] == pytest.approx((42.1, 207.0), abs=0.1)
+    assert pat.step_height(pat.PATTERNS["trot"], 50) == 8 and pat.step_height(pat.PATTERNS["crawl"], 50) == 15
+    assert [pat.PATTERNS[n].stride_slew_mm for n in ("walk", "trot", "crawl")] == [1.0, 0.75, 0.5]
     assert ranges["walk"] == pytest.approx((10.8, 73.0), abs=0.1)
     assert ranges["crawl"][1] == pytest.approx(26.9, abs=0.1)
 
@@ -122,9 +120,13 @@ def test_timing_clamps(name):
     slow = pat.timing(name, lo / 3)
     assert slow.stride_mm == pat.STRIDE_MIN_MM and slow.speed_mm_s == pytest.approx(lo)
     assert pat.timing(name, -20) == pat.timing(name, 20)  # a magnitude
-    if pat.fixed_cadence(p):
-        # the walk and the trot: one cycle at every speed, the stride alone changes (their four-foot
-        # phase stays one tick: the body's balance loop never acts in them, §12)
+    if pat.is_trot(p):
+        # the trot: one tick on four feet at every speed, the swing growing with it (test_trot.py)
+        assert pat.timing(name, lo).shift_ms == pat.timing(name, hi).shift_ms == 20
+        assert pat.timing(name, lo).period_ms < pat.timing(name, hi).period_ms
+    elif pat.fixed_cadence(p):
+        # the walk: one cycle at every speed, the stride alone changes (its four-foot phase stays
+        # one tick: the body's balance loop never acts in it, §12)
         assert pat.timing(name, lo).period_ms == pat.timing(name, hi).period_ms
         assert pat.timing(name, lo).shift_ms == pat.timing(name, hi).shift_ms == 20
         assert pat.timing(name, lo).stride_mm < pat.timing(name, hi).stride_mm == pytest.approx(p.stride_mm)
@@ -192,19 +194,15 @@ def test_plan_fits_feet_and_the_slew(name):
 
 def fast_bound(name: str, v: float, steer: float = 0.0) -> float:
     """The fastest joint a fast gait may ask, deg a tick: 8.3 (415 deg/s; the
-    floor runs of 2026-11 asked up to 414 at 180 mm/s and kept up) up to the
-    trot's old top of 184 mm/s. Loosened to 9.6 (480 deg/s) for the trot
-    above it, and for the trot steering at any speed (its outer side takes
-    the longer stride), since 2026-11-17: its 44 mm stride is what makes it
-    faster, and the swing has to carry it in the same 8 ticks; still under
-    the body's 10 deg/tick slew, with 0.4 left for FEET's 1 mm rounding
-    (which alone moves the knee up to ~1 deg a tick: 34 mm steering asks 9.1,
-    35 mm straight 8.3). Not yet run on the floor. The walk (since
-    2026-11-22): 9.3 (465 deg/s), its 54 mm stride in a 220 ms swing asks up
-    to 448 at its top (the trot's top asks 476, the long trot's 451)."""
+    floor runs of 2026-11 asked up to 414 at 180 mm/s and kept up). The
+    trot above its 8-tick swing (150 mm/s) and steering at any speed (its
+    outer side takes the longer stride): 9.7 (485 deg/s, test_trot.py
+    BOUND), under the body's 10 deg/tick slew, 0.1 of it for FEET's 1 mm
+    rounding at its long strides. The walk (since 2026-11-22): 9.3 (465
+    deg/s), its 54 mm stride in a 220 ms swing asks up to 448 at its top."""
     if name == "walk":
         return 9.3
-    return 9.6 if name == "trot" and (v > 184.3 or steer) else 8.3
+    return 9.7 if name == "trot" and (v > 150.0 or steer) else 8.3
 
 
 @pytest.mark.parametrize("name", ("walk", "trot"))
@@ -252,10 +250,10 @@ def test_steering_bends_the_path_inside_the_reach_and_the_slew(name, direction):
 @pytest.mark.parametrize("to", ("forward", "back"))
 def test_a_turn_in_place_goes_straight_within_a_second(name, to):
     """The remote's B7 / B5 while turning in place (2026-11-17): the strides
-    move 1.5 mm a tick in the trot (0.5 before: 2 s from a turn at 1x to
-    straight), so the turn becomes a straight trot in under 0.7 s; the walk
-    (1.0 mm a tick, strides up to 43 mm at 1x) in under 1.6 s, under two of
-    its cycles; every foot in reach and every joint inside the bound."""
+    move 0.75 mm a tick in the trot (its build-up), so the turn becomes a
+    straight trot in under 1.4 s; the walk (1.0 mm a tick, strides up to 43
+    mm at 1x) in under 1.6 s, under two of its cycles; every foot in reach
+    and every joint inside the bound."""
     p = Planner(M, name, "left", tick=0)
     ticks = [p.next() for _ in range(150)]
     p.set_direction(to)
@@ -263,7 +261,7 @@ def test_a_turn_in_place_goes_straight_within_a_second(name, to):
     while any(abs(a - b) > 1e-9 for a, b in zip(p.s_cur, p.s_tgt)):
         ticks.append(p.next())
         n += 1
-    assert n * 20 < (1600 if name == "walk" else 700), n
+    assert n * 20 < (1600 if name == "walk" else 1400), n
     ticks += [p.next() for _ in range(100)]
     check_ticks(ticks, (name, to))
     assert max(joint_step_deg(a, b) for a, b in zip(ticks, ticks[1:])) < fast_bound(name, 0)
@@ -386,9 +384,9 @@ def test_direction_and_pattern_changes():
         t = p.next()
         seen.append((p.pattern.name, t.lifting))
     first = next(i for i, (n, _) in enumerate(seen) if n == "walk")
-    # trot to walk directly (§12): the strides no longer than the walk's at this speed, then the
-    # next slot is the walk's; before 2026-11-16 every leg stepped home first
-    assert first * 20 < 600
+    # trot to walk through the legs' way home (since 2026-11-22: the walk's four one-leg slots; the
+    # trot's strides shrink 0.75 mm a tick): 0.7 s from this turn
+    assert first * 20 < 800
     assert all(len(lf) <= 1 for n, lf in seen[first:] if n == "walk")
     assert p.s_cur == pytest.approx([-0.8 * 54, 0.8 * 54])  # turning left carried over, the walk's top stride
     # into the crawl (a leaning pattern): through the legs' way home, as before

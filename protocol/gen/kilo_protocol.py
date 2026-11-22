@@ -3083,10 +3083,10 @@ MODEL_OUTLINE_HALF_WIDTH_MM = 30.0
 MODEL_INERTIA_FRAME_BOX_MM = (130, 60, 45)
 MODEL_SENSOR_ULTRASONIC_HEIGHT_MM = 80
 MODEL_SENSOR_ULTRASONIC_FLOOR_TILT_DEG = 12
-MODEL_VIEW_LONGTROT_COM_X_MM = 3.5
-MODEL_VIEW_LONGTROT_COM_H_MM = 79.0
-MODEL_VIEW_LONGTROT_EXTRA_MS = 120.0
-MODEL_VIEW_LONGTROT_CLAMP_DEG = 2.3
+MODEL_VIEW_TROT_COM_X_MM = 3.5
+MODEL_VIEW_TROT_COM_H_MM = 79.0
+MODEL_VIEW_TROT_EXTRA_MS = 120.0
+MODEL_VIEW_TROT_CLAMP_DEG = 2.3
 MODEL_VIEW_TRICKS_COM_DX_MM = -5.5
 MODEL_VIEW_TRICKS_COM_DY_MM = -5.0
 MODEL_VIEW_TRICKS_SAG_DEG_PER_KG_CM = 4.0
@@ -3095,7 +3095,7 @@ MODEL_VIEW_TRICKS_IMU_PITCH_DEG = 1.9
 MODEL_VIEW_TRICKS_IMU_ROLL_DEG = 2.0
 MODEL_VIEW_TRICKS_RIGID_COM_DY_MM = -2.0
 MODEL_VIEWS: dict[str, dict[str, float]] = {
-    'longtrot': {'com_x_mm': 3.5, 'com_h_mm': 79.0, 'extra_ms': 120.0, 'clamp_deg': 2.3},
+    'trot': {'com_x_mm': 3.5, 'com_h_mm': 79.0, 'extra_ms': 120.0, 'clamp_deg': 2.3},
     'tricks': {'com_dx_mm': -5.5, 'com_dy_mm': -5.0, 'sag_deg_per_kg_cm': 4.0, 'tail_droop_deg': 16.0, 'imu_pitch_deg': 1.9, 'imu_roll_deg': 2.0},
     'tricks_rigid': {'com_dy_mm': -2.0},
 }
@@ -3141,7 +3141,7 @@ MODEL_ABOUT: dict[str, tuple[str, str, str]] = {
     'inertia.frame_box_mm': ("the frame's mass spread as a box this size", 'mm', 'estimate'),
     'sensor.ultrasonic_height_mm': ('the distance sensor above the floor, standing', 'mm', 'estimate (taken a little low)'),
     'sensor.ultrasonic_floor_tilt_deg': ('looking down more than this, the sensor sees the floor', 'deg', 'estimate'),
-    'views.longtrot': ("the long trot's own fit of how he rocks on a diagonal", '', 'floor recordings of 2026-11-15..17'),
+    'views.trot': ("the trot's own fit of how he rocks on a diagonal", '', 'floor recordings of 2026-11-15..17'),
     'views.tricks': ("the tricks' own fit (the rear-up is designed on it)", '', 'rear-up plays of 2026-11-19..21'),
     'views.tricks_rigid': ("the rear-up's first, rigid fit, before the right hind shoulder was re-seated", '', 'the two falls of 2026-11-17'),
 }

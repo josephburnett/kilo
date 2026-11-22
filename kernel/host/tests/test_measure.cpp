@@ -2,7 +2,7 @@
 // script against the Python's vectors (tests/measure_vectors.txt), its
 // poses' safety (every pose in the FEET ranges and the legs' reach, the
 // centre of mass inside the feet with margin under the uncertainty bands,
-// the worst tilt a tip can give), and B1 in the whole Mind on a scripted
+// the worst tilt a tip can give), and C5 twice in the whole Mind on a scripted
 // body: a run to its end (the stream, the balance off and back, the run in
 // the flight recorder, STAND), every key stopping it, a fall, the
 // refusals (battery, USB, not standing, not level, not still), a tip
@@ -164,7 +164,7 @@ void test_safety() {
   CHECK(max_tilt <= 12);       // a tip is caught 5 mm down; far from the body's fall reflex (75 deg)
 }
 
-// ---- B1 in the whole Mind ------------------------------------------------------------------------------
+// ---- C5 twice in the whole Mind ---------------------------------------------------------------------------
 struct Rig : MindRig {
   std::function<void(Rig&)> each;
   // The scripted body's IMU reads what each FEET predicted for its tick (a body that does what the
@@ -236,6 +236,12 @@ struct Rig : MindRig {
   void stand() {  // B6, then a second of standing still
     key(0x02, 1500);
   }
+  // C5 twice (remote.h): the calibration posture, then STAND and the routine once he is still
+  void measure_keys() {
+    key(0x90, 1500);
+    key(0x90, 100);
+    for (int i = 0; i < 80 && !measuring(); i++) run_ms(100);
+  }
   bool measuring() { return mind.measure().active(); }
   const Goal* goal(uint8_t t) { return mind.link().goal(t); }
 };
@@ -249,10 +255,10 @@ MindConfig cfg() {
 void test_full_run() {
   Rig r(cfg());
   r.start();
-  r.stand();
-  r.key(0x4A, 100);  // B1
+  r.measure_keys();
   CHECKF(r.measuring(), "not measuring");
-  CHECK(r.ring_has("remote B1 (0x4A, measure): measuring (about 80 s; any key stops it)"));
+  CHECK(r.ring_has("remote C5 (0x90, calibration posture): posture calib (C5 again: measure himself)"));
+  CHECK(r.ring_has("remote C5 (0x90, calibration posture): standing, measuring (about 80 s; any key stops it)"));
   r.run_ms(1000);
   const Goal* b = r.goal(KILO_MSG_SET_BALANCE);
   CHECK(b != nullptr && b->payload[0] == 0);  // the balance off while it measures
@@ -320,7 +326,7 @@ void test_stops() {
     int posture;  // the posture goal after
   } cases[] = {
       {0x02, "remote B6 (0x02, stand): measurement stopped, posture stand", KILO_POSTURE_STAND},
-      {0x4A, "remote B1 (0x4A, measure): measurement stopped: standing", KILO_POSTURE_STAND},
+      {0x90, "remote C5 (0x90, calibration posture): measurement stopped: standing", KILO_POSTURE_STAND},
       {0xA2, "remote A7 (0xA2, sleep): measurement stopped, posture rest", KILO_POSTURE_REST},
       {0xE2, "remote C7 (0xE2, freeze): frozen (measurement stopped: standing)", KILO_POSTURE_STAND},
       {0x68, "remote A4 (0x68, trot): measurement stopped: standing (only B6, A7 and C7 act after it)",
@@ -333,8 +339,7 @@ void test_stops() {
   for (const Case& c : cases) {
     Rig r(cfg());
     r.start();
-    r.stand();
-    r.key(0x4A, 100);
+    r.measure_keys();
     r.run_ms(4000);
     CHECK(r.measuring());
     size_t feet = r.body.count(KILO_MSG_FEET);
@@ -355,8 +360,7 @@ void test_fall_and_tilt() {
   {
     Rig r(cfg());
     r.start();
-    r.stand();
-    r.key(0x4A, 100);
+    r.measure_keys();
     r.run_ms(3000);
     r.body.event(KILO_EVENT_FELL, 2);
     r.run_ms(100);
@@ -367,8 +371,7 @@ void test_fall_and_tilt() {
   {
     Rig r(cfg());
     r.start();
-    r.stand();
-    r.key(0x4A, 100);
+    r.measure_keys();
     r.run_ms(3000);
     r.follow = false;
     r.body.roll = 30 * 16;  // picked up, or over
@@ -381,8 +384,7 @@ void test_fall_and_tilt() {
   {
     Rig r(cfg());
     r.start();
-    r.stand();
-    r.key(0x4A, 100);
+    r.measure_keys();
     r.run_ms(3000);
     r.follow = false;
     r.body.pitch = 12 * 16;  // 12 deg off the model's level
@@ -401,7 +403,6 @@ void test_refusals() {
       {"battery", [](Rig& r) { r.body.batt_mv = 7300; }, [](Rig&) {}, "measure refused: battery 7300 mV at rest (needs 7400)"},
       {"usb", [](Rig& r) { r.body.flags |= KILO_TELEMETRY_FLAGS_NO_BATTERY; }, [](Rig&) {},
        "measure refused: on USB power (no battery)"},
-      {"lying", [](Rig&) {}, [](Rig& r) { r.key(0xA2, 1500); }, "measure refused: not standing: B6 first"},
       {"tilted", [](Rig&) {}, [](Rig& r) { r.body.pitch = 12 * 16; r.run_ms(1100); },
        "measure refused: not level and still (pitch 12.00 roll 0.00"},
       {"moving", [](Rig&) {},
@@ -418,19 +419,23 @@ void test_refusals() {
     r.start();
     r.stand();
     c.set(r);
-    r.key(0x4A, 100);
+    r.key(0x90, 1500);  // C5 twice: the calibration posture, then STAND and the routine asked until it gives up
+    r.key(0x90, 100);
+    r.run_ms(7000);
     CHECKF(!r.measuring() && r.ring_has(c.why), "%s: no '%s'", c.name, c.why);
     if (!r.ring_has(c.why))
       for (const std::string& l : r.log.lines)
         if (l.find("remote B") != std::string::npos) std::printf("    %s\n", l.c_str());
     CHECK(r.body.count(KILO_MSG_FEET) == 0 && r.mind.recorder().runs_total() == 0);
   }
-  {  // no stand at all (just booted: no posture goal)
+  {  // C5 once: the calibration posture, nothing measured
     Rig r(cfg());
     r.start();
     r.run_ms(1000);
-    r.key(0x4A, 100);
-    CHECK(!r.measuring() && r.ring_has("measure refused: not standing: B6 first"));
+    r.key(0x90, 3000);
+    CHECK(!r.measuring() && r.body.count(KILO_MSG_FEET) == 0);
+    const Goal* p = r.goal(KILO_MSG_SET_POSTURE);
+    CHECK(p != nullptr && p->payload[1] == KILO_POSTURE_CALIB);
   }
 }
 
@@ -460,7 +465,7 @@ void test_tip() {
     }
     if (s.exp > e) q.body.pitch = q.body.roll = 0;
   };
-  r.key(0x4A, 100);
+  r.measure_keys();
   for (int i = 0; i < 1100 && r.measuring(); i++) r.run_ms(100);
   CHECK(!r.measuring() && r.mind.measure().ended_ok() && r.mind.measure().tips() == 1);
   CHECK(r.marked("tip exp=edge_lf") && r.marked("base exp=edge_lf settle_p=0.00 settle_r=0.00 lifted_p=0.00"));
@@ -498,7 +503,7 @@ void test_lean_is_not_a_tip() {
       q.body.pitch = (int16_t)std::lround(deg * 37 / 79.18 * 16);  // along the model's tip (37, 70) a16
       q.body.roll = (int16_t)std::lround(deg * 70 / 79.18 * 16);
     };
-    r.key(0x4A, 100);
+    r.measure_keys();
     for (int i = 0; i < 1100 && r.measuring(); i++) r.run_ms(100);
     CHECK(!r.measuring() && r.mind.measure().ended_ok());
     CHECK(r.marked("base exp=edge_lf settle_p=0.00 settle_r=0.00 lifted_p=0.8"));

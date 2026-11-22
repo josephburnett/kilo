@@ -44,8 +44,7 @@ class FakeLink:
 class WalkSim:
     def __init__(self, pattern: str = "walk", direction: str = "forward", speed: float | None = None,
                  config: PlannerConfig | None = None, balance: bool = True, kp_q8: int = 253,
-                 model: BodyModel | None = None, body_model: BodyModel | None = None, planner_factory=None,
-                 **vb_kw: Any):
+                 model: BodyModel | None = None, body_model: BodyModel | None = None, **vb_kw: Any):
         self.vb = VirtualBody(None, model=body_model, **vb_kw)
         self.vb.telem_div = 1
         self.vb.posture = "STANCE"
@@ -61,10 +60,7 @@ class WalkSim:
         for rx, m in self.link.state.history:
             bc.add(m.tick, rx)
         start = int(math.floor(bc.now(self.now + 0.005))) + LOOKAHEAD
-        if planner_factory is not None:  # another planner (kilo.planner.longtrot): factory(model, direction, speed, tick, config)
-            self.planner = planner_factory(model or BodyModel(), direction, speed, start, config)
-        else:
-            self.planner = Planner(model or BodyModel(), pattern, direction, speed, tick=start, config=config)
+        self.planner = Planner(model or BodyModel(), pattern, direction, speed, tick=start, config=config)
         self.stream = Stream(self.link, self.planner, self.vb.epoch, bc, self._handover)
 
     def _handover(self) -> None:

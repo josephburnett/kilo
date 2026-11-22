@@ -43,7 +43,7 @@ STILL_MM = 3.0  # "stopped": the body stays this close to where it ends
 REPLAN_TICKS = 4  # "replan": the plan LOOKAHEAD (5) ahead, planned again from the body's tick + 2: 4 ticks sooner
 MODES = ("planned", "quick", "replan")
 WALK_FACTORS = (0.4, 0.7, 1.0, 1.15, 1.25)  # the remote's levels (kernel/mind/remote/remote.cpp)
-TROT_FACTORS = (0.4, 0.7, 1.0, 1.3, 1.6)
+TROT_FACTORS = (0.4, 0.7, 1.0, 1.25, 1.4)
 
 
 def level_speed(pattern: str, level: int) -> float:

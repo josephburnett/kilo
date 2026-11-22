@@ -1,5 +1,6 @@
 #include "planner/patterns.h"
 #include "planner/model.h"
+#include "planner/trot.h"
 #include "util/str.h"
 
 namespace kilo {
@@ -8,29 +9,23 @@ namespace planner {
 // The walk lifts LB, LF, RB, RF one at a time (the lateral sequence, evenly
 // spaced, the strides centred under the centre of mass); the trot the diagonal pairs LF+RB, RF+LB; the crawl LB, LF, RB, RF
 // one at a time with the lean. Values (and why) as in patterns.py's PATTERNS
-// (the trot's 44 mm stride and its lift tapering from 8 mm at 35 mm to 6 at
-// 44, its strides' 1.5 mm a tick: since 2026-11-17; the walk: since 2026-11-22).
+// (the walk: since 2026-11-22; the trot's strides 0.75 mm a tick, its build-up, an 8 mm lift at
+// every stride, 144 mm/s by default: its timing is trot.h's schedule, its swing_ms, stride_mm and
+// period_ms only its table entry's; since 2026-11-22).
 const Pattern kPatternTable[kPatterns] = {
     {"walk", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 220, 54, 8, 205, 960, 20, 740, false, 0, 58, 6, 40, 1.0,
      true},
-    {"trot", 2, 2, {{LF, RB}, {RF, LB}, {0, 0}, {0, 0}}, 150, 44, 8, 205, 340, 20, 190, false, 0, 144, 6, 35, 1.5,
+    {"trot", 2, 2, {{LF, RB}, {RF, LB}, {0, 0}, {0, 0}}, 160, 52, 8, 205, 360, 20, 250, false, 0, 144, -1, 0, 0.75,
      false},
     {"crawl", 4, 1, {{LB, 0}, {LF, 0}, {RB, 0}, {RF, 0}}, 300, 50, 15, 179, 2550, 0, 4000, true, 0, -1, -1, 0, 0.5,
      false},
 };
-
-// longtrot.py LONG_TROT: the trot's pairs, an 8 mm lift at every stride (no taper: its swing is
-// longer), the strides 0.75 mm a tick (the build-up), 144 mm/s by default (the planner's timing
-// for it is longtrot.h's long_timing(); swing_ms, stride_mm and period_ms are its table entry's).
-const Pattern kLongTrot = {"longtrot", 2, 2, {{LF, RB}, {RF, LB}, {0, 0}, {0, 0}}, 160, 52, 8, 205, 360, 20, 250,
-                           false, 0, 144, -1, 0, 0.75, false};
 
 const Pattern& default_pattern() { return kPatternTable[1]; }
 
 const Pattern* find_pattern(const char* name) {
   for (const Pattern& p : kPatternTable)
     if (str_ieq(name, p.name)) return &p;
-  if (str_ieq(name, kLongTrot.name)) return &kLongTrot;
   return nullptr;
 }
 
@@ -67,7 +62,28 @@ real default_speed(const Pattern& p) {
   return p.stride_mm / (p.period_ms - p.swing_ms) * (real)1000.0;
 }
 
+// patterns.py trot_timing(): (swing, stride, speed) at |speed| (< 0: 144), clamped to the trot's
+// slowest and to kTrotTopMmS (kTrotTopBackMmS backward).
+static void trot_timing(real speed_mm_s, bool back, int* swing, real* stride, real* speed) {
+  real v = speed_mm_s < 0 ? kPatternTable[1].default_mm_s : speed_mm_s;
+  real lo = kStrideMinMm / (((real)kTrotWMin + kTrotStancePlus) * kTickMs / (real)1000.0);
+  v = m_min(back ? kTrotTopBackMmS : kTrotTopMmS, m_max(lo, v));
+  int w = trot_swing_for(v);
+  real stance = ((real)w + kTrotStancePlus) * kTickMs / (real)1000.0;
+  real s = m_max(kStrideMinMm, v * stance);
+  *swing = w;
+  *stride = s;
+  *speed = s / stance;
+}
+
 void speed_range(const Pattern& p, real* lo, real* hi) {
+  if (is_trot(p)) {
+    int w;
+    real s;
+    trot_timing(0, false, &w, &s, lo);
+    *hi = kTrotTopMmS;
+    return;
+  }
   real st_lo, st_hi;
   stance_limits(p, &st_lo, &st_hi);
   if (fixed_cadence(p)) st_hi = st_lo;
@@ -75,7 +91,14 @@ void speed_range(const Pattern& p, real* lo, real* hi) {
   *hi = p.stride_mm / st_lo * (real)1000.0;
 }
 
-Timing timing(const Pattern& p, real speed_mm_s) {
+Timing timing(const Pattern& p, real speed_mm_s, Direction d) {
+  if (is_trot(p)) {
+    int w;
+    real s, v;
+    trot_timing(m_fabs(speed_mm_s), d == Direction::Back, &w, &s, &v);
+    real st = ((real)w + kTrotStancePlus) * kTickMs;
+    return {s, kTickMs, st, st + (real)w * kTickMs, v};
+  }
   real n = p.n_groups;
   real st_lo, st_hi;
   stance_limits(p, &st_lo, &st_hi);

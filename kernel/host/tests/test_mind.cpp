@@ -34,10 +34,13 @@ void test_remote_through_the_mind() {
   CHECK(r.log.has("remote A7 (0xA2, sleep) repeat: ignored") && r.log.has("remote ? (0x45): ignored"));
   CHECK(r.log.has("remote B3 (0x18, none): ignored (no action on this key)") &&
         r.log.has("remote A2 (0x10, none): ignored (no action on this key)"));
-  // A2 with the rear-up key off (the default, MindConfig::rear_up_key): like rows 1-3
-  r.body.event(KILO_EVENT_IR_KEY, 0x10);
+  // A1 with the rear-up key off (the default, MindConfig::rear_up_key): like rows 1-3; B1 too (kept
+  // for the righting experiment)
+  r.body.event(KILO_EVENT_IR_KEY, 0x42);
+  r.body.event(KILO_EVENT_IR_KEY, 0x4A);
   r.run_ms(40);
-  CHECK(r.log.has("remote A2 (0x10, none): ignored (no action on this key)") && r.body.count(KILO_MSG_TRICK_BEGIN) == 0);
+  CHECK(r.log.has("remote A1 (0x42, none): ignored (no action on this key)") && r.body.count(KILO_MSG_TRICK_BEGIN) == 0);
+  CHECK(r.log.has("remote B1 (0x4A, none): ignored (no action on this key)"));
   r.body.event(KILO_EVENT_IR_KEY, 0xA2);  // A7: rest
   r.run_ms(40);
   CHECK(r.posture_goal() == KILO_POSTURE_REST);
@@ -46,26 +49,26 @@ void test_remote_through_the_mind() {
   off.body.event(KILO_EVENT_IR_KEY, 0x02);
   off.run_ms(40);
   CHECK(off.posture_goal() == -1);
-  // the rear-up key on (KILO_REAR_UP=1, kilo-mind-host --rear-up): A2 goes to the remote
+  // the rear-up key on (KILO_REAR_UP=1, kilo-mind-host --rear-up): A1 goes to the remote
   {
     MindConfig on;
     on.remote = true;
     on.rear_up_key = 1;
     Rig up(on);
     CHECK(remote::rear_up_key() == 1);
-    up.body.event(KILO_EVENT_IR_KEY, 0x10);
+    up.body.event(KILO_EVENT_IR_KEY, 0x42);
     up.run_ms(40);
-    CHECK(up.log.has("remote A2 (0x10, rear up): ") && !up.log.has("A2 (0x10, rear up): ignored"));
+    CHECK(up.log.has("remote A1 (0x42, rear up): ") && !up.log.has("A1 (0x42, rear up): ignored"));
   }
-  {  // KILO_REAR_UP=3 (kilo-mind-host --rear-up=3): A2 is the third stage
+  {  // KILO_REAR_UP=3 (kilo-mind-host --rear-up=3): A1 is the third stage
     MindConfig on;
     on.remote = true;
     on.rear_up_key = 3;
     Rig up(on);
     CHECK(remote::rear_up_key() == 3);
-    up.body.event(KILO_EVENT_IR_KEY, 0x10);
+    up.body.event(KILO_EVENT_IR_KEY, 0x42);
     up.run_ms(40);
-    CHECK(up.log.has("remote A2 (0x10, rear up 3): ") && !up.log.has("A2 (0x10, rear up 3): ignored"));
+    CHECK(up.log.has("remote A1 (0x42, rear up 3): ") && !up.log.has("A1 (0x42, rear up 3): ignored"));
   }
   Rig after{MindConfig()};  // the next Mind's config sets it again
   CHECK(!remote::rear_up_key());

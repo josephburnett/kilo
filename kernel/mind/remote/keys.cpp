@@ -20,21 +20,21 @@ const Key kKeyTable[kKeys] = {
     {0x30, "A3", "trot", Kind::Ignore, "", "none"},
     {0x18, "B3", "sit", Kind::Ignore, "", "none"},
     {0x7A, "C3", "stretch", Kind::Ignore, "", "none"},
-    {0x10, "A2", "hi", Kind::Trick, "rear_up", "rear up"},  // B2 until 2026-11-17
+    {0x10, "A2", "hi", Kind::Ignore, "", "none"},  // the rear-up until 2026-11-22
     {0x38, "B2", "push-up", Kind::Sound, "meow", "meow"},  // a meow (docs/sound.md); nothing before 2026-11-19
     {0x5A, "C2", "pee", Kind::Ignore, "", "none"},
-    {0x42, "A1", "wash face", Kind::Gait, "longtrot", "long trot"},  // the long trot (2026-11-21)
-    {0x4A, "B1", "butt-up", Kind::Measure, "measure", "measure"},  // docs/self-measurement.md; nothing before 2026-11-21
+    {0x42, "A1", "wash face", Kind::Trick, "rear_up", "rear up"},  // A2 until 2026-11-22, B2 until 2026-11-17
+    {0x4A, "B1", "butt-up", Kind::Ignore, "", "none"},  // the righting experiment's key
     {0x52, "C1", "last skill", Kind::Ignore, "", "none"},
 };
 
 namespace {
-// A2 with the rear-up key off: a row 1-3 key that does nothing.
-const Key kRearUpOff = {0x10, "A2", "hi", Kind::Ignore, "", "none"};
-// A2 with the key on at stage 2 or 3 (stage 1 is the table's own entry).
+// A1 with the rear-up key off: a row 1-3 key that does nothing.
+const Key kRearUpOff = {0x42, "A1", "wash face", Kind::Ignore, "", "none"};
+// A1 with the key on at stage 2 or 3 (stage 1 is the table's own entry).
 const Key kRearUpStage[2] = {
-    {0x10, "A2", "hi", Kind::Trick, "rear_up_2", "rear up 2"},
-    {0x10, "A2", "hi", Kind::Trick, "rear_up_3", "rear up 3"},
+    {0x42, "A1", "wash face", Kind::Trick, "rear_up_2", "rear up 2"},
+    {0x42, "A1", "wash face", Kind::Trick, "rear_up_3", "rear up 3"},
 };
 uint8_t g_rear_up_stage = 0;
 }  // namespace

@@ -5,9 +5,10 @@
 // second of a pair couple_ms after the first); each group's slot is a
 // four-foot shift, then the swing, so
 //   period = groups x (shift + span),  span = swing + couple,  stance = period - swing.
-// The swing time is fixed per pattern. The walk and the trot (no lean) have
-// a fixed cadence: the shift stays at its shortest (one tick) and speed
-// comes from the stride alone. The crawl: speed from the stride and the
+// The swing time is fixed in the walk and the crawl; the trot's grows with
+// its speed (planner/trot.h). The walk and the trot (no lean) have a fixed
+// cadence: the shift stays at its shortest (one tick) and speed comes from
+// the stride alone (the trot's from its schedule: timing()). The crawl: speed from the stride and the
 // stance time (stance = stride / speed); slower than the longest stance the
 // stride shrinks (to STRIDE_MIN_MM); faster than the default stride at the
 // shortest shift, the speed is capped. The crawl's shortest shift:
@@ -66,12 +67,10 @@ struct Pattern {
 // PATTERNS in patterns.py's order: walk, trot, crawl.
 constexpr int kPatterns = 3;
 extern const Pattern kPatternTable[kPatterns];
-// The long trot ("longtrot", remote key A1; planner/longtrot.h): not in the table, as LONG_TROT is
-// not in patterns.py's PATTERNS. Its timing is its own (pattern_timing(), not timing()).
-extern const Pattern kLongTrot;
-inline bool is_long_trot(const Pattern& p) { return &p == &kLongTrot; }
+// The trot: its swing and its timing are its schedule's (planner/trot.h), not its table entry's.
+inline bool is_trot(const Pattern& p) { return &p == &kPatternTable[1]; }
 const Pattern& default_pattern();  // trot
-// By name, ignoring case (the table's three and "longtrot"); null if unknown.
+// By name, ignoring case; null if unknown.
 const Pattern* find_pattern(const char* name);
 
 enum class Direction : uint8_t { Forward, Back, Left, Right, March };
@@ -97,8 +96,10 @@ real default_speed(const Pattern& p);
 real step_height(const Pattern& p, real stride);
 // (slowest, fastest) speed that timing() gives.
 void speed_range(const Pattern& p, real* lo, real* hi);
-// Stride, shift and period for walking at |speed_mm_s|, clamped to speed_range().
-Timing timing(const Pattern& p, real speed_mm_s);
+// Stride, shift and period for walking at |speed_mm_s|, clamped to speed_range(); the trot's from
+// its schedule (patterns.py trot_timing: the swing from trot_swing_for, one tick on four feet, the
+// ground time the swing + kTrotStancePlus ticks; at most kTrotTopBackMmS backward).
+Timing timing(const Pattern& p, real speed_mm_s, Direction d = Direction::Forward);
 Timing default_timing(const Pattern& p);
 // (left, right) stride, + = the feet push the body forward: forward and back
 // both sides, bent by steer (-1..1, + left: the left side's stride less steer

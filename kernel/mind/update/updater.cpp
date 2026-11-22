@@ -211,7 +211,9 @@ void KernelUpdater::step_verify() {
   set_phase(KILO_UPDATE_PHASE_INSTALLING);
 }
 
-// The renames, in one pass: only now does kernel7.img change.
+// The renames, in one pass: only now does kernel7.img change. The previous kernel is kernel7.old only
+// for the swap (put back if the last rename fails), removed once the new one is kernel7.img: no kernel
+// is kept on the card (the commits are in git: docs/laptop-setup.md, a kernel that misbehaves).
 void KernelUpdater::install() {
   uint64_t t = clock_.now_us();
   KernelStore::Result r = store_.remove(kKernelOldFile);
@@ -220,7 +222,9 @@ void KernelUpdater::install() {
     fail(KILO_UPDATE_ERROR_INSTALL_FAILED);
     return;
   }
-  if (r == KernelStore::Result::Ok) logf(log_, LogLevel::Info, "update: removed the previous %s", kKernelOldFile);
+  if (r == KernelStore::Result::Ok) logf(log_, LogLevel::Info, "update: removed a %s left on the card", kKernelOldFile);
+  if (store_.remove(kKernelBadFile) == KernelStore::Result::Ok)
+    logf(log_, LogLevel::Info, "update: removed a %s left on the card", kKernelBadFile);
 
   r = store_.rename(kKernelFile, kKernelOldFile);
   if (r == KernelStore::Result::Failed) {
@@ -230,8 +234,8 @@ void KernelUpdater::install() {
     return;
   }
   bool moved = r == KernelStore::Result::Ok;
-  logf(log_, LogLevel::Info, moved ? "update: %s -> %s" : "update: no %s on the card to keep as %s", kKernelFile,
-       kKernelOldFile);
+  logf(log_, LogLevel::Info, moved ? "update: %s -> %s (for the swap)" : "update: no %s on the card (no %s)",
+       kKernelFile, kKernelOldFile);
 
   r = store_.rename(kKernelNewFile, kKernelFile);
   if (r != KernelStore::Result::Ok) {
@@ -250,11 +254,13 @@ void KernelUpdater::install() {
     fail(KILO_UPDATE_ERROR_INSTALL_FAILED);
     return;
   }
+  if (moved && store_.remove(kKernelOldFile) == KernelStore::Result::Failed)
+    logf(log_, LogLevel::Warn, "update: cannot remove %s (the previous kernel): the next update removes it",
+         kKernelOldFile);
   if (store_.sync() != KernelStore::Result::Ok)
     logf(log_, LogLevel::Warn, "update: syncing the card's directory reported a failure");
-  logf(log_, LogLevel::Info, "update: installed: %s is the new kernel (%u bytes, crc32 %08x)%s, in %u ms",
-       kKernelFile, (unsigned)status_.size, (unsigned)status_.crc32,
-       moved ? ", the previous one is kernel7.old" : "", (unsigned)ms_since(t));
+  logf(log_, LogLevel::Info, "update: installed: %s is the new kernel (%u bytes, crc32 %08x), in %u ms",
+       kKernelFile, (unsigned)status_.size, (unsigned)status_.crc32, (unsigned)ms_since(t));
   set_phase(KILO_UPDATE_PHASE_DONE);
 }
 

@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from kilo.measure import script as measure_script
-from kilo.planner import longtrot as LT
+from kilo.planner import plan as PL
 from kilo.planner import model as PM
 from kilo.planner.model import BodyModel
 from kilo.protocol import kilo_protocol as P
@@ -51,8 +51,8 @@ TYPED_AGAIN = {
     "mind/kilo/tricks/sagittal.py": [r"tail_\w+: float = -?\d", r"(rear_x|belly_z|back_z|pi_rear_x|pi_top_z|nose_x"
                                      r"|nose_z): float = -?\d"],
     "mind/kilo/tricks/stance.py": [r"KILO_CZP = \(", r"half_width: float = \d", r"imu_pitch: float = -?\d"],
-    "mind/kilo/planner/longtrot.py": [r"(com_x_mm|extra_ms|clamp_deg|com_h_mm): float = \d", r"hypot\(65, 123\)"],
-    "kernel/mind/planner/longtrot.h": [r"kFit\w+ = \(real\)\d", r"kFit\w+ = \d"],
+    "mind/kilo/planner/plan.py": [r"(com_x_mm|extra_ms|clamp_deg|com_h_mm): float = \d", r"hypot\(65, 123\)"],
+    "kernel/mind/planner/trot.h": [r"kFit\w+ = \(real\)\d", r"kFit\w+ = \d"],
     "kernel/mind/guard/guard.h": [r"kSensorHeightMm = \d", r"kFloorTiltDeg = \d"],
 }
 
@@ -92,9 +92,9 @@ def test_the_consumers_read_the_model():
     assert f == D.NOMINAL.with_(com_dx=f.com_dx, com_dy=f.com_dy, sag=f.sag, tail_droop_deg=f.tail_droop_deg,
                                 imu_roll=f.imu_roll)
     assert RU.AS_RECORDED.com_dy == PM.view_numbers("tricks_rigid")["com_dy_mm"]
-    # the long trot's pendulum is the "longtrot" view
-    v = PM.view_numbers("longtrot")
-    assert (LT.TROT_FIT.com_x_mm, LT.TROT_FIT.com_h_mm, LT.TROT_FIT.extra_ms, LT.TROT_FIT.clamp_deg) == (
+    # the trot's pendulum is the "trot" view
+    v = PM.view_numbers("trot")
+    assert (PL.TROT_FIT.com_x_mm, PL.TROT_FIT.com_h_mm, PL.TROT_FIT.extra_ms, PL.TROT_FIT.clamp_deg) == (
         v["com_x_mm"], v["com_h_mm"], v["extra_ms"], v["clamp_deg"])
     # the measurement's home height is the model's STANCE
     assert M.stance_z_mm() == measure_script.HOME_Z
@@ -113,7 +113,7 @@ def test_a_view_replaces_the_models_numbers():
     assert v.com([0.0] * 4, [76.0] * 4)[0] == pytest.approx(M.com([0.0] * 4, [76.0] * 4)[0] - 5.5)
     assert D.Params.of(v) == D.FITTED
     assert T.Geometry3.of(v).com_dy == -5.0 and S.Geometry.of(v).com_dx == -5.5
-    assert M.view("longtrot") == M  # its numbers are the pendulum's own: nothing of BodyModel changes
+    assert M.view("trot") == M  # its numbers are the pendulum's own: nothing of BodyModel changes
 
 
 # ---- (c) the views, and how far each is from the model --------------------------------------------
@@ -121,7 +121,7 @@ def test_a_view_replaces_the_models_numbers():
 # view from protocol/spec.toml (its user then reads the model) or changing the model fails here
 # until this table says the same: one visible edit.
 VIEWS = {
-    "longtrot": {"com_x_mm": (3.5, 7.43), "com_h_mm": (79.0, 79.24), "extra_ms": (120.0, None),
+    "trot": {"com_x_mm": (3.5, 7.43), "com_h_mm": (79.0, 79.24), "extra_ms": (120.0, None),
                  "clamp_deg": (2.3, None)},
     "tricks": {"com_dx_mm": (-5.5, 0.0), "com_dy_mm": (-5.0, 0.0), "sag_deg_per_kg_cm": (4.0, 0.0),
                "tail_droop_deg": (16.0, 18.0), "imu_pitch_deg": (1.9, 0.0), "imu_roll_deg": (2.0, 0.0)},
@@ -199,7 +199,7 @@ def test_model_show_says_where_every_number_comes_from_and_what_disagrees():
 
     text = cli_model.show(cli_model.load_fit(FIT))
     for word in ("LEG_LB_MM", "stand_com_x_mm", "the owner's ruler, 2026-11-16", "NUMBERS THAT DISAGREE",
-                 "longtrot", "tricks_rigid", "com_x_mm             3.5  against the model's 7.43",
+                 "trot", "tricks_rigid", "com_x_mm             3.5  against the model's 7.43",
                  "the measurement says 4.35 +- 0.31"):
         assert word in text, word
     assert "42.07" not in text  # the first run's height ran into the fit's limit: it says nothing
@@ -259,5 +259,5 @@ def test_model_apply_dry_run_changes_nothing_and_reports():
     assert rc == 0, text
     assert [p.read_bytes() for p in watched] == before
     assert "centre of mass, standing: 7.4 -> 4.3 mm ahead" in text
-    assert "crawl" in text and "longtrot: still off: com_x_mm 3.5 vs 4.33" in text
+    assert "crawl" in text and "trot: still off: com_x_mm 3.5 vs 4.33" in text
     assert "Dry run: nothing was changed" in text and "FAILED" not in text

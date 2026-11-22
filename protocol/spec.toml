@@ -1299,14 +1299,14 @@ ultrasonic_floor_tilt_deg = 12
 # fails if a view is added or changed without this file). Removing a view makes
 # its user read the model.
 #
-# The long trot's rock (kilo.planner.longtrot TrotFit, kernel/mind/planner/longtrot.h):
+# The trot's rock (kilo.planner.plan TrotFit, kernel/mind/planner/trot.h):
 # an inverted pendulum about the diagonal, fitted to the floor recordings of
 # 2026-11-15..17 (mind/tests/stridesim.py).
 #   com_x_mm   the centre of mass ahead of the shoulders' middle (the model: 7.4 at STANCE)
 #   com_h_mm   its height above the floor (the model: 79.2 at STANCE)
 #   extra_ms, clamp_deg   the pendulum's own: the diagonal rocks as if it lasted
 #              this much longer; the tip's clamp. No counterpart in the model.
-[model.views.longtrot]
+[model.views.trot]
 com_x_mm = 3.5
 com_h_mm = 79.0
 extra_ms = 120.0
@@ -1374,7 +1374,7 @@ servo_tau_ms = ["...and then closes 63 % of the gap in this time", "ms", "fitted
 "inertia.frame_box_mm" = ["the frame's mass spread as a box this size", "mm", "estimate"]
 "sensor.ultrasonic_height_mm" = ["the distance sensor above the floor, standing", "mm", "estimate (taken a little low)"]
 "sensor.ultrasonic_floor_tilt_deg" = ["looking down more than this, the sensor sees the floor", "deg", "estimate"]
-"views.longtrot" = ["the long trot's own fit of how he rocks on a diagonal", "", "floor recordings of 2026-11-15..17"]
+"views.trot" = ["the trot's own fit of how he rocks on a diagonal", "", "floor recordings of 2026-11-15..17"]
 "views.tricks" = ["the tricks' own fit (the rear-up is designed on it)", "", "rear-up plays of 2026-11-19..21"]
 "views.tricks_rigid" = ["the rear-up's first, rigid fit, before the right hind shoulder was re-seated", "", "the two falls of 2026-11-17"]
 
@@ -1480,9 +1480,10 @@ servo_tau_ms = ["...and then closes 63 % of the gap in this time", "ms", "fitted
 # is in the image, so that only a mind kernel is installed, and answers
 # COMMIT with RESULT OK (writing has started) or IMAGE_BAD. It then pauses its
 # link as for a flash and writes the image to its SD card's FAT partition as
-# kernel7.new, reads it back and compares the CRC-32, and only then removes
-# kernel7.old, renames kernel7.img to kernel7.old and kernel7.new to
-# kernel7.img. UPDATE_STATUS goes to that client at each phase and slice, and
+# kernel7.new, reads it back and compares the CRC-32, and only then renames
+# kernel7.img to kernel7.old and kernel7.new to kernel7.img and removes
+# kernel7.old (no previous kernel is kept; kernel7.old exists only for the
+# swap, and a kernel7.old or kernel7.bad found first is removed). UPDATE_STATUS goes to that client at each phase and slice, and
 # last DONE or FAILED; a failure before the renames leaves kernel7.img as it
 # was. After DONE the mind does what REBOOT does (REST, then restart) and the
 # Pi boots the new kernel. A body flash and a kernel update exclude each
@@ -1649,7 +1650,7 @@ RECEIVING = 1                  # UPDATE_BEGIN accepted, UPDATE_DATA arriving
 CHECKING = 2                   # UPDATE_COMMIT: size, CRC-32, host.update_marker
 WRITING = 3                    # kernel7.new on the SD card: done of image_size bytes
 VERIFYING = 4                  # kernel7.new read back: done of image_size bytes, then its CRC-32 compared
-INSTALLING = 5                 # kernel7.old removed, kernel7.img -> kernel7.old, kernel7.new -> kernel7.img
+INSTALLING = 5                 # kernel7.img -> kernel7.old, kernel7.new -> kernel7.img, kernel7.old removed
 DONE = 6                       # installed: the mind reboots into it (REST to the body first)
 FAILED = 7                     # error says why
 

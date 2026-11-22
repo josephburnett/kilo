@@ -1,4 +1,4 @@
-"""rear_up: Kilo sits up on his hind feet and his tail, front paws in the air (A2).
+"""rear_up: Kilo sits up on his hind feet and his tail, front paws in the air (A1).
 
     python -m kilo.tricks.rear_up              write the three stages' JSON, print their checks
     python -m kilo.tricks.rear_up --check      exit 1 if a JSON is stale or a check fails
@@ -51,7 +51,7 @@ plays the one the build allows at most, KILO_REAR_UP=1, 2 or 3). Each stage
 plays the one before it unchanged and then goes on: 1 rear_up holds at "up",
 2 rear_up_2 at "mid", 3 rear_up_3 at "top". In a higher stage the lower
 stages' tops hold STEP_HOLD (4 s): the mind's remote goes on to the next
-stage only when A2 is pressed again in that time, else it stops the trick
+stage only when A1 is pressed again in that time, else it stops the trick
 there (TRICK_STOP: the straight line to SIT that every stop takes, checked
 from every frame); kernel/mind/remote/remote.h. The remote finds the stage
 tops by their guards' names ("up", "mid", "top").
@@ -257,7 +257,7 @@ class Step:
 
 GUARD_HOLD = 20   # ticks a guarded frame on the way up holds (0.4 s; the mind averages its second half)
 HOLD = 100        # ticks at a stage's top (2 s)
-STEP_HOLD = 200   # ticks at a lower stage's top in a higher stage (4 s): the remote's A2 goes on, else down
+STEP_HOLD = 200   # ticks at a lower stage's top in a higher stage (4 s): the remote's A1 goes on, else down
 RISE_DPS = 30.0   # on the tripod above stage 1: the tail tip slides forward as Kilo rises
 GUARD_ROLL = 6.0  # deg: the guards' |roll| limit (TELEMETRY, which reads about +2 where Kilo is level)
 PLAY_ROLL_MAX = 8.0
@@ -620,7 +620,7 @@ def check(trick: Trick | None = None, bands: Sequence | None = None, stops: Sequ
           workers: int | None = None) -> Report:
     """The play in every band (default dynamics.bands()), with the mind's
     guards; every cut-short in the bands ``stops``; the fitted play from SIT
-    (A2 while he sits); the play on Kilo before the re-seat (it must stop
+    (A1 while he sits); the play on Kilo before the re-seat (it must stop
     itself safely, or play safely)."""
     trick = trick or build()
     bands = list(bands if bands is not None else D.bands())
@@ -628,7 +628,7 @@ def check(trick: Trick | None = None, bands: Sequence | None = None, stops: Sequ
     for b, p in bands:
         if stops and b in stops:
             jobs += [(trick, b, p, kind, tick) for kind, tick in stop_points(trick)]
-    if any(b == "fitted" for b, _ in bands):  # A2 while he sits (after a stop): the trick starts from SIT
+    if any(b == "fitted" for b, _ in bands):  # A1 while he sits (after a stop): the trick starts from SIT
         jobs.append((trick, "fitted, from SIT", D.FITTED, "play", None, SIT))
     jobs.append((trick, "as recorded", as_recorded(), "play", None))
     n = workers or os.cpu_count() or 1
