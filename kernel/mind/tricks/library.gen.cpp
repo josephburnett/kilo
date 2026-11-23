@@ -223,20 +223,6 @@ const Keyframe kAliveWashFaceSit[] = {
     {21, 0, 0x01, {64, -39, -60, 30, 30, -63, -63, 82, 82, 45, 45}},
     {25, 0, 0x01, {10, -20, -60, 30, 30, -80, -80, 60, 60, 45, 45}},
 };
-// alive_wash_face_stand (authored): 11 frames, loop 0..0 x0, end STAND, stop over 25 ticks
-const Keyframe kAliveWashFaceStand[] = {
-    {12, 5, 0x01, {95, -30, -82, 30, 30, -80, -80, 60, 60, 45, 45}},
-    {9, 0, 0x01, {95, -30, -82, 30, 43, -80, -71, 85, 44, 45, 0}},
-    {22, 0, 0x01, {0, 10, -52, -87, 43, -80, -70, 22, 44, 45, 0}},
-    {15, 10, 0x01, {0, 0, -70, -56, 43, -80, -70, -16, 44, 45, 0}},
-    {8, 0, 0x01, {0, 10, -52, -87, 43, -80, -70, 22, 44, 45, 0}},
-    {15, 10, 0x01, {0, 0, -70, -56, 43, -80, -70, -16, 44, 45, 0}},
-    {8, 0, 0x01, {0, 10, -52, -87, 43, -80, -70, 22, 44, 45, 0}},
-    {15, 10, 0x01, {0, 0, -70, -56, 43, -80, -70, -16, 44, 45, 0}},
-    {27, 15, 0x01, {-45, -71, -50, 80, 43, -80, -80, -28, 44, 45, 6}},
-    {21, 0, 0x01, {64, -39, -60, 30, 30, -63, -63, 82, 82, 45, 45}},
-    {25, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
-};
 // alive_pee_sit (authored): 9 frames, loop 0..0 x0, end SIT, stop over 25 ticks
 const Keyframe kAlivePeeSit[] = {
     {25, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
@@ -329,7 +315,6 @@ const Trick kLibrary[kLibrarySize] = {
     {"alive_stretch_sit", "", 10, 0, 0, 0, 0xFF07, 0x00, 2, 0, 0, kAliveStretchSit, 25, nullptr, 0, 0},
     {"alive_stretch_stand", "", 9, 0, 0, 0, 0xFF07, 0x00, 3, 0, 0, kAliveStretchStand, 25, nullptr, 0, 0},
     {"alive_wash_face_sit", "", 11, 0, 0, 0, 0xFF07, 0x00, 2, 0, 0, kAliveWashFaceSit, 25, nullptr, 0, 0},
-    {"alive_wash_face_stand", "", 11, 0, 0, 0, 0xFF07, 0x00, 3, 0, 0, kAliveWashFaceStand, 25, nullptr, 0, 0},
     {"alive_pee_sit", "", 9, 0, 0, 0, 0xFF07, 0x00, 2, 0, 0, kAlivePeeSit, 25, nullptr, 0, 0},
     {"alive_pee_stand", "", 8, 0, 0, 0, 0xFF07, 0x00, 3, 0, 0, kAlivePeeStand, 25, nullptr, 0, 0},
     {"alive_sniff_sit", "", 11, 0, 0, 0, 0xFF07, 0x00, 2, 0, 0, kAliveSniffSit, 25, nullptr, 0, 0},
@@ -358,7 +343,6 @@ const TrickCheck kLibraryCheck[kLibrarySize] = {
     {0xDC1C, 76, 170},  // alive_stretch_sit
     {0x0F8D, 249, 145},  // alive_stretch_stand
     {0x7118, 249, 226},  // alive_wash_face_sit
-    {0xABE2, 85, 227},  // alive_wash_face_stand
     {0x3D86, 179, 183},  // alive_pee_sit
     {0xA96F, 210, 158},  // alive_pee_stand
     {0xB383, 230, 144},  // alive_sniff_sit

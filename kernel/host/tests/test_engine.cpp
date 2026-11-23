@@ -5,11 +5,13 @@
 // the planned stop and the quick stop end on four feet at home; a gait
 // change goes through home; the clock waits for the gate and for the weight;
 // a catch lands the foot; a copy of a solver solves the same ticks (the
-// walker's quick stop relies on it). How well the walks rock and predict
-// is the judge's (mind/tests/enginejudge.py), not this file's.
+// walker's quick stop relies on it); the paw wash is made. How well the
+// walks rock and predict is the judge's (mind/tests/enginejudge.py), not
+// this file's.
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include "engine/paw.h"
 #include "engine/solve.h"
 #include "tests/check.h"
 
@@ -256,6 +258,35 @@ void test_a_copy_solves_the_same_ticks() {
   }
 }
 
+// The paw wash (engine/paw.h): made from the model at any tempo, STAND to STAND, the weight on
+// three feet, a guard on the still hold. Its statics, its head clearance and its play on the
+// dynamics are checked on the laptop (mind/tests/test_engine_tricks.py).
+void test_the_paw_wash() {
+  static PawWash w;
+  planner::BodyModel m;
+  PawGoal g;
+  CHECKF(w.build(m, g), "%s", w.why() ? w.why() : "");
+  const tricks::Trick& t = w.trick();
+  CHECK(tricks::trick_problem(t) == nullptr);
+  CHECK(t.n_frames == 7 && t.loop_start == 3 && t.loop_end == 4 && t.repeats == 3);
+  CHECK(t.end_posture == KILO_POSTURE_STAND && t.flags == 0 && t.n_guards == 1 && t.guards[0].frame == 2);
+  const int8_t stand[KILO_JOINT_COUNT] = {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30};
+  CHECK(std::memcmp(t.frames[6].ang, stand, sizeof stand) == 0);
+  CHECKF(w.margin() >= kPawMarginMm - (real)0.06 && w.lean_dx() < 0 && w.lean_roll() < 0, "margin %.2f lean %.2f %.2f",
+         (double)w.margin(), (double)w.lean_dx(), (double)w.lean_roll());
+  // the left paw up (its shoulder forward of the lean's), the other legs as in the lean
+  CHECK(t.frames[2].ang[3] < t.frames[0].ang[3] && std::memcmp(&t.frames[2].ang[4], &t.frames[0].ang[4], 3) == 0);
+  uint32_t slow = 0, quick = 0;
+  CHECK(tricks::total_ticks(t, tricks::kSpeedUnity, &slow));
+  g.tempo = 2;
+  g.strokes = 20;  // at most kPawStrokesMax
+  CHECK(w.build(m, g) && w.trick().repeats == kPawStrokesMax);
+  g.strokes = 3;
+  CHECK(w.build(m, g) && tricks::total_ticks(w.trick(), tricks::kSpeedUnity, &quick));
+  // (the still holds and the way back to STAND do not shorten with the tempo)
+  CHECKF(quick < slow * 3 / 4, "tempo 2: %u ticks against %u", (unsigned)quick, (unsigned)slow);
+}
+
 }  // namespace
 
 int main() {
@@ -267,5 +298,6 @@ int main() {
   test_a_gait_change_goes_through_home();
   test_the_clock_waits_for_the_gate_and_lands_a_caught_foot();
   test_a_copy_solves_the_same_ticks();
+  test_the_paw_wash();
   return report("test_engine");
 }

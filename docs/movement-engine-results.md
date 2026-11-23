@@ -345,6 +345,16 @@ The changes (`changes`; from the change to the end; the old against the new):
 
 No fall in any run, old or new.
 
+Also on the virtual body's own physics (kilo.vbody.physics: the weight
+held 5 mm inside three feet, rigid legs; not the judge), a stop at tick 400
+(largest error against the prediction, old / new): the crawl 3.2 / 0.5°,
+the walk 1.5 / 1.7°, the trot 1.3 / 3.0°. The trot's 3.0° comes as he
+stands at the end of the stop; its feet are the old trot's within a
+quarter of a millimetre and a tick (the feet now go in quarter
+millimetres), and this physics' diagonal rock is sensitive to which feet
+are within 0.6 mm of the lowest. The judge (RockingPhysics) has the two
+stops equal. One run each; not followed further.
+
 **What it means.**
 
 - **The walk** (new: the weight 3.5 mm inside the three feet, solved
@@ -387,3 +397,50 @@ No fall in any run, old or new.
   it. Nor can it show whether the faster joints at the walk's top speeds
   keep up, or anything about slipping.
   The floor try (C4 at each level, B7/B5, A4, B4) settles it.
+
+## Step 4: the paw wash judged on the body model (2026-11-23)
+
+**Question.** Is the engine's paw wash (kernel/mind/engine/paw.h: a front
+paw lifted on three feet, the face washed with it) safe to play on Kilo,
+and does it keep the head clear of the paw (the owner's rule after the
+original paw lick bumped his head: at least 10 mm)?
+
+**How** (simulation only; `mind/tests/test_engine_tricks.py`). The trick
+as the mind makes it (`engine-judge --trick paw_wash`), on the models the
+random mode's library tricks are held to (mind/tests/test_alive_tricks.py):
+the rigid quasi-static model on Kilo as designed and as recorded, both
+paws, tempos 0.5 to 2; and the tricks' dynamics (kilo.tricks.dynamics: the
+servos' lag, the legs' give, friction) with the trick's own guard, in the
+fit and at the 19 corners of `dynamics.bands()`.
+
+**Numbers.** The lean the engine chose: the body 7.0 mm back, rolled 5.1°
+right side down (the left paw; mirrored for the right); the centre of mass
+7.1 mm inside the three feet by the model with the paw up and at the
+bottom of a stroke. A first version with 6 mm, a short hold of the lean
+and the paw going straight up rocked onto the diagonal for 40 ms as the
+paw left the floor (the right hind foot unloaded) on the dynamics; with 7
+mm, the lean held until the servos have it (10 ticks) and the paw first
+just off the floor (10 mm over 16 ticks), each of the three feet keeps its
+load, the right hind's least about 12 g, in the fit and at the corners
+tested (the centre of mass 4 mm further forward is the closest).
+
+| check (tempo 1) | left paw, as designed | as recorded | right paw, as designed | as recorded |
+|---|---|---|---|---|
+| least margin of the centre of mass inside the support, all along | 6.4 mm | 6.7 mm | 6.4 mm | 3.2 mm |
+| largest roll | 5.1° | 5.1° | 5.1° | 5.1° |
+| largest single topple | 1.2 mm | 1.2 mm | 1.2 mm | 1.2 mm |
+| least gap between the head and a front leg (either way the pan turns) | 17.0 mm | 17.0 mm | 16.7 mm | 16.7 mm |
+| what touches the floor | the feet | the feet | the feet | the feet |
+
+(The right paw on Kilo as recorded keeps less: the recorded right hind
+shoulder sits differently, which the engine's model does not know.) On
+the dynamics: no fall and no stop by the guard, the three feet carrying
+him the whole time the paw is up (over a second).
+
+**What it means.** By the models he stays on his three feet with room to
+spare and the head stays clear of the paw by 17 mm (the paw cannot come
+closer to the muzzle than its leg's plane allows with the head straight:
+about 16 mm by the model's head, which is an estimate). Not known: whether
+Kilo holds the lean as the model says (the self-measurement's 3-foot tips
+came only after the mass crossed the edge, results §2), whether a paw at
+the cheek looks like washing, and whether the head model is right.

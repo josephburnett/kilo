@@ -16,11 +16,6 @@ void StepClock::start(const real offsets[kLegs], real cycle_ticks, real phase) {
   for (int i = 0; i < kLegs; i++) lift_at_[i] = target_[i] = offsets[i];
 }
 
-real StepClock::to_lift(int leg) const {
-  real d = frac(lift_at_[leg] - phase_);
-  return d;
-}
-
 uint8_t StepClock::advance(bool wait) {
   if (wait) return 0;
   real d = (real)1.0 / cycle_;
@@ -33,11 +28,6 @@ uint8_t StepClock::advance(bool wait) {
   }
   phase_ = frac(phase_ + d);
   return out;
-}
-
-void StepClock::preview(int n, uint8_t* out) const {
-  StepClock c = *this;
-  for (int k = 0; k < n; k++) out[k] = c.advance(false);
 }
 
 void StepClock::slew_offsets(uint8_t swinging) {
@@ -54,14 +44,6 @@ void StepClock::slew_offsets(uint8_t swinging) {
     if (ahead < 3 * d || frac(lift_at_[i] - phase_) < 3 * d) continue;
     lift_at_[i] = frac(lift_at_[i] + step);
   }
-}
-
-bool StepClock::offsets_settled() const {
-  for (int i = 0; i < kLegs; i++) {
-    real diff = m_fabs(target_[i] - lift_at_[i]);
-    if (diff > (real)1e-6 && diff < (real)1.0 - (real)1e-6) return false;
-  }
-  return true;
 }
 
 }  // namespace engine

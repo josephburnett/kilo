@@ -4,6 +4,12 @@
 //   engine-judge --gait walk|trot|crawl [--speed MM_S] [--dir forward|back|left|right|march]
 //                [--steer S] [--ticks N] [--at TICK:CMD]... [--set KEY=VALUE]...
 //
+//   engine-judge --trick paw_wash [--tempo T] [--strokes N]
+//
+// prints the trick the engine makes (engine/paw.h): "trick lean_dx D lean_roll R margin M repeats N
+// loop A B end STAND", then per frame "frame dur hold flags pan tilt tail sh_LF sh_RF sh_RB sh_LB kn_LF ..
+// kn_LB" (degrees), then "guard frame lo hi roll" (a16).
+//
 // --set changes the solver's config (SolverConfig's fields) or the gait's (margin, roll_max, roll_cost,
 // swing, cycle) for a study.
 //
@@ -14,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "engine/paw.h"
 #include "engine/solve.h"
 
 using namespace kilo;
@@ -50,7 +57,37 @@ void apply(Solver& s, const char* cmd) {
 
 }  // namespace
 
+int trick(int argc, char** argv) {
+  PawGoal g;
+  for (int i = 1; i + 1 < argc; i += 2) {
+    if (!strcmp(argv[i], "--tempo")) g.tempo = (real)atof(argv[i + 1]);
+    else if (!strcmp(argv[i], "--strokes")) g.strokes = atoi(argv[i + 1]);
+  }
+  static PawWash w;
+  if (!w.build(planner::BodyModel(), g)) {
+    fprintf(stderr, "engine-judge: no paw wash: %s\n", w.why());
+    return 1;
+  }
+  const tricks::Trick& t = w.trick();
+  printf("trick lean_dx %.3f lean_roll %.3f margin %.3f repeats %u loop %u %u\n", (double)w.lean_dx(),
+         (double)w.lean_roll(), (double)w.margin(), (unsigned)t.repeats, (unsigned)t.loop_start, (unsigned)t.loop_end);
+  for (int i = 0; i < t.n_frames; i++) {
+    const tricks::Keyframe& f = t.frames[i];
+    printf("frame %u %u %u", (unsigned)f.dur, (unsigned)f.hold, (unsigned)f.flags);
+    for (int k = 0; k < (int)KILO_JOINT_COUNT; k++) printf(" %d", (int)f.ang[k]);
+    printf("\n");
+  }
+  for (int i = 0; i < t.n_guards; i++)
+    printf("guard %u %d %d %d\n", (unsigned)t.guards[i].frame, (int)t.guards[i].lo_a16, (int)t.guards[i].hi_a16,
+           (int)t.guards[i].roll_a16);
+  return 0;
+}
+
 int main(int argc, char** argv) {
+  if (argc >= 3 && !strcmp(argv[1], "--trick")) {
+    if (strcmp(argv[2], "paw_wash")) return usage();
+    return trick(argc - 2, argv + 2);
+  }
   const Gait* gait = find_gait("walk");
   Direction dir = Direction::Forward;
   real speed = -1, steer = 0;

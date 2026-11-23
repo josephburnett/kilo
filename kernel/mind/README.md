@@ -34,7 +34,7 @@ link/consts       message classes and timings (kilo/link/consts.py, LinkConfig)
 link/names        names of message types and enums, for logs
 link/stats.h      link counters (kilo/body/state.py LinkStats)
 planner/          the body model (model.h, as mind/kilo/planner/model.py) and the model's error from the telemetry (errors)
-engine/           the movement engine (docs/movement-engine.md): gait (the gaits as table rows), clock (the one step clock), solve (the tick solver: feet and weight every tick), walker (its ticks streamed to the body as POSE)
+engine/           the movement engine (docs/movement-engine.md): gait (the gaits as table rows), clock (the one step clock), solve (the tick solver: feet and weight every tick), walker (its ticks streamed to the body as POSE), paw (the paw wash: a front paw lifted on three feet, made as a trick from the model)
 flash/image       the body image in RAM (32 KB) and its manifest (body.json parse and write)
 flash/crc32       the image's CRC-32, as zlib.crc32
 flash/flasher     the STK500v1 flasher: RESET, optiboot, pages, verify, the HELLO after

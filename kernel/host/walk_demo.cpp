@@ -163,7 +163,7 @@ int main(int argc, char** argv) {
   const StreamStats& s = walker.stream_stats();
   logf(log, LogLevel::Info, "walked: body ticks %u, GAIT frames %u, support sets %d (mask %04x), ended: %s", ticks,
        watch.gait_frames, popcount(watch.supports), watch.supports, walker.ended() ? walker.ended() : "(running)");
-  logf(log, LogLevel::Info, "FEET sent %u skipped %u max behind %u, body queue max %u, underruns %u, refused %u, fell %u",
+  logf(log, LogLevel::Info, "POSE sent %u skipped %u max behind %u, body queue max %u, underruns %u, refused %u, fell %u",
        s.sent, s.skipped, s.max_behind, watch.max_queued, watch.underruns, watch.refused, watch.fell);
   serial.close();
 

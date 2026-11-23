@@ -13,6 +13,7 @@ MIND_SRCS = \
 	mind/engine/gait.cpp \
 	mind/engine/clock.cpp \
 	mind/engine/solve.cpp \
+	mind/engine/paw.cpp \
 	mind/engine/walker.cpp \
 	mind/proto/crc16.c \
 	mind/proto/kilo_frame.c

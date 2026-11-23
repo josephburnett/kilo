@@ -28,6 +28,7 @@
 #include "behaviour/alive.h"
 #include "guard/guard.h"
 #include "mind.h"
+#include "engine/paw.h"
 #include "engine/solve.h"
 #include "power/battery.h"
 #include "remote/client.h"
@@ -1120,6 +1121,13 @@ void test_alive_tricks_through_the_mind() {
     for (const char* base : {"sit", "stand"}) {
       char name[48];
       std::snprintf(name, sizeof name, "alive_%s_%s", p.alive_tricks[i], base);
+      if (std::strcmp(name, "alive_wash_face_stand") == 0) {  // the engine's (engine/paw.h), made when asked
+        static engine::PawWash w;
+        CHECKF(w.build(planner::BodyModel(), engine::PawGoal()) && tricks::trick_problem(w.trick()) == nullptr &&
+                   w.trick().end_posture == KILO_POSTURE_STAND,
+               "the engine's paw wash: %s", w.why() ? w.why() : "");
+        continue;
+      }
       const tricks::Trick* t = tricks::find_trick(name);
       CHECKF(t != nullptr && tricks::trick_problem(*t) == nullptr, "%s", name);
       if (t != nullptr)

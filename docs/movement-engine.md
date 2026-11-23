@@ -1,8 +1,8 @@
 # One movement engine
 
 Written 2026-11-22 as a design; **steps 1 and 2 are built** (step 1 the
-same day, step 2 on 2026-11-23: "What exists now" just below), steps 3 to 6
-are not. The owner's four decisions
+same day, step 2 on 2026-11-23: "What exists now" just below), **step 4 in
+part** (the paw lift and face wash, 2026-11-23); steps 3, 5 and 6 are not. The owner's four decisions
 on it are at the end. Numbers marked **(est.)** are estimates; every other
 number is read from the code, the docs or the recordings named next to
 it, most of them from
@@ -111,6 +111,47 @@ it, the walks on the virtual body).
   `PYTHONPATH=mind python mind/tests/enginejudge.py table` and `changes`.
   The laptop reaches the engine only through that program (`kilo.engine`);
   there is no Python copy of it.
+
+## What exists now (step 4, the first trick, 2026-11-23)
+
+- **The paw wash** (`kernel/mind/engine/paw.h`): the owner's first trick
+  as a goal (decision 4). Standing, he moves his weight back and onto the
+  other side (by the model: the body 7 mm back and rolled 5°, so that
+  the centre of mass is 7 mm inside the three feet that stay down, twice
+  the walk's 3.5 because he holds it; the lean is held until the servos
+  have it before the paw leaves the floor), lifts a front paw, first just
+  off the floor over a third of a second, then up beside his
+  muzzle, tilts his head down to it, strokes down his face and back up two
+  to four times, puts the paw down, and stands. It is made from the body
+  model each time it is asked for, at the tempo and the number of strokes
+  asked (0.5 to 2 times its own pace, 1 to 8 strokes), not played from a
+  recording; either paw (the player mirrors it).
+- **Safety.** A hold with the paw up is watched: if he is not standing
+  still on three feet (the roll more than 6° off what the lean expects, or
+  the pitch more than 6°), the trick stops and he goes back to STAND. The
+  board's balance correction is off for it. Judged on the laptop
+  (`mind/tests/test_engine_tricks.py`; results, "Step 4"): by the
+  quasi-static model the centre of mass stays at least 3.2 mm inside the
+  feet all along (6.4 mm but for the right paw on Kilo as recorded, whose
+  right hind shoulder sits differently) and the head at least 16.7 mm from
+  the paw (the rule: 10 mm,
+  either way the pan turns); played on the tricks' dynamics with the
+  servos' lag and the legs' give, it neither falls nor trips its guard in
+  the fit or at any of the 19 corners of what the recordings allow.
+- **Where it plays**: the random mode's face wash when he stands (A5, then
+  A5 again for a trick: the trick drawn is the face wash one time in five).
+  Sitting, the face wash is the library's as before. The library's standing
+  face wash (it sat down first) is deleted.
+- **What the owner should see** (not yet tried): standing in the random
+  mode, now and then he leans back and a little to one side, lifts a front
+  paw up beside his face, dips his head to it and wipes a few times, then
+  stands again. It has never run on Kilo.
+- **Not built in step 4**: the other tricks as goals (the stretch, with its
+  shake as an overlay, the sniff, the rear-up as "nose up to N degrees").
+  **Step 3** (postures as goals) is not built: sitting and lying rest the
+  body on his haunches and belly, which the engine has no model of; the
+  moves between postures stay the intent layer's, planned and checked in
+  Python's statics and dynamics (docs/intent.md).
 
 ## Summary (half a page)
 
@@ -481,10 +522,10 @@ what it replaces.
 3. **Postures as goals.** Stand, sit, rest from any measured state through
    the solver; `intent/` moves and the graph go. Floor try: B6, A7, the
    random mode's sitting and lying down, from odd starts.
-4. **Tricks as goals.** The kept tricks (item 11) rewritten as tasks with a
-   tempo; the keyframe library goes. First the paw lift on three feet and
-   the face wash. Floor try: A5 twice, A1 (rear up as "nose up to N
-   degrees").
+4. **Tricks as goals (begun 2026-11-23: the paw lift on three feet and the
+   face wash, standing).** The kept tricks (item 11) rewritten as tasks with
+   a tempo; the keyframe library goes. Floor try: A5 twice, A1 (rear up as
+   "nose up to N degrees").
 5. **Closed-loop getting up.** The policy of part two; the righting
    experiment goes. Floor try: B1 from each side and the back, then the
    same as a goal the engine sets itself after a fall.

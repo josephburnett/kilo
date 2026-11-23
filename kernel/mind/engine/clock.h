@@ -8,9 +8,10 @@
 //
 // The clock can wait: a tick it does not advance (the solver holds a lift
 // while the body is off the plan, or while the weight is not yet where the
-// lift needs it). It can change gait under way: the offsets move toward the
-// new gait's at most kOffsetSlew of a cycle a tick, and only while the leg is
-// on the ground and not about to lift, so no leg's swing is cut or doubled.
+// lift needs it). Its offsets can move under way (a longer swing, another
+// cadence: the four-foot time shared out again), at most kOffsetSlew of a
+// cycle a tick and only while the leg is on the ground and not about to
+// lift, so no leg's swing is cut or doubled.
 #ifndef KILO_MIND_ENGINE_CLOCK_H
 #define KILO_MIND_ENGINE_CLOCK_H
 #include <stdint.h>
@@ -27,20 +28,15 @@ class StepClock {
   // One tick: the phase advances by 1 / cycle unless waiting; returns the
   // legs whose lift point it passed (bit i: leg i).
   uint8_t advance(bool wait = false);
-  // The lifts the next n ticks bring, without advancing (the solver's look-ahead): out[k] for tick k + 1.
-  void preview(int n, uint8_t* out) const;
   void set_cycle(real cycle_ticks) { cycle_ = cycle_ticks < 2 ? 2 : cycle_ticks; }
   // Move the offsets toward these (a new swing or cadence, a gait change under way), kOffsetSlew a tick.
   void retarget(const real offsets[kLegs]) {
     for (int i = 0; i < kLegs; i++) target_[i] = offsets[i];
   }
   void slew_offsets(uint8_t swinging);
-  bool offsets_settled() const;
   real phase() const { return phase_; }
   real cycle() const { return cycle_; }
   real offset(int leg) const { return lift_at_[leg]; }
-  // How far (0..1 of a cycle) the phase has to go to the leg's next lift.
-  real to_lift(int leg) const;
 
  private:
   real phase_ = 0;

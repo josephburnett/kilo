@@ -27,7 +27,7 @@ from kilo.tricks import rear_up as RU
 from kilo.tricks.model import CANONICAL, JOINT_IDS, JOINT_NAMES, TICK_MS, Keyframe, Posture
 
 GEOMETRIES = {"as designed": RU.DESIGN, "as recorded": RU.AS_RECORDED}
-CASES = [(t, b) for t in A.SET for b in A.BASES]
+CASES = A.cases()  # the standing face wash is the engine's: test_engine_tricks.py
 
 
 def test_library_files_are_current():
