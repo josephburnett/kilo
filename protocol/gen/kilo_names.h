@@ -18,15 +18,10 @@ static inline const char *kilo_msg_name(unsigned v)
     case KILO_MSG_STATS_REQ: return "STATS_REQ";
     case KILO_MSG_PCA_READ: return "PCA_READ";
     case KILO_MSG_SET_POSTURE: return "SET_POSTURE";
-    case KILO_MSG_FEET: return "FEET";
+    case KILO_MSG_POSE: return "POSE";
     case KILO_MSG_SET_HEAD: return "SET_HEAD";
     case KILO_MSG_SET_BODY_POSE: return "SET_BODY_POSE";
     case KILO_MSG_SET_BALANCE: return "SET_BALANCE";
-    case KILO_MSG_TRICK_BEGIN: return "TRICK_BEGIN";
-    case KILO_MSG_TRICK_FRAMES: return "TRICK_FRAMES";
-    case KILO_MSG_TRICK_COMMIT: return "TRICK_COMMIT";
-    case KILO_MSG_TRICK_PLAY: return "TRICK_PLAY";
-    case KILO_MSG_TRICK_STOP: return "TRICK_STOP";
     case KILO_MSG_SET_EYES: return "SET_EYES";
     case KILO_MSG_BEEP: return "BEEP";
     case KILO_MSG_CAL_GET: return "CAL_GET";
@@ -116,8 +111,6 @@ static inline const char *kilo_ack_status_name(unsigned v)
     case KILO_ACK_STATUS_BAD_ARG: return "BAD_ARG";
     case KILO_ACK_STATUS_BUSY: return "BUSY";
     case KILO_ACK_STATUS_UNKNOWN_TYPE: return "UNKNOWN_TYPE";
-    case KILO_ACK_STATUS_CRC_MISMATCH: return "CRC_MISMATCH";
-    case KILO_ACK_STATUS_NO_TRICK: return "NO_TRICK";
     case KILO_ACK_STATUS_REFUSED_LOW_BATT: return "REFUSED_LOW_BATT";
     case KILO_ACK_STATUS_REFUSED_FALLEN: return "REFUSED_FALLEN";
     case KILO_ACK_STATUS_EEPROM_BUSY: return "EEPROM_BUSY";
@@ -132,6 +125,7 @@ static inline const char *kilo_goal_refused_reason_name(unsigned v)
     switch (v) {
     case KILO_GOAL_REFUSED_REASON_BAD_LEN: return "BAD_LEN";
     case KILO_GOAL_REFUSED_REASON_BAD_ARG: return "BAD_ARG";
+    case KILO_GOAL_REFUSED_REASON_BUSY: return "BUSY";
     case KILO_GOAL_REFUSED_REASON_UNKNOWN_TYPE: return "UNKNOWN_TYPE";
     case KILO_GOAL_REFUSED_REASON_LOW_BATT: return "LOW_BATT";
     case KILO_GOAL_REFUSED_REASON_FALLEN: return "FALLEN";
@@ -146,23 +140,21 @@ static inline const char *kilo_event_name(unsigned v)
     switch (v) {
     case KILO_EVENT_BOOT: return "BOOT";
     case KILO_EVENT_FELL: return "FELL";
-    case KILO_EVENT_RECOVERED: return "RECOVERED";
-    case KILO_EVENT_RECOVERY_FAILED: return "RECOVERY_FAILED";
+    case KILO_EVENT_LYING: return "LYING";
     case KILO_EVENT_LOW_BATTERY: return "LOW_BATTERY";
     case KILO_EVENT_BATTERY_OK: return "BATTERY_OK";
     case KILO_EVENT_WATCHDOG: return "WATCHDOG";
     case KILO_EVENT_LINK_RESTORED: return "LINK_RESTORED";
     case KILO_EVENT_IMU_FAULT: return "IMU_FAULT";
     case KILO_EVENT_IMU_OK: return "IMU_OK";
-    case KILO_EVENT_TRICK_DONE: return "TRICK_DONE";
-    case KILO_EVENT_GAIT_STOPPED: return "GAIT_STOPPED";
+    case KILO_EVENT_STREAM_STOPPED: return "STREAM_STOPPED";
     case KILO_EVENT_GOAL_REFUSED: return "GOAL_REFUSED";
     case KILO_EVENT_CONFIG_MIGRATED: return "CONFIG_MIGRATED";
     case KILO_EVENT_CONFIG_DEFAULTED: return "CONFIG_DEFAULTED";
     case KILO_EVENT_EEPROM_SAVED: return "EEPROM_SAVED";
     case KILO_EVENT_TX_DROPPED: return "TX_DROPPED";
     case KILO_EVENT_IR_KEY: return "IR_KEY";
-    case KILO_EVENT_FEET_UNDERRUN: return "FEET_UNDERRUN";
+    case KILO_EVENT_POSE_UNDERRUN: return "POSE_UNDERRUN";
     default: return "?";
     }
 }
@@ -173,10 +165,8 @@ static inline const char *kilo_mode_name(unsigned v)
     case KILO_MODE_BOOT: return "BOOT";
     case KILO_MODE_LIMP: return "LIMP";
     case KILO_MODE_IDLE: return "IDLE";
-    case KILO_MODE_GAIT: return "GAIT";
-    case KILO_MODE_TRICK: return "TRICK";
+    case KILO_MODE_STREAM: return "STREAM";
     case KILO_MODE_FALLEN: return "FALLEN";
-    case KILO_MODE_RECOVERING: return "RECOVERING";
     case KILO_MODE_LOW_BATT: return "LOW_BATT";
     case KILO_MODE_CALIB: return "CALIB";
     case KILO_MODE_LINK_LOST: return "LINK_LOST";
@@ -188,8 +178,7 @@ static inline const char *kilo_owner_name(unsigned v)
 {
     switch (v) {
     case KILO_OWNER_IDLE: return "IDLE";
-    case KILO_OWNER_GAIT: return "GAIT";
-    case KILO_OWNER_TRICK: return "TRICK";
+    case KILO_OWNER_STREAM: return "STREAM";
     case KILO_OWNER_REFLEX: return "REFLEX";
     case KILO_OWNER_PI_HOLD: return "PI_HOLD";
     default: return "?";
@@ -246,28 +235,6 @@ static inline const char *kilo_battery_level_name(unsigned v)
     case KILO_BATTERY_LEVEL_WARN: return "WARN";
     case KILO_BATTERY_LEVEL_LOW: return "LOW";
     case KILO_BATTERY_LEVEL_CRITICAL: return "CRITICAL";
-    default: return "?";
-    }
-}
-
-static inline const char *kilo_trick_done_reason_name(unsigned v)
-{
-    switch (v) {
-    case KILO_TRICK_DONE_REASON_DONE: return "DONE";
-    case KILO_TRICK_DONE_REASON_STOPPED: return "STOPPED";
-    case KILO_TRICK_DONE_REASON_PREEMPTED: return "PREEMPTED";
-    case KILO_TRICK_DONE_REASON_FELL: return "FELL";
-    default: return "?";
-    }
-}
-
-static inline const char *kilo_easing_name(unsigned v)
-{
-    switch (v) {
-    case KILO_EASING_LINEAR: return "LINEAR";
-    case KILO_EASING_COSINE: return "COSINE";
-    case KILO_EASING_STEP: return "STEP";
-    case KILO_EASING_SPLINE_RESERVED: return "SPLINE_RESERVED";
     default: return "?";
     }
 }

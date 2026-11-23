@@ -4,7 +4,7 @@ RIGID (``rigid_rest``): the planner's model (kilo.planner.model) as the
 walks use it: legs that do not give, the body on the plane through three
 or four of its feet, the three that carry the centre of mass when one is
 off the ground. This is "the model's prediction" the routine sends with
-every pose (FEET pitch/roll) and records; kernel/mind/measure/script.cpp
+every pose (POSE pitch/roll) and records; kernel/mind/measure/script.cpp
 ports it (kernel/host/tests/measure_vectors.txt checks the two agree).
 
 COMPLIANT (``rest``): what the fit uses. Each leg is a spring along the

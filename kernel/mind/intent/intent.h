@@ -11,24 +11,26 @@
 //               (tricks/player.h) with its roll limit;
 //   Posture     the body's own posture change (SET_POSTURE): where no checked
 //               move leads, and from UNKNOWN;
-//   WaitReflex  fallen: wait for the body's fall reflex (EVENT RECOVERED or
-//               RECOVERY_FAILED), up to kReflexWaitUs;
+//   WaitReflex  fallen: wait for the body's fall reflex to lay him down
+//               (EVENT LYING: given up, he needs a hand; the body has no
+//               get-up of its own) or for a hand to right him, up to
+//               kReflexWaitUs;
 //   Right       instead, with the righting experiment (set_righting:
 //               KILO_RIGHTING, docs/righting.md): from a side or his back, a
-//               righting move played as a FALL_OK trick, which the body takes
-//               from its fall reflex once the Mind has set its param FALL_RC
-//               to 0 (mirrored from his left side). At most kMaxRightings of
+//               righting move played as a FALL_OK trick, whose POSE stream
+//               takes the joints from the body's fall reflex (mirrored from
+//               his left side). At most kMaxRightings of
 //               them per intent; then, or when it gives up while he is down,
 //               he is sent LIMP and the host says so (a meow).
 //
 // be(goal):
 //   Settle   wait (up to kSettleWaitUs) for the estimate to leave MOVING;
 //            still moving then: the body's own posture change to the goal.
-//            The body's fall reflex at work (mode FALLEN or RECOVERING: it
-//            has the joints and refuses every goal): the Reflex wait at once.
+//            The body's fall reflex at work (mode FALLEN: it has the joints
+//            and refuses every goal): the Reflex wait at once.
 //   decide   there already: the goal's posture is latched (SET_POSTURE, as
 //            the remote's key does today) and it is done. The body LIMP
-//            (servos off): REST first (TRICK_PLAY is refused in LIMP), then
+//            (servos off): REST first (a POSE stream is refused in LIMP), then
 //            again. Else the first step toward the goal starts.
 //   Move / Posture / Reflex   the step runs.
 //   Check    wait (kCheckMinUs to kCheckWaitUs) for a settled estimate. Where the
@@ -39,7 +41,7 @@
 //   own change: the lowest posture), if fallen as he lies.
 //
 // cancel(): someone else takes the body (a walk, a trick, the laptop): a
-// move under way is stopped (TRICK_STOP) and the intent forgotten.
+// move under way is stopped (its end posture) and the intent forgotten.
 //
 // Nothing here runs unless the mind is built or started with intents on
 // (KILO_INTENT=1, kilo-mind-host --intent): MindConfig.intent.
@@ -78,7 +80,7 @@ class Intent {
   static constexpr uint64_t kPostureMinUs = 1000000;   // the body's own posture change: at least this before Check
   static constexpr uint64_t kCheckMinUs = 800000;      // Check: at least this (the estimate's still + confirm times)
   static constexpr uint64_t kCheckWaitUs = 4000000;    // ...and at most this for a settled estimate
-  static constexpr uint64_t kReflexWaitUs = 15000000;  // WaitReflex: this long for RECOVERED / RECOVERY_FAILED
+  static constexpr uint64_t kReflexWaitUs = 15000000;  // WaitReflex: this long for EVENT LYING or a hand
   static constexpr uint64_t kPlayerWaitUs = 2000000;   // a move waits this long for the trick player to be free
   static constexpr int kMaxFails = 3;                  // failed steps before it gives up
   static constexpr int kMaxSteps = 6;                  // steps in all
@@ -160,7 +162,7 @@ class Intent {
   uint32_t play_ = 0;
   uint32_t known_play_ = 0;
   int steps_ = 0, fails_ = 0;
-  bool recovered_ = false, recovery_failed_ = false;  // EVENTs seen in Reflex
+  bool lying_ = false;  // EVENT LYING seen in Reflex
   const char* ended_ = nullptr;
   bool reached_ = false;
   char ended_buf_[96] = {};

@@ -185,7 +185,7 @@ class Alive {
   BodyPose from_ = {0, 0, 0, 0}, cur_ = {0, 0, 0, 0};
   double last_pan_ = 0;
   // a sitting move: its trick
-  kilo_keyframe_t frames_[kMaxSteps] = {};
+  tricks::Keyframe frames_[kMaxSteps] = {};
   tricks::Trick trick_ = {};
   uint32_t play_ = 0;
   uint32_t moves_ = 0, counts_[(int)AliveMove::kCount] = {}, sit_failures_ = 0, looks_ = 0;

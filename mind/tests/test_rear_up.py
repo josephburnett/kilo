@@ -5,8 +5,9 @@ the two falls of 2026-11-17 (fixtures/rear_up_2026_11_17.json); the
 compliant dynamic model (kilo.tricks.dynamics) held to the plays of
 2026-11-19..21 (fixtures/rear_up_2026_11_21.json); the third design
 (kilo.tricks.rear_up), its checks in that model and its guards; the
-library entries; the mind's guard watch (kilo.tricks.player.GuardWatch);
-and the tricks on the real body core (kilo.vbody.core)."""
+library entries; and the mind's guard watch (kilo.tricks.model.GuardWatch).
+(The plays on the real body core's trick store went with the store in
+protocol 3.0.)"""
 
 from __future__ import annotations
 
@@ -19,10 +20,8 @@ import pytest
 
 from kilo.planner.model import BodyModel
 from kilo.tricks import dynamics as D, library, rear_up as RU, sagittal as S, stance as T
-from kilo.tricks.model import JOINT_LIMITS, MAX_FRAMES, Guard, Keyframe, Posture, Trick
-from kilo.tricks.player import GuardWatch
+from kilo.tricks.model import JOINT_LIMITS, MAX_FRAMES, Guard, GuardWatch, Keyframe, Posture, Trick
 
-from test_corebody import binary, rig, stand, events  # noqa: F401  (fixtures)
 
 G = S.Geometry.of(BodyModel().view("tricks_rigid"))  # the side view as of the trials and the photo (2026-11-17)
 STAND_P = S.Pose(30, 30, -30, -30, 0)
@@ -489,128 +488,3 @@ def test_guard_watch_push_roll():
 def test_guards_round_trip_through_json():
     t = RU.build(None, 2)
     assert Trick.from_json(t.to_json()).guards == t.guards and Trick.from_json(t.to_json()).roll_max == 8.0
-
-
-# ---- on the real body core ---------------------------------------------------------------------
-
-def joints_out(out: list[int]) -> dict:
-    """The core's joint outputs (a16, canonical order) as joint name -> deg."""
-    return {name: v / 16 for name, v in zip(("head_pan", "head_tilt", "tail", "lf_shoulder", "rf_shoulder",
-                                             "rb_shoulder", "lb_shoulder", "lf_knee", "rf_knee", "rb_knee",
-                                             "lb_knee"), out)}
-
-
-def play_with_model_attitude(core, client, until, alive=True, max_ticks=2000):
-    """Tick the core, feeding it the attitude the 3-D model (the design's
-    calibration) gives for its joint outputs, as TELEMETRY (nose down +,
-    right side up +). Returns the nose-up pitches fed."""
-    R, fed = None, []
-    for _ in range(max_ticks):
-        d = core.dump()
-        if OFF in d["out"]:
-            break
-        r = T.rest(RU.DESIGN, joints_out(d["out"]), R)
-        R = r.R
-        nose = T.telemetry_pitch(RU.DESIGN, r)
-        core.set_attitude(pitch_deg=-nose, roll_deg=r.roll)
-        fed.append(nose)
-        core.step(1, alive=alive)
-        if until():
-            break
-    return fed
-
-
-OFF = -32768
-
-
-TOP_PITCH = {"rear_up": (24, 28), "rear_up_2": (36, 40), "rear_up_3": (50, 54)}
-
-
-@pytest.mark.parametrize("name", RU.NAMES)
-def test_rear_up_on_the_body_core(rig, name):
-    core, link, client = rig()
-    stand(core, client)
-    t = library.load(name)
-    tid, n = client.start_trick(t)
-    fed = play_with_model_attitude(core, client, lambda: client.trick_done_since(n, tid) is not None)
-    done = client.trick_done_since(n, tid)
-    assert done is not None and done.arg >> 8 == 0  # DONE: no fall, no pre-emption
-    lo, hi = TOP_PITCH[name]
-    assert not events(link, "FELL") and lo < max(fed) < hi
-    assert abs(len(fed) - (t.duration_ticks + 1)) <= 2
-    core.step(15)  # the end crossfade (only SIT's back shoulders move: -80 in the frame, -90 clamped to -80)
-    d = core.dump()
-    assert d["posture"] == int(Posture.SIT) and not d["trick_run"] and link.state.mode == "IDLE"
-    assert joints_out(d["out"]) == RU.SIT_FRAME
-    # the core reached every keyframe exactly (no limit clamps), slew-limited on the way
-    core2, link2, client2 = rig()
-    stand(core2, client2)
-    tid, n = client2.start_trick(t)
-    prev, ends, tick = None, [], 0
-    for i, f in enumerate(t.frames):
-        tick += f.dur + f.hold
-        ends.append(tick)
-    seen = {}
-    k = 0
-    while client2.trick_done_since(n, tid) is None and k < 2000:
-        core2.step(1)
-        k += 1
-        out = core2.dump()["out"]
-        if prev is not None:
-            assert max(abs(a - b) for a, b in zip(out, prev)) <= 10 * 16  # the safety slew, 10 deg/tick
-        prev = out
-        seen[k] = out
-    for i, e in enumerate(ends):
-        if e in seen:  # the frame's last tick (the next one is already the next move's first)
-            want = [round(v * 16) for v in RU.keyframe(RU.joints_of(t.frames[i]), 1).to_wire().ang]
-            got = seen[e]
-            assert max(abs(a - b) for a, b in zip(got, want)) <= 16, (i, got, want)
-
-
-@pytest.mark.parametrize("name", RU.NAMES)
-def test_rear_up_stop_is_a_slow_straight_crossfade_to_sit(rig, name):
-    core, link, client = rig()
-    stand(core, client)
-    t = library.load(name)
-    tid, n = client.start_trick(t)
-    hold_i = RU.top_frame(t)
-    top = sum(f.dur + f.hold for f in t.frames[:hold_i]) + t.frames[hold_i].dur + 20  # into the top's hold
-    play_with_model_attitude(core, client, lambda: False, max_ticks=top)
-    start = core.dump()["out"]
-    client.stop_trick()  # None: the trick's own stop_ticks
-    assert core.run_until(lambda: client.trick_done_since(n, tid) is not None, 1) is not None
-    assert client.trick_done_since(n, tid).arg >> 8 == 1  # STOPPED
-    # SIT (body/src/core/posture.cpp): its back shoulders' -90 is clamped to
-    # the -80 limit, so they arrive early and wait (the model clamps every sample the same way)
-    sit_raw = [v * 16 for v in (10, -20, -60, 30, 30, -90, -90, 60, 60, 45, 45)]
-    ws = []
-    for _ in range(t.stop_ticks + 5):
-        core.step(1)
-        out = core.dump()["out"]
-        # every joint the same fraction of the way: a straight line in joint space (what the check assumed)
-        w = [(o - s) / (e - s) for i, (o, s, e) in enumerate(zip(out, start, sit_raw)) if abs(e - s) > 200 and i not in (5, 6)]
-        assert max(w) - min(w) < 0.06, w
-        f = sum(w) / len(w)
-        for i in (5, 6):
-            assert out[i] == pytest.approx(max(-80 * 16, start[i] + f * (sit_raw[i] - start[i])), abs=24)
-        ws.append(f)
-    assert ws[0] < 0.1 and ws[t.stop_ticks // 2] < 0.75 and ws[-1] == pytest.approx(1.0, abs=0.01)
-    assert core.dump()["posture"] == int(Posture.SIT)
-
-
-@pytest.mark.parametrize("name", RU.NAMES)
-def test_rear_up_leaves_the_fall_detector_armed(rig, name):
-    """FALL_OK is off: a real fall backwards past 75 deg during the hold is a fall."""
-    core, link, client = rig()
-    stand(core, client)
-    t = library.load(name)
-    tid, n = client.start_trick(t)
-    hold_i = RU.top_frame(t)
-    play_with_model_attitude(core, client, lambda: False,
-                             max_ticks=sum(f.dur + f.hold for f in t.frames[:hold_i]) + t.frames[hold_i].dur + 10)
-    assert not events(link, "FELL")
-    core.set_attitude(pitch_deg=-85)  # tipping over backwards
-    assert core.run_until(lambda: client.trick_done_since(n, tid) is not None, 1) is not None
-    assert client.trick_done_since(n, tid).arg >> 8 == 3  # FELL
-    core.step(2)
-    assert [e.arg for e in events(link, "FELL")] == [-2]  # a pitch fall, nose up

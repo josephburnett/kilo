@@ -118,14 +118,13 @@ bool BodyState::battery_pct(double* pct) const {
 }
 
 bool BodyState::fallen() const {
-  return has_telemetry && (telemetry.mode == KILO_MODE_FALLEN || telemetry.mode == KILO_MODE_RECOVERING);
+  return has_telemetry && telemetry.mode == KILO_MODE_FALLEN;
 }
 
 bool BodyState::moving() const {
   if (!has_telemetry) return false;
   uint8_t m = telemetry.mode;
-  return (telemetry.flags & (KILO_TELEMETRY_FLAGS_GAIT | KILO_TELEMETRY_FLAGS_TRICK)) != 0 || m == KILO_MODE_GAIT ||
-         m == KILO_MODE_TRICK || m == KILO_MODE_RECOVERING;
+  return (telemetry.flags & KILO_TELEMETRY_FLAGS_STREAM) != 0 || m == KILO_MODE_STREAM;
 }
 
 int BodyState::upright() const {

@@ -52,7 +52,7 @@ Goals and the epoch rule (§3c, §4, §5):
 - Contact (a body that may just have rebooted): after every (re)connect, and
   after the body was lost (no TELEMETRY for 300 ms), no motion goal
   (SET_POSTURE other than REST/LIMP, a SET_BALANCE enable, the other epoch
-  goals) is sent or refreshed, and TRICK_PLAY and the FEET stream are refused, until the body has
+  goals) is sent or refreshed, and the POSE stream is refused, until the body has
   been heard on this connection: a HELLO that proves a reboot (motion goals
   are cleared first, under the same lock the writer packs goals under), or a
   TELEMETRY (its tick is checked for a restart first). After a reconnect or a
@@ -64,7 +64,7 @@ Goals and the epoch rule (§3c, §4, §5):
   mind noticing within 300 ms still sees the refreshes sent meanwhile; it
   boots at a new epoch, so they are STALE: docs §3c "Boot epoch".)
 
-Streams (FEET, the walking plan; kilo.planner.walker): ``send_stream()``
+Streams (POSE, the stream of poses; kilo.planner.walker): ``send_stream()``
 writes the frame at once on the caller's thread, under the same transmit
 lock as the writer: no queue, no ack, no refresh, no retry, and not part of
 the goals and their epoch machinery (the frame carries the epoch its
@@ -449,7 +449,7 @@ class SerialLink:
         self._txq.put((self.messages.type_of(name), None, payload, name))
 
     def send_stream(self, name: str, payload: bytes) -> bool:
-        """Write one Pi->body stream frame (FEET) now. ``payload`` is packed
+        """Write one Pi->body stream frame (POSE) now. ``payload`` is packed
         by the caller (the streamer packs its own, allocation-light). False
         when it was not written: silent, not connected, the body not heard on
         this connection yet, or a write error."""
@@ -477,8 +477,6 @@ class SerialLink:
             raise LinkError(f"{name}: the link is passive (sends nothing)")
         if self._transport is None:
             raise NotConnected(f"{name}: not connected")
-        if name == "TRICK_PLAY" and not self._contact:
-            raise NotConnected(f"{name}: the body has not been heard on this connection yet")
         with self._req_lock:
             p = _Pending(name, typ, reply_name)
             self.state.stats.commands += 1

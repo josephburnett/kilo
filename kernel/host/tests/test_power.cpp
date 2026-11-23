@@ -220,7 +220,7 @@ void test_wake_by_key() {
       const Sent& s = r.body.sent[i];
       if (rest_at == 0 && s.type == KILO_MSG_SET_POSTURE && s.payload.size() >= 2 && s.payload[1] == KILO_POSTURE_REST)
         rest_at = i;
-      if (feet_at == 0 && s.type == KILO_MSG_FEET) feet_at = i;
+      if (feet_at == 0 && s.type == KILO_MSG_POSE) feet_at = i;
     }
     CHECKF(rest_at != 0 && feet_at != 0 && rest_at < feet_at, "rest at %zu feet at %zu", rest_at, feet_at);
   }
@@ -291,7 +291,7 @@ void test_no_limp_while_stopping() {
   uint64_t free_at = 0, limp_at = 0;
   for (int i = 0; i < 5000 && limp_at == 0; i++) {
     r.pass();
-    bool busy = r.mind.walker().active() || r.mind.remote().busy() || r.body.mode == KILO_MODE_GAIT;
+    bool busy = r.mind.walker().active() || r.mind.remote().busy() || r.body.mode == KILO_MODE_STREAM;
     if (busy) {
       saw_busy = true;
       free_at = 0;
@@ -357,7 +357,7 @@ void test_keys_from_limp() {
       const Sent& s = r.body.sent[i];
       if (rest_at == 0 && s.type == KILO_MSG_SET_POSTURE && s.payload.size() >= 2 && s.payload[1] == KILO_POSTURE_REST)
         rest_at = i;
-      if (feet_at == 0 && s.type == KILO_MSG_FEET) feet_at = i;
+      if (feet_at == 0 && s.type == KILO_MSG_POSE) feet_at = i;
     }
     CHECKF(rest_at != 0 && feet_at != 0 && rest_at < feet_at, "rest at %zu feet at %zu", rest_at, feet_at);
   }
@@ -387,11 +387,9 @@ void test_righted_before_limp() {
     r.body.mode = KILO_MODE_FALLEN;
     r.body.event(KILO_EVENT_FELL, -1);
     r.run_ms(1000);
-    r.body.mode = KILO_MODE_RECOVERING;
     r.run_ms(3000);
-    r.body.mode = KILO_MODE_IDLE;  // RECOVERED: IDLE STAND
+    r.body.mode = KILO_MODE_IDLE;  // righted by a hand while the reflex held him: IDLE again
     r.body.support = 0xF;
-    r.body.event(KILO_EVENT_RECOVERED, 0);
     r.run_ms(60000);
     CHECKF(r.state() == State::Awake && !r.mind.sleep().limp() && r.mind.sleep().limps() == 0, "state %s limps %u",
            power::state_name(r.state()), (unsigned)r.mind.sleep().limps());

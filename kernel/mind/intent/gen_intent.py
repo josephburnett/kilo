@@ -29,7 +29,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 sys.path.insert(0, str(REPO / "mind"))
 
-from kilo.body.client import trick_id_for  # noqa: E402
+from kilo.tricks.model import trick_id_for  # noqa: E402
 from kilo.intent import estimate as E  # noqa: E402
 from kilo.intent import graph as G  # noqa: E402
 from kilo.intent import moves as M  # noqa: E402
@@ -109,7 +109,7 @@ def render() -> tuple[str, str]:
         else:
             c.append(f"// {name}: {n} frame{'s' if n != 1 else ''}, end {t.end_posture.name}; margin "
                      f"{min(src['margin_mm'].values()):.1f} mm, {src['dynamics']['bands']} bands of the dynamics")
-        c.append(f"const kilo_keyframe_t {ident(name)}[] = {{")
+        c.append(f"const tricks::Keyframe {ident(name)}[] = {{")
         for f in t.frames:
             w = f.to_wire()
             c.append(f"    {{{w.dur}, {w.hold}, 0x{w.flags:02X}, {{{', '.join(str(a) for a in w.ang)}}}}},")

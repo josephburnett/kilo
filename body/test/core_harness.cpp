@@ -196,15 +196,14 @@ static void dump(void) {
   std::printf(" head_ttl=%u", a.head_ttl);
   std::printf(" wd_armed=%u wd_stage=%u wd_since=%u wd_limp_timer=%u", b.wd.armed, b.wd.stage, b.wd.since,
               b.wd.limp_timer);
-  const Feet& g = b.feet;
-  std::printf(" feet_state=%u feet_queued=%u feet_support=%u feet_late=%u feet_underruns=%u", g.state,
-              feet_queued(g), feet_support(g), g.late, g.underruns);
+  const Stream& g = b.stream;
+  std::printf(" stream_state=%u pose_queued=%u stream_support=%u stream_flags=%u pose_dropped=%u pose_underruns=%u",
+              g.state, stream_queued(g), g.support, g.cur.flags, g.dropped, g.underruns);
   int16_t pose[4] = {g.pose[0], g.pose[1], g.dh, g.xs};
   list("pose", pose, 4);
+  std::printf(" limited=%u", a.limited);
   const Fall& f = b.fall;
-  std::printf(" fall_state=%u fall_axis=%d fall_tries=%u fall_timer=%u", f.state, f.axis, f.tries, f.timer);
-  const Keyframe& kf = b.kf;
-  std::printf(" trick_run=%u trick_id=%u trick_store=%u trick_frame=%u", kf.run, kf.id, kf.store, kf.fi);
+  std::printf(" fall_state=%u fall_axis=%d fall_timer=%u", f.state, f.axis, f.timer);
   std::printf(" balance_req=%u balance_enable=%u balance_active=%u", b.balance_req, b.bal.enable, b.bal.active);
   int16_t corr[2] = {b.bal.ax[BAL_ROLL].corr, b.bal.ax[BAL_PITCH].corr};
   list("balance_corr", corr, 2);

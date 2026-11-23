@@ -11,8 +11,8 @@ import struct
 from dataclasses import dataclass, field, fields as dc_fields
 from typing import Any, ClassVar
 
-PROTO_MAJOR = 2
-PROTO_MINOR = 1
+PROTO_MAJOR = 3
+PROTO_MINOR = 0
 BAUD = 250000
 MAX_PAYLOAD = 60
 HEADER_BYTES = 2
@@ -30,9 +30,10 @@ TICK_MS = 20
 TELEMETRY_DEFAULT_DIV = 2
 TELEMETRY_DEFAULT_HZ = 25
 GOAL_REFRESH_HZ = 5
-FEET_DEPTH = 8
-FEET_LOOKAHEAD_TICKS = 5
-FEET_HOLD_TICKS = 5
+POSE_DEPTH = 5
+POSE_LOOKAHEAD_TICKS = 3
+POSE_HOLD_TICKS = 5
+POSE_MAX_AHEAD_TICKS = 250
 HEARTBEAT_IDLE_MS = 100
 MIND_ALIVE_MS = 1000
 CMD_RETRY_MS = 50
@@ -48,12 +49,9 @@ EEPROM_READ_MAX = 56
 REBOOT_MAGIC = 0x4B49
 RESET_PULSE_MS = 100
 PARAM_SLOTS = 20
-TRICK_CAPACITY = 24
-TRICK_FRAMES_PER_MSG = 4
 BEEP_MAX_NOTES = 8
 JOINT_COUNT = 11
 CHANNEL_COUNT = 16
-TRICK_SPEED_UNITY_Q6 = 64
 PCA_FULL_OFF_BIT = 0x1000
 
 
@@ -81,15 +79,10 @@ class MsgId(enum.IntEnum):
     STATS_REQ = 0x05
     PCA_READ = 0x06
     SET_POSTURE = 0x10
-    FEET = 0x11
+    POSE = 0x11
     SET_HEAD = 0x12
     SET_BODY_POSE = 0x13
     SET_BALANCE = 0x14
-    TRICK_BEGIN = 0x20
-    TRICK_FRAMES = 0x21
-    TRICK_COMMIT = 0x22
-    TRICK_PLAY = 0x23
-    TRICK_STOP = 0x24
     SET_EYES = 0x30
     BEEP = 0x31
     CAL_GET = 0x38
@@ -122,8 +115,6 @@ class AckStatus(enum.IntEnum):
     BAD_ARG = 2
     BUSY = 3
     UNKNOWN_TYPE = 4
-    CRC_MISMATCH = 5
-    NO_TRICK = 6
     REFUSED_LOW_BATT = 7
     REFUSED_FALLEN = 8
     EEPROM_BUSY = 9
@@ -134,6 +125,7 @@ class AckStatus(enum.IntEnum):
 class GoalRefusedReason(enum.IntEnum):
     BAD_LEN = 1
     BAD_ARG = 2
+    BUSY = 3
     UNKNOWN_TYPE = 4
     LOW_BATT = 7
     FALLEN = 8
@@ -144,33 +136,29 @@ class GoalRefusedReason(enum.IntEnum):
 class EventCode(enum.IntEnum):
     BOOT = 1
     FELL = 2
-    RECOVERED = 3
-    RECOVERY_FAILED = 4
+    LYING = 4
     LOW_BATTERY = 5
     BATTERY_OK = 6
     WATCHDOG = 7
     LINK_RESTORED = 8
     IMU_FAULT = 9
     IMU_OK = 10
-    TRICK_DONE = 11
-    GAIT_STOPPED = 12
+    STREAM_STOPPED = 12
     GOAL_REFUSED = 13
     CONFIG_MIGRATED = 14
     CONFIG_DEFAULTED = 15
     EEPROM_SAVED = 16
     TX_DROPPED = 17
     IR_KEY = 18
-    FEET_UNDERRUN = 19
+    POSE_UNDERRUN = 19
 
 
 class Mode(enum.IntEnum):
     BOOT = 0
     LIMP = 1
     IDLE = 2
-    GAIT = 3
-    TRICK = 4
+    STREAM = 3
     FALLEN = 5
-    RECOVERING = 6
     LOW_BATT = 7
     CALIB = 8
     LINK_LOST = 9
@@ -178,8 +166,7 @@ class Mode(enum.IntEnum):
 
 class Owner(enum.IntEnum):
     IDLE = 0
-    GAIT = 1
-    TRICK = 2
+    STREAM = 1
     REFLEX = 3
     PI_HOLD = 4
 
@@ -216,20 +203,6 @@ class BatteryLevel(enum.IntEnum):
     WARN = 1
     LOW = 2
     CRITICAL = 3
-
-
-class TrickDoneReason(enum.IntEnum):
-    DONE = 0
-    STOPPED = 1
-    PREEMPTED = 2
-    FELL = 3
-
-
-class Easing(enum.IntEnum):
-    LINEAR = 0
-    COSINE = 1
-    STEP = 2
-    SPLINE_RESERVED = 3
 
 
 class HostResultCode(enum.IntEnum):
@@ -420,8 +393,7 @@ class TelemetryFlags(enum.IntFlag):
     BALANCE_ACTIVE = 1 << 0
     IMU_FAULT = 1 << 1
     SERVOS_POWERED = 1 << 2
-    GAIT = 1 << 3
-    TRICK = 1 << 4
+    STREAM = 1 << 3
     HEAD_HELD = 1 << 5
     BATT_WARN = 1 << 6
     LINK_OK = 1 << 7
@@ -451,17 +423,22 @@ class SupportFlags(enum.IntFlag):
     LB = 1 << 3
 
 
-class TrickFlags(enum.IntFlag):
-    BALANCE = 1 << 0
-    FALL_OK = 1 << 1
+class PoseFlags(enum.IntFlag):
+    JOINT_LF = 1 << 0
+    JOINT_RF = 1 << 1
+    JOINT_RB = 1 << 2
+    JOINT_LB = 1 << 3
+    BALANCE = 1 << 4
+    FALL_OK = 1 << 5
+    EASE = 1 << 6
 
 
-class TrickPlayFlags(enum.IntFlag):
-    MIRROR = 1 << 0
-
-
-class KeyframeFlags(enum.IntFlag):
-    BALANCE = 1 << 2
+class LimitedFlags(enum.IntFlag):
+    LF = 1 << 0
+    RF = 1 << 1
+    RB = 1 << 2
+    LB = 1 << 3
+    HEAD = 1 << 4
 
 
 class EyesMask(enum.IntFlag):
@@ -505,48 +482,6 @@ class WalkFlags(enum.IntFlag):
 LEN_OK = 0
 LEN_BAD = 1
 LEN_UNKNOWN_TYPE = 2
-
-
-@dataclass
-class Keyframe:
-    SIZE: ClassVar[int] = 14
-    _FMT: ClassVar[struct.Struct] = struct.Struct('<BBBbbbbbbbbbbb')
-    dur: int = 0  # tick; range 1..255; ticks from the previous frame
-    hold: int = 0  # tick; ticks to hold after arriving
-    flags: int = 0  # flags keyframe_flags; bits 0-1 easing (enum easing), bit 2 balance
-    ang: list[int] = field(default_factory=lambda: [0] * 11)  # deg; canonical joint order; -128 = unchanged (the previous frame's angle by index; in frame 0 the pose at the start)
-
-    def _fixed_values(self) -> list:
-        v: list = []
-        v.append(self.dur)
-        v.append(self.hold)
-        v.append(self.flags)
-        if len(self.ang) != 11:
-            raise PayloadError('ang: expected 11 elements')
-        v.extend(self.ang)
-        return v
-
-    @classmethod
-    def _from_fixed(cls, v: tuple, **extra):
-        kw: dict = {}
-        kw['dur'] = v[0]
-        kw['hold'] = v[1]
-        kw['flags'] = v[2]
-        kw['ang'] = list(v[3:14])
-        kw.update(extra)
-        return cls(**kw)
-
-    def pack(self) -> bytes:
-        try:
-            return self._FMT.pack(*self._fixed_values())
-        except struct.error as e:
-            raise PayloadError(f'{type(self).__name__}: {e}') from None
-
-    @classmethod
-    def unpack(cls, data: bytes):
-        if len(data) != cls._FMT.size:
-            raise PayloadError(f'{cls.__name__}: length {len(data)} != {cls._FMT.size}')
-        return cls._from_fixed(cls._FMT.unpack(bytes(data)))
 
 
 @dataclass
@@ -716,14 +651,14 @@ class WalkRecordHeader:
 class WalkPlan:
     SIZE: ClassVar[int] = 17
     _FMT: ClassVar[struct.Struct] = struct.Struct('<IBBBhhhhh')
-    tick: int = 0  # tick; the body tick, unwrapped (FEET.tick is its low 16 bits)
-    sent: int = 0  # 1 = written as FEET; 0 = already past when planned (skipped), or the link did not take it
+    tick: int = 0  # tick; the body tick, unwrapped (POSE.tick is its low 16 bits)
+    sent: int = 0  # 1 = written as POSE; 0 = already past when planned (skipped), or the link did not take it
     lifting: int = 0  # bit i: leg i in the air (swinging) this tick
     support: int = 0  # flags support_flags: the feet on the ground
     margin: int = 0  # 0.1 mm; the centre of mass inside the polygon of the feet down (- = outside); -32768 = none. The planner's min_margin counts ticks with one leg up only
     plan_pitch: int = 0  # a16; the attitude these feet give, no servo lag
     plan_roll: int = 0  # a16
-    pitch: int = 0  # a16; predicted at this tick, servo lag included (FEET.pitch before its clamp)
+    pitch: int = 0  # a16; predicted at this tick, servo lag included (POSE.pitch before its clamp)
     roll: int = 0  # a16
 
     def _fixed_values(self) -> list:
@@ -1182,23 +1117,24 @@ class SetPosture:
 
 
 @dataclass
-class Feet:
-    """0x11 FEET (stream). One tick of the mind's plan (doc §3d): where each foot is at `tick` and the attitude the plan predicts there. Sent every tick, about link.feet_lookahead_ticks ahead; not acked, not refreshed, not retried. The body queues up to link.feet_depth ticks and plays each at its tick, slew-limited from where the feet are (a late or missing tick never snaps). A field outside its range (x_mm, z_mm, pitch, roll) or a support bit above bit 3 is refused BAD_ARG. The first FEET accepted enters GAIT (gated: BAD_ARG, STALE, FALLEN, LOW_BATT, UNCALIBRATED -> EVENT GOAL_REFUSED, rate-limited) and the stream owns the legs until a SET_POSTURE or an epoch bump (GAIT_STOPPED arg 0). A tick already past is dropped (STATS feet_late). When the queue runs dry the body holds the last pose for link.feet_hold_ticks (EVENT FEET_UNDERRUN), then settles: swing feet down at their x to the ground (the plane through the support feet when three are down, else their mean depth), IDLE in STANCE (GAIT_STOPPED arg 1). In GAIT the balance loop's reference is this pitch/roll, it corrects through the support feet only, and it holds its corrections while any support bit is clear (TELEMETRY flag BALANCE_HELD; doc §3f)."""
+class Pose:
+    """0x11 POSE (stream). One key of the mind's stream of poses (docs/movement-engine.md): the pose the body is to reach by `tick`. The body queues up to link.pose_depth keys in tick order (a second key for a queued tick replaces it) and moves from where it is toward the next one, reaching it exactly on its tick: in a straight line, or along a cosine ease (flag EASE), from the last key reached (for the first key of a stream, from the joints' outputs when it arrived). So keys may come every tick (a walk) or far apart (a slow move, a hold). Every value passes the joint limits and the safety slew (TELEMETRY.limited says what they cut). Each leg is a foot (x, z in q2 = 1/4 mm, through the body's IK, SET_BODY_POSE on top) or, with its JOINT flag, two joint angles (a16); a leg changing between the two moves in joint space. -32768 in a head value leaves that joint to IDLE; the legs are always the stream's. Not acked, not refreshed, not retried. Refused (EVENT GOAL_REFUSED, rate-limited like a goal) BAD_ARG (a foot outside x -480..480, z 60..440 q2, a joint angle of -32768, a pitch or roll beyond +-30 deg, a support bit above 3, an unknown flag), STALE, FALLEN (unless FALL_OK), LOW_BATT, UNCALIBRATED (as STAND), BUSY (another reflex holds the joints, or IDLE is LIMP or CALIB). A key already past, too far ahead or with no room is dropped (STATS pose_dropped). The first key accepted starts the stream (mode STREAM); a stream whose legs are all feet makes IDLE's posture STANCE, as a walk needs. The stream holds the joints until a SET_POSTURE, an epoch bump or a reflex (STREAM_STOPPED arg 0). Reaching its last key with none queued, the body holds it (EVENT POSE_UNDERRUN), and after link.pose_hold_ticks the feet whose support bit is clear settle at their x to the ground (the plane through the support feet when three are down, else their mean depth); a stream of feet then ends in STANCE (STREAM_STOPPED arg 1), one with joint-mode legs keeps holding. Balance: with every leg a foot it corrects through the support feet toward this pitch/roll and holds its corrections while any support bit is clear (TELEMETRY flag BALANCE_HELD; doc §3f); with joint-mode legs it corrects in joint space while the next key has flag BALANCE."""
     ID: ClassVar[int] = 0x11
-    NAME: ClassVar[str] = 'FEET'
+    NAME: ClassVar[str] = 'POSE'
     KIND: ClassVar[Kind] = Kind.STREAM
     DIR: ClassVar[Dir] = Dir.PI_TO_BODY
     HAS_EPOCH: ClassVar[bool] = True
     IS_QUERY: ClassVar[bool] = False
     REPLY_TO: ClassVar[int | None] = None
-    MIN_LEN: ClassVar[int] = 16
-    MAX_LEN: ClassVar[int] = 16
-    _FMT: ClassVar[struct.Struct] = struct.Struct('<BHbbbbBBBBhhB')
+    MIN_LEN: ClassVar[int] = 31
+    MAX_LEN: ClassVar[int] = 31
+    _FMT: ClassVar[struct.Struct] = struct.Struct('<BHBhhhhhhhhhhhhhB')
     epoch: int = 0
-    tick: int = 0  # tick; the body tick this pose is for (TELEMETRY.tick's clock)
-    x_mm: list[int] = field(default_factory=lambda: [0] * 4)  # mm; range -60..60; foot fore-aft from under the hip, + forward; legs LF RF RB LB
-    z_mm: list[int] = field(default_factory=lambda: [0] * 4)  # mm; range 30..95; foot depth below the hip, i.e. the body height at that leg; legs LF RF RB LB
-    pitch: int = 0  # deg x 0.0625; range -480..480; the attitude the plan predicts at tick: the balance reference (TELEMETRY conventions), +-30 deg
+    tick: int = 0  # tick; the body tick by which the pose is reached (TELEMETRY.tick's clock)
+    flags: int = 0  # flags pose_flags
+    leg: list[int] = field(default_factory=lambda: [0] * 8)  # per leg LF RF RB LB two values: foot x (+ forward of the hip) and z (below the hip) in q2 (1/4 mm), or with the leg's JOINT flag the shoulder and knee angles in a16 (1/16 deg, OpenCat convention)
+    head: list[int] = field(default_factory=lambda: [0] * 3)  # deg x 0.0625; pan, tilt, tail; -32768 = left to IDLE (the posture, or a SET_HEAD hold)
+    pitch: int = 0  # deg x 0.0625; range -480..480; the attitude the mind predicts at tick: the balance reference (TELEMETRY conventions), +-30 deg
     roll: int = 0  # deg x 0.0625; range -480..480; +-30 deg
     support: int = 0  # flags support_flags; the feet on the ground at tick; the balance corrects through these only
 
@@ -1206,12 +1142,13 @@ class Feet:
         v: list = []
         v.append(self.epoch)
         v.append(self.tick)
-        if len(self.x_mm) != 4:
-            raise PayloadError('x_mm: expected 4 elements')
-        v.extend(self.x_mm)
-        if len(self.z_mm) != 4:
-            raise PayloadError('z_mm: expected 4 elements')
-        v.extend(self.z_mm)
+        v.append(self.flags)
+        if len(self.leg) != 8:
+            raise PayloadError('leg: expected 8 elements')
+        v.extend(self.leg)
+        if len(self.head) != 3:
+            raise PayloadError('head: expected 3 elements')
+        v.extend(self.head)
         v.append(self.pitch)
         v.append(self.roll)
         v.append(self.support)
@@ -1222,11 +1159,12 @@ class Feet:
         kw: dict = {}
         kw['epoch'] = v[0]
         kw['tick'] = v[1]
-        kw['x_mm'] = list(v[2:6])
-        kw['z_mm'] = list(v[6:10])
-        kw['pitch'] = v[10]
-        kw['roll'] = v[11]
-        kw['support'] = v[12]
+        kw['flags'] = v[2]
+        kw['leg'] = list(v[3:11])
+        kw['head'] = list(v[11:14])
+        kw['pitch'] = v[14]
+        kw['roll'] = v[15]
+        kw['support'] = v[16]
         kw.update(extra)
         return cls(**kw)
 
@@ -1245,7 +1183,7 @@ class Feet:
 
 @dataclass
 class SetHead:
-    """0x12 SET_HEAD (goal). Hold (mode 1) or release (mode 0) pan, tilt, tail. Held joints follow the targets slew-limited at max_speed_dps (0 = only the safety slew) while the head joints' owner is IDLE or GAIT, without balance corrections; released by mode 0, head_hold_ms without a refresh, or an epoch bump. BAD_ARG for mode > 1; mode 0 is never stale; mode 1: STALE, FALLEN, LOW_BATT. TELEMETRY flags HEAD_HELD, head owner nibble PI_HOLD."""
+    """0x12 SET_HEAD (goal). Hold (mode 1) or release (mode 0) pan, tilt, tail. Held joints follow the targets slew-limited at max_speed_dps (0 = only the safety slew) while the head joints' owner is IDLE (not a stream whose pose drives them), without balance corrections; released by mode 0, head_hold_ms without a refresh, or an epoch bump. BAD_ARG for mode > 1; mode 0 is never stale; mode 1: STALE, FALLEN, LOW_BATT. TELEMETRY flags HEAD_HELD, head owner nibble PI_HOLD."""
     ID: ClassVar[int] = 0x12
     NAME: ClassVar[str] = 'SET_HEAD'
     KIND: ClassVar[Kind] = Kind.GOAL
@@ -1300,7 +1238,7 @@ class SetHead:
 
 @dataclass
 class SetBodyPose:
-    """0x13 SET_BODY_POSE (goal). Body pitch, roll, height delta, x-shift (on top of gait / STANCE)."""
+    """0x13 SET_BODY_POSE (goal). Body pitch, roll, height delta, x-shift (on top of STANCE and of a POSE stream's feet)."""
     ID: ClassVar[int] = 0x13
     NAME: ClassVar[str] = 'SET_BODY_POSE'
     KIND: ClassVar[Kind] = Kind.GOAL
@@ -1386,255 +1324,6 @@ class SetBalance:
         kw['kd_ms'] = v[2]
         kw['deadband_deg'] = v[3]
         kw['max_corr_deg'] = v[4]
-        kw.update(extra)
-        return cls(**kw)
-
-    def pack(self) -> bytes:
-        try:
-            return self._FMT.pack(*self._fixed_values())
-        except struct.error as e:
-            raise PayloadError(f'{type(self).__name__}: {e}') from None
-
-    @classmethod
-    def unpack(cls, data: bytes):
-        if len(data) != cls._FMT.size:
-            raise PayloadError(f'{cls.__name__}: length {len(data)} != {cls._FMT.size}')
-        return cls._from_fixed(cls._FMT.unpack(bytes(data)))
-
-
-@dataclass
-class TrickBegin:
-    """0x20 TRICK_BEGIN (command). Trick header; empties the store. BUSY while a trick plays; BAD_ARG for n_frames outside 1..trick_capacity (24), loop_end >= n_frames, loop_start > loop_end, a joint_mask bit outside the 11 driven joints (or none), unknown flags, or an end_posture without angles (LIMP, STANCE)."""
-    ID: ClassVar[int] = 0x20
-    NAME: ClassVar[str] = 'TRICK_BEGIN'
-    KIND: ClassVar[Kind] = Kind.COMMAND
-    DIR: ClassVar[Dir] = Dir.PI_TO_BODY
-    HAS_EPOCH: ClassVar[bool] = False
-    IS_QUERY: ClassVar[bool] = False
-    REPLY_TO: ClassVar[int | None] = None
-    MIN_LEN: ClassVar[int] = 11
-    MAX_LEN: ClassVar[int] = 11
-    _FMT: ClassVar[struct.Struct] = struct.Struct('<BBBBBHBBbb')
-    trick_id: int = 0
-    n_frames: int = 0  # range 1..24
-    loop_start: int = 0
-    loop_end: int = 0
-    repeats: int = 0  # total plays of loop_start..loop_end: 0 and 1 = once, 255 = until stopped
-    joint_mask: int = 0
-    flags: int = 0  # flags trick_flags
-    end_posture: int = 0  # enum posture
-    exp_roll: int = 0  # deg; balance reference for frames with the balance bit (right side up +)
-    exp_pitch: int = 0  # deg; balance reference (nose down +; legacy header byte)
-
-    def _fixed_values(self) -> list:
-        v: list = []
-        v.append(self.trick_id)
-        v.append(self.n_frames)
-        v.append(self.loop_start)
-        v.append(self.loop_end)
-        v.append(self.repeats)
-        v.append(self.joint_mask)
-        v.append(self.flags)
-        v.append(self.end_posture)
-        v.append(self.exp_roll)
-        v.append(self.exp_pitch)
-        return v
-
-    @classmethod
-    def _from_fixed(cls, v: tuple, **extra):
-        kw: dict = {}
-        kw['trick_id'] = v[0]
-        kw['n_frames'] = v[1]
-        kw['loop_start'] = v[2]
-        kw['loop_end'] = v[3]
-        kw['repeats'] = v[4]
-        kw['joint_mask'] = v[5]
-        kw['flags'] = v[6]
-        kw['end_posture'] = v[7]
-        kw['exp_roll'] = v[8]
-        kw['exp_pitch'] = v[9]
-        kw.update(extra)
-        return cls(**kw)
-
-    def pack(self) -> bytes:
-        try:
-            return self._FMT.pack(*self._fixed_values())
-        except struct.error as e:
-            raise PayloadError(f'{type(self).__name__}: {e}') from None
-
-    @classmethod
-    def unpack(cls, data: bytes):
-        if len(data) != cls._FMT.size:
-            raise PayloadError(f'{cls.__name__}: length {len(data)} != {cls._FMT.size}')
-        return cls._from_fixed(cls._FMT.unpack(bytes(data)))
-
-
-@dataclass
-class TrickFrames:
-    """0x21 TRICK_FRAMES (command). Up to 4 keyframes starting at index `first`, in order: first must equal the number of frames received since TRICK_BEGIN (else BAD_ARG), first + count <= n_frames, dur >= 1, easing != 3. NO_TRICK without a header; BUSY while a trick plays."""
-    ID: ClassVar[int] = 0x21
-    NAME: ClassVar[str] = 'TRICK_FRAMES'
-    KIND: ClassVar[Kind] = Kind.COMMAND
-    DIR: ClassVar[Dir] = Dir.PI_TO_BODY
-    HAS_EPOCH: ClassVar[bool] = False
-    IS_QUERY: ClassVar[bool] = False
-    REPLY_TO: ClassVar[int | None] = None
-    MIN_LEN: ClassVar[int] = 16
-    MAX_LEN: ClassVar[int] = 58
-    _FMT: ClassVar[struct.Struct] = struct.Struct('<BB')
-    first: int = 0
-    frames: list[Keyframe] = field(default_factory=list)  # 1..4, count in count
-
-    def _fixed_values(self) -> list:
-        v: list = []
-        v.append(self.first)
-        v.append(len(self.frames))
-        return v
-
-    @classmethod
-    def _from_fixed(cls, v: tuple, **extra):
-        kw: dict = {}
-        kw['first'] = v[0]
-        kw.update(extra)
-        return cls(**kw)
-
-    def pack(self) -> bytes:
-        n = len(self.frames)
-        tail = b''.join(e.pack() for e in self.frames)
-        if not 1 <= n <= 4:
-            raise PayloadError('frames: 1..4 elements, got %d' % n)
-        try:
-            return self._FMT.pack(*self._fixed_values()) + tail
-        except struct.error as e:
-            raise PayloadError(f'{type(self).__name__}: {e}') from None
-
-    @classmethod
-    def unpack(cls, data: bytes):
-        data = bytes(data)
-        if payload_len_status(cls.ID, data) != LEN_OK:
-            raise PayloadError(f'{cls.__name__}: bad length {len(data)}')
-        v = cls._FMT.unpack(data[:2])
-        rest = data[2:]
-        items = [Keyframe.unpack(rest[i:i + 14]) for i in range(0, len(rest), 14)]
-        return cls._from_fixed(v, frames=items)
-
-
-@dataclass
-class TrickCommit:
-    """0x22 TRICK_COMMIT (command). crc16 = CRC-16/CCITT-FALSE over the n_frames x 14 B frame array as sent; mismatch -> CRC_MISMATCH. NO_TRICK if no header or another trick_id, BAD_ARG if frames are missing. Idempotent: on a committed store it is the cache check (OK = the body holds exactly this trick)."""
-    ID: ClassVar[int] = 0x22
-    NAME: ClassVar[str] = 'TRICK_COMMIT'
-    KIND: ClassVar[Kind] = Kind.COMMAND
-    DIR: ClassVar[Dir] = Dir.PI_TO_BODY
-    HAS_EPOCH: ClassVar[bool] = False
-    IS_QUERY: ClassVar[bool] = False
-    REPLY_TO: ClassVar[int | None] = None
-    MIN_LEN: ClassVar[int] = 3
-    MAX_LEN: ClassVar[int] = 3
-    _FMT: ClassVar[struct.Struct] = struct.Struct('<BH')
-    trick_id: int = 0
-    crc16: int = 0
-
-    def _fixed_values(self) -> list:
-        v: list = []
-        v.append(self.trick_id)
-        v.append(self.crc16)
-        return v
-
-    @classmethod
-    def _from_fixed(cls, v: tuple, **extra):
-        kw: dict = {}
-        kw['trick_id'] = v[0]
-        kw['crc16'] = v[1]
-        kw.update(extra)
-        return cls(**kw)
-
-    def pack(self) -> bytes:
-        try:
-            return self._FMT.pack(*self._fixed_values())
-        except struct.error as e:
-            raise PayloadError(f'{type(self).__name__}: {e}') from None
-
-    @classmethod
-    def unpack(cls, data: bytes):
-        if len(data) != cls._FMT.size:
-            raise PayloadError(f'{cls.__name__}: length {len(data)} != {cls._FMT.size}')
-        return cls._from_fixed(cls._FMT.unpack(bytes(data)))
-
-
-@dataclass
-class TrickPlay:
-    """0x23 TRICK_PLAY (command). Play the committed trick with speed (64 = 1x; scales dur and hold) and mirror (L/R swap, pan, tail and expected roll negated). STALE on an epoch mismatch, NO_TRICK if trick_id is not committed, BAD_ARG for speed < 16 or unknown flags, BUSY while a trick plays, under a reflex, or in LIMP or CALIB, REFUSED_FALLEN while the fall reflex holds the joints (but with param FALL_RC 0 a FALL_OK trick takes them from it), REFUSED_LOW_BATT, UNCALIBRATED. Ends with EVENT TRICK_DONE."""
-    ID: ClassVar[int] = 0x23
-    NAME: ClassVar[str] = 'TRICK_PLAY'
-    KIND: ClassVar[Kind] = Kind.COMMAND
-    DIR: ClassVar[Dir] = Dir.PI_TO_BODY
-    HAS_EPOCH: ClassVar[bool] = True
-    IS_QUERY: ClassVar[bool] = False
-    REPLY_TO: ClassVar[int | None] = None
-    MIN_LEN: ClassVar[int] = 4
-    MAX_LEN: ClassVar[int] = 4
-    _FMT: ClassVar[struct.Struct] = struct.Struct('<BBBB')
-    epoch: int = 0
-    trick_id: int = 0
-    speed_q6: int = 0  # x x 0.015625; range 16..255
-    flags: int = 0  # flags trick_play_flags
-
-    def _fixed_values(self) -> list:
-        v: list = []
-        v.append(self.epoch)
-        v.append(self.trick_id)
-        v.append(self.speed_q6)
-        v.append(self.flags)
-        return v
-
-    @classmethod
-    def _from_fixed(cls, v: tuple, **extra):
-        kw: dict = {}
-        kw['epoch'] = v[0]
-        kw['trick_id'] = v[1]
-        kw['speed_q6'] = v[2]
-        kw['flags'] = v[3]
-        kw.update(extra)
-        return cls(**kw)
-
-    def pack(self) -> bytes:
-        try:
-            return self._FMT.pack(*self._fixed_values())
-        except struct.error as e:
-            raise PayloadError(f'{type(self).__name__}: {e}') from None
-
-    @classmethod
-    def unpack(cls, data: bytes):
-        if len(data) != cls._FMT.size:
-            raise PayloadError(f'{cls.__name__}: length {len(data)} != {cls._FMT.size}')
-        return cls._from_fixed(cls._FMT.unpack(bytes(data)))
-
-
-@dataclass
-class TrickStop:
-    """0x24 TRICK_STOP (command). Stop the playing trick: crossfade over transition_ticks (0 = XFADE_TICKS) to its end posture, EVENT TRICK_DONE(STOPPED). OK also when nothing plays."""
-    ID: ClassVar[int] = 0x24
-    NAME: ClassVar[str] = 'TRICK_STOP'
-    KIND: ClassVar[Kind] = Kind.COMMAND
-    DIR: ClassVar[Dir] = Dir.PI_TO_BODY
-    HAS_EPOCH: ClassVar[bool] = False
-    IS_QUERY: ClassVar[bool] = False
-    REPLY_TO: ClassVar[int | None] = None
-    MIN_LEN: ClassVar[int] = 1
-    MAX_LEN: ClassVar[int] = 1
-    _FMT: ClassVar[struct.Struct] = struct.Struct('<B')
-    transition_ticks: int = 0  # tick
-
-    def _fixed_values(self) -> list:
-        v: list = []
-        v.append(self.transition_ticks)
-        return v
-
-    @classmethod
-    def _from_fixed(cls, v: tuple, **extra):
-        kw: dict = {}
-        kw['transition_ticks'] = v[0]
         kw.update(extra)
         return cls(**kw)
 
@@ -2148,7 +1837,7 @@ class Hello:
     last_alive_tick: int = 0  # tick
     caps: int = 0  # flags hello_caps
     max_payload: int = 0
-    trick_capacity: int = 0  # keyframes; 0 = no trick store (P0)
+    pose_depth: int = 0  # POSE keys the body queues (link.pose_depth)
     joint_count: int = 0  # driven joints (11)
     config_state: int = 0  # enum config_state
     epoch: int = 0
@@ -2162,7 +1851,7 @@ class Hello:
         v.append(self.last_alive_tick)
         v.append(self.caps)
         v.append(self.max_payload)
-        v.append(self.trick_capacity)
+        v.append(self.pose_depth)
         v.append(self.joint_count)
         v.append(self.config_state)
         v.append(self.epoch)
@@ -2178,7 +1867,7 @@ class Hello:
         kw['last_alive_tick'] = v[4]
         kw['caps'] = v[5]
         kw['max_payload'] = v[6]
-        kw['trick_capacity'] = v[7]
+        kw['pose_depth'] = v[7]
         kw['joint_count'] = v[8]
         kw['config_state'] = v[9]
         kw['epoch'] = v[10]
@@ -2200,7 +1889,7 @@ class Hello:
 
 @dataclass
 class Telemetry:
-    """0x81 TELEMETRY (stream). Body state, 25 Hz by default (50 Hz while the mind streams FEET: SET_STREAM telem_div 1)."""
+    """0x81 TELEMETRY (stream). Body state, 25 Hz by default (50 Hz while the mind streams POSE: SET_STREAM telem_div 1)."""
     ID: ClassVar[int] = 0x81
     NAME: ClassVar[str] = 'TELEMETRY'
     KIND: ClassVar[Kind] = Kind.STREAM
@@ -2223,12 +1912,12 @@ class Telemetry:
     owners: int = 0  # low nibble leg owner, high nibble head owner (enum owner)
     flags: int = 0  # flags telemetry_flags
     last_rx_seq: int = 0
-    trick_frame: int = 0  # 0xFF = none
-    ref_pitch: int = 0  # deg x 0.0625; the balance reference in use, 0 while the balance is off: in GAIT the FEET prediction plus SET_BODY_POSE, in STANCE the pose, else the posture's or the trick's
+    limited: int = 0  # flags limited_flags; the legs (and the head) whose pose a joint limit, the slew limit or the leg's reach cut this tick
+    ref_pitch: int = 0  # deg x 0.0625; the balance reference in use, 0 while the balance is off: in a stream of feet the POSE prediction plus SET_BODY_POSE, in STANCE the pose, with joint-mode legs the POSE prediction, else the posture's
     ref_roll: int = 0  # deg x 0.0625
     corr_pitch: int = 0  # deg x 0.0625; the balance correction the legs carry this tick (frozen while BALANCE_HELD; decays to 0 when the balance is off)
     corr_roll: int = 0  # deg x 0.0625
-    feet_queued: int = 0  # tick; FEET ticks waiting in the queue (0 outside GAIT)
+    pose_queued: int = 0  # POSE keys waiting in the queue (0 outside a stream)
     support: int = 0  # flags support_flags; the feet the balance corrects through this tick
     tick_load: int = 0  # us x 100; max tick time since the last telemetry
     rx_err: int = 0  # cumulative, mod 256
@@ -2248,12 +1937,12 @@ class Telemetry:
         v.append(self.owners)
         v.append(self.flags)
         v.append(self.last_rx_seq)
-        v.append(self.trick_frame)
+        v.append(self.limited)
         v.append(self.ref_pitch)
         v.append(self.ref_roll)
         v.append(self.corr_pitch)
         v.append(self.corr_roll)
-        v.append(self.feet_queued)
+        v.append(self.pose_queued)
         v.append(self.support)
         v.append(self.tick_load)
         v.append(self.rx_err)
@@ -2275,12 +1964,12 @@ class Telemetry:
         kw['owners'] = v[9]
         kw['flags'] = v[10]
         kw['last_rx_seq'] = v[11]
-        kw['trick_frame'] = v[12]
+        kw['limited'] = v[12]
         kw['ref_pitch'] = v[13]
         kw['ref_roll'] = v[14]
         kw['corr_pitch'] = v[15]
         kw['corr_roll'] = v[16]
-        kw['feet_queued'] = v[17]
+        kw['pose_queued'] = v[17]
         kw['support'] = v[18]
         kw['tick_load'] = v[19]
         kw['rx_err'] = v[20]
@@ -2706,8 +2395,8 @@ class Stats:
     i2c_err: int = 0
     imu_stale: int = 0
     dmp_rate_hz: int = 0  # Hz
-    feet_late: int = 0  # FEET dropped because their tick had passed
-    feet_underruns: int = 0  # times the FEET queue ran dry in GAIT
+    pose_dropped: int = 0  # POSE keys dropped: already past, too far ahead, or no room
+    pose_underruns: int = 0  # times a stream reached its last key with none queued
 
     def _fixed_values(self) -> list:
         v: list = []
@@ -2720,8 +2409,8 @@ class Stats:
         v.append(self.i2c_err)
         v.append(self.imu_stale)
         v.append(self.dmp_rate_hz)
-        v.append(self.feet_late)
-        v.append(self.feet_underruns)
+        v.append(self.pose_dropped)
+        v.append(self.pose_underruns)
         return v
 
     @classmethod
@@ -2736,8 +2425,8 @@ class Stats:
         kw['i2c_err'] = v[6]
         kw['imu_stale'] = v[7]
         kw['dmp_rate_hz'] = v[8]
-        kw['feet_late'] = v[9]
-        kw['feet_underruns'] = v[10]
+        kw['pose_dropped'] = v[9]
+        kw['pose_underruns'] = v[10]
         kw.update(extra)
         return cls(**kw)
 
@@ -2849,15 +2538,10 @@ MESSAGES: dict[int, type] = {
     0x05: StatsReq,
     0x06: PcaRead,
     0x10: SetPosture,
-    0x11: Feet,
+    0x11: Pose,
     0x12: SetHead,
     0x13: SetBodyPose,
     0x14: SetBalance,
-    0x20: TrickBegin,
-    0x21: TrickFrames,
-    0x22: TrickCommit,
-    0x23: TrickPlay,
-    0x24: TrickStop,
     0x30: SetEyes,
     0x31: Beep,
     0x38: CalGet,
@@ -2887,15 +2571,11 @@ MESSAGES: dict[int, type] = {
 
 # (message, field) -> the field's valid raw values, inclusive (the body refuses others BAD_ARG).
 FIELD_RANGES: dict[tuple[str, str], tuple[int, int]] = {
-    ('FEET', 'x_mm'): (-60, 60),
-    ('FEET', 'z_mm'): (30, 95),
-    ('FEET', 'pitch'): (-480, 480),
-    ('FEET', 'roll'): (-480, 480),
+    ('POSE', 'pitch'): (-480, 480),
+    ('POSE', 'roll'): (-480, 480),
     ('SET_BALANCE', 'enable'): (0, 1),
     ('SET_BALANCE', 'deadband_deg'): (0, 30),
     ('SET_BALANCE', 'max_corr_deg'): (0, 30),
-    ('TRICK_BEGIN', 'n_frames'): (1, 24),
-    ('TRICK_PLAY', 'speed_q6'): (16, 255),
     ('CAL_SET', 'joint'): (0, 15),
     ('CAL_SET', 'offset_a16'): (-400, 400),
     ('IMU_OFFSETS_SET', 'save'): (0, 1),
@@ -2948,7 +2628,6 @@ class ParamId(enum.IntEnum):
     LEG_W_MM = 16
     LEG_SH_ZERO_DEG = 17
     LEG_KN_ZERO_DEG = 18
-    FALL_RC = 19
 
 
 PARAMS: dict[int, ParamInfo] = {
@@ -2959,7 +2638,7 @@ PARAMS: dict[int, ParamInfo] = {
     2: ParamInfo(2, 'WD_LIMP_S', 10, 1, 600, 's',
                          'Watchdog REST -> LIMP after this long.'),
     3: ParamInfo(3, 'XFADE_TICKS', 10, 0, 100, 'tick',
-                         'Crossfade length out of TRICK or REFLEX.'),
+                         'Crossfade length out of a POSE stream or REFLEX.'),
     4: ParamInfo(4, 'POSTURE_TICKS', 25, 1, 255, 'tick',
                          'Default IDLE posture transition (SET_POSTURE transition_ticks = 0).'),
     5: ParamInfo(5, 'SLEW_MAX_A16', 160, 16, 800, 'a16/tick',
@@ -2990,8 +2669,6 @@ PARAMS: dict[int, ParamInfo] = {
                          'Upper link angle from straight down (+ = foot forward) at joint angle 0 (the calibration posture). Petoi: upper leg vertical = 0; verify on Kilo.'),
     18: ParamInfo(18, 'LEG_KN_ZERO_DEG', 90, 30, 150, 'deg',
                          'Knee bend relative to the upper link at joint angle 0 (the calibration posture). Petoi: lower leg at 90 deg; verify on Kilo.'),
-    19: ParamInfo(19, 'FALL_RC', 1, 0, 1, 'bool',
-                         "1: after a roll fall the fall reflex plays rc (up to three tries). 0: it never does: once he is still, FAILED at once (REST, EVENT RECOVERY_FAILED, LIMP), and while the reflex holds the joints TRICK_PLAY of a FALL_OK trick is accepted and ends the reflex (the mind's righting, docs/righting.md). Set live, never persisted, by a mind built with KILO_RIGHTING=1."),
 }
 PARAMS_BY_NAME: dict[str, ParamInfo] = {p.name: p for p in PARAMS.values()}
 
@@ -3174,25 +2851,13 @@ def payload_len_status(msg_type: int, payload: bytes) -> int:
     if msg_type == 0x10:
         return LEN_OK if n == 4 else LEN_BAD
     if msg_type == 0x11:
-        return LEN_OK if n == 16 else LEN_BAD
+        return LEN_OK if n == 31 else LEN_BAD
     if msg_type == 0x12:
         return LEN_OK if n == 10 else LEN_BAD
     if msg_type == 0x13:
         return LEN_OK if n == 7 else LEN_BAD
     if msg_type == 0x14:
         return LEN_OK if n == 5 else LEN_BAD
-    if msg_type == 0x20:
-        return LEN_OK if n == 11 else LEN_BAD
-    if msg_type == 0x21:
-        if not 16 <= n <= 58:
-            return LEN_BAD
-        return LEN_OK if n == 2 + 14 * payload[1] else LEN_BAD
-    if msg_type == 0x22:
-        return LEN_OK if n == 3 else LEN_BAD
-    if msg_type == 0x23:
-        return LEN_OK if n == 4 else LEN_BAD
-    if msg_type == 0x24:
-        return LEN_OK if n == 1 else LEN_BAD
     if msg_type == 0x30:
         return LEN_OK if n == 4 else LEN_BAD
     if msg_type == 0x31:
@@ -4837,7 +4502,7 @@ class HostWalkInfo:
     duration_ms: int = 0  # ms; setup to the end (so far, while recording)
     bytes: int = 0  # B; the recording's size: what WALK_FETCH sends
     records: int = 0
-    feet: int = 0  # FEET frames sent
+    feet: int = 0  # POSE frames sent
     flags: int = 0  # flags walk_flags
     text: bytes = b''  # 0..120 B
 

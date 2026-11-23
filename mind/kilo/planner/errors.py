@@ -1,8 +1,8 @@
 """The model's error, from what the body reports every tick while it walks.
 
-In GAIT the body's TELEMETRY carries the attitude it measured, the
+In mode STREAM the body's TELEMETRY carries the attitude it measured, the
 reference it balanced toward (the planner's prediction for that tick, from
-FEET; 0 while its balance is off, so the walker compares with its own
+POSE; 0 while its balance is off, so the walker compares with its own
 prediction for the tick) and the correction it applied. Measured minus
 predicted is the model's error (docs/walking-and-balance.md §9 item 4, §10):
 
@@ -37,7 +37,7 @@ MIN_SWING_DEG = 1.0      # the predicted roll must move this much (sd) for a lag
 
 
 class ErrorTracker:
-    """Error samples from TELEMETRY in GAIT (``add``), estimates on demand."""
+    """Error samples from TELEMETRY in STREAM (``add``), estimates on demand."""
 
     def __init__(self, window: int = WINDOW_TICKS, offset_s: float = 2.0):
         self.samples: deque = deque(maxlen=window)  # (tick, meas p, meas r, ref p, ref r, corr p, corr r)
@@ -46,7 +46,7 @@ class ErrorTracker:
         self._n = 0
 
     def add(self, tick: int, msg: Any, ref: tuple[float, float] | None = None) -> tuple[float, float]:
-        """One TELEMETRY in GAIT (``tick`` unwrapped) and the prediction for
+        """One TELEMETRY in STREAM (``tick`` unwrapped) and the prediction for
         its tick (default: the reference the body reports, which is 0 while
         its balance is off). Returns its error less the offset."""
         mp, mr = msg.pitch / A16, msg.roll / A16
@@ -112,7 +112,7 @@ def _lag(ref: list, meas: dict) -> tuple[float | None, float | None]:
 
 def from_history(history: Iterable[tuple[float, Any]], gait_mode: int) -> dict[str, Any] | None:
     """Estimate from BodyState.history ((time, TELEMETRY) pairs): the newest
-    unbroken run in GAIT (``kilo status``)."""
+    unbroken run in STREAM (``kilo status``)."""
     run: list = []
     last_raw = None
     tick = 0

@@ -10,18 +10,22 @@ turned him 31 to 33° toward his right side in all six tries, half what
 the simulator says, and he rolled back each time
 (docs/righting-results.md). The side move has not been tried.
 
-Without the experiment Kilo gets up as before: the body's own fixed move.
-You reported on 2026-11-22 that this built-in getting-up "didn't work 100%
-of the time" (your words; no count was given).
+Kilo's body no longer has a getting-up of its own (you decided this on
+2026-11-22, docs/movement-engine.md decision 1; the body's fixed move rc,
+which "didn't work 100% of the time" in your words, was deleted with
+protocol 3). So without the experiment he lies where he fell: the body lays
+him down and lets his legs go limp.
 
 ## Words used here
 
 - **The fall reflex**: when Kilo is tilted more than 75 degrees for a tenth
-  of a second, his body (the NyBoard) takes the legs over, chirps, waits
-  until he lies still, and then (as before) plays **rc**.
-- **rc**: the body's fixed getting-up move ("recover"), three poses in 1.8
-  seconds, copied from the original Petoi firmware. Not planned from
-  anything.
+  of a second, his body (the NyBoard) takes the legs over, chirps, holds
+  them until he lies still, then lays him down (the resting pose) and lets
+  the legs go limp 2 seconds later. It does not get him up.
+- **rc**: the getting-up move the body used to have ("recover"), three
+  poses in 1.8 seconds, copied from the original Petoi firmware; deleted
+  on 2026-11-22. The recordings of it are what the simulator is checked
+  against below.
 - **The model / the simulator**: the program on the laptop that plays a
   move on a made-up Kilo (his weights, his legs, his outline, the floor's
   friction, servos that lag and give) and says what would happen
@@ -32,10 +36,9 @@ of the time" (your words; no count was given).
   over toward his back, propped on the shoulder servos and his back.
 - **The state estimate**: the mind's opinion of where he is (standing, on
   his left side, on his back, ...: docs/intent.md).
-- **FALL_RC**: a new switch in the body. 1 (always, unless the mind says
-  otherwise): the fall reflex plays rc. 0: it never plays rc; it lies him
-  down and lets go of the legs, and takes the mind's righting move instead.
-  It is never saved: the body starts with 1 every time it is switched on.
+- **The stream of poses**: how the mind moves him (POSE, docs/movement-engine.md).
+  A righting move is sent as poses marked "may be played while he is
+  down" (FALL_OK): the body's fall reflex hands the legs over to them.
 - **Stall**: a servo pushing against something it cannot move. It heats up
   and draws a lot of current. That is the risk of a getting-up.
 
@@ -127,15 +130,11 @@ What is on the safe side whatever the simulator gets wrong:
 
 1. A kernel built with `KILO_RIGHTING=1`. Without it (the default) B1 does
    nothing but log that the experiment is not built in (his eyes give
-   three quick purple flashes: refused), and the body's fall reflex works
-   as always.
-2. The body firmware of the same build (protocol 2.1: it knows FALL_RC).
-   `kilo card` writes both; the mind flashes the body at its next boot.
-3. With both, at every start the mind sets FALL_RC to 0: from then on a
-   fall no longer plays rc. **He does not get up by himself any more**: he
-   lies down where he fell and goes limp. B1 gets him up.
-4. To go back: write a card without the switch. The next start has rc
-   again.
+   three quick purple flashes: refused).
+2. The body firmware of the same build (protocol 3). `kilo card` writes
+   both; the mind flashes the body at its next boot.
+3. **He does not get up by himself** either way: after a fall he lies down
+   where he fell and goes limp. B1 gets him up.
 
 B1 acts only when the state estimate says he is on his left side, his
 right side or his back. Otherwise it is refused, with a line in the log
@@ -170,7 +169,7 @@ hand's width of space all round.
 3. Press **B6** (column B, sixth row from the bottom): he stands.
 4. Lay him gently on the blanket on his **right side**, and take your hands
    away. He chirps, lies down (legs fold) and a little later goes limp.
-   That is the new behaviour: no rc.
+   That is the body's fall reflex: it no longer tries to get him up.
 5. Press **B1** (column B, bottom row). Hands off while his eyes blink
    white. Watch:
    - the legs underneath go forward and back, the top legs reach back, the
@@ -217,12 +216,13 @@ with your hands off.
   falls from a recording; `mind/tests/fixtures/falls_2026_11.json` the
   recorded falls.
 - The mind: `kernel/mind/intent/` (the Right steps, at most three, limp at
-  the end), B1 in `kernel/mind/remote/`, FALL_RC set in `kernel/mind/mind.cpp`.
-- The body: FALL_RC in `body/src/core/body.cpp` (64 bytes of program, 2 of
-  memory).
+  the end), B1 in `kernel/mind/remote/`, the moves played as POSE streams by
+  `kernel/mind/tricks/player.cpp` (FALL_OK).
+- The body: the fall reflex in `body/src/core/body.cpp` and `reflex.h`;
+  a FALL_OK POSE taking the joints from it in `body_pose()`.
 - Tests: `mind/tests/test_righting.py`, `mind/tests/test_intent.py`,
   `kernel/host/tests/test_intent.cpp`, `body/test/test_reflex.cpp`, and
   `kernel/host/test.sh` "righting" (B1 against the real body logic on the
-  laptop: FALL_RC, the moves, three tries, limp).
+  laptop: the fall laid down, the moves, three tries, limp).
 - `docs/righting-results.md`: what the simulator reproduces, your
   measurements and tries.

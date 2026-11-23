@@ -1,39 +1,38 @@
 // arbiter: who moves each joint, and the safety stage (doc §3c).
 //
 // Each tick, for each of the 11 driven joints:
-//   1. owner  = the highest-priority active owner whose mask holds the joint
-//               REFLEX(3) > TRICK(2) > GAIT(1) > IDLE(0)
+//   1. owner  = the highest-priority active owner that holds the joint
+//               REFLEX(3) > STREAM(1) > IDLE(0)
 //   2. base   = that owner's angle; if the owner just changed, crossfade from
 //               the previous base so the hand-over never jumps
 //   3. layers = head (SET_HEAD hold, joints 0-2 under IDLE) and
-//               balance (core/balance.h): joint-space owners (IDLE, TRICK)
-//               add the balance correction, except on held head joints
-//   4. safety = clamp to joint limits, slew-limit, convert to PCA counts
+//               balance (core/balance.h): joint-space owners (IDLE, and
+//               STREAM when its legs are joint angles) add the balance
+//               correction, except on held head joints
+//   4. safety = clamp to joint limits, slew-limit, convert to PCA counts;
+//               `limited` records which legs (and the head) steps 3-4 cut
 //
-// IDLE (the built-in postures and STANCE), GAIT (the FEET player, core/
-// feet.h: legs 8-15 while the mind's stream plays), TRICK (the keyframe
-// player, core/keyframe.h) and REFLEX (battery, link watchdog, warm-boot
-// hold, fall).
+// IDLE (the built-in postures and STANCE), STREAM (the mind's POSE
+// stream, core/stream.h: every leg joint, and the head joints its pose
+// drives) and REFLEX (battery, link watchdog, warm-boot hold, fall).
 //
 // Crossfades start from the joint's last OUTPUT (after balance, limits and
 // slew), so a hand-over never jumps even when the previous owner's angle was
-// beyond a limit or carried a balance correction. Into TRICK and REFLEX
-// there is none (their first segment starts from that output); out of
-// TRICK it lasts the player's xfade (TRICK_STOP transition_ticks, else
-// XFADE_TICKS), out of REFLEX XFADE_TICKS.
+// beyond a limit or carried a balance correction. Into STREAM and REFLEX
+// there is none (they start from that output themselves); out of them it
+// lasts XFADE_TICKS.
 #ifndef KILO_CORE_ARBITER_H
 #define KILO_CORE_ARBITER_H
 #include <stdint.h>
 #include "balance.h"
 #include "joints.h"
-#include "keyframe.h"
 
 // OWN_PI_HOLD is not an owner that supplies a base angle: it tags a head
 // joint held by SET_HEAD (owner[] and TELEMETRY), whose real owner is IDLE
-// or GAIT.
-enum Owner : uint8_t { OWN_IDLE = 0, OWN_GAIT = 1, OWN_TRICK = 2, OWN_REFLEX = 3, OWN_PI_HOLD = 4 };
+// or STREAM.
+enum Owner : uint8_t { OWN_IDLE = 0, OWN_STREAM = 1, OWN_REFLEX = 3, OWN_PI_HOLD = 4 };
 
-// Tunables are live params (core/params.h): XFADE_TICKS (out of TRICK or
+// Tunables are live params (core/params.h): XFADE_TICKS (out of STREAM or
 // REFLEX, 10), POSTURE_TICKS (default IDLE transition, 25 = 0.5 s) and
 // SLEW_MAX_A16 (160 = 10 deg per tick = 500 deg/s).
 
@@ -50,7 +49,6 @@ struct Arbiter {
   uint8_t reflex_active;
   uint8_t owner[DRIVEN_COUNT];  // owner on the previous tick (OWN_PI_HOLD: held head joint)
   int16_t xsrc[DRIVEN_COUNT];   // crossfade source: the output when the owner changed
-                                // (also the TRICK start pose)
   uint8_t xn[DRIVEN_COUNT], xi[DRIVEN_COUNT];
   int16_t out[DRIVEN_COUNT];    // output after the safety stage (a16 or OFF)
   int16_t last_on[DRIVEN_COUNT];  // last powered output: slew reference
@@ -61,6 +59,7 @@ struct Arbiter {
   int16_t head_tgt[3];
   int16_t head_step;
   uint8_t head_ttl;
+  uint8_t limited;  // this tick: legs (bits LF RF RB LB) and head (bit 4) whose angle a limit or the slew cut
 };
 
 // warm = null: cold start, everything LIMP.
@@ -69,8 +68,10 @@ struct Arbiter {
 void arbiter_init(Arbiter& a, const int16_t* warm);
 
 // IDLE posture goal. Re-sending the current posture is a no-op (goals are
-// refreshed at 5 Hz and must not restart the move). ticks 0 = default.
-void arbiter_set_idle(Arbiter& a, uint8_t posture, uint8_t ticks);
+// refreshed at 5 Hz and must not restart the move) unless `restart` (a
+// posture that ends a stream: IDLE moves from where the stream left the
+// joints over `ticks`). ticks 0 = default.
+void arbiter_set_idle(Arbiter& a, uint8_t posture, uint8_t ticks, bool restart = false);
 uint8_t arbiter_idle_posture(const Arbiter& a);
 
 // REFLEX takes every driven joint and moves it from the current output to
@@ -84,8 +85,8 @@ bool arbiter_reflex_settled(const Arbiter& a);
 // Head layer (doc §3c layer 1). A hold (body_goal_head sets head_tgt,
 // head_step, head_ttl): joints 0-2 follow head_tgt (JOINT_OFF = not held) at
 // most head_step a16 per tick from their last output, for head_ttl ticks
-// unless refreshed, whenever their owner is IDLE or GAIT (a trick that owns
-// a head joint, or a reflex, wins). Held joints get no balance correction:
+// unless refreshed, whenever their owner is IDLE (a stream whose pose
+// drives that joint, or a reflex, wins). Held joints get no balance correction:
 // the Pi is pointing them; owner[] says OWN_PI_HOLD (TELEMETRY's head owner
 // nibble PI_HOLD). release(), or head_ttl running out: the joints
 // crossfade back to their owner's angle over XFADE_TICKS.
@@ -101,12 +102,11 @@ inline bool arbiter_idle_moving(const Arbiter& a) { return a.idle.i < a.idle.n; 
 // One tick of steps 1-4. Writes all 16 channel counts (unused channels and
 // LIMP joints full-off). bal: the balance corrections to add to joints owned
 // by a joint-space owner (null = none). The caller decides when balance runs
-// (body.cpp); this only applies the current corrections. kf: the keyframe
-// player (null = no TRICK owner); call kf_step() first. legs: this tick's
-// IK leg angles (feet_legs: shoulders LF RF RB LB, knees LF RF RB LB), or
-// null (STANCE has none then). gait: the FEET stream owns the legs (GAIT
-// supplies legs[]).
+// (body.cpp); this only applies the current corrections. j: this tick's
+// angles from core/stream.h (stream_joints, canonical order), or null:
+// with `stream` the stream's pose (JOINT_OFF head joints stay IDLE's),
+// else STANCE's legs in j[3..10]. stream: the POSE stream holds the joints.
 void arbiter_run(Arbiter& a, const JointCal& cal, uint16_t counts[JOINT_COUNT], const Balance* bal,
-                 const Keyframe* kf, const int16_t* legs = 0, bool gait = false);
+                 const int16_t* j = 0, bool stream = false);
 
 #endif

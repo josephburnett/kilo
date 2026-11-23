@@ -56,8 +56,8 @@ struct BodyState {
   // The pack's charge from the resting 2S curve (est.); false without a
   // battery (NO_BATTERY flag) or a voltage.
   bool battery_pct(double* pct) const;
-  bool fallen() const;   // mode FALLEN or RECOVERING
-  bool moving() const;   // the gait/trick flags, or mode GAIT, TRICK, RECOVERING
+  bool fallen() const;   // mode FALLEN (the fall reflex holds the joints)
+  bool moving() const;   // a POSE stream: flag or mode STREAM
   // |pitch| and |roll| under 30 deg and not fallen; -1 before any TELEMETRY.
   int upright() const;
 

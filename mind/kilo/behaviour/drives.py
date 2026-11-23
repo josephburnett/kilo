@@ -29,7 +29,7 @@ ACTIVITIES = ("rest", "idle", "active", "explore", "social")
 @dataclass
 class DriveInputs:
     activity: str = "idle"          # one of ACTIVITIES (from the running behaviour)
-    moving: bool = False            # the body reports gait/trick/recovering
+    moving: bool = False            # the body reports a stream (a walk, a trick, a get-up)
     battery_pct: float | None = None
     social: bool = False            # a face is seen or Kilo is petted
     startle: float = 0.0            # 0..1 startle strength this tick (a spike level)

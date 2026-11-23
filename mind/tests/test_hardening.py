@@ -1,8 +1,6 @@
 """Regression tests for the second review of the mind: goals into a rebooting
-body, the runner's pause, the logs off the control threads, a preempted
-trick, races."""
+body, the runner's pause, the logs off the control threads, races."""
 
-import asyncio
 import threading
 import time
 
@@ -13,11 +11,10 @@ from kilo.body.client import BodyClient
 from kilo.body.state import BodyState
 from kilo.link import consts
 from kilo.link.codec import DecodeError, KiloCodec
-from kilo.link.serial_link import LinkConfig, NotConnected, SerialLink
+from kilo.link.serial_link import LinkConfig, SerialLink
 from kilo.link.transport import loopback_pair
 from kilo.logs.kilolog import KilologWriter, read_kilolog
 from kilo.protocol import kilo_protocol as P
-from kilo.tricks import library
 from kilo.vbody.sim import VirtualBody
 
 from conftest import FAST, keep_alive
@@ -128,9 +125,6 @@ def test_lost_body_gets_no_motion_goal_until_it_is_heard(rig):
     assert late == [], late
     assert any(n == "HELLO_REQ" for t, n in sent)  # still polling while lost
     assert "SET_POSTURE" not in client.link.goals() and client.state.reboots == 1
-    with pytest.raises(NotConnected):  # TRICK_PLAY waits for contact too
-        client.link._contact = False
-        client.link.request("TRICK_PLAY", {"epoch": 0, "trick_id": 1, "speed_q6": 64, "flags": 0})
 
 
 def test_second_reboot_within_3s_still_clears_goals(make_link):
@@ -255,32 +249,7 @@ def test_kilolog_slow_sink_does_not_delay_callers(tmp_path):
     assert len(list(read_kilolog(tmp_path / "z.kilolog")[1])) == 5
 
 
-# ---- 7, 13, 16: client ----------------------------------------------------------------------
-
-def test_cancelled_play_stops_the_trick(rig):
-    client, vb, _ = rig()
-    client.wait_ready(2)
-    client.stand()
-    assert _keep(client.link, lambda: vb.posture == "STAND")
-    t = library.load("sniff")
-    from dataclasses import replace
-    loop_forever = replace(t, repeats=255)
-
-    async def go():
-        task = asyncio.ensure_future(client.play(loop_forever))
-        for _ in range(100):
-            await asyncio.sleep(0.02)
-            if vb.trick.running:
-                break
-        assert vb.trick.running
-        task.cancel()  # Action.halt() when the runner preempts
-        with pytest.raises(asyncio.CancelledError):
-            await task
-    asyncio.run(go())
-    assert _keep(client.link, lambda: not vb.trick.running, 1)
-    done = [e for _, e in client.state.events if e.code == consts.EV["TRICK_DONE"]]
-    assert done and P.TrickDoneReason((done[-1].arg & 0xFFFF) >> 8) == P.TrickDoneReason.STOPPED
-
+# ---- 13: client ----------------------------------------------------------------------
 
 def test_waits_do_not_stamp_liveness(rig):
     client, vb, _ = rig()
@@ -294,42 +263,6 @@ def test_waits_do_not_stamp_liveness(rig):
     client.stamp_liveness = False  # a client whose waits are not the main loop
     client.cal_save(0.5)
     assert link._mind_alive_at == before
-    client.stand()
-    assert _keep(link, lambda: vb.posture == "STAND")
-    from dataclasses import replace
-    t = replace(library.load("sniff"), repeats=255)
-
-    async def go():
-        stamp = link._mind_alive_at
-        task = asyncio.ensure_future(client.play(t))
-        await asyncio.sleep(0.6)
-        assert link._mind_alive_at == stamp  # a looping play() does not keep a dead loop alive
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-    asyncio.run(go())
-
-
-def test_concurrent_uploads_are_serialised(rig):
-    client, vb, _ = rig()
-    client.wait_ready(2)
-    names = ["hi", "sniff", "check_around", "scratch"]
-    errors, ids = [], {}
-
-    def up(n):
-        try:
-            for _ in range(3):
-                ids[n] = client.upload_trick(library.load(n), force=True)[0]
-        except Exception as e:  # interleaved BEGIN/FRAMES/COMMIT would fail with BAD_ARG/NO_TRICK
-            errors.append((n, e))
-    ths = [threading.Thread(target=up, args=(n,)) for n in names]
-    for th in ths:
-        th.start()
-    for th in ths:
-        th.join(20)
-    assert errors == []
-    assert vb.trick.state == "ready" and vb.trick.hdr.trick_id in ids.values()
-    assert client._trick_cached[0] == vb.trick.hdr.trick_id
 
 
 # ---- 12: LinkStats race ------------------------------------------------------------------------

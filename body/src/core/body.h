@@ -14,11 +14,10 @@
 #include "battery.h"
 #include "config.h"
 #include "events.h"
-#include "feet.h"
-#include "keyframe.h"
 #include "notes.h"
 #include "params.h"
 #include "reflex.h"
+#include "stream.h"
 
 // Durations in 20 ms ticks. The watchdog's are live params (core/params.h).
 #define WD_STOP_TICKS param_ms_ticks(KILO_PARAM_WD_STOP_MS)        // 0.5 s without a valid frame: stop
@@ -42,7 +41,6 @@ enum GoalResult : uint8_t {
   GOAL_OK = 0,
   GOAL_BAD_ARG = 2,
   GOAL_BUSY = 3,
-  GOAL_NO_TRICK = 6,
   GOAL_LOW_BATT = 7,
   GOAL_FALLEN = 8,  // the fall reflex holds the joints (ACK REFUSED_FALLEN)
   GOAL_STALE = 10,
@@ -78,9 +76,8 @@ struct Body {
   uint8_t hold_ticks;
   uint8_t balance_req;  // SET_POSTURE flags bit 0; cleared by an epoch bump
   Balance bal;          // the balance layer: SET_BALANCE settings + controller
-  Keyframe kf;          // the trick store and player (TRICK owner)
   Fall fall;            // the fall reflex (core/reflex.h)
-  Feet feet;            // the FEET player, STANCE and the body pose (core/feet.h)
+  Stream stream;        // the POSE stream, STANCE and the body pose (core/stream.h)
   // IMU health
   uint8_t imu_fault;
   uint8_t imu_stale_run, imu_err_run;
@@ -97,35 +94,34 @@ void body_tick(Body& b, const TickIn& in, uint16_t counts[JOINT_COUNT]);
 // ---- Integration points for the link layer (protocol round) ----
 // Call on every CRC-valid frame from the Pi: feeds the link watchdog.
 void body_link_frame(Body& b);
-// SET_POSTURE goal. Ends a FEET stream (GAIT_STOPPED arg 0): IDLE takes
-// the legs into the posture from where they are.
+// SET_POSTURE goal. Ends a POSE stream (STREAM_STOPPED arg 0): IDLE takes
+// the joints into the posture from where they are, over `ticks`.
 GoalResult body_goal_posture(Body& b, uint8_t epoch, uint8_t posture, uint8_t ticks, uint8_t flags);
 // SET_HEAD goal (payload: epoch, mode, pan, tilt, tail, max_speed_dps; doc
 // §3c layer 1). mode 0 releases (never stale); mode 1 holds: STALE, FALLEN,
 // LOW_BATT; BAD_ARG for mode > 1. The safety stage clamps the targets;
 // -32768 leaves that joint to its owner.
 GoalResult body_goal_head(Body& b, const uint8_t* p);
-// FEET (the whole payload; doc §3d, core/feet.h). BAD_ARG for a field out
-// of the spec's range; STALE, FALLEN, LOW_BATT, UNCALIBRATED (as STAND).
-// Then queued (or dropped as late or too far ahead: STATS feet_late, no
-// refusal). The first one enters GAIT: IDLE's posture becomes STANCE (the
-// head and tail of STAND), the legs stay IDLE's until the first queued
-// tick plays, then the stream owns them until a SET_POSTURE, an epoch bump
-// or a reflex (GAIT_STOPPED 0) or the settle after an underrun
-// (GAIT_STOPPED 1).
-GoalResult body_feet(Body& b, const uint8_t* p);
+// POSE (the whole payload; core/stream.h). BAD_ARG for a field out of
+// range; STALE; FALLEN while the fall reflex holds the joints, unless the
+// key has FALL_OK (it takes them: the mind's get-up); LOW_BATT;
+// UNCALIBRATED (as STAND); BUSY under another reflex or in LIMP or CALIB.
+// Then queued (or dropped: STATS pose_dropped, no refusal). The first one
+// starts the stream from where the joints are (a stream of feet makes
+// IDLE's posture STANCE, the head and tail of STAND); it holds the joints
+// until a SET_POSTURE, an epoch bump or a reflex (STREAM_STOPPED 0), or the
+// settle after an underrun with every leg a foot (STREAM_STOPPED 1).
+GoalResult body_pose(Body& b, const uint8_t* p);
 // SET_BODY_POSE goal (payload: epoch, pitch, roll (a16), dheight_mm,
-// xshift_mm): STALE, FALLEN, LOW_BATT. Applies to STANCE and on top of the
-// FEET poses (slewed; pitch and roll clamped to +-30 deg); zeroed by an
+// xshift_mm): STALE, FALLEN, LOW_BATT. Applies to STANCE and on top of a
+// stream's feet (slewed; pitch and roll clamped to +-30 deg); zeroed by an
 // epoch bump.
 GoalResult body_goal_pose(Body& b, const uint8_t* p);
-// The FEET stream owns the legs (playing, holding, settling).
-inline bool body_gait_running(const Body& b) { return feet_playing(b.feet); }
-// A FEET stream is on: playing, or accepted and waiting for its first
-// tick. TELEMETRY mode GAIT, flags GAIT, leg owner nibble GAIT (unless a
-// trick or reflex holds the legs).
-inline bool body_gait_active(const Body& b) { return b.feet.state != FT_OFF; }
-// The fall reflex holds the joints (FALLEN, RECOVERING or FAILED).
+// A POSE stream holds the joints (moving, holding, settling). TELEMETRY
+// mode STREAM, flags STREAM, leg owner nibble STREAM (unless a reflex holds
+// the legs).
+inline bool body_stream_on(const Body& b) { return stream_on(b.stream); }
+// The fall reflex holds the joints (FALLEN or LYING).
 inline bool body_fallen(const Body& b) { return b.fall.state != FS_UPRIGHT; }
 // SET_BALANCE goal: enable, Kp (Q8), Kd (ms), dead band and clamp (deg).
 // Live, not persisted. BAD_ARG if enable > 1 or a band/clamp > 30 deg.
@@ -134,39 +130,25 @@ GoalResult body_goal_balance(Body& b, const uint8_t p[5]);
 // eligible (doc §3c: IDLE SIT or STAND, settled, no REFLEX) and no IMU_FAULT.
 // TELEMETRY flags bit 0.
 inline bool body_balance_active(const Body& b) { return b.bal.active; }
-// The geometric balance holds its corrections this tick (a FEET support bit
+// The geometric balance holds its corrections this tick (a support bit
 // clear, or just after; body_tick).
 inline bool body_balance_held(const Body& b) { return b.bal.active && b.bal.hold; }
-// TRICK_PLAY (payload: epoch, trick_id, speed_q6, flags). Returns the ACK
-// status: STALE, NO_TRICK, BAD_ARG, BUSY (a trick plays), REFUSED_FALLEN
-// (the fall reflex holds the joints), LOW_BATT, BUSY (another reflex holds
-// the joints, or the IDLE posture is LIMP or CALIB), UNCALIBRATED.
-uint8_t body_trick_play(Body& b, const uint8_t p[4]);
-// TRICK_STOP: crossfade to the end posture over `ticks` (0 = XFADE_TICKS),
-// EVENT TRICK_DONE(STOPPED). Always OK (nothing playing is not an error).
-void body_trick_stop(Body& b, uint8_t ticks);
-// End the playing trick (if any) for `reason` (KfEnd): EVENT TRICK_DONE,
-// IDLE adopts the end posture, the joints crossfade back over `ticks`
-// (0 = XFADE_TICKS). (A fall ends it through body_epoch_bump(b, KF_END_FELL).)
-void body_trick_end(Body& b, uint8_t reason, uint8_t ticks);
-// Fall detection must stay off: a FALL_OK trick is playing (for the fall
-// reflex, doc §3g).
-inline bool body_fall_suppressed(const Body& b) { return kf_fall_ok(b.kf); }
+// Fall detection must stay off: a FALL_OK stream is on (the mind's get-up,
+// doc §3g).
+inline bool body_fall_suppressed(const Body& b) { return stream_on(b.stream) && b.stream.fall_ok; }
 // IMU re-initialised (hal finished a runtime DMP upload while LIMP).
 void body_imu_recovered(Body& b);
-// TELEMETRY.mode (§4): 1 LIMP, 2 IDLE, 3 GAIT (a FEET stream: waiting for
-// its first tick, playing, holding or settling), 4 TRICK, 5 FALLEN,
-// 6 RECOVERING, 7 LOW_BATT, 9 LINK_LOST.
+// TELEMETRY.mode (§4): 1 LIMP, 2 IDLE, 3 STREAM (a POSE stream: moving,
+// holding or settling), 5 FALLEN, 7 LOW_BATT, 9 LINK_LOST.
 uint8_t body_mode(const Body& b);
 // TELEMETRY.support: the feet the balance corrects through this tick. The
-// FEET pose's support bits while the stream plays; all four in IDLE SIT,
-// STAND and STANCE; none otherwise (LIMP, REST, CALIB, ZERO, a trick, a
-// reflex: no foot model there).
+// stream's support bits while it is on; all four in IDLE SIT, STAND and
+// STANCE; none otherwise (LIMP, REST, CALIB, ZERO, a reflex: no foot model
+// there).
 uint8_t body_support(const Body& b);
 
 // A new goal epoch (doc §3c): clears the latched motion goals and ends a
-// playing trick with TRICK_DONE(trick_reason) carrying the new epoch. The
-// fall reflex passes KF_END_FELL; everything else is a preemption.
-void body_epoch_bump(Body& b, uint8_t trick_reason = KF_END_PREEMPTED);
+// stream (STREAM_STOPPED 0, carrying the new epoch).
+void body_epoch_bump(Body& b);
 
 #endif

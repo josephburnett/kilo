@@ -1,12 +1,57 @@
-# One movement engine: a proposal
+# One movement engine
 
-Written 2026-11-22. A design proposal, nothing built; the owner's four
-decisions on it are at the end. Numbers marked **(est.)** are estimates;
-every other number is read from the code, the docs or the recordings
-named next to it, most of them from
+Written 2026-11-22 as a design; **step 1 is built** (the same day: "What
+exists now" just below), steps 2 to 6 are not. The owner's four decisions
+on it are at the end. Numbers marked **(est.)** are estimates; every other
+number is read from the code, the docs or the recordings named next to
+it, most of them from
 [movement-engine-results.md](movement-engine-results.md) (the old walk,
-trot, long trot and crawl of 2026-11-17 to 11-21). Nothing here has been
-tried on Kilo.
+trot, long trot and crawl of 2026-11-17 to 11-21). Nothing of it has been
+tried on Kilo: everything below about step 1 was checked on the laptop
+only (the body's real program in its host tests, the mind against it).
+
+## What exists now (step 1, 2026-11-22)
+
+- **One stream of poses.** The mind moves the body only by `POSE`
+  messages (protocol 3.0, `protocol/spec.toml`): a pose and the tick by
+  which to reach it. Each leg is a foot (where it is, in quarter
+  millimetres) or two joint angles; the head joints are given or left to
+  the body's posture; the pose carries the attitude the mind expects
+  there (the body's balance reference) and which feet are down. FEET and
+  the five TRICK messages are gone.
+- **The board assumes the poses** (`body/src/core/stream.h`). It keeps up
+  to 5 of them in tick order and moves toward the next one from wherever
+  the joints are, arriving exactly on its tick, in a straight line or
+  along a smooth (cosine) curve. So a walk sends a pose every tick, and a
+  trick one per keyframe. It still corrects its balance itself (through
+  the feet for a walk, in the joints for a trick frame that asks for it),
+  clips every joint to its limits and speed, and when the poses stop it
+  holds the last one (the swing feet of a walk come down). It reports,
+  every TELEMETRY, the correction it carries, the reference, the feet down,
+  how many poses wait, and which legs a limit or the slew cut
+  (`limited`, new).
+- **The board's trick player and its get-up (rc) are deleted**, as
+  decided. After a fall the body holds him until he is still, lays him
+  down and lets the legs go limp 2 s later (EVENT LYING). He does not get
+  up by himself; B1 (in a `KILO_RIGHTING=1` build) runs the righting
+  moves as poses the fall reflex hands the legs over to.
+- **The mind** sends the walk's and the self-measurement's feet as before
+  (whole millimetres), 3 ticks (60 ms) ahead instead of 5 (results §1).
+  The trick player (`kernel/mind/tricks/player.h`) turns each library
+  trick into poses: mirror and speed applied in the mind, the end posture
+  sent when the body's tick reaches the last pose, the guards as before.
+  While a trick plays it holds other posture requests back until the end
+  (a posture ends a stream on the body), as the body's player did.
+- **Room on the board**: flash 27094 of 30720 B (was 27572), RAM 1249 of
+  1540 B (was 1539).
+- **What the owner should see on the floor**: every key as before (the
+  walks, the trot, the postures, the random mode's tricks, the rear-up,
+  the self-measurement). Differences to look for: a fall no longer ends
+  in a get-up attempt but lying down and going limp; a change asked of a
+  walk (faster, slower, steer, stop) reaches the legs about 40 ms sooner
+  (60 ms of poses queued instead of 100). Not yet
+  checked: whether 60 ms of look-ahead is enough on the Pi under load (the
+  recordings say yes, results §1).
 
 ## Summary (half a page)
 
@@ -44,7 +89,7 @@ estimated 300 B of the board's RAM (it has almost none spare today) and
 
 The way there is six steps, each tried on the floor and each deleting what
 it replaces. Part one says what the recordings already settled and what
-only the floor can.
+only the floor can. Step 1 is built (above); 2 to 6 remain.
 
 ## Part one: what to learn first
 
@@ -330,44 +375,39 @@ Deleted outright once its step lands (git keeps it):
   the laptop build of the kernel (decision 3). Kept in Python as tools:
   `dynamics.py`, `righting.py` (the simulators), `measure/` (the fit), the
   study scripts.
-- Protocol: `FEET`, `TRICK_BEGIN`, `TRICK_FRAMES`, `TRICK_COMMIT`,
-  `TRICK_PLAY`, `TRICK_STOP`, `FALL_RC`. Replaced by one `POSE` message: a
-  pose for the board to assume and **the tick by which to reach it**; per
-  leg either a foot position (x, z in mm, wider ranges than FEET's ±60 and
-  30-95) or two joint angles (for a paw above the body), the head and tail
-  angles, the attitude the engine expects there (the board's balance
-  reference) and the feet that should carry him: about 22 B payload
-  **(est.)**, under 10 % of the line at 50 Hz. The board moves toward the
-  newest pose by its tick, slew-limited, and once there holds it with its
-  correction on; a late or missing POSE therefore costs nothing but
-  freshness, and the mind may send poses further apart where nothing needs
-  every tick (a hold, a slow stretch). TELEMETRY gains a "limited" flag per
-  leg (a joint or slew limit cut the pose) and, while a pose stream runs,
-  the commanded joint angles at a low rate.
-- Board: `core/keyframe.cpp` (1176 B of flash in the 2026-10-11 size report,
-  and its 24-frame store, 336 B plus header of RAM); rc and the recovery
-  states in `reflex`/`body.cpp` (150-250 B of code and about 40 B of table,
-  docs/righting.md's estimate); the trick dispatch in `link.cpp`; the
-  joint-space balance gains for SIT if every pose is streamed. `feet.cpp`
-  grows a little (joint mode, reach-by-tick). **Net (est.)**: about 300 B
-  of RAM and 1.5-2 KB of flash freed, against about 1 B of RAM and 3 KB of
-  flash spare reported after the righting branch.
+- Protocol (**done in step 1**): `FEET`, `TRICK_BEGIN`, `TRICK_FRAMES`,
+  `TRICK_COMMIT`, `TRICK_PLAY`, `TRICK_STOP`, `FALL_RC` are gone, replaced
+  by one `POSE` message of 31 B (1850 B/s at 50 Hz, 7 % of the line): per
+  leg a foot (x, z in quarter mm: x ±120 mm, z 15-110 mm) or two joint
+  angles, the head and tail angles or "leave them", the attitude the engine
+  expects there, the feet that carry him, and flags (which legs are angles,
+  balance, may-play-while-fallen, eased). TELEMETRY's `limited` says which
+  legs a joint limit, the slew or the leg's reach cut; the commanded joint
+  angles are the JOINTS stream, which the mind can turn on.
+- Board (**done in step 1**): `core/keyframe.*` and `core/feet.*` replaced
+  by `core/stream.*`; rc and its states gone from `reflex`/`body.cpp`/
+  `posture.cpp`; the trick dispatch gone from `link.cpp`. Freed: 478 B of
+  flash and 290 B of RAM (the estimate was 300 B and 1.5-2 KB: the new
+  stream player, with its interpolation and joint mode, took back about
+  1 KB of what keyframe.cpp gave). The joint-space balance gains stay
+  (the built-in postures and the tricks' frames use them).
 
 ## Part four: the path
 
 Every step is tried on the floor with keys he already has, and deletes
 what it replaces.
 
-1. **One stream.** `POSE` replaces FEET and the TRICK messages; the board's
-   trick player and rc go. The look-ahead drops to 60 ms. The mind's
-   existing walker sends POSE in foot mode; the existing tricks and intent
-   moves are sampled in the mind and sent in joint mode. Floor try: every
-   key looks as before; tricks at the same timing (compare the recordings
-   of item 11); after a fall he lies soft and reports, and B1 runs the
-   righting experiment's moves through the new stream. *Why first*: every
-   later step needs it, it gives the board back the RAM the rest needs, and
-   it changes no movement, so a difference on the floor is the transport's
-   fault and easy to find.
+1. **One stream (built 2026-11-22, not yet tried on the floor).** `POSE`
+   replaces FEET and the TRICK messages; the board's trick player and rc
+   are gone. The look-ahead is 60 ms. The walker sends POSE in foot mode;
+   the tricks and intent moves go as one joint-mode pose per keyframe
+   phase (the board interpolates between them). Floor try: every key looks
+   as before; tricks at the same timing (compare the recordings of item
+   11); after a fall he lies soft and reports, and B1 (a `KILO_RIGHTING=1`
+   build) runs the righting experiment's moves through the new stream.
+   *Why first*: every later step needs it, it gives the board back the RAM
+   the rest needs, and it changes no movement, so a difference on the
+   floor is the transport's fault and easy to find.
 2. **Gait clock and solver.** Walk, trot and crawl become offsets on one
    clock; `planner/` goes. Floor try: C4, A4, B4, B7/B5 mid-walk; new: the
    tempo changes without a stop, walk to trot without squaring up. Judged
@@ -391,9 +431,19 @@ the board finishing its last pose and holding it with its correction on
 (the watchdog then settles him), so a stall mid-trick leaves him in that
 pose rather than mid-fall; the solver must only send poses that are safe
 to hold. The solver replaces tuned, floor-tested code (the walk, the quick
-stop) and will at first be worse at something. RAM on the board stays
-tight until step 1 lands, so nothing can be added there before it. Between
-step 1 and step 5 he does not get up by himself (decision 1).
+stop) and will at first be worse at something. Between step 1 and step 5
+he does not get up by himself (decision 1).
+
+**What the remaining steps need that the laptop cannot give.** Step 2 (the
+gait clock and solver replacing the planner) has to be judged against
+RockingPhysics and then on the floor (items 8 and 10): the walk it
+replaces was tuned there. Steps 3 and 4 build on step 2's solver. Step 5
+needs falls recorded with hands off (item 12): nothing on the laptop
+predicts a get-up. Step 6 needs item 13 (a slope and a push). The
+per-servo lag and give in `[model.correction]` are all at their defaults
+(nothing measured): the engine is to read them when it plans, but until
+the measurement of "Each servo" above is built and run they change
+nothing.
 
 **Honest unknowns.** Whether 3 mm inside three feet holds on the floor for
 the new walk (item 8; the recordings say so only for the old gaits).

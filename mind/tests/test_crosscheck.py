@@ -40,7 +40,7 @@ def harness(tmp_path_factory):
     subprocess.run(["bash", str(BUILD_SCRIPT), str(out)], check=True, capture_output=True, timeout=300)
     proc = subprocess.Popen([str(out)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     h = Harness(proc)
-    h.p2 = h.implements_feet()
+    h.p2 = h.implements_pose()
     yield h
     proc.stdin.close()
     proc.wait(5)
@@ -51,14 +51,13 @@ class Harness:
         self.proc = proc
         self.p2 = True
 
-    def implements_feet(self) -> bool:
-        """Whether this firmware plays FEET: a body without GAIT refuses it
-        UNKNOWN_TYPE, and the vbody then plays that body (p2=False). The probe's
-        tick has passed (late: dropped without a word by a body that plays FEET)."""
+    def implements_pose(self) -> bool:
+        """Whether this firmware plays POSE: a body without the stream refuses
+        it UNKNOWN_TYPE, and the vbody then plays that body (p2=False). The
+        probe is refused BUSY (the body is LIMP) by a body that plays POSE."""
         self.cmd("reset 0 0")
-        out = self.cmd("rx " + wire("FEET", 1, epoch=0, tick=0, x_mm=[0] * 4, z_mm=[76] * 4, pitch=0, roll=0,
-                                    support=15).hex())
-        unknown = (P.MsgId.FEET << 8) | P.GoalRefusedReason.UNKNOWN_TYPE
+        out = self.cmd("rx " + pose(1, 0).hex())
+        unknown = (P.MsgId.POSE << 8) | P.GoalRefusedReason.UNKNOWN_TYPE
         return not any(t == P.MsgId.EVENT and P.decode_payload(t, p).code == P.EventCode.GOAL_REFUSED
                        and P.decode_payload(t, p).arg == unknown for t, p in out)
 
@@ -121,7 +120,7 @@ def norm(frames: list[tuple[int, bytes]]) -> Counter:
             out.append((name, m.code, m.arg, m.epoch))
         elif t == P.MsgId.HELLO:
             out.append((name, m.proto_major, m.proto_minor, m.reset_cause, m.max_payload,
-                        m.trick_capacity, m.joint_count, m.config_state, m.epoch))
+                        m.pose_depth, m.joint_count, m.config_state, m.epoch))
         elif t == P.MsgId.PONG:
             out.append((name, m.token))
         elif t in (P.MsgId.CAL_VALUES, P.MsgId.PARAM_VALUE, P.MsgId.EEPROM_DATA, P.MsgId.PCA_COUNTS):
@@ -138,6 +137,13 @@ def wire(name: str, seq: int, **fields) -> bytes:
 
 def raw(type_: int, seq: int, payload: bytes) -> bytes:
     return C.build_frame(type_, seq, payload)
+
+
+def pose(seq: int, tick: int, epoch: int = 0, **kw) -> bytes:
+    """A POSE in foot mode at STANCE's feet (x 0, z 76 mm) unless given."""
+    fields = dict(epoch=epoch, tick=tick, flags=0, leg=[0, 304] * 4, head=[-32768] * 3, pitch=0, roll=0, support=15)
+    fields.update(kw)
+    return wire("POSE", seq, **fields)
 
 
 def play(harness: Harness, steps: list, config_state: int = P.ConfigState.OK,
@@ -159,17 +165,6 @@ def play(harness: Harness, steps: list, config_state: int = P.ConfigState.OK,
         assert norm(c) == norm(v), f"step {i} ({step!r}): body {sorted(norm(c))} != vbody {sorted(norm(v))}"
         sent += c
     return sent
-
-
-def trick_dones(sent: list[tuple[int, bytes]]) -> list[tuple[int, int]]:
-    """(reason, trick_id) of every EVENT TRICK_DONE."""
-    out = []
-    for t, p in sent:
-        if t == P.MsgId.EVENT:
-            m = P.decode_payload(t, p)
-            if m.code == P.EventCode.TRICK_DONE:
-                out.append(((m.arg & 0xFFFF) >> 8, m.arg & 0xFF))
-    return out
 
 
 def _pi_vectors() -> list[dict]:
@@ -231,7 +226,7 @@ def test_goals(harness):
         wire("SET_POSTURE", 3, epoch=7, posture=S.SIT, transition_ticks=0, flags=0),     # rate-limited
         wire("SET_POSTURE", 4, epoch=7, posture=S.REST, transition_ticks=0, flags=0),    # never stale
         wire("SET_POSTURE", 5, epoch=0, posture=S.STANCE, transition_ticks=0, flags=0),  # P1: BAD_ARG
-        wire("FEET", 6, epoch=0, tick=0, x_mm=[0] * 4, z_mm=[76] * 4, pitch=0, roll=0, support=15),  # late / P1
+        pose(6, 0),                                                                       # past: dropped
         wire("BEEP", 7, notes=[{"note": 12, "dur_10ms": 10}]),
         wire("HEARTBEAT", 8),
         raw(P.MsgId.SET_POSTURE, 9, b"\x00\x03\x00"),                                     # BAD_LEN
@@ -281,29 +276,11 @@ def test_misc_commands(harness):
         wire("IMU_OFFSETS_SET", 8, accel_x=1, accel_y=2, accel_z=3, gyro_x=4, gyro_y=5, gyro_z=6, save=1),
         ("save",),
         raw(0x7D, 9, b""), raw(0x90, 10, b"\x01"), raw(P.MsgId.PING, 11, b"\x01"),       # unknown, unknown, BAD_LEN
-        wire("TRICK_STOP", 12, transition_ticks=5),
+        raw(0x24, 12, b"\x05"),                                                          # (TRICK_STOP: gone)
         wire("REBOOT", 13, magic=0x4C49),                                                 # BAD_ARG
         wire("REBOOT", 14, magic=P.REBOOT_MAGIC),                                         # ACK, HELLO, BOOT
         wire("HELLO_REQ", 15),
     ])
-
-
-# ---- tricks (P1): upload rules, play gating, tick-exact TRICK_DONE ----------------
-def _trick_msgs(trick, trick_id: int, seq: int) -> tuple[list[bytes], int]:
-    out = []
-    for m in trick.upload_messages(trick_id):
-        out.append(C.encode_message(m, seq))
-        seq += 1
-    return out, seq
-
-
-def _small_trick(repeats: int = 2):
-    from kilo.tricks.model import Keyframe, Trick
-    stand = {"lf_shoulder": 30, "rf_shoulder": 30, "rb_shoulder": -30, "lb_shoulder": -30,
-             "lf_knee": 30, "rf_knee": 30, "rb_knee": -30, "lb_knee": -30, "head_pan": 0, "head_tilt": 0, "tail": 0}
-    f = [Keyframe.from_joints({**stand, "head_pan": a}, dur=d, hold=h)
-         for a, d, h in ((20, 3, 1), (-20, 2, 0), (10, 4, 2), (0, 1, 0))]
-    return Trick(name="x", frames=tuple(f), loop_start=1, loop_end=2, repeats=repeats)
 
 
 def _ticks_with_heartbeats(n: int, seq: int) -> tuple[list, int]:
@@ -315,94 +292,6 @@ def _ticks_with_heartbeats(n: int, seq: int) -> tuple[list, int]:
             seq += 1
         steps.append(("tick", 1))
     return steps, seq
-
-
-@pytest.mark.parametrize("speed,mirror", [(64, 0), (96, 1), (16, 0)])
-def test_trick_play_to_done(harness, speed, mirror):
-    S = P.Posture
-    t = _small_trick()
-    up, seq = _trick_msgs(t, 5, 10)
-    ticks, seq = _ticks_with_heartbeats(120 if speed >= 64 else 300, seq + 3)
-    sent = play(harness, [
-        wire("SET_POSTURE", 1, epoch=0, posture=S.STAND, transition_ticks=0, flags=0),
-        ("tick", 5),
-        *up,
-        wire("TRICK_COMMIT", seq, trick_id=5, crc16=t.crc16()),            # the cache check: OK again
-        wire("TRICK_PLAY", seq + 1, epoch=0, trick_id=5, speed_q6=speed, flags=mirror),
-        wire("TRICK_PLAY", seq + 2, epoch=0, trick_id=5, speed_q6=speed, flags=mirror),  # BUSY
-        *ticks,                                                             # TRICK_DONE(DONE) on the same tick
-    ])
-    assert trick_dones(sent) == [(P.TrickDoneReason.DONE, 5)]
-
-
-def test_trick_upload_errors(harness):
-    S = P.Posture
-    t = _small_trick()
-    up, seq = _trick_msgs(t, 6, 20)
-    begin, frames, commit = up[0], up[1:-1], up[-1]
-    sent = play(harness, [
-        frames[0],                                                          # NO_TRICK: no header
-        wire("TRICK_COMMIT", 1, trick_id=6, crc16=0),                       # NO_TRICK
-        wire("TRICK_BEGIN", 2, trick_id=6, n_frames=P.TRICK_CAPACITY + 1, loop_start=0, loop_end=0, repeats=0,
-             joint_mask=0xFF07, flags=0, end_posture=S.STAND, exp_roll=0, exp_pitch=0),   # BAD_ARG
-        wire("TRICK_BEGIN", 3, trick_id=6, n_frames=2, loop_start=0, loop_end=0, repeats=0,
-             joint_mask=0x0008, flags=0, end_posture=S.STAND, exp_roll=0, exp_pitch=0),   # BAD_ARG: joint 3
-        wire("TRICK_BEGIN", 4, trick_id=6, n_frames=2, loop_start=0, loop_end=0, repeats=0,
-             joint_mask=0x0007, flags=0, end_posture=S.LIMP, exp_roll=0, exp_pitch=0),    # BAD_ARG: end posture
-        begin,
-        wire("TRICK_FRAMES", 5, first=1, frames=[{"dur": 1, "hold": 0, "flags": 1, "ang": [0] * 11}]),  # out of order
-        wire("TRICK_FRAMES", 6, first=0, frames=[{"dur": 0, "hold": 0, "flags": 1, "ang": [0] * 11}]),  # dur 0
-        wire("TRICK_FRAMES", 7, first=0, frames=[{"dur": 1, "hold": 0, "flags": 3, "ang": [0] * 11}]),  # easing 3
-        wire("TRICK_COMMIT", 8, trick_id=6, crc16=t.crc16()),               # BAD_ARG: frames missing
-        *frames,
-        wire("TRICK_COMMIT", 30, trick_id=6, crc16=t.crc16() ^ 1),          # CRC_MISMATCH
-        wire("TRICK_PLAY", 31, epoch=0, trick_id=6, speed_q6=64, flags=0),  # NO_TRICK: not committed
-        commit,
-        wire("TRICK_PLAY", 32, epoch=0, trick_id=6, speed_q6=64, flags=0),  # BUSY: LIMP
-        wire("SET_POSTURE", 33, epoch=0, posture=S.CALIB, transition_ticks=0, flags=0),
-        wire("TRICK_PLAY", 34, epoch=0, trick_id=6, speed_q6=64, flags=0),  # BUSY: CALIB
-        wire("SET_POSTURE", 35, epoch=0, posture=S.SIT, transition_ticks=0, flags=0),
-        wire("TRICK_PLAY", 36, epoch=1, trick_id=6, speed_q6=64, flags=0),  # STALE
-        wire("TRICK_PLAY", 37, epoch=0, trick_id=7, speed_q6=64, flags=0),  # NO_TRICK
-        wire("TRICK_PLAY", 38, epoch=0, trick_id=6, speed_q6=15, flags=0),  # BAD_ARG
-        wire("TRICK_PLAY", 39, epoch=0, trick_id=6, speed_q6=64, flags=2),  # BAD_ARG
-        wire("TRICK_PLAY", 40, epoch=0, trick_id=6, speed_q6=64, flags=0),  # OK
-        wire("TRICK_BEGIN", 41, trick_id=6, n_frames=2, loop_start=0, loop_end=0, repeats=0,
-             joint_mask=0x0007, flags=0, end_posture=S.STAND, exp_roll=0, exp_pitch=0),   # BUSY
-        ("tick", 3),
-        wire("TRICK_STOP", 42, transition_ticks=5),                         # OK, TRICK_DONE(STOPPED)
-        wire("TRICK_STOP", 43, transition_ticks=5),                         # OK, no event
-        wire("TRICK_PLAY", 44, epoch=0, trick_id=6, speed_q6=64, flags=0),
-        ("tick", 2),
-        wire("SET_POSTURE", 45, epoch=0, posture=S.LIMP, transition_ticks=0, flags=0),  # TRICK_DONE(STOPPED)
-        wire("TRICK_PLAY", 46, epoch=0, trick_id=6, speed_q6=64, flags=0),  # BUSY: LIMP
-    ])
-    assert trick_dones(sent) == [(P.TrickDoneReason.STOPPED, 6)] * 2
-    # Uncalibrated and low battery.
-    play(harness, [
-        wire("SET_POSTURE", 1, epoch=0, posture=S.SIT, transition_ticks=0, flags=0),
-        *_trick_msgs(t, 6, 2)[0],
-        wire("TRICK_PLAY", 9, epoch=0, trick_id=6, speed_q6=64, flags=0),   # UNCALIBRATED
-    ], config_state=P.ConfigState.DEFAULTED)
-    play(harness, [
-        wire("SET_POSTURE", 1, epoch=0, posture=S.REST, transition_ticks=0, flags=0),
-        *_trick_msgs(t, 6, 2)[0],
-        wire("TRICK_PLAY", 9, epoch=0, trick_id=6, speed_q6=64, flags=0),   # REFUSED_LOW_BATT
-    ], batt_level=P.BatteryLevel.LOW)
-
-
-def test_trick_preempted_by_watchdog(harness):
-    S = P.Posture
-    t = _small_trick(repeats=255)
-    up, seq = _trick_msgs(t, 8, 2)
-    sent = play(harness, [
-        wire("SET_POSTURE", 1, epoch=0, posture=S.STAND, transition_ticks=0, flags=0),
-        *up,
-        wire("TRICK_PLAY", seq, epoch=0, trick_id=8, speed_q6=64, flags=0),
-        *[("tick", 1) for _ in range(30)],      # silent: WATCHDOG + TRICK_DONE(PREEMPTED), epoch 1
-        wire("TRICK_PLAY", seq + 1, epoch=0, trick_id=8, speed_q6=64, flags=0),  # LINK_RESTORED, STALE
-    ])
-    assert trick_dones(sent) == [(P.TrickDoneReason.PREEMPTED, 8)]
 
 
 # ---- head (P1, docs §3c layer 1) ----------------------------------------------------------
@@ -434,23 +323,54 @@ def test_head_goal(harness):
     ], batt_level=P.BatteryLevel.LOW)
 
 
-def test_feet_stream(harness):
-    """Protocol 2.0 (§3d): FEET is refused STALE for another epoch, never
-    acked; the first FEET for a coming tick enters GAIT; when the queue runs
-    dry the body says FEET_UNDERRUN (1 tick since the last), holds, settles
-    and ends with GAIT_STOPPED arg 1. The body in this tree plays FEET, so a
-    harness that refuses it is a failure, not a skip."""
-    assert harness.p2, "the link harness does not play FEET (UNKNOWN_TYPE)"
+def test_pose_stream(harness):
+    """Protocol 3.0 (docs/movement-engine.md): POSE is refused STALE for
+    another epoch and BUSY in LIMP, never acked; the first POSE for a coming
+    tick starts the stream; keys every tick are played on their tick, a key
+    far ahead is one slow move, one too far ahead is dropped; when the queue
+    runs dry the body says POSE_UNDERRUN (ticks since the last), holds,
+    settles and ends with STREAM_STOPPED arg 1; a stream with a joint-mode
+    leg holds instead, until a posture ends it (STREAM_STOPPED 0). The body
+    in this tree plays POSE, so a harness that refuses it is a failure, not a
+    skip. (The harness never runs link_tick: one GOAL_REFUSED per type per
+    play.)"""
+    assert harness.p2, "the link harness does not play POSE (UNKNOWN_TYPE)"
     S = P.Posture
-    feet = lambda seq, tick, epoch=0: wire("FEET", seq, epoch=epoch, tick=tick, x_mm=[0] * 4, z_mm=[76] * 4,
-                                           pitch=0, roll=0, support=15)
-    hb = lambda seq: wire("HEARTBEAT", seq)
-    play(harness, [
-        feet(1, 5, epoch=9),                                               # STALE
-        wire("SET_POSTURE", 2, epoch=0, posture=S.STANCE, transition_ticks=0, flags=0),
-        ("tick", 20), hb(3),
-        feet(4, 21), feet(5, 22), feet(6, 23),                             # GAIT, played on ticks 21-23
-        ("tick", 3),
-        ("tick", 1),                                                       # dry: FEET_UNDERRUN(1)
-        ("tick", 40), hb(7),                                               # hold, settle: GAIT_STOPPED(1)
-    ])
+    play(harness, [pose(1, 5, epoch=9)])                                   # STALE
+    play(harness, [pose(1, 5)])                                            # BUSY: LIMP
+    steps, seq, tick = [], 1, 0
+
+    def add(*items):
+        nonlocal seq
+        for it in items:
+            steps.append(it(seq) if callable(it) else it)
+            seq += 1
+
+    def ticks(n):  # n ticks, a heartbeat every 20 (the watchdog stops at 25)
+        nonlocal tick
+        while n > 0:
+            k = min(n, 20)
+            steps.append(("tick", k))
+            add(lambda q: wire("HEARTBEAT", q))
+            tick += k
+            n -= k
+
+    add(lambda q: wire("SET_POSTURE", q, epoch=0, posture=S.STANCE, transition_ticks=0, flags=0))
+    ticks(20)
+    add(*(lambda q, t=t: pose(q, t) for t in (tick + 1, tick + 2, tick + 3)))  # keys every tick
+    ticks(3 + 1 + 40)                                                      # dry: POSE_UNDERRUN, hold, settle
+    far = tick + 36
+    add(lambda q: pose(q, far, support=0b0111, leg=[0, 304, 0, 304, 0, 304, 40, 240]))  # one slow move, LB up
+    add(lambda q: pose(q, tick + P.POSE_MAX_AHEAD_TICKS + 1))              # too far ahead: dropped
+    ticks(36 + 1 + 30)                                                     # reached, POSE_UNDERRUN, LB settles
+    add(lambda q: wire("SET_POSTURE", q, epoch=0, posture=S.SIT, transition_ticks=0, flags=0))
+    ticks(5)
+    add(lambda q: pose(q, tick + 7, flags=P.PoseFlags.JOINT_LF | P.PoseFlags.EASE,
+                       leg=[480, 320] + [0, 304] * 3, head=[160, -32768, -32768]))  # a joint-mode leg, eased
+    ticks(7 + 40)                                                          # POSE_UNDERRUN, then held: no end
+    add(lambda q: wire("SET_POSTURE", q, epoch=0, posture=S.STAND, transition_ticks=0, flags=0))  # STREAM_STOPPED 0
+    sent = play(harness, steps)
+    names = [P.EventCode(m.code).name for t, p in sent if t == P.MsgId.EVENT
+             for m in [P.decode_payload(t, p)]]
+    assert names == ["POSE_UNDERRUN", "STREAM_STOPPED", "POSE_UNDERRUN", "STREAM_STOPPED", "POSE_UNDERRUN",
+                     "STREAM_STOPPED"], names

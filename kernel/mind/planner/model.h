@@ -4,7 +4,7 @@
 //
 // - Body frame: origin midway between the four shoulder axles, x forward,
 //   y LEFT, z UP, mm. Legs in protocol order LF RF RB LB.
-// - A foot as FEET gives it: x fore-aft from under its shoulder (+ forward),
+// - A foot as a POSE gives it (in mm): x fore-aft from under its shoulder (+ forward),
 //   z its depth below the shoulder, to the centre of the foot disc; the
 //   ground is foot_r_mm lower.
 // - Attitude as TELEMETRY reports it: pitch nose DOWN +, roll RIGHT side up

@@ -311,7 +311,7 @@ def field_range(spec: dict, msg: str, name: str) -> tuple[int, int]:
 
 
 def validate_shared(spec: dict) -> None:
-    """The shared defaults and limits ([gait], link.feet_*, [[joints]], [balance], [battery],
+    """The shared defaults and limits ([gait], link.pose_*, [[joints]], [balance], [battery],
     [head]) against each other and the wire ranges."""
     link = spec["link"]
     g = spec["gait"]
@@ -319,11 +319,13 @@ def validate_shared(spec: dict) -> None:
         raise SpecError("gait: unexpected or missing keys")
     if not 1 <= g["stance_h_256"] <= 255:
         raise SpecError("gait.stance_h_256: 1..255")
-    for k in ("feet_depth", "feet_lookahead_ticks", "feet_hold_ticks"):
+    for k in ("pose_depth", "pose_lookahead_ticks", "pose_hold_ticks"):
         if not 1 <= link[k] <= 32:
             raise SpecError(f"link.{k}: 1..32")
-    if link["feet_lookahead_ticks"] >= link["feet_depth"]:
-        raise SpecError("link.feet_lookahead_ticks must be below feet_depth")
+    if link["pose_lookahead_ticks"] >= link["pose_depth"]:
+        raise SpecError("link.pose_lookahead_ticks must be below pose_depth")
+    if not link["pose_lookahead_ticks"] < link["pose_max_ahead_ticks"] <= 255:
+        raise SpecError("link.pose_max_ahead_ticks: above the look-ahead, at most 255")
     joints = spec["joints"]
     if [j["id"] for j in joints] != list(range(link["channel_count"])):
         raise SpecError("joints: ids 0..channel_count-1, in order")

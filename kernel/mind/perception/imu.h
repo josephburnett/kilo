@@ -15,7 +15,7 @@
 // - pet: gentle periodic rocking over 4 s (1.5-10 deg peak to peak, >= 4
 //   half cycles of 0.2-1.5 s, never faster than 30 deg/s).
 // - startle: >= 10 deg from calm within 0.2 s, or a gyro rate >= 250 deg/s.
-// While the body moves itself (GAIT, TRICK, RECOVERING, CALIB, BOOT, the
+// While the body moves itself (STREAM, CALIB, BOOT, the
 // gait/trick flags) and for settle_s after a mode change, only tilt runs.
 //
 // What differs: the attitude history is a fixed ring of kBuf samples (4.5 s

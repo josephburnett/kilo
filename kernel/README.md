@@ -675,9 +675,10 @@ names it.
 **Ring sizes** (PL011): Circle's `SERIAL_BUF_SIZE`, 2048 bytes each way,
 kept. Needs: RX is TELEMETRY (<= 66 B wire) at 25-50 Hz plus events and
 acks, about 4 kB/s; the worst case between two polls is the line rate for
-the ~10 ms the link tolerates, 250 B; 4x margin = 1 KB. TX is FEET at 50 Hz
-(<= 66 B), goal refreshes at 5 Hz and heartbeats, about 4.5 kB/s; the worst
-burst in one poll is about 300 B (every goal plus FEET, HELLO_REQ and a
+the ~10 ms the link tolerates, 250 B; 4x margin = 1 KB. TX is POSE at 50 Hz
+while walking (37 B on the wire), goal refreshes at 5 Hz and heartbeats,
+about 4.5 kB/s; the worst burst in one poll is about 300 B (every goal plus
+the POSE keys due, HELLO_REQ and a
 command); 4x = 1.2 KB. 2048 covers both (82 ms of line-rate input). Making
 it smaller would mean defining `SERIAL_BUF_SIZE` for Circle's library build
 too (it sets the class layout), for 2 KB of RAM.
@@ -718,7 +719,7 @@ a frame only when `tx_free()` covers all of it; otherwise it counts
 | steady on | starting up |
 | 0.5 Hz (1 s on, 1 s off) | no body: no HELLO yet, or no TELEMETRY for 300 ms |
 | 2 Hz | the body is alive: TELEMETRY flowing |
-| 5 Hz | the body's HELLO has another protocol major: the kernel stays up and keeps the heartbeat, but sends no goals or FEET (kilo-mind-host exits 2 instead) |
+| 5 Hz | the body's HELLO has another protocol major: the kernel stays up and keeps the heartbeat, but sends no goals or POSE (kilo-mind-host exits 2 instead) |
 | double flash (two 100 ms flashes, once a second) | flashing the body, from the laptop or the SD card, until the new firmware's HELLO (or FAILED); or writing a kernel update to the card (the flashes stretch: the loop stalls on each 16 KB slice) |
 | one 50 ms flash every 5 s | light sleep (docs/power.md): A7 (or 2 min lying idle in REST), then 30 s of nothing. The servos go off earlier (3 s after A7) without changing the LED |
 | steady on or off for more than ~20 s | stopped: `Initialize` failed or a crash (Circle halts, the LED freezes) |
@@ -782,7 +783,7 @@ floor only, never on a desk.**
 | C4 | 0xB0 | walk |
 | B2 | 0x38 | a meow (docs/sound.md). It moves nothing, so it works at any time, also while Kilo walks |
 | A1 | 0x42 | experiment key ("A"): rear up, only when switched on (below); otherwise nothing. A2 until 2026-11-22 |
-| B1 | 0x4A | experiment key ("B"): kept for the righting experiment; until that is built in, nothing |
+| B1 | 0x4A | experiment key ("B"): the righting experiment, with `make -C kernel KILO_RIGHTING=1` (docs/righting.md): rights him from a side or his back. Off (the default): nothing; after a fall he lies still, since the body has no get-up of its own |
 | C1 | 0x52 | experiment key, free: nothing |
 | A3, B3, C3, A2, C2 | | nothing (logged as ignored) |
 
@@ -842,7 +843,7 @@ down where they are, the body stops in about 0.2 s, and the legs square up
 (`mind/planner/plan.h` halt(); docs/walking-and-balance.md section 14). It
 ends in STANCE (the standing pose the walk uses) with the servos on. Every
 stop sets the speed level back to +3, the heading to straight and the steer
-to 0. A playing trick is stopped first (TRICK_STOP).
+to 0. A playing trick is stopped first (its end posture).
 
 **The rear-up key.** A1 is off unless the kernel is built with
 `KILO_REAR_UP=1`, `2` or `3` (`rear_up_key` in "The Mind's settings";
@@ -1151,9 +1152,9 @@ moment it starts, whether or not Kilo is walking (`mind/record/`,
 `mind/README.md` "The flight recorder"):
 
 - every body link frame both ways: each TELEMETRY (attitude, mode, flags,
-  battery, distance), EVENT (keys, falls, TRICK_DONE), JOINTS if the body
-  streams them, and every command the mind sends (FEET, postures,
-  TRICK_PLAY, TRICK_STOP); the HEARTBEATs are only counted;
+  battery, distance), EVENT (keys, falls, STREAM_STOPPED), JOINTS if the
+  body streams them, and every frame the mind sends (POSE keys, postures
+  and the other goals, commands); the HEARTBEATs are only counted;
 - every log line, the routine once-a-second ones included;
 - during a walk, each planned tick and the walk's parameters (as before);
   during a trick, the trick, its keyframes' timing, the moment the body
@@ -1186,7 +1187,7 @@ busy-waits, so every write stops the main loop, and the body's watchdog
 (500 ms without a heartbeat) must never fire because of it. So the saver:
 
 - writes only at a **safe moment**: no walk, trick or run's 2 s post-roll,
-  the body not walking, playing a trick, fallen or recovering, no flash,
+  the body not walking, playing a trick or fallen, no flash,
   update or bridge, the behaviour runner not running, and all of that for
   2 s;
 - makes **one card call a pass**, a write of at most 4 KB, so the
@@ -1396,7 +1397,7 @@ card, the slices' time, the 4 MB heap buffer, the reboot into the new
 kernel and `kilo update` seeing it come back. The
 `Mind` on the Pi: IR remote keys through the kernel (the body's
 `EVENT IR_KEY` reaching the remote; walks and postures from the keys);
-tricks from the compiled-in library (upload and play on the real body);
+tricks from the compiled-in library (played as POSE keys on the real body);
 perception's percept lines from the real IMU and ultrasonic; balance on
 at start (Kp 0.99); the body's STATS line each second; `mind.poll`'s
 cost; the behaviour runner with `KILO_BEHAVIOUR=1` (never run on the

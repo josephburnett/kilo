@@ -229,7 +229,7 @@ void test_walk_run() {
   CHECK(count_kind(rs, KILO_WALK_RECORD_RUN) == 2);
   const planner::StreamStats& ss = r.mind.walker().stream_stats();
   CHECK(count_kind(rs, KILO_WALK_RECORD_PLAN) == ss.sent + ss.skipped && run->feet == ss.sent &&
-        count_kind(rs, KILO_WALK_RECORD_TX, KILO_MSG_FEET) == ss.sent);
+        count_kind(rs, KILO_WALK_RECORD_TX, KILO_MSG_POSE) == ss.sent);
   // the keys that drove it are marked in the run, and the walk's summary is in the log
   CHECK(mark(rs, "key") != nullptr && mark(rs, "key")->payload.find("key B7 (0x62, faster)") == 0);
   CHECK(r.ring_has("walk trot forward") && r.ring_has("walk error: "));
@@ -239,10 +239,6 @@ void test_walk_run() {
          r.metric(1).c_str());
 }
 
-uint16_t trick_done_arg(const char* name, uint8_t reason) {
-  const tricks::Trick* t = tricks::find_trick(name);
-  return (uint16_t)(tricks::trick_id_for(*t) | (reason << 8));
-}
 
 // A trot run: its label and its marks (+4: the timing mark at the change says speed_set=180.0 and the
 // swing it has then: the swing grows a tick a step from there).
@@ -289,12 +285,10 @@ void test_trick_runs() {
   r.body.event(KILO_EVENT_IR_KEY, 0x42);
   r.run_ms(200);
   CHECK(r.mind.player().playing() && rec.in_run());
-  r.body.mode = KILO_MODE_TRICK;
   r.body.pitch = -7 * 16;  // nose up 7: on his rear, inside the guards at back and paws (the next decides at 5 s)
   r.run_ms(3000);
-  r.body.mode = KILO_MODE_IDLE;
   r.body.pitch = 0;
-  r.body.event(KILO_EVENT_TRICK_DONE, (int16_t)trick_done_arg("rear_up", KILO_TRICK_DONE_REASON_DONE));
+  r.body.skip_ticks(1000);  // the rest of the trick at once: its last key reached
   r.run_ms(100);
   CHECK(!rec.in_run() && r.mind.player().result().state == tricks::PlayState::Done);
   r.run_ms(2200);
@@ -318,7 +312,7 @@ void test_trick_runs() {
   CHECK(play != nullptr && play->payload == "play speed=64" && play->t_us == r.mind.player().played_at_us());
   CHECKF(end != nullptr && end->payload.find("end reason=DONE elapsed_ms=") == 0 && end->payload.find(" battery_mv=8000") != std::string::npos,
          "%s", end ? end->payload.c_str() : "none");
-  CHECK(count_kind(rs, KILO_WALK_RECORD_TX, KILO_MSG_TRICK_PLAY) == 1);
+  CHECK(count_kind(rs, KILO_WALK_RECORD_TX, KILO_MSG_POSE) >= 2);  // the trick's keys went out (and are recorded)
   const size_t end_i = (size_t)(end - rs.data());
   size_t tel_in = 0;  // the measured pitch at every tick of the play
   for (const Rec& x : rs)
@@ -330,13 +324,10 @@ void test_trick_runs() {
   r.body.event(KILO_EVENT_IR_KEY, 0x42);
   r.run_ms(300);
   CHECK(r.mind.player().playing());
-  r.body.mode = KILO_MODE_TRICK;
   r.run_ms(100);
   r.body.event(KILO_EVENT_IR_KEY, 0x02);  // B6
   r.run_ms(100);
-  CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1);
-  r.body.mode = KILO_MODE_IDLE;
-  r.body.event(KILO_EVENT_TRICK_DONE, (int16_t)trick_done_arg("rear_up", KILO_TRICK_DONE_REASON_STOPPED));
+  CHECK(!r.mind.player().playing());  // stopped: its end posture
   r.run_ms(4000);
   rs = r.records();
   const Rec* t2 = mark(rs, "trick", end_i + 1);
@@ -394,7 +385,7 @@ void test_rear_up_stages() {
       if (std::strcmp(t->guards[i].name, name) == 0) return (int)t->guards[i].frame;
     return -1;
   };
-  auto ends_at_ms = [&](int f) {  // the frame's hold ends this long after TRICK_PLAY
+  auto ends_at_ms = [&](int f) {  // the frame's hold ends this long after the trick's start
     uint32_t ticks = 0;
     for (int i = 0; i <= f; i++) ticks += t->frames[i].dur + t->frames[i].hold;
     return ticks * KILO_TICK_MS;
@@ -422,7 +413,6 @@ void test_rear_up_stages() {
     r.run_ms(20);
     CHECKF(label(r) == "trick=rear_up_3 stage=1 of=3 reached=0", "presses %d: %s", presses, label(r).c_str());
     r.body.batt_mv = 8000;
-    r.body.mode = KILO_MODE_TRICK;
     uint64_t t0 = r.mind.player().played_at_us();
     auto at_ms = [&]() { return (uint32_t)((r.body.clock.t - t0) / 1000); };
     auto run = [&](uint32_t ms) {  // the body pitched as the trick's guards expect at each moment (the model's)
@@ -440,7 +430,7 @@ void test_rear_up_stages() {
     };
     // into stage 1's hold
     while (at_ms() < ends_at_ms(up) - 2000) run(20);
-    CHECK(r.ring_has("remote: rear_up: stage 1 (of 3): A1 to go on") && r.body.count(KILO_MSG_TRICK_STOP) == 0);
+    CHECK(r.ring_has("remote: rear_up: stage 1 (of 3): A1 to go on") && r.mind.player().playing());
     CHECKF(label(r) == "trick=rear_up_3 stage=1 of=3", "%s", label(r).c_str());
     if (presses >= 1) {
       r.body.event(KILO_EVENT_IR_KEY, 0x42);
@@ -450,9 +440,7 @@ void test_rear_up_stages() {
     }
     while (at_ms() < ends_at_ms(up) + 200) run(20);
     if (presses == 0) {  // no A1: down from stage 1, before its hold ended
-      CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1 && r.ring_has("remote: rear_up: held stage 1 without A1: coming down"));
-      r.body.mode = KILO_MODE_IDLE;
-      r.body.event(KILO_EVENT_TRICK_DONE, (int16_t)trick_done_arg("rear_up_3", KILO_TRICK_DONE_REASON_STOPPED));
+      CHECK(!r.mind.player().playing() && r.ring_has("remote: rear_up: held stage 1 without A1: coming down"));
       r.run_ms(4000);
       std::vector<Rec> rs = r.records();
       CHECK(has_mark(rs, "rear_up: up to stage 1 (of 3)") && has_mark(rs, "rear_up: held stage 1 without A1"));
@@ -462,7 +450,7 @@ void test_rear_up_stages() {
             has_mark(rs, "end reason=STOPPED") && has_mark(rs, " stage=1 of=3 reached=1 why="));
       continue;
     }
-    CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 0);
+    CHECK(r.mind.player().playing());
     while (at_ms() < ends_at_ms(mid) - 2000) run(20);
     CHECK(r.ring_has("remote: rear_up: stage 2 (of 3): A1 to go on"));
     if (presses == 2) {
@@ -472,18 +460,16 @@ void test_rear_up_stages() {
     }
     while (at_ms() < ends_at_ms(mid) + 200) run(20);
     if (presses == 1) {
-      CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1 && r.ring_has("remote: rear_up: held stage 2 without A1: coming down"));
-      CHECKF(label(r) == "trick=rear_up_3 stage=2 of=3", "%s", label(r).c_str());
+      CHECK(!r.mind.player().playing() && r.ring_has("remote: rear_up: held stage 2 without A1: coming down"));
+      CHECKF(label(r) == "trick=rear_up_3 stage=2 of=3 end=STOPPED", "%s", label(r).c_str());
       continue;
     }
-    CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 0);
+    CHECK(r.mind.player().playing());
     run(3000);
     CHECKF(r.ring_has("remote: rear_up: stage 3 (of 3)"), "guard %s", r.mind.player().result().guard ? r.mind.player().result().guard : "-");
     r.body.event(KILO_EVENT_IR_KEY, 0x02);  // B6 brings him down from any stage
     r.run_ms(200);
-    CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1 && r.ring_has("remote: rear_up: coming down (stage 3 allowed)"));
-    r.body.mode = KILO_MODE_IDLE;
-    r.body.event(KILO_EVENT_TRICK_DONE, (int16_t)trick_done_arg("rear_up_3", KILO_TRICK_DONE_REASON_STOPPED));
+    CHECK(!r.mind.player().playing() && r.ring_has("remote: rear_up: coming down (stage 3 allowed)"));
     r.run_ms(4000);
     std::vector<Rec> rs = r.records();
     for (const char* m : {"rear_up: up to stage 1 (of 3)", "rear_up: stage 1 (of 3)", "rear_up: on to stage 2 (of 3)",
@@ -547,14 +533,11 @@ void test_play_session_log() {
     run_s(10);
   }
   hold(0x42, 1);  // A1: rear_up
-  r.body.mode = KILO_MODE_TRICK;
   r.body.pitch = -7 * 16;  // the pitch its guards expect: on his rear (back, paws), then on the tripod (up)
   run_s(3);
   r.body.pitch = -23 * 16;
-  run_s(3.5);  // the trick takes 6.3 s: done before the mind's 7.3 s wait for TRICK_DONE runs out
+  run_s(3.5);  // the trick takes 6.3 s: done (its last key reached), then its end posture
   r.body.pitch = 0;
-  r.body.mode = KILO_MODE_IDLE;
-  r.body.event(KILO_EVENT_TRICK_DONE, (int16_t)trick_done_arg("rear_up", KILO_TRICK_DONE_REASON_DONE));
   run_s(60);
   uint32_t session_lines = ring.next_seq();
   // the cable goes in: Circle's and the net task's lines
@@ -600,7 +583,7 @@ void test_play_session_log() {
     remote_acted += std::strncmp(t, "remote ", 7) == 0 && std::strstr(t, "ignored") == nullptr;
     walks += std::strncmp(t, "walk trot forward", 17) == 0;
     walk_ends += std::strncmp(t, "walk ended: stopped", 19) == 0;
-    trick += std::strstr(t, "trick rear_up: TRICK_DONE DONE") != nullptr;
+    trick += std::strstr(t, "trick rear_up: DONE after") != nullptr;
     status_in += std::strncmp(t, "link ttyS1", 10) == 0 || std::strncmp(t, "loop ", 5) == 0 ||
                  std::strstr(t, "repeat: ignored") != nullptr || std::strncmp(t, "percept ", 8) == 0;
   }

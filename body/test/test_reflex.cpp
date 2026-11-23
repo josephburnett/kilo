@@ -1,12 +1,13 @@
 // The fall reflex (core/reflex.*, body.cpp; doc §3g) and the head layer
 // (SET_HEAD, arbiter.cpp; doc §3c layer 1) (Appendix H "reflex", "arbiter"):
 // the detector needs FALL_SAMPLES consecutive samples (a dip restarts it,
-// a single bad sample never trips), both sides and pitch falls, FALL_OK
-// suppression, LIMP/CALIB/IMU_FAULT gating, the rc playback (frames,
-// timing, mirror, retries), RECOVERED / RECOVERY_FAILED, the epoch and
-// STALE / FALLEN refusals, a trick preempted with TRICK_DONE(FELL), a
-// more important reflex taking over; head hold, slew, timeout, release,
-// epoch release, balance exclusion and owner precedence.
+// a single bad sample never trips), both sides and pitch falls, the hold
+// until still, then LYING (REST, LIMP, the reflex lets go), FALL_OK
+// suppression and the mind's get-up taking the joints from the reflex,
+// LIMP/CALIB/IMU_FAULT gating, the epoch and STALE / FALLEN refusals, a
+// stream ended by the fall, a more important reflex taking over; head
+// hold, slew, timeout, release, epoch release, balance exclusion and owner
+// precedence.
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -16,7 +17,6 @@
 #include "../src/core/params.h"
 #include "../src/core/posture.h"
 #include "../src/core/reflex.h"
-#include "../src/proto/crc16.h"
 #include "check.h"
 #include "body_fixture.h"
 #include "fake_eeprom.h"
@@ -73,19 +73,15 @@ static bool at_posture(uint8_t p) {
     if (b.arb.out[k] != joint_clamp(joint_id((uint8_t)k), posture_angle(p, (uint8_t)k))) return false;
   return true;
 }
-// rc frame i (mirrored or not), after limits.
-static int16_t rc_out(int i, bool mirror, int k) {
-  uint8_t id = (uint8_t)(POSTURE_RC + i + (mirror ? POSTURE_RC_MIRROR : 0));
-  return joint_clamp(joint_id((uint8_t)k), posture_angle(id, (uint8_t)k));
-}
-static bool at_rc(int i, bool mirror) {
-  for (uint8_t k = 0; k < DRIVEN_COUNT; k++)
-    if (b.arb.out[k] != rc_out(i, mirror, k)) return false;
+
+static bool all_owned(uint8_t own, uint8_t from = 0) {
+  for (uint8_t k = from; k < DRIVEN_COUNT; k++)
+    if (b.arb.owner[k] != own) return false;
   return true;
 }
-static bool all_owned(uint8_t own) {
-  for (uint8_t k = 0; k < DRIVEN_COUNT; k++)
-    if (b.arb.owner[k] != own) return false;
+static bool legs_at(uint8_t p) {
+  for (uint8_t k = 3; k < DRIVEN_COUNT; k++)
+    if (b.arb.out[k] != joint_clamp(joint_id((uint8_t)k), posture_angle(p, (uint8_t)k))) return false;
   return true;
 }
 static uint8_t head_goal(uint8_t epoch, uint8_t mode, int16_t pan, int16_t tilt, int16_t tail, uint16_t dps) {
@@ -97,30 +93,14 @@ static uint8_t head_goal(uint8_t epoch, uint8_t mode, int16_t pan, int16_t tilt,
   return body_goal_head(b, p);
 }
 
-// ---- A minimal trick (all joints, or a mask), for preemption and precedence.
-static uint8_t upload_trick(uint8_t id, uint16_t mask, uint8_t flags, int pan) {
-  KfFrame f[2];
-  const int8_t st[11] = {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30};
-  for (int i = 0; i < 2; i++) {
-    f[i].dur = 20;
-    f[i].hold = 100;
-    f[i].flags = KF_COSINE;
-    std::memcpy(f[i].ang, st, 11);
-    f[i].ang[0] = (int8_t)(i ? -pan : pan);
-  }
-  uint8_t h[11] = {id, 2, 0, 0, 0, (uint8_t)(mask & 0xFF), (uint8_t)(mask >> 8), flags, POSTURE_STAND, 0, 0};
-  uint8_t s = kf_begin(b.kf, h);
-  uint8_t c[2 + 2 * sizeof(KfFrame)] = {0, 2};
-  std::memcpy(c + 2, f, sizeof f);
-  if (!s) s = kf_frames(b.kf, c);
-  uint16_t crc = KILO_CRC16_INIT;
-  for (size_t i = 0; i < sizeof f; i++) crc = kilo_crc16_update(crc, ((const uint8_t*)f)[i]);
-  if (!s) s = kf_commit(b.kf, id, crc);
-  return s;
-}
-static uint8_t play(uint8_t id) {
-  uint8_t p[4] = {b.epoch, id, 64, 0};
-  return body_trick_play(b, p);
+// ---- A minimal stream: STAND's legs as joint angles, reached in `dt` ticks
+// (flags: FALL_OK for the mind's get-up), the pan driven or left to IDLE.
+static uint8_t pose(uint8_t flags, int16_t pan = JOINT_OFF, int dt = 20, uint8_t epoch = 0xFF) {
+  uint8_t p[KILO_POSE_LEN];
+  const int16_t head[3] = {pan, JOINT_OFF, JOINT_OFF};
+  fixture_pose(p, epoch == 0xFF ? b.epoch : epoch, (uint16_t)(b.tick + dt), (uint8_t)(FIXTURE_ALL_JOINT | flags),
+               FIXTURE_STAND_LEGS, head);
+  return body_pose(b, p);
 }
 
 // ---------------------------------------------------------------------------
@@ -155,20 +135,15 @@ static void test_detector() {
     CHECKF(got == c.want, "roll %d pitch %d: got %d want %d", c.roll, c.pitch, got, c.want);
   }
   a = Attitude();
-  CHECK(fall_level(a));
-  a.roll = 19 * 16 + 15;
-  CHECK(fall_level(a));
-  a.roll = -20 * 16;
-  CHECK(!fall_level(a));
-  a = Attitude();
   a.rate_yaw = 20 * 16;
   CHECK(!fall_still(a));
   a.rate_yaw = -19 * 16;
   CHECK(fall_still(a));
 }
 
-// Tip over from STAND: count, trip, hold, wait still, rc, CHECK, RECOVERED.
-static void test_fall_and_recover(bool right_up) {
+// Tip over from STAND: count, trip, hold, wait still, LYING: REST, LIMP 2 s
+// later, the reflex lets go. The body does not get up by itself.
+static void test_fall_and_lie(bool right_up) {
   reset();
   stand();
   uint8_t e0 = b.epoch;
@@ -196,86 +171,28 @@ static void test_fall_and_recover(bool right_up) {
   std::memcpy(held, b.arb.out, sizeof held);
   tick(50);
   CHECK(std::memcmp(held, b.arb.out, sizeof held) == 0 && b.fall.state == FS_FALLEN);
-  // Still for 9 ticks, a twitch, then 10: rc starts on the 10th.
+  // Still for 9 ticks, a twitch, then 10: LYING on the 10th.
   att(85 * side, 0, 0);
   tick(9);
   att(85 * side, 0, 25);
   tick();
   att(85 * side, 0, 0);
   tick(9);
-  CHECK(b.fall.state == FS_FALLEN);
+  CHECK(b.fall.state == FS_FALLEN && count(EV_LYING) == 0);
   tick();
-  CHECK(b.fall.state == FS_RC && b.fall.tries == 1 && body_mode(b) == KILO_MODE_RECOVERING);
-  bool mirror = right_up;  // rc as written is for the right side down
-  CHECK(b.arb.reflex.posture == (uint8_t)(POSTURE_RC + (mirror ? POSTURE_RC_MIRROR : 0)));
-  // The frames, tick-exact: frame i moves over dur then holds; at the end of
-  // each hold the output is the frame (limits applied).
-  for (int i = 0; i < RC_FRAMES; i++) {
-    int n = rc_dur((uint8_t)i) + rc_hold((uint8_t)i);
-    CHECK(b.arb.reflex.posture == (uint8_t)(POSTURE_RC + i + (mirror ? POSTURE_RC_MIRROR : 0)));
-    CHECK(b.arb.reflex.n == rc_dur((uint8_t)i));
-    tick(n - 1);
-    CHECKF(at_rc(i, mirror), "rc frame %d (mirror %d) not reached", i, mirror);
-    tick();
-  }
-  CHECK(b.fall.state == FS_CHECK);
-  // Mirror semantics: pan negated, LF<->RF shoulders swapped.
-  CHECK(rc_out(1, true, 0) == -rc_out(1, false, 0) && rc_out(1, true, 3) == rc_out(1, false, 4) &&
-        rc_out(1, true, 6) == rc_out(1, false, 5));
-  // Upright for 24 ticks, a wobble, then 25: RECOVERED on the 25th.
-  att(3, -4, 50);
-  tick(24);
-  att(25, 0, 0);
-  tick();
-  att(3, -4, 0);
-  tick(24);
-  CHECK(b.fall.state == FS_CHECK && count(EV_RECOVERED) == 0);
-  tick();
-  CHECK(b.fall.state == FS_UPRIGHT && b.holder == RH_NONE && !b.arb.reflex_active);
-  CHECK(count(EV_RECOVERED) == 1 && arbiter_idle_posture(b.arb) == POSTURE_STAND);
-  CHECK(body_mode(b) == KILO_MODE_IDLE && b.epoch == (uint8_t)(e0 + 1));
-  // The hand-back crossfades (never more than the slew per tick), then STAND.
+  CHECK(b.fall.state == FS_LYING && count(EV_LYING, side) == 1 && body_mode(b) == KILO_MODE_FALLEN);
+  CHECK(arbiter_idle_posture(b.arb) == POSTURE_REST && b.arb.reflex.posture == POSTURE_REST);
+  // REST over REST_MOVE_TICKS (never more than the slew per tick), LIMP
+  // FALL_LIMP_TICKS later, then the reflex lets go.
   int16_t prev[DRIVEN_COUNT];
   std::memcpy(prev, b.arb.out, sizeof prev);
-  for (int t = 0; t < 40; t++) {
+  for (int t = 0; t < REST_MOVE_TICKS; t++) {
     tick();
     for (uint8_t k = 0; k < DRIVEN_COUNT; k++) {
       CHECK(std::abs(b.arb.out[k] - prev[k]) <= PARAM(SLEW_MAX_A16));
       prev[k] = b.arb.out[k];
     }
   }
-  CHECK(at_posture(POSTURE_STAND));
-  // Detection is armed again.
-  att(85 * side, 0, 0);
-  tick(FALL_SAMPLES);
-  CHECK(b.fall.state == FS_FALLEN && count(EV_FELL) == 2);
-}
-
-// Never upright: three tries 1 s apart, alternating mirror, then FAILED:
-// REST, RECOVERY_FAILED, LIMP 2 s later, the reflex lets go.
-static void test_retries_and_failure() {
-  reset();
-  stand();
-  att(-100, 0, 0);  // right side down (roll < 0): try 1 unmirrored
-  tick(FALL_SAMPLES);
-  CHECK(b.fall.state == FS_FALLEN);
-  const int rc_ticks = 11 + 30 + 5 + 25 + 18;  // 89
-  bool want_mirror[3] = {false, true, false};
-  for (int t = 0; t < FALL_TRIES; t++) {
-    tick(FALL_STILL_TICKS);
-    CHECKF(b.fall.state == FS_RC && b.fall.tries == t + 1, "try %d did not start", t + 1);
-    CHECK(b.arb.reflex.posture == (uint8_t)(POSTURE_RC + (want_mirror[t] ? POSTURE_RC_MIRROR : 0)));
-    tick(rc_ticks);
-    CHECK(b.fall.state == FS_CHECK);
-    tick(FALL_CHECK_TICKS - 1);
-    CHECK(b.fall.state == FS_CHECK);
-    tick();
-    if (t < FALL_TRIES - 1) CHECK(b.fall.state == FS_FALLEN && count(EV_RECOVERY_FAILED) == 0);
-  }
-  CHECK(b.fall.state == FS_FAILED && count(EV_RECOVERY_FAILED) == 1 && count(EV_RECOVERED) == 0);
-  CHECK(arbiter_idle_posture(b.arb) == POSTURE_REST && b.arb.reflex.posture == POSTURE_REST);
-  CHECK(body_mode(b) == KILO_MODE_FALLEN);
-  tick(REST_MOVE_TICKS);
   CHECK(at_posture(POSTURE_REST));
   tick(FALL_LIMP_TICKS - 1);
   CHECK(b.arb.out[0] != JOINT_OFF);
@@ -283,17 +200,12 @@ static void test_retries_and_failure() {
   for (uint8_t k = 0; k < DRIVEN_COUNT; k++) CHECK(b.arb.out[k] == JOINT_OFF);
   tick();
   CHECK(b.fall.state == FS_UPRIGHT && b.holder == RH_NONE && body_mode(b) == KILO_MODE_LIMP);
+  CHECK(b.epoch == (uint8_t)(e0 + 1));
   tick(100);  // LIMP: no detection although still on its side
-  CHECK(count(EV_FELL) == 1);
-  // The roll sign decides try 1's mirror: left side down -> mirrored.
-  reset();
-  stand();
-  att(100, 0, 0);
-  tick(FALL_SAMPLES + FALL_STILL_TICKS);
-  CHECK(b.fall.state == FS_RC && b.arb.reflex.posture == (uint8_t)(POSTURE_RC + POSTURE_RC_MIRROR));
+  CHECK(count(EV_FELL) == 1 && count(EV_LYING) == 1);
 }
 
-// Nose or tail down: no rc, FAILED once still.
+// Nose or tail down: the same, LYING with the pitch arg.
 static void test_pitch_fall() {
   for (int sign = -1; sign <= 1; sign += 2) {
     reset();
@@ -305,13 +217,22 @@ static void test_pitch_fall() {
     CHECK(b.fall.state == FS_FALLEN);
     att(10, 88 * sign, 0);
     tick(FALL_STILL_TICKS);
-    CHECK(b.fall.state == FS_FAILED && count(EV_RECOVERY_FAILED) == 1 && b.fall.tries == 0);
+    CHECK(b.fall.state == FS_LYING && count(EV_LYING, 2 * sign) == 1);
   }
+  // An IMU fault while fallen: nothing can be judged, LYING at once.
+  reset();
+  stand();
+  att(-90, 0, 100);
+  tick(FALL_SAMPLES);
+  CHECK(b.fall.state == FS_FALLEN);
+  b.imu_fault = 1;
+  tick();
+  CHECK(b.fall.state == FS_LYING && count(EV_LYING, -1) == 1);
 }
 
-// Gating: LIMP, CALIB, IMU_FAULT, another reflex, FALL_OK; a trick without
-// FALL_OK ends with TRICK_DONE(FELL).
-static void test_gating_and_tricks() {
+// Gating: LIMP, CALIB, IMU_FAULT, another reflex, FALL_OK; a stream without
+// FALL_OK ends with the fall (STREAM_STOPPED, the new epoch).
+static void test_gating_and_streams() {
   reset();  // cold: LIMP
   att(-90, 0, 0);
   tick(50);
@@ -327,73 +248,75 @@ static void test_gating_and_tricks() {
   tick(FALL_SAMPLES);
   CHECK(b.fall.state == FS_FALLEN);  // REST is not exempt
 
-  // FALL_OK trick: suppressed while it plays; the count restarts after.
+  // A FALL_OK stream: suppressed while it is on; the count restarts after.
   reset();
   stand();
-  CHECK(upload_trick(7, 0xFF07, KILO_TRICK_FLAGS_FALL_OK, 20) == KILO_ACK_STATUS_OK);
-  CHECK(play(7) == KILO_ACK_STATUS_OK);
+  CHECK(pose(KILO_POSE_FLAGS_FALL_OK) == GOAL_OK);
   att(-90, 0, 0);
   tick(100);
-  CHECK(b.kf.run && b.fall.state == FS_UPRIGHT && b.fall.over == 0);
-  body_trick_stop(b, 0);
+  CHECK(body_stream_on(b) && b.fall.state == FS_UPRIGHT && b.fall.over == 0);
+  CHECK(body_goal_posture(b, b.epoch, POSTURE_STAND, 0, 0) == GOAL_OK);  // the posture ends the stream
+  CHECK(!body_stream_on(b));
   tick(FALL_SAMPLES - 1);
   CHECK(b.fall.state == FS_UPRIGHT);
   tick();
   CHECK(b.fall.state == FS_FALLEN);
 
-  // A trick without FALL_OK: TRICK_DONE(FELL) with the new epoch, REFLEX
+  // A stream without FALL_OK: STREAM_STOPPED with the new epoch, REFLEX
   // takes every joint at once.
   reset();
   stand();
-  CHECK(upload_trick(8, 0xFF07, 0, 20) == KILO_ACK_STATUS_OK);
-  CHECK(play(8) == KILO_ACK_STATUS_OK);
+  CHECK(pose(0) == GOAL_OK);
   tick(10);
   uint8_t e0 = b.epoch;
   att(0, -80, 0);
   tick(FALL_SAMPLES);
-  const Event* d = last(EV_TRICK_DONE);
-  CHECK(d && ((uint16_t)d->arg >> 8) == KF_END_FELL && (d->arg & 0xFF) == 8 && d->epoch == (uint8_t)(e0 + 1));
-  CHECK(!b.kf.run && all_owned(OWN_REFLEX) && count(EV_FELL, -2) == 1);
-  // ...and is refused while fallen.
-  CHECK(play(8) == KILO_ACK_STATUS_REFUSED_FALLEN);
-  uint8_t stale[4] = {e0, 8, 64, 0};
-  CHECK(body_trick_play(b, stale) == KILO_ACK_STATUS_STALE);
+  const Event* d = last(EV_STREAM_STOPPED);
+  CHECK(d && d->arg == 0 && d->epoch == (uint8_t)(e0 + 1));
+  CHECK(!body_stream_on(b) && all_owned(OWN_REFLEX) && count(EV_FELL, -2) == 1);
+  // ...and is refused while fallen, or with the old epoch.
+  CHECK(pose(0) == GOAL_FALLEN);
+  CHECK(pose(KILO_POSE_FLAGS_FALL_OK, JOINT_OFF, 20, e0) == GOAL_STALE);
 }
 
-// FALL_RC 0 (the mind's righting, docs/righting.md): no rc, FAILED once still;
-// a FALL_OK trick takes the joints from the reflex, any other is refused, and
-// with FALL_RC 1 even a FALL_OK one is.
-static void test_fall_rc_off() {
+// The mind's get-up (decided 2026-11-22: the body has no built-in one): a
+// FALL_OK stream takes the joints from the fall reflex, FALLEN or LYING;
+// any other is refused; no fall is detected while it is on; once a posture
+// ends it, a body still down falls again.
+static void test_getup() {
   reset();
   stand();
-  CHECK(param_ok(KILO_PARAM_FALL_RC, 0) && !param_ok(KILO_PARAM_FALL_RC, 2) && PARAM(FALL_RC) == 1);
-  CHECK(upload_trick(9, 0xFF07, KILO_TRICK_FLAGS_FALL_OK, 20) == KILO_ACK_STATUS_OK);
-  att(-110, 0, 0);
-  tick(FALL_SAMPLES + FALL_STILL_TICKS);
-  CHECK(b.fall.state == FS_RC);  // the default: rc
-  CHECK(play(9) == KILO_ACK_STATUS_REFUSED_FALLEN);
-  reset();
-  stand();
-  PARAM(FALL_RC) = 0;
-  CHECK(upload_trick(9, 0xFF07, KILO_TRICK_FLAGS_FALL_OK, 20) == KILO_ACK_STATUS_OK);
-  att(-110, 0, 0);
+  att(-110, 0, 100);
   tick(FALL_SAMPLES);
   CHECK(b.fall.state == FS_FALLEN && count(EV_FELL, -1) == 1);
-  tick(FALL_STILL_TICKS);
-  CHECK(b.fall.state == FS_FAILED && b.fall.tries == 0 && count(EV_RECOVERY_FAILED) == 1);
-  CHECK(arbiter_idle_posture(b.arb) == POSTURE_REST && body_mode(b) == KILO_MODE_FALLEN);
-  CHECK(upload_trick(8, 0xFF07, 0, 20) == KILO_ACK_STATUS_OK);
-  CHECK(play(8) == KILO_ACK_STATUS_REFUSED_FALLEN);  // not FALL_OK
-  CHECK(upload_trick(9, 0xFF07, KILO_TRICK_FLAGS_FALL_OK, 20) == KILO_ACK_STATUS_OK);
+  CHECK(pose(0) == GOAL_FALLEN);  // not FALL_OK
   tick(5);
-  CHECK(play(9) == KILO_ACK_STATUS_OK);
-  CHECK(b.fall.state == FS_UPRIGHT && b.holder == RH_NONE && !b.arb.reflex_active && b.kf.run);
-  tick(100);  // still on his side: no fall while it plays
-  CHECK(b.kf.run && count(EV_FELL) == 1);
-  body_trick_stop(b, 0);
-  tick(FALL_SAMPLES + FALL_STILL_TICKS + 30);  // he is still down once it ends: the reflex, FAILED again
-  CHECK(count(EV_FELL) == 2 && b.fall.state == FS_FAILED && count(EV_RECOVERY_FAILED) == 2);
-  PARAM(FALL_RC) = 1;
+  CHECK(pose(KILO_POSE_FLAGS_FALL_OK) == GOAL_OK);  // still moving: taken from FALLEN
+  CHECK(b.fall.state == FS_UPRIGHT && b.holder == RH_NONE && !b.arb.reflex_active && body_stream_on(b));
+  tick();
+  CHECK(all_owned(OWN_STREAM, 3) && all_owned(OWN_IDLE, 0) == false && b.arb.owner[0] == OWN_IDLE);
+  CHECK(body_mode(b) == KILO_MODE_STREAM);
+  tick(100);  // still on his side: no fall while it is on
+  CHECK(count(EV_FELL) == 1 && body_stream_on(b));
+  // Ended by a posture while he is still down: the reflex trips again, and
+  // once he is still he lies down.
+  CHECK(body_goal_posture(b, b.epoch, POSTURE_REST, 0, 0) == GOAL_OK);
+  att(-110, 0, 0);
+  tick(FALL_SAMPLES + FALL_STILL_TICKS);
+  CHECK(count(EV_FELL) == 2 && b.fall.state == FS_LYING && count(EV_LYING) == 1);
+  // Taken from LYING too (REST under way, before LIMP).
+  tick(30);
+  CHECK(pose(KILO_POSE_FLAGS_FALL_OK) == GOAL_OK);
+  CHECK(b.fall.state == FS_UPRIGHT && b.holder == RH_NONE && body_stream_on(b));
+  tick(40);
+  CHECK(legs_at(POSTURE_STAND));  // the stream's key: STAND's legs as joint angles (the head IDLE's)
+  // After LIMP the reflex has let go: a stream is refused BUSY (a posture first).
+  reset();
+  stand();
+  att(-110, 0, 0);
+  tick(FALL_SAMPLES + FALL_STILL_TICKS + REST_MOVE_TICKS + FALL_LIMP_TICKS + 2);
+  CHECK(b.fall.state == FS_UPRIGHT && body_mode(b) == KILO_MODE_LIMP);
+  CHECK(pose(KILO_POSE_FLAGS_FALL_OK) == GOAL_BUSY);
 }
 
 // Goals: old epoch STALE; current epoch FALLEN except LIMP, which ends the
@@ -418,7 +341,7 @@ static void test_goals_while_fallen() {
   CHECK(b.fall.state == FS_UPRIGHT && b.holder == RH_NONE && !b.arb.reflex_active);
   tick();
   for (uint8_t k = 0; k < DRIVEN_COUNT; k++) CHECK(b.arb.out[k] == JOINT_OFF);
-  CHECK(body_mode(b) == KILO_MODE_LIMP && count(EV_RECOVERED) == 0);
+  CHECK(body_mode(b) == KILO_MODE_LIMP && count(EV_LYING) == 0);
   // Through the link: SET_POSTURE refused FALLEN as EVENT GOAL_REFUSED.
   reset();
   stand();
@@ -437,12 +360,12 @@ static void test_watchdog_takes_over() {
   reset();
   stand();
   body_link_frame(b);  // arm the watchdog
-  att(-90, 0, 0);
+  att(-90, 0, 100);  // still moving: FALLEN, not yet LYING
   tick(FALL_SAMPLES);
   CHECK(b.fall.state == FS_FALLEN);
   tick(WD_REST_TICKS + 2);
   CHECK(b.holder == RH_WATCHDOG && b.fall.state == FS_UPRIGHT);
-  CHECK(arbiter_idle_posture(b.arb) == POSTURE_REST && count(EV_RECOVERY_FAILED) == 0);
+  CHECK(arbiter_idle_posture(b.arb) == POSTURE_REST && count(EV_LYING) == 0);
   // The link comes back: the watchdog lets go, detection re-arms, trips again.
   body_link_frame(b);
   tick(FALL_SAMPLES);
@@ -540,31 +463,30 @@ static void test_head() {
   CHECK(seen >= 1);
 }
 
-// Precedence: a trick that owns the head beats the hold; one that does not
-// leaves the head to it; REFLEX beats both (and its epoch bump releases).
+// Precedence: a stream whose pose drives the head beats the hold; one that
+// leaves the head to IDLE leaves it to the hold; REFLEX beats both (and its
+// epoch bump releases).
 static void test_head_precedence() {
   reset();
   stand();
-  CHECK(upload_trick(5, 0xFF07, 0, 30) == KILO_ACK_STATUS_OK);
   CHECK(head_goal(b.epoch, 1, -50 * 16, 0, JOINT_OFF, 0) == GOAL_OK);
   tick(10);
   CHECK(b.arb.out[0] == -50 * 16);
-  CHECK(play(5) == KILO_ACK_STATUS_OK);
+  CHECK(pose(0, 30 * 16, 20) == GOAL_OK);
   for (int t = 0; t < 30; t++) {
     if (t % 10 == 0) head_goal(b.epoch, 1, -50 * 16, 0, JOINT_OFF, 0);
     tick();
   }
-  CHECK(b.arb.owner[0] == OWN_TRICK && b.arb.out[0] == 30 * 16);  // frame 0 pan 30, reached
-  body_trick_stop(b, 0);
+  CHECK(b.arb.owner[0] == OWN_STREAM && b.arb.out[0] == 30 * 16);  // the key's pan 30, reached
+  CHECK(body_goal_posture(b, b.epoch, POSTURE_STAND, 0, 0) == GOAL_OK);
   head_goal(b.epoch, 1, -50 * 16, 0, JOINT_OFF, 0);
   tick(20);
   CHECK(b.arb.owner[0] == OWN_PI_HOLD && b.arb.out[0] == -50 * 16);  // back to the hold
-  // A legs-only trick: the head stays held.
-  CHECK(upload_trick(6, 0xFF00, 0, 30) == KILO_ACK_STATUS_OK);
-  CHECK(play(6) == KILO_ACK_STATUS_OK);
+  // A stream that leaves the head to IDLE: the head stays held.
+  CHECK(pose(0, JOINT_OFF, 20) == GOAL_OK);
   head_goal(b.epoch, 1, -50 * 16, 0, JOINT_OFF, 0);
   tick(10);
-  CHECK(b.arb.owner[0] == OWN_PI_HOLD && b.arb.owner[3] == OWN_TRICK && b.arb.out[0] == -50 * 16);
+  CHECK(b.arb.owner[0] == OWN_PI_HOLD && b.arb.owner[3] == OWN_STREAM && b.arb.out[0] == -50 * 16);
   // A fall: REFLEX everywhere, the hold is gone (epoch bump).
   att(-90, 0, 0);
   tick(FALL_SAMPLES + 1);
@@ -573,12 +495,11 @@ static void test_head_precedence() {
 
 int main() {
   test_detector();
-  test_fall_and_recover(false);
-  test_fall_and_recover(true);
-  test_retries_and_failure();
+  test_fall_and_lie(false);
+  test_fall_and_lie(true);
   test_pitch_fall();
-  test_gating_and_tricks();
-  test_fall_rc_off();
+  test_gating_and_streams();
+  test_getup();
   test_goals_while_fallen();
   test_watchdog_takes_over();
   test_head();

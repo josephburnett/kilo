@@ -188,7 +188,7 @@ def imus() -> None:
             for i in range(80)]
     imu("startle_by_gyro", rows)
     imu("self_motion", Trace(8).add(3).add(3, fp=lambda u: 1.5 * math.sin(2 * math.pi * u) + tap_shape(u, 1.0, 4),
-                                           flags=("servos_powered", "gait"), mode="GAIT").add(0.5).rows)
+                                           flags=("servos_powered", "stream"), mode="STREAM").add(0.5).rows)
     rows = []
     for i in range(40):
         p = -74 if 14 <= i <= 19 else 0.9
@@ -198,7 +198,7 @@ def imus() -> None:
     # a pickup with the servos powered and a 50 Hz walk-rate trace with a mode change
     tr = Trace(9).add(3).add(3, fp=wander, fr=lambda u: wander(u + 0.5)).add(5)
     imu("pickup_powered", tr.rows)
-    tr = Trace(10).add(2).add(2, mode="TRICK", flags=("servos_powered", "trick")).add(4)
+    tr = Trace(10).add(2).add(2, mode="STREAM", flags=("servos_powered", "stream")).add(4)
     imu("mode_change_relearns", tr.rows)
 
 

@@ -15,7 +15,7 @@ extern const Trick kLibrary[kLibrarySize];
 // What Python computes for each kLibrary entry, for the tests.
 struct TrickCheck {
   uint16_t crc16;        // Trick.crc16()
-  uint8_t trick_id;      // client.trick_id_for()
+  uint8_t trick_id;      // model.trick_id_for()
   uint16_t total_ticks;  // Trick.duration_ticks at 1x (0: until stopped)
 };
 extern const TrickCheck kLibraryCheck[kLibrarySize];

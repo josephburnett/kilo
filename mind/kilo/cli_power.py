@@ -164,7 +164,7 @@ class Stretch:
 def kind_of(mode: str, servos: bool, asleep: bool) -> str:
     if asleep:
         return "asleep"
-    if mode == "GAIT":
+    if mode in ("STREAM", "GAIT"):  # (GAIT, TRICK, RECOVERING: logs from protocol 2)
         return "walking"
     if mode in ("TRICK", "FALLEN", "RECOVERING"):
         return "trick"

@@ -1,156 +1,161 @@
-// player: uploads a trick into the body's store and plays it, over the
-// link's one command slot, as a cooperative state machine. Python
-// counterpart: the trick part of kilo/body/client.py (upload_trick,
-// start_trick, play, stop_trick), whose blocking calls become steps of
-// poll().
+// player: plays a trick from the compiled-in library through the body's
+// POSE stream, as a cooperative state machine (docs/movement-engine.md,
+// step 1: the body no longer stores or plays tricks; the mind sends each
+// keyframe as a pose for the body to reach by its tick, and the body moves
+// there by itself, in a straight line or along a cosine as the frame says,
+// correcting its balance where the frame asks for it).
 //
 // A play (start()):
-// 1. Upload, cached: if this player committed the same trick (trick_id and
-//    CRC) and the body has not rebooted since, nothing is sent; otherwise
-//    TRICK_COMMIT alone asks the body (OK = it holds exactly this trick),
-//    and only on a refusal do TRICK_BEGIN, the TRICK_FRAMES chunks and
-//    TRICK_COMMIT go out.
-// 2. The latched SET_POSTURE goal is cleared (the trick's end posture
-//    replaces it on the body), then TRICK_PLAY with the body's epoch, the
-//    speed and the mirror flag. NO_TRICK (someone replaced the body's
-//    trick since): uploaded again, once, and played again.
-// 3. It ends on EVENT TRICK_DONE for its trick_id (reason DONE, STOPPED,
-//    PREEMPTED, FELL), or after the expected duration + 1 s
-//    (TRICK_DONE_MARGIN_S; none for a trick that loops until stopped): then
-//    TRICK_STOP goes out and the play fails.
-// 4. While it plays, the trick's guards (model.h TrickGuard, Trick.roll_max;
-//    player.py GuardWatch) read every TELEMETRY; one that fails sends
-//    TRICK_STOP (the trick's stop_ticks) and the play ends STOPPED with
-//    result().guard saying why.
-// cancel() is what cancelling Python's play() coroutine does: a play not yet
-// done is stopped on the body (TRICK_STOP) and ends STOPPED.
-//
-// The link has one command slot. The owner calls collect() right after
-// link.poll() and before anything else may send a request in that pass, so
-// the player always sees its own answer before the slot is reused; poll()
-// then sends the next step if the slot is free (waiting up to 2 s for it).
+// 1. Waits for the body to be heard on this connection, its epoch and its
+//    clock (TELEMETRY: planner::BodyClock), at most kStartWaitUs.
+// 2. Clears the latched SET_POSTURE goal (a refresh would end the stream),
+//    then sends the keys (KeySeq: per frame its move's end, a step's jump,
+//    its hold's end) as POSE with every leg as joint angles, the head joints
+//    the trick sets (the others left to the body's posture), the frame's
+//    BALANCE flag with the trick's expected attitude as the reference, EASE
+//    for a cosine frame, FALL_OK for a get-up. The trick starts on the body's
+//    next tick: frame 0's move from wherever the joints are, its key at
+//    start + its dur (never closer than KILO_POSE_LOOKAHEAD_TICKS: a key
+//    that close, and the ones after it, wait the difference). Each
+//    key goes out once the one before it is within KILO_POSE_LOOKAHEAD_TICKS
+//    of the body's tick, so the body always holds the next one.
+// 3. When the body's TELEMETRY tick reaches the last key it is done: the
+//    trick's end posture as a SET_POSTURE goal over XFADE_TICKS (that ends
+//    the stream: the body takes the posture from where the trick left the
+//    joints), cleared again once the body has left the stream; then Done
+//    DONE. A trick that loops until stopped never gets there.
+// 4. stop() (or a guard: model.h TrickGuard, Trick.roll_max; GuardWatch
+//    reads every TELEMETRY): the end posture over the transition asked for
+//    (the trick's stop_ticks by default), then Done STOPPED (result().guard
+//    says which guard). EVENT FELL: Done FELL (the fall reflex has the
+//    joints). The stream ended by someone else (EVENT STREAM_STOPPED, an
+//    epoch change, the body leaving mode STREAM): Done PREEMPTED. POSE
+//    refused, the link lost, keys not reached within kDoneMarginUs of the
+//    last one's tick: Failed.
+// cancel() stops a play not yet done.
 #ifndef KILO_MIND_TRICKS_PLAYER_H
 #define KILO_MIND_TRICKS_PLAYER_H
 #include <stdint.h>
 #include "link/serial_link.h"
+#include "planner/walker.h"
 #include "platform.h"
 #include "tricks/model.h"
 
 namespace kilo {
 namespace tricks {
 
-constexpr uint64_t kDoneMarginUs = 1000000;  // client.py TRICK_DONE_MARGIN_S
-constexpr uint64_t kSlotWaitUs = 2000000;    // the command slot busy this long: the play fails
+constexpr uint64_t kDoneMarginUs = 1000000;  // the last key not reached this long after its tick: Failed
+constexpr uint64_t kStartWaitUs = 2000000;   // no contact, epoch or body clock this long after start(): Failed
+constexpr uint64_t kEndWaitUs = 1000000;     // the body still in the stream this long after the end posture: done anyway
+
+// How a play ended (Done).
+enum DoneReason : uint8_t {
+  kDone = 0,       // played to its last key
+  kStopped = 1,    // stop(), cancel() or a guard
+  kPreempted = 2,  // a reflex, an epoch bump or another goal ended the stream
+  kFell = 3,       // the fall reflex took the joints
+};
+const char* done_reason_name(uint8_t reason);
 
 enum class PlayState : uint8_t {
   Idle,     // never played
-  Running,  // uploading, starting or playing
-  Done,     // TRICK_DONE arrived: reason
+  Running,  // starting, playing or ending
+  Done,     // ended: reason
   Failed,   // refused, timed out or no link: error
 };
 
-// How the last play went (client.py TrickResult, or the TrickError it raised).
+// How the last play went.
 struct PlayResult {
   PlayState state;
   uint32_t play;         // which start() this is (start() returns it)
-  uint8_t trick_id;
-  uint8_t reason;        // Done: KILO_TRICK_DONE_REASON_*
-  bool uploaded;         // this play uploaded the trick
-  uint32_t elapsed_ms;   // TRICK_PLAY's ACK to the TRICK_DONE
+  uint8_t trick_id;      // trick_id_for(trick)
+  uint8_t reason;        // Done: DoneReason
+  uint32_t elapsed_ms;   // the trick's start on the body to its end (the last key, a stop, a fall)
   bool has_expected;
   uint32_t expected_ticks;
   const char* error;     // Failed: why
   const char* guard;     // the mind stopped it: which guard and why (null: it did not)
 };
 
-const char* done_reason_name(uint8_t reason);
-
 class TrickPlayer {
  public:
   TrickPlayer(SerialLink& link, Clock& clock, Log& log) : link_(link), clock_(clock), log_(log) {}
 
   // From the owner's LinkListener.
+  void on_telemetry(const kilo_telemetry_t& t);
   void on_event(const kilo_event_t& e);
 
-  // Upload (cached) and play trick. Returns the play's number (> 0), or 0
-  // with *why set: an invalid trick or speed, or a play still running
-  // (stop or cancel it first).
+  // Play trick. Returns the play's number (> 0), or 0 with *why set: an
+  // invalid trick or speed, or a play still running (stop or cancel it first).
   uint32_t start(const Trick& trick, bool mirror = false, uint8_t speed_q6 = kSpeedUnity,
                  const char** why = nullptr);
-  // TRICK_STOP (client.stop_trick): the body crossfades to the trick's end
-  // posture over transition_ticks (0 = the body's default; kTrickStopTicks,
-  // the default: the last started trick's own stop_ticks, as client.py's
-  // None). A play still uploading or starting is abandoned (Failed "stopped").
+  // The end posture over transition_ticks (kTrickStopTicks: the trick's own
+  // stop_ticks; 0: XFADE_TICKS). A play still starting is abandoned
+  // (Failed "stopped").
   static constexpr int kTrickStopTicks = -1;
   void stop(int transition_ticks = kTrickStopTicks);
   // The transition a stop() with kTrickStopTicks asks for now.
   uint8_t stop_ticks() const { return trick_ != nullptr ? trick_->stop_ticks : 0; }
-  // A play not yet done is stopped on the body; nothing when none runs.
+  // A play not yet done is stopped; nothing when none runs.
   void cancel() {
     if (busy()) stop();
   }
 
-  // The answer to our command, if it came in this pass (see above).
-  void collect();
-  // Send the next step; timeouts. Never blocks.
+  // Send the keys due, watch the guards and the end. Never blocks.
   void poll();
 
-  // A play is running (uploading, starting or waiting for TRICK_DONE) or a TRICK_STOP is to go out.
-  bool busy() const { return step_ != Step::Idle || stop_pending_; }
+  // A play is running (starting, playing or ending).
+  bool busy() const { return step_ != Step::Idle; }
   const PlayResult& result() const { return result_; }
   // The trick last started (null before any).
   const Trick* trick() const { return trick_; }
-  // The body is playing it: TRICK_PLAY was acknowledged at played_at_us().
+  // The body is playing it: its keys go out (from played_at_us()).
   bool playing() const { return step_ == Step::Playing; }
+  // The local time of the trick's start tick on the body (0 before it).
   uint64_t played_at_us() const { return played_at_; }
   uint8_t speed() const { return speed_; }
   bool mirrored() const { return mirror_; }
+  // POSE keys sent in this play.
+  uint32_t keys_sent() const { return sent_; }
 
  private:
-  enum class Step : uint8_t { Idle, Check, Begin, Frames, Commit, Play, Playing };
+  enum class Step : uint8_t { Idle, Starting, Playing, Ending };
 
-  bool send(uint8_t type, const void* payload, uint8_t len, uint64_t now);
-  void answered(uint8_t type, bool ok, uint8_t status, uint64_t now);
+  bool begin(uint64_t now);
+  bool send_key(const TrickKey& k);
+  void end_posture(uint8_t ticks);
   void fail(const char* why);
-  void finish(uint8_t reason, uint64_t now);
+  void ended(uint8_t reason, uint64_t now);  // the stream is over: Ending (or Done at once for FELL, PREEMPTED)
+  void finish();
+  int64_t body_tick_now(uint64_t now) const;
 
   SerialLink& link_;
   Clock& clock_;
   Log& log_;
+  planner::BodyClock body_;
 
   Step step_ = Step::Idle;
   const Trick* trick_ = nullptr;
   bool mirror_ = false;
   uint8_t speed_ = kSpeedUnity;
-  uint8_t tid_ = 0;
-  uint16_t crc_ = 0;
-  uint8_t chunk_ = 0;
-  bool forced_ = false;     // uploading after the cache check failed or NO_TRICK
-  bool replayed_ = false;   // NO_TRICK seen once already
-  uint64_t step_at_ = 0;    // the step became due (the slot wait)
-  uint64_t played_at_ = 0;  // TRICK_PLAY's ACK
-  uint64_t timeout_us_ = 0; // 0: until stopped
+  uint64_t step_at_ = 0;
+  uint64_t played_at_ = 0;
+  int16_t epoch_ = kNoEpoch;
+  uint8_t posture_flags_ = 0;  // the SET_POSTURE goal's flags when the play began (its balance flag)
+  bool own_goal_ = false;      // the latched SET_POSTURE is our end posture (cleared once the body has it)
 
-  // our command in the link's slot
-  bool waiting_ = false;
-  uint8_t req_type_ = 0;
-  uint8_t req_seq_ = 0;
-
-  bool stop_pending_ = false;
-  uint8_t stop_ticks_ = 0;
-
-  // TRICK_DONE seen since our TRICK_PLAY went out
-  bool done_seen_ = false;
-  uint8_t done_reason_ = 0;
-
-  // the trick the body holds as far as we know (client.py _trick_cached)
-  bool cached_ = false;
-  uint8_t cached_tid_ = 0;
-  uint16_t cached_crc_ = 0;
-  uint32_t cached_reboots_ = 0;
+  KeySeq seq_;
+  bool have_key_ = false;  // key_ is the next to send
+  TrickKey key_ = {};
+  int64_t base_ = 0;       // the trick's start tick (unwrapped): a key's tick is base_ + at
+  int64_t last_sent_ = 0;  // the tick of the last key sent
+  bool all_sent_ = false;
+  uint32_t sent_ = 0;
+  uint8_t reason_ = kDone;
 
   GuardWatch watch_;
   uint32_t seen_telemetry_ = 0;
+  bool stream_seen_ = false;  // TELEMETRY mode STREAM since the first key
 
   uint32_t plays_ = 0;
   PlayResult result_ = {};

@@ -39,7 +39,7 @@
 //            while not walking), a laptop connecting or sending a request, a
 //            client connected at all, the walker, a trick, the remote's own
 //            action (A7's planned stop), the behaviour runner, the body in
-//            GAIT, TRICK, FALLEN, RECOVERING, CALIB or BOOT. None of these
+//            STREAM, FALLEN, CALIB or BOOT. None of these
 //            powers the servos again. A key that moves Kilo (B6, C5, A4-C4,
 //            A6, C6, A5, A2) cancels: back to Awake, and for a walk, a turn,
 //            a trick or the behaviour runner the servos first get REST again

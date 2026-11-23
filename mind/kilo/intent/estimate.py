@@ -11,11 +11,11 @@ posture, or nothing it knows the attitude of).
 
 HOW IT DECIDES, in this order:
 
-1. MOVING while the body is in a moving mode (GAIT, TRICK, BOOT) or has
-   not been still (every rate under STILL_DPS) for STILL_US. (FALLEN and
-   RECOVERING are not moving modes: while the fall reflex has him he is
-   judged by his rates and his attitude like any other time, so a Kilo
-   lying still on his side between two tries reads ON_x_SIDE.)
+1. MOVING while the body is in a moving mode (STREAM, BOOT) or has
+   not been still (every rate under STILL_DPS) for STILL_US. (FALLEN is
+   not a moving mode: while the fall reflex has him he is judged by his
+   rates and his attitude like any other time, so a Kilo lying still on
+   his side reads ON_x_SIDE.)
 2. From the attitude alone, by where gravity points in his frame:
    ON_END   the nose or the tail down: |pitch|, folded about 90 deg, at
             least END_DEG;
@@ -108,7 +108,7 @@ SIDE_DEG = 60               # ON_x_SIDE: |roll| from here ...
 BACK_DEG = 120              # ... to here; past it ON_BACK
 MODEL_ERROR_DEG = 8.0       # the model against the recordings' means (the module's docstring)
 SPREAD_DEG = 1.3            # one posture's reading from one time to the next (sd, the recordings' largest)
-MOVING_MODES = (int(P.Mode.BOOT), int(P.Mode.GAIT), int(P.Mode.TRICK))
+MOVING_MODES = (int(P.Mode.BOOT), int(P.Mode.STREAM))
 LIMP_MODE = int(P.Mode.LIMP)
 
 POSTURE_OF = {State.STANDING: "stand", State.SITTING: "sit", State.RESTING: "rest"}

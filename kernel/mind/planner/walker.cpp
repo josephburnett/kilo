@@ -76,13 +76,15 @@ bool BodyClock::now(uint64_t t_us, double* tick) const {
   return true;
 }
 
-void pack_feet(uint8_t epoch, const TickPlan& tp, kilo_feet_t* out) {
+void pack_pose(uint8_t epoch, const TickPlan& tp, kilo_pose_t* out) {
   out->epoch = epoch;
   out->tick = (uint16_t)(tp.tick & 0xFFFF);
+  out->flags = 0;  // four feet
   for (int i = 0; i < kLegs; i++) {
-    out->x_mm[i] = tp.x[i];
-    out->z_mm[i] = tp.z[i];
+    out->leg[2 * i] = (int16_t)(tp.x[i] * 4);  // whole mm, in q2
+    out->leg[2 * i + 1] = (int16_t)(tp.z[i] * 4);
   }
+  for (int k = 0; k < 3; k++) out->head[k] = KILO_HEAD_NOT_HELD;  // the head and tail: IDLE's (STANCE: STAND's)
   int p = round_i(to_a16(tp.pitch)), r = round_i(to_a16(tp.roll));
   out->pitch = (int16_t)(p < -480 ? -480 : p > 480 ? 480 : p);
   out->roll = (int16_t)(r < -480 ? -480 : r > 480 ? 480 : r);
@@ -124,7 +126,7 @@ const char* Walker::check_can_walk() const {
   if (st.epoch == kNoEpoch || !st.alive(clock_.now_us(), KILO_BODY_LOST_MS * 1000u))
     return "no telemetry from the body";
   uint8_t mode = st.telemetry.mode;
-  if (mode == KILO_MODE_FALLEN || mode == KILO_MODE_RECOVERING) return "Kilo is down: the fall reflex holds the joints";
+  if (mode == KILO_MODE_FALLEN) return "Kilo is down: the fall reflex holds the joints";
   return nullptr;
 }
 
@@ -187,7 +189,7 @@ void Walker::halt() {
 }
 
 // The planner put back to the first tick the body has not played yet (its
-// tick + kReplanAheadTicks: the FEET for the next one may be on the wire), so
+// tick + kReplanAheadTicks: the POSE for the next one may be on the wire), so
 // the next wake plans and sends those ticks again. Returns how many.
 uint32_t Walker::replan_from_now() {
   double body;
@@ -267,7 +269,7 @@ void Walker::setup_step(uint64_t now) {
       link_.set_goal(KILO_MSG_SET_BALANCE, (const uint8_t*)&b, sizeof b);
       balance_changed_ = true;
     }
-    // STANCE, also when the body still holds GAIT from a stream that ended
+    // STANCE, also when the body still holds a stream that ended
     // without the planned stop: the posture ends that.
     posture_stance(goal_.balance && posture_balance_);
     phase_ = WalkPhase::Stance;
@@ -275,7 +277,7 @@ void Walker::setup_step(uint64_t now) {
     return;
   }
   if (phase_ == WalkPhase::Stance && now - phase_at_ >= kStanceWaitUs) {
-    link_.clear_goal(KILO_MSG_SET_POSTURE);  // a refresh would end GAIT
+    link_.clear_goal(KILO_MSG_SET_POSTURE);  // a refresh would end the stream
     if (!begin_stream(now)) {
       end("no telemetry from the body", false);
       teardown(false);
@@ -356,16 +358,16 @@ void Walker::send_stream_divs_step() {
 void Walker::ingest() {
   for (; ev_n_ > 0; ev_head_ = (ev_head_ + 1) % kQueue, ev_n_--) {
     const kilo_event_t& e = ev_q_[ev_head_];
-    if (e.code == KILO_EVENT_GAIT_STOPPED) {
+    if (e.code == KILO_EVENT_STREAM_STOPPED) {
       if (handover_) end("stopped", true);
-      else if (e.arg == 1) end("the body settled after a FEET underrun (the stream was late)", false);
-      else end("the body stopped the gait (a posture or an epoch bump took the legs)", false);
-    } else if (e.code == KILO_EVENT_FEET_UNDERRUN) {
+      else if (e.arg == 1) end("the body settled after a POSE underrun (the stream was late)", false);
+      else end("the body stopped the stream (a posture or an epoch bump took the legs)", false);
+    } else if (e.code == KILO_EVENT_POSE_UNDERRUN) {
       stats_.underruns++;
     } else if (e.code == KILO_EVENT_GOAL_REFUSED) {
       uint16_t a = (uint16_t)e.arg;
-      if ((a >> 8) == KILO_MSG_FEET) {
-        format(why_, sizeof why_, "the body refused FEET: %s", ack_status_name((uint8_t)(a & 0xFF)));
+      if ((a >> 8) == KILO_MSG_POSE) {
+        format(why_, sizeof why_, "the body refused POSE: %s", ack_status_name((uint8_t)(a & 0xFF)));
         end(why_, false);
       }
     } else if (e.code == KILO_EVENT_FELL) {
@@ -378,14 +380,14 @@ void Walker::ingest() {
     int64_t tick = clock_est_.add(m.tick, q.rx_us);
     has_last_tel_ = true;
     last_mode_ = m.mode;
-    if (m.mode == KILO_MODE_GAIT) {
+    if (m.mode == KILO_MODE_STREAM) {
       gait_seen_ = true;
       const Pred& p = pred_[m.tick % kPred];
       const Attitude* ref = p.used && p.tick == m.tick ? &p.att : nullptr;
       Attitude e = tracker_.add(tick, m.pitch, m.roll, m.ref_pitch, m.ref_roll, m.corr_pitch, m.corr_roll, ref);
       planner_.observe(e.pitch, e.roll);
     } else if (gait_seen_ && !handover_ && ended_ == nullptr) {
-      format(why_, sizeof why_, "the body left GAIT (mode %s)", mode_name(m.mode));
+      format(why_, sizeof why_, "the body left the stream (mode %s)", mode_name(m.mode));
       end(why_, false);
     }
   }
@@ -407,12 +409,12 @@ bool Walker::wake(uint64_t now) {
     return false;
   }
   if (handover_) {
-    if (gait_seen_ && has_last_tel_ && last_mode_ != KILO_MODE_GAIT) {
+    if (gait_seen_ && has_last_tel_ && last_mode_ != KILO_MODE_STREAM) {
       end("stopped", true);
       return false;
     }
     if (now - handover_at_ > kHandoverTimeoutUs) {
-      end("stopped (no GAIT_STOPPED seen after the STANCE posture)", true);
+      end("stopped (no STREAM_STOPPED seen after the STANCE posture)", true);
       return false;
     }
     return true;
@@ -436,7 +438,7 @@ bool Walker::wake(uint64_t now) {
     started_ = true;
     started_at_ = now;
   } else if (!gait_seen_ && now - started_at_ > kEnterTimeoutUs) {
-    end("the body did not enter GAIT", false);
+    end("the body did not start the stream", false);
     return false;
   }
   int64_t target = cur + kLookahead;
@@ -455,9 +457,9 @@ bool Walker::wake(uint64_t now) {
       continue;
     }
     behind++;
-    kilo_feet_t f;
-    pack_feet((uint8_t)epoch_, tp, &f);
-    bool sent = link_.send_stream(KILO_MSG_FEET, (const uint8_t*)&f, sizeof f);
+    kilo_pose_t f;
+    pack_pose((uint8_t)epoch_, tp, &f);
+    bool sent = link_.send_stream(KILO_MSG_POSE, (const uint8_t*)&f, sizeof f);
     if (sent) {
       stats_.sent++;
       Pred& p = pred_[f.tick % kPred];
@@ -467,7 +469,7 @@ bool Walker::wake(uint64_t now) {
   }
   if (behind > stats_.max_behind) stats_.max_behind = behind;
   if (planner_.done() && !handover_) {
-    // every planned tick is out; the STANCE posture ends GAIT after them
+    // every planned tick is out; the STANCE posture ends the stream after them
     handover_ = true;
     handover_at_ = now;
     posture_stance(posture_balance_);

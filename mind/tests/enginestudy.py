@@ -32,7 +32,7 @@ import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
-from kilo.logs import flight
+from kilo.logs import flight, proto2
 from kilo.logs import walkrec as W
 from kilo.protocol import kilo_protocol as P
 
@@ -166,7 +166,7 @@ def link(bs: list[Boot]) -> None:
     n_runs, n_ticks = 0, 0
     for bt in bs:
         for run, w, rows in walks(bt):
-            g = [r for r in rows if r["mode"] == "GAIT"]
+            g = [r for r in rows if r["mode"] == "STREAM"]
             if len(g) < 25:
                 continue
             n_runs += 1
@@ -174,7 +174,7 @@ def link(bs: list[Boot]) -> None:
             ld = [r["lead_ms"] for r in g if r["lead_ms"] is not None]
             lead += ld
             per_build[bt.builds[0]] += ld
-            queued += [r["feet_queued"] for r in g if r["feet_queued"] is not None]
+            queued += [r["pose_queued"] for r in g if r["pose_queued"] is not None]
             # TELEMETRY arrival against the body's tick grid: the lower envelope of (arrival - 20 ms * tick)
             # over a 1 s window is the fastest arrival; above it is jitter (the body's send, the wire, the mind)
             ar = [(r["tick"], r["telem_ms"]) for r in g if r["telem_ms"] is not None]
@@ -189,10 +189,10 @@ def link(bs: list[Boot]) -> None:
                     continue
                 if f.direction == "rx" and isinstance(f.msg, P.Telemetry):
                     last_tick = f.msg.tick if last_tick is None else W._unwrap(f.msg.tick, last_tick)
-                elif f.direction == "tx" and isinstance(f.msg, P.Feet) and last_tick is not None:
+                elif f.direction == "tx" and proto2.is_stream(f.msg) and last_tick is not None:
                     j = W._unwrap(f.msg.tick, last_tick)
                     loop.append(j - last_tick)
-            sends = sorted(r["feet_sent_ms"] for r in g if r["feet_sent_ms"] is not None)
+            sends = sorted(r["pose_sent_ms"] for r in g if r["pose_sent_ms"] is not None)
             gaps += [b - a for a, b in zip(sends, sends[1:]) if b - a < 200]  # longer: another run's stream
     print(f"walk runs in GAIT: {n_runs}, {n_ticks} ticks (old walk, old trot, long trot, crawl; builds 2026-11-17..21)")
     print(f"FEET sent to its tick's TELEMETRY received (lead, ms): {spread(lead)}")
@@ -230,7 +230,7 @@ def swings(bs: list[Boot]) -> list[dict]:
         for run, w, rows in walks(bt):
             pats = patterns_of(w)
             by = {r["tick"]: r for r in rows}
-            g = [r for r in rows if r["mode"] == "GAIT"]
+            g = [r for r in rows if r["mode"] == "STREAM"]
             i = 0
             while i < len(g):
                 r = g[i]
@@ -283,7 +283,7 @@ def balance(bs: list[Boot]) -> None:
     acc: dict[str, dict] = defaultdict(lambda: {"n": 0, "active": 0, "held": 0, "corr": [], "err": []})
     for bt in bs:
         for t, m in bt.stream.telemetry():
-            mode = P.Mode(m.mode).name if m.mode in P.Mode._value2member_map_ else str(m.mode)
+            mode = proto2.mode_name(m.mode)
             a = acc[mode]
             a["n"] += 1
             fl = P.TelemetryFlags(m.flags)
@@ -339,11 +339,11 @@ def lag(bs: list[Boot]) -> None:
     out = []
     for bt in bs:
         for run, w, rows in walks(bt):
-            g = [r for r in rows if r["mode"] == "GAIT" and r["meas_roll"] is not None]
+            g = [r for r in rows if r["mode"] == "STREAM" and r["meas_roll"] is not None]
             if len(g) < 100:
                 continue
             batt = [m.batt_mv for t, m in [(f.t_us, f.msg) for f in w.frames if f.direction == "rx"
-                                           and isinstance(f.msg, P.Telemetry)] if m.mode == P.Mode.GAIT and m.batt_mv]
+                                           and isinstance(f.msg, P.Telemetry)] if m.mode == P.Mode.STREAM and m.batt_mv]
             for axis in ("roll", "pitch"):
                 src = {r["tick"]: r[f"plan_{axis}"] for r in rows if r[f"plan_{axis}"] is not None}
                 dst = {r["tick"]: r[f"meas_{axis}"] for r in g}
@@ -437,7 +437,7 @@ def estimate(bs: list[Boot]) -> None:
                 fell_t = None
             if smp.mode == int(P.Mode.IDLE) and fell_t is not None and smp.t_us - fell_t > 10e6:
                 fell_t = None
-            if smp.mode in (int(P.Mode.FALLEN), int(P.Mode.RECOVERING)) and est.est.state != E.State.MOVING:
+            if smp.mode in (int(P.Mode.FALLEN), proto2.MODE_RECOVERING) and est.est.state != E.State.MOVING:
                 words = RT.lying(RT.up_of(smp.pitch / A16, smp.roll / A16))
                 lie[(words.split(",")[0].replace("leaning on his", "on his"), est.est.state.name)] += 1
     print("\nwhile FALLEN or RECOVERING and still: how he lies (from the attitude) -> the estimate, TELEMETRY:")
@@ -452,7 +452,7 @@ def getup(bs: list[Boot]) -> None:
     """The falls and rc's tries in the recordings (FELL, RECOVERING, RECOVERED, RECOVERY_FAILED): per try
     the roll rate and how long until still (rates under 20 deg/s for 0.2 s), and how the fall ended."""
     from kilo.tricks import righting as RT
-    names = {P.EventCode.FELL: "FELL", P.EventCode.RECOVERED: "RECOVERED", P.EventCode.RECOVERY_FAILED: "FAILED"}
+    names = {P.EventCode.FELL: "FELL", proto2.EVENT_RECOVERED: "RECOVERED", P.EventCode.LYING: "FAILED"}
     falls = []
     for bt in bs:
         s = bt.stream
@@ -468,7 +468,7 @@ def getup(bs: list[Boot]) -> None:
             # tries: contiguous RECOVERING stretches
             tries, cur = [], []
             for t2, m in seg:
-                if m.mode == P.Mode.RECOVERING:
+                if m.mode == proto2.MODE_RECOVERING:
                     cur.append((t2, m))
                 elif cur:
                     tries.append(cur)
@@ -516,7 +516,7 @@ def getup(bs: list[Boot]) -> None:
     for bt in bs:
         cur = []
         for t, m in bt.stream.telemetry():
-            if m.mode == P.Mode.RECOVERING and abs(m.rate_roll) / A16 > 60:
+            if m.mode == proto2.MODE_RECOVERING and abs(m.rate_roll) / A16 > 60:
                 cur.append((t, m))
             elif cur:
                 if len(cur) >= 2:
@@ -580,9 +580,9 @@ def tricks(bs: list[Boot]) -> None:
             if tr.play_us is not None and kfs:
                 seen, prev = {}, None
                 for t, m in tr.telemetry:
-                    if m.trick_frame != 0xFF and m.trick_frame != prev and t >= tr.play_us:
-                        seen.setdefault(m.trick_frame, (t - tr.play_us) / 1e6)
-                    prev = m.trick_frame
+                    if m.limited != 0xFF and m.limited != prev and t >= tr.play_us:
+                        seen.setdefault(m.limited, (t - tr.play_us) / 1e6)
+                    prev = m.limited
                 for k in kfs:
                     if k.index in seen and k.index > 0:
                         sched_off.append((seen[k.index] - k.start_s) * 1000)

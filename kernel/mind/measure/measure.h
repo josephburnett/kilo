@@ -1,5 +1,5 @@
 // measure: Kilo measures himself (docs/self-measurement.md), the remote's B1.
-// The script's poses (measure/script.h) streamed to the body as FEET at
+// The script's poses (measure/script.h) streamed to the body as POSE (four feet) at
 // 50 Hz with the body's balance off, so the tilt the IMU reads is the
 // body's own answer to each pose; every frame and a mark per step go into
 // the flight recorder (a run of its own, "measure"), and the laptop fits
@@ -18,9 +18,9 @@
 // 1. SET_STREAM telem_div 1 (50 Hz TELEMETRY), its ACK waited for;
 // 2. SET_BALANCE off (the goal there before put back at the end), the head
 //    released to the posture's, STANCE without the balance flag for
-//    kStanceWaitUs; then the posture goal is dropped (a refresh would end GAIT);
+//    kStanceWaitUs; then the posture goal is dropped (a refresh would end the stream);
 // 3. the stream: every 20 ms each script tick up to the body's tick +
-//    KILO_FEET_LOOKAHEAD_TICKS goes out as FEET with the rigid model's
+//    KILO_POSE_LOOKAHEAD_TICKS goes out as POSE with the rigid model's
 //    attitude and support for it (measure/script.h rigid_rest: "the model's
 //    prediction" in the recording); TELEMETRY watched for each sweep's tip
 //    (measure/script.h: the tilt toward the lifted foot kTipRiseDeg above
@@ -28,14 +28,14 @@
 //    kTipUpFraction of the model's tip from the settle hold's during the
 //    lifted hold: Script::tip; a "base" line with both baselines and a
 //    "tip" line go into the recording) and for trouble;
-// 4. the end: once the last tick has played, STAND (which ends GAIT on the
-//    body), the balance goal and the TELEMETRY rate put back, and the run
-//    closed once the body has left GAIT (or after kEndWaitUs).
+// 4. the end: once the last tick has played, STAND (which ends the stream on
+//    the body), the balance goal and the TELEMETRY rate put back, and the run
+//    closed once the body has left mode STREAM (or after kEndWaitUs).
 //
 // It stops at once, into the same end (STAND), on stop() (the remote: any
 // key, B1 again among them), on EVENT FELL (the body's fall reflex has the
 // joints; STAND is refused until it lets go, as for any posture), on the
-// body leaving GAIT or refusing FEET, on a body reboot or epoch change, on
+// body leaving mode STREAM or refusing POSE, on a body reboot or epoch change, on
 // a tilt over kAbortTiltDeg, on a tilt kAbortOffDeg away from the model's
 // prediction (less the offset it had at the start: an IMU offset is
 // expected), and on the mind's loop stalling.
@@ -71,7 +71,7 @@ class Measure {
   static constexpr uint64_t kStanceWaitUs = 600000;
   static constexpr uint64_t kSetStreamWaitUs = 1000000;
   static constexpr uint64_t kEndWaitUs = 1500000;
-  static constexpr uint64_t kEnterTimeoutUs = 600000;  // GAIT this soon after the first FEET
+  static constexpr uint64_t kEnterTimeoutUs = 600000;  // mode STREAM this soon after the first POSE
   static constexpr uint64_t kMindStallUs = 500000;
   static constexpr real kLevelMaxDeg = 10;    // start: |pitch| and |roll| at most this
   static constexpr real kStillPtpDeg = 3;     // ...and moved at most this over the last second

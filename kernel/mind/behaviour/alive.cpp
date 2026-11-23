@@ -59,6 +59,8 @@ Alive::Alive(SerialLink& link, tricks::TrickPlayer& player, LogRing& log, uint64
 Alive::Variant Alive::wanted() const {
   SerialLink& l = link_;
   const Goal* g = l.goal(KILO_MSG_SET_POSTURE);
+  // a standing trick of ours to its end (the end posture the player latches meanwhile is the trick's)
+  if (variant_ == Variant::Stand && trick_playing()) return Variant::Stand;
   if (g == nullptr) {  // a sit move's trick or one of the tricks cleared it (a standing one: STANCE again after)
     if (variant_ == Variant::Sit) return Variant::Sit;
     return variant_ == Variant::Stand && (restance_ || trick_playing()) ? Variant::Stand : Variant::None;
@@ -314,11 +316,11 @@ const SitMoveDef* sit_move_def(AliveMove m) {
 void Alive::build_sit(const SitMoveDef& d, double a, bool mirror, bool head) {
   int n = 0;
   auto frame = [&](const double dd[KILO_JOINT_COUNT], double dur_s, double hold_s) {
-    kilo_keyframe_t& f = frames_[n++];
+    tricks::Keyframe& f = frames_[n++];
     mem_zero(&f, sizeof f);
     f.dur = (uint8_t)d_clamp(dur_s * kTicksPerS, 1, 255);
     f.hold = (uint8_t)d_clamp(hold_s * kTicksPerS, 0, 255);
-    f.flags = KILO_EASING_COSINE;
+    f.flags = tricks::kCosine;
     for (int k = 0; k < (int)KILO_JOINT_COUNT; k++)
       f.ang[k] = (k == 0 || (k == 1 && !head)) ? tricks::kAngleUnchanged : (int8_t)d_iround((double)kSit[k] + dd[k]);
   };
@@ -442,12 +444,12 @@ void Alive::poll(double now, bool running, bool calm, double head_pan) {
     enter(v, now);
   }
   const BodyState& b = link_.state();
-  bool idle = b.has_telemetry && (b.telemetry.mode == KILO_MODE_IDLE || b.telemetry.mode == KILO_MODE_TRICK);
+  bool idle = b.has_telemetry && (b.telemetry.mode == KILO_MODE_IDLE || b.telemetry.mode == KILO_MODE_STREAM);
   if (variant_ == Variant::Stand) {
     if (restance_ && !trick_playing()) {  // the trick is over: STANCE again (it ended in STAND)
       restance_ = false;
       const tricks::PlayResult& r = player_.result();
-      bool done = r.play == lib_play_ && r.state == tricks::PlayState::Done && r.reason == KILO_TRICK_DONE_REASON_DONE;
+      bool done = r.play == lib_play_ && r.state == tricks::PlayState::Done && r.reason == tricks::kDone;
       own_stance_ = done && client_posture(link_, nullptr, "stance");
       if (!own_stance_) {
         logf(log_, LogLevel::Info, "alive: standing left (the trick ended %s)",
@@ -488,7 +490,7 @@ void Alive::poll(double now, bool running, bool calm, double head_pan) {
     return;
   }
   // sitting: a move is a trick; the next waits for it and the pause; the head looks around meanwhile
-  if (b.has_telemetry && (b.telemetry.mode == KILO_MODE_IDLE || b.telemetry.mode == KILO_MODE_TRICK)) sit_look(now);
+  if (b.has_telemetry && (b.telemetry.mode == KILO_MODE_IDLE || b.telemetry.mode == KILO_MODE_STREAM)) sit_look(now);
   if (player_.busy() || !b.has_telemetry || b.telemetry.mode != KILO_MODE_IDLE) return;
   if ((pending_ || now >= next_at_) && trick_due(now) && play_trick(now)) return;
   if (now < next_at_) return;

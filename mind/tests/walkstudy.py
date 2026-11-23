@@ -135,7 +135,7 @@ def sim_walk(p: pat.Pattern, speed: float, direction: str = "forward", physics: 
         n0 = len(sim.telemetry)
         sim.run(ticks)
     pred = sim.pred()
-    g = [t for t in sim.telemetry[n0:] if t.mode == P.Mode.GAIT and t.tick in pred]
+    g = [t for t in sim.telemetry[n0:] if t.mode == P.Mode.STREAM and t.tick in pred]
     roll = [t.roll / 16 - pred[t.tick][1] for t in g]
     pitch = [t.pitch / 16 - pred[t.tick][0] for t in g]
     rr = [abs(t.rate_roll / 16) for t in g]
@@ -215,7 +215,7 @@ def floor(paths) -> None:
                 continue
             seen.add(key)
             leads = [r["lead_ms"] for r in rows if r["lead_ms"] is not None]
-            q = [r["feet_queued"] for r in rows if r["mode"] == "GAIT" and r["feet_queued"] is not None]
+            q = [r["pose_queued"] for r in rows if r["mode"] == "STREAM" and r["pose_queued"] is not None]
             runs[os.path.basename(path)] = {
                 "holds": res.fields.get("holds") if res else "?", "catches": res.fields.get("catches") if res else "?",
                 "underruns": (w.mark("end").fields.get("underruns") if w.mark("end") else "?"),

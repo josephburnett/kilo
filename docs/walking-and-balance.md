@@ -7,8 +7,8 @@ feet 65 mm apart, body height 0.80 × 95 = 76 mm, centre of mass about 80 mm
 up. Code at the time: `body/src/core/gait.cpp`, `balance.cpp`, `body.cpp`
 (the wiring); design: `docs/architecture.md` §3d, §3f. The body's gait
 generator is gone since protocol 2.0 (commit a38580e): the mind now plans
-the feet (`kernel/mind/planner/`) and streams them to the body, which plays
-them (`body/src/core/feet.cpp`).
+the feet (`kernel/mind/planner/`) and streams them to the body as poses
+(`POSE`, protocol 3.0), which it plays (`body/src/core/stream.cpp`).
 
 **The trot today is section 15's** (the "long trot" of 2026-11-21; the only
 trot since 2026-11-22, when the owner judged it "much better" and asked for
@@ -355,7 +355,7 @@ error telemetry) and the planner.
 ## 10. The planner, as built (the mind, 2026-10-14)
 
 Code: `mind/kilo/planner/` (model.py, patterns.py, plan.py, errors.py,
-walker.py); the virtual body it is tested on: `mind/kilo/vbody/feet.py`
+walker.py); the virtual body it is tested on: `mind/kilo/vbody/pose.py`
 and `physics.py`; the C++ port that walks Kilo: `kernel/mind/planner/`,
 driven by the remote (`kernel/README.md` "The remote's keys").
 
@@ -382,7 +382,7 @@ mid-swing it is redone at the slot's start while the plan waits. The trot
 stands on diagonal pairs for 150 ms and does not lean. The predicted
 attitude for a tick is the plane through the support feet the plan
 commanded a servo lag earlier; it goes to the body as the balance
-reference (kept inside FEET's ±30°). From the body's reports: no lift
+reference (kept inside POSE's ±30°). From the body's reports: no lift
 while the body is more than 5° off the plan (the plan waits with every foot
 where it is, up to 0.5 s); a swinging leg lands at once
 where it is when the body tips toward it by 7°. A stop takes every leg home
@@ -411,17 +411,17 @@ TELEMETRY arrival times (50 Hz while walking): body time = local time + the
 largest (tick x 20 ms - arrival) of the last 2 s, i.e. the least delayed
 frame; the window restarts when five frames in a row are more than a tick
 below that (the body's tick fell back after a stall over 40 ms). Each wake sends every planned tick from the last one sent up to the
-body's tick + 5 (100 ms ahead), so a late wake (a garbage-collector pause,
-an SD stall) catches up in one go; a tick already played is planned but not
-sent. The body queues 8 ticks and holds the last pose on an underrun, then
-settles (lifted feet onto the plane of the three support feet), and IDLE
-STANCE crossfades the legs home. The thread never writes to disk (its records go to the frame
+body's tick + 3 (60 ms ahead; `link.pose_lookahead_ticks`), so a late wake
+(a garbage-collector pause, an SD stall) catches up in one go; a tick
+already played is planned but not sent. The body queues 5 keys and holds
+the last pose on an underrun, then settles (lifted feet onto the plane of
+the three support feet), and IDLE STANCE crossfades the legs home. The thread never writes to disk (its records go to the frame
 log's queue), freezes the existing objects for the garbage collector and
 raises its young-generation threshold while it runs, and sends nothing
-while the mind's main loop looks dead. FEET goes out at once on the
+while the mind's main loop looks dead. POSE goes out at once on the
 caller's thread (SerialLink.send_stream): no ack, refresh or retry, outside
 the goals' epoch machinery; no SET_POSTURE goal is latched while it
-streams (a refresh would end GAIT on the body).
+streams (a refresh would end the stream on the body).
 
 **What the virtual body showed.** In its physics (a rigid body on point
 feet, servo lag, tipping over an edge as an inverted pendulum) the planned
@@ -622,7 +622,7 @@ put the best fit at 40 to 60 ms and 60 to 80 ms; the mean delay is then
 about 120 ms (the cross-correlation's 140 ms is its peak, not where the
 motion starts). Pitch rms is 0.4 to 0.9° in every case. The body model
 (`servo_lag_ms` 50, `servo_tau_ms` 70), the virtual body's physics and the
-prediction sent with FEET all use it now.
+prediction sent with each pose all use it now.
 
 **The extra roll toward a lifted hind leg** (2.4 to 2.9° in the
 recordings) turned out to be the body's own balance correction. In each
@@ -1092,8 +1092,8 @@ the air down at 2 mm a tick and slid all four under the shoulders.
   follow), which alone keeps the peak near 3 m/s²; slowing the feet over
   120 ms (six ticks) keeps it under about 2 m/s², a weight shift of about
   15 mm, well inside four feet.
-- **The plan already sent.** The mind plans five ticks (100 ms) ahead of
-  the body, and the body queues them; a stop decided now starts 100 ms
+- **The plan already sent.** The mind plans three ticks (60 ms) ahead of
+  the body, and the body queues them; a stop decided now starts 60 ms
   later unless those ticks are planned again.
 
 ### 14.3 The quick stop
@@ -1119,9 +1119,9 @@ the two kept in step by the golden vectors):
 The C++ mind's walker also **plans again the ticks already sent**: it keeps
 a copy of the planner from before each of the last ticks, and on a halt
 goes back to the first tick the body has not played yet (its tick + 2: the
-next FEET may be on the wire), halts from there, and sends those ticks
-again; the body replaces a queued tick with a newer FEET for it. The stop
-starts about 40 ms after the request instead of 100 ms. The Python walker
+next POSE may be on the wire), halts from there, and sends those ticks
+again; the body replaces a queued key with a newer POSE for its tick. The
+stop starts about 40 ms after the request instead of 60 ms. The Python walker
 (`mind/kilo/planner/walker.py`, the reference) has the halt but not this.
 
 **Where it is used.** Everything that asks for a stop on Kilo: B6, A7, C5,
@@ -1135,7 +1135,7 @@ changes into or out of the crawl, and the scripted walk of the host tests
 ### 14.4 The numbers
 
 `PYTHONPATH=mind python mind/tests/stopsim.py --md` walks the virtual body
-(the planner, the stream, the body's FEET player, the walking physics with
+(the planner, the stream, the body's POSE player, the walking physics with
 the servo lag, and its momentum switched on: braking shifts the weight
 forward by a h / g) at each gait and speed, asks for the stop at every
 second tick of a whole cycle (every sixth in the crawl), and measures from
@@ -1478,7 +1478,7 @@ its build-up, its stops from every phase, steering, the changes to and from
 the walk and the crawl, backward, the turns, the gate and the catch; every
 foot position identical in the double-precision build, within the .5 mm
 rounding ties in the Pi's float build). Nothing changed in the body's
-firmware or the wire protocol: the mind streams FEET as for every gait.
+firmware or the wire protocol: the mind streams its feet as for every gait.
 `mind/tests/test_trot.py` checks its plan (reach, joints, build-up,
 placement, levels, changes, stops); `mind/tests/stridesim.py` is the study
 (`limits`, `fit`, `schedule`, `stops`); `kilo.vbody.rocking.RockingPhysics`

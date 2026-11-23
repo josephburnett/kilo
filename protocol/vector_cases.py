@@ -37,17 +37,9 @@ COBS_LITERALS = [
 COBS_LITERALS[-1] = ((_R[2:255] + b"\x00\x01").hex(), "fe" + _R[2:255].hex() + "0201")
 
 
-def _kf(dur, hold, flags, ang):
-    return {"dur": dur, "hold": hold, "flags": flags, "ang": ang}
-
-
 def frame_cases():
     """(name, msg, seq, fields, note)"""
-    U = -128
-    kf_a = _kf(25, 0, 1, [0, -10, 30, 45, 45, -45, -45, 10, 10, -10, -10])
-    kf_b = _kf(10, 5, 0x05, [U, U, U, 60, 60, -60, -60, U, U, U, U])
-    kf_c = _kf(1, 0, 2, [0] * 11)  # zero-heavy
-    kf_d = _kf(255, 255, 0, [127, -127, 0, 1, -1, 0, U, 0, 0, 0, 0])
+    OFF = -32768
     return [
         # Pi -> body
         ("hello_req_seq7", "HELLO_REQ", 7, {}, ""),
@@ -60,28 +52,23 @@ def frame_cases():
         ("pca_read", "PCA_READ", 6, {}, ""),
         ("set_posture_rest_epoch255", "SET_POSTURE", 8,
          {"epoch": 255, "posture": 1, "transition_ticks": 50, "flags": 0}, "epoch byte first"),
-        ("feet_walk", "FEET", 9,
-         {"epoch": 3, "tick": 51239, "x_mm": [12, -8, 15, -20], "z_mm": [76, 76, 61, 76], "pitch": -32,
-          "roll": 128, "support": 0x0B}, "epoch byte first; LB lifting, the body planned to roll right"),
-        ("feet_zero", "FEET", 10,
-         {"epoch": 0, "tick": 0, "x_mm": [0, 0, 0, 0], "z_mm": [30, 30, 30, 30], "pitch": 0,
-          "roll": 0, "support": 0}, "many zero bytes"),
+        ("pose_walk", "POSE", 9,
+         {"epoch": 3, "tick": 51239, "flags": 0, "leg": [48, 304, -32, 304, 60, 244, -80, 304],
+          "head": [OFF, OFF, OFF], "pitch": -32, "roll": 128, "support": 0x0B},
+         "epoch byte first; four feet, LB lifting, the body planned to roll right"),
+        ("pose_zero", "POSE", 10,
+         {"epoch": 0, "tick": 0, "flags": 0, "leg": [0, 240, 0, 240, 0, 240, 0, 240],
+          "head": [0, 0, 0], "pitch": 0, "roll": 0, "support": 0}, "many zero bytes"),
+        ("pose_joints", "POSE", 14,
+         {"epoch": 7, "tick": 900, "flags": 0x7F, "leg": [480, 480, -1280, 960, -960, -960, 960, 720],
+          "head": [1520, -480, OFF], "pitch": -480, "roll": 32, "support": 0x0E},
+         "four joint-mode legs (a paw up), balance, fall-ok, eased; the tail left to IDLE"),
         ("set_head_hold", "SET_HEAD", 11,
          {"epoch": 3, "mode": 1, "pan": -480, "tilt": 160, "tail": 0, "max_speed_dps": 120}, ""),
         ("set_body_pose", "SET_BODY_POSE", 12,
          {"epoch": 3, "pitch": 80, "roll": -48, "dheight_mm": -5, "xshift_mm": 4}, ""),
         ("set_balance", "SET_BALANCE", 13,
          {"enable": 1, "kp_q8": 128, "kd_ms": 20, "deadband_deg": 1, "max_corr_deg": 15}, ""),
-        ("trick_begin", "TRICK_BEGIN", 14,
-         {"trick_id": 7, "n_frames": 22, "loop_start": 2, "loop_end": 5, "repeats": 3,
-          "joint_mask": 0xFF07, "flags": 1, "end_posture": 2}, ""),
-        ("trick_frames_1", "TRICK_FRAMES", 15, {"first": 0, "frames": [kf_a]}, "min variable length"),
-        ("trick_frames_4_max", "TRICK_FRAMES", 16,
-         {"first": 4, "frames": [kf_a, kf_b, kf_c, kf_d]}, "58 B payload, -128 and zero bytes"),
-        ("trick_commit", "TRICK_COMMIT", 17, {"trick_id": 7, "crc16": 0x1D0F}, ""),
-        ("trick_play_mirror", "TRICK_PLAY", 18,
-         {"epoch": 3, "trick_id": 7, "speed_q6": 96, "flags": 1}, "epoch byte first"),
-        ("trick_stop", "TRICK_STOP", 19, {"transition_ticks": 10}, ""),
         ("set_eyes_left_green", "SET_EYES", 20, {"led_mask": 0x38, "r": 0, "g": 255, "b": 0}, ""),
         ("beep_1", "BEEP", 21, {"notes": [{"note": 12, "dur_10ms": 10}]}, ""),
         ("beep_8_max", "BEEP", 22,
@@ -100,14 +87,14 @@ def frame_cases():
         ("reboot", "REBOOT", 31, {"magic": 0x4B49}, ""),
         # Body -> Pi
         ("hello_boot", "HELLO", 0,
-         {"proto_major": 2, "proto_minor": 0, "fw_build": 0xDEADBEEF, "reset_cause": 1,
-          "last_alive_tick": 0, "caps": 0x1D, "max_payload": 60, "trick_capacity": 32,
+         {"proto_major": 3, "proto_minor": 0, "fw_build": 0xDEADBEEF, "reset_cause": 1,
+          "last_alive_tick": 0, "caps": 0x1D, "max_payload": 60, "pose_depth": 5,
           "joint_count": 11, "config_state": 0, "epoch": 0}, "unsolicited on boot"),
         ("telemetry", "TELEMETRY", 1,
          {"tick": 51234, "pitch": -35, "roll": 12, "rate_pitch": 160, "rate_roll": -16,
           "rate_yaw": 0, "dist_mm": 312, "batt_mv": 7820, "mode": 3, "owners": 0x11,
-          "flags": 0x08AD, "last_rx_seq": 22, "trick_frame": 0xFF, "ref_pitch": -32, "ref_roll": 128,
-          "corr_pitch": 4, "corr_roll": -16, "feet_queued": 5, "support": 0x0B,
+          "flags": 0x08AD, "last_rx_seq": 22, "limited": 0x04, "ref_pitch": -32, "ref_roll": 128,
+          "corr_pitch": 4, "corr_roll": -16, "pose_queued": 3, "support": 0x0B,
           "tick_load": 47, "rx_err": 0, "epoch": 3}, ""),
         ("joints", "JOINTS", 2,
          {"tick": 100, "angle": [0, -160, 480, 720, 720, -720, -720, 160, 160, -160, -1440]}, ""),
@@ -115,10 +102,10 @@ def frame_cases():
          {"tick": 101, "accel_x": 120, "accel_y": -340, "accel_z": 16384, "gyro_x": -5,
           "gyro_y": 3, "gyro_z": 0}, ""),
         ("ack_ok", "ACK", 4, {"seq": 30, "type": 0x3F, "status": 0}, ""),
-        ("ack_stale_trick_play", "ACK", 5, {"seq": 18, "type": 0x23, "status": 10}, ""),
+        ("ack_bad_arg_param_set", "ACK", 5, {"seq": 18, "type": 0x3E, "status": 2}, ""),
         ("event_fell", "EVENT", 6, {"code": 2, "arg": -1, "tick": 4000, "epoch": 4}, ""),
         ("event_goal_refused", "EVENT", 7,
-         {"code": 13, "arg": (0x11 << 8) | 10, "tick": 4100, "epoch": 4}, "GAIT refused STALE"),
+         {"code": 13, "arg": (0x11 << 8) | 10, "tick": 4100, "epoch": 4}, "POSE refused STALE"),
         ("event_goal_refused_uncalibrated", "EVENT", 17,
          {"code": 13, "arg": (0x10 << 8) | 11, "tick": 4200, "epoch": 0}, "STAND refused: config DEFAULTED"),
         ("event_ir_key_repeat", "EVENT", 50, {"code": 18, "arg": 0x100 | 0x18, "tick": 4300, "epoch": 4},
@@ -136,7 +123,7 @@ def frame_cases():
         ("stats", "STATS", 14,
          {"uptime_s": 86400, "overruns": 0, "max_tick_us": 9876, "stack_free_min": 212,
           "rx_crc_err": 1, "rx_overflow": 0, "i2c_err": 2, "imu_stale": 0, "dmp_rate_hz": 100,
-          "feet_late": 3, "feet_underruns": 1}, ""),
+          "pose_dropped": 3, "pose_underruns": 1}, ""),
         ("pca_counts", "PCA_COUNTS", 15,
          {"counts": [0x1000, 0x1000, 0x1000, 0, 0, 0, 0, 0, 307, 300, 290, 310, 205, 410, 205, 410]},
          "full-off bit"),
@@ -177,7 +164,7 @@ def build(P, C):
         return (C.cobs_encode(body + bytes([c & 0xFF, c >> 8])) + b"\x00").hex()
 
     ping = bytes.fromhex(next(f for f in frames if f["name"] == "ping")["decoded"])
-    tf = next(f for f in frames if f["name"] == "trick_frames_1")
+    bp = next(f for f in frames if f["name"] == "beep_8_max")
     errors = [
         {"name": "crc_flipped", "wire": raw_frame(bytes([0x03, 0x03, 0xEF, 0xBE]), 0x0001),
          "error": "bad_crc"},
@@ -196,8 +183,8 @@ def build(P, C):
          "type": 0x03, "seq": 9},
         {"name": "heartbeat_with_payload", "wire": wire_of(0x02, 10, "00"), "error": "bad_length",
          "type": 0x02, "seq": 10},
-        {"name": "trick_frames_count_mismatch",
-         "wire": wire_of(0x21, 11, "0002" + tf["payload"][4:]), "error": "bad_length", "type": 0x21, "seq": 11},
+        {"name": "beep_count_mismatch",
+         "wire": wire_of(0x31, 11, "07" + bp["payload"][2:]), "error": "bad_length", "type": 0x31, "seq": 11},
         {"name": "beep_zero_notes", "wire": wire_of(0x31, 12, "00"), "error": "bad_length",
          "type": 0x31, "seq": 12},
         {"name": "eeprom_data_empty", "wire": wire_of(0x88, 13, "c002"), "error": "bad_length",

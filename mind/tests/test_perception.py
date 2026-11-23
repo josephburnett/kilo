@@ -255,7 +255,7 @@ def test_startle_by_gyro_rate():
 
 def test_self_motion_suppresses_impulses():
     tr = Trace(8).add(3).add(3, fp=lambda u: 1.5 * math.sin(2 * math.pi * u) + tap_shape(u, 1.0, 4),
-                             flags=("servos_powered", "gait"), mode="GAIT").add(0.5)
+                             flags=("servos_powered", "stream"), mode="STREAM").add(0.5)
     _, ev = tr.run()
     assert [n for n in names(ev) if n in ("tap", "pet", "startle", "picked_up")] == []
 

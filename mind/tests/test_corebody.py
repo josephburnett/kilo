@@ -20,9 +20,9 @@ import pytest
 
 from kilo.body.client import BodyClient
 from kilo.link import consts
-from kilo.link.serial_link import CommandError, LinkConfig, SerialLink
+from kilo.link.serial_link import LinkConfig, SerialLink
 from kilo.protocol import kilo_protocol as P
-from kilo.tricks import library
+from kilo.planner.walker import pack_pose_feet
 from kilo.vbody.core import BUILD_SCRIPT, CORE_BUILD, TICK_S, CoreBody, build_harness
 
 from conftest import FAST
@@ -37,17 +37,23 @@ LIMP, REST, SIT, STAND, STANCE = (int(P.Posture[n]) for n in ("LIMP", "REST", "S
 OFF = -32768
 HOLD = 0xFE  # core/posture.h POSTURE_HOLD: IDLE holds the warm-boot snapshot
 RH_WATCHDOG, RH_FALL = 3, 2  # core/body.h ReflexHolder
-OWN_IDLE, OWN_GAIT, OWN_TRICK, OWN_REFLEX = 0, 1, 2, 3
+OWN_IDLE, OWN_STREAM, OWN_REFLEX = 0, 1, 3
 
 # Where the Python vbody (kilo.vbody.sim) and the C core disagree (the core
 # is right). Kept here so the next vbody pass has the list in one place.
 CORE_VS_SIM = """
 - fall: the core's timeline follows the IMU: 6 samples over 75 deg -> FELL,
-  10 still samples -> rc (mode RECOVERING), rc's 3 frames (89 ticks), then
-  25 upright samples -> RECOVERED (2.48 s from FELL when it lands upright),
-  up to 3 tries, else RECOVERY_FAILED, REST, LIMP 2 s later. The sim's
-  trigger_fall() is a fixed 1 s FALLEN + 1 s RECOVERING whatever the
-  attitude, never re-tries or fails, and has no detector.
+  holding the pose until 10 still samples -> LYING (REST, EVENT LYING, LIMP
+  2 s after the 1 s REST move, then the reflex lets go). The sim's
+  trigger_fall() holds a fixed 1 s whatever the attitude (no detector; its
+  physics "falls" past 35 deg of tilt), then the same LYING timeline.
+- POSE: the core's first key of a stream is moved toward from the joints'
+  outputs in joint space; the sim starts each stream on a new physics
+  standing on STANCE's feet and moves toward the first key in foot space.
+  The sim does not balance joint-mode legs in joint space (their
+  corrections decay), and its head values go straight to the key's (the
+  core moves them from the joints' outputs). Events, refusals, drops, the
+  hold and the settle agree (test_crosscheck.py test_pose_stream).
 - REBOOT: the PCA9685 keeps driving through the AVR's reset, so the core
   boots warm: the warm-boot hold keeps the pose, then IDLE holds it (posture
   HOLD, mode IDLE, servos powered). The sim's reboot() is a cold power-on
@@ -209,104 +215,54 @@ def test_watchdog_timeline_and_stale_goals(rig):
     assert core.run_until(lambda: bool(refused(link, "SET_POSTURE", "STALE")), 1) is not None
     core.step(2)
     assert "SET_POSTURE" not in link.goals() and core.dump()["posture"] == LIMP
-    with pytest.raises(CommandError) as ei:
-        link.request("TRICK_PLAY", {"epoch": e0, "trick_id": 1, "speed_q6": 64, "flags": 0})
-    assert ei.value.status_name == "STALE"
     # With the new epoch it goes through.
     stand(core, client)
 
 
-# ---- tricks -----------------------------------------------------------------------------------
+# ---- the POSE stream --------------------------------------------------------------------------------
 
-def test_trick_upload_play_and_preemption(rig):
-    core, link, client = rig()
-    stand(core, client)
-    trick = library.load("hi")
-    tid, uploaded = client.upload_trick(trick)
-    assert uploaded and core.dump()["trick_store"] == 2  # KF_READY
-    assert client.upload_trick(trick) == (tid, False)  # cached
-    expected = client.expected_ticks(trick)
-    tid, n = client.start_trick(trick)
-    assert "SET_POSTURE" not in link.goals()  # the end posture replaces it
-    core.step(1)
-    d = core.dump()
-    assert d["trick_run"] and d["mode"] == P.Mode.TRICK and OWN_TRICK in d["owner"]
-    # TRICK_PLAY while one plays: BUSY.
-    with pytest.raises(CommandError) as ei:
-        client.start_trick(trick)
-    assert ei.value.status_name == "BUSY"
-    # TRICK_DONE(DONE) on the tick kilo.tricks.player predicts.
-    k = core.run_until(lambda: client.trick_done_since(n, tid) is not None, 30)
-    assert k is not None
-    done = client.trick_done_since(n, tid)
-    assert done.arg >> 8 == P.TrickDoneReason.DONE
-    t_done = core.events("TRICK_DONE")[-1][0]
-    t_play = [t for t, name, _ in core.sent if name == "ACK"][-2]  # the TRICK_PLAY's OK (before BUSY)
-    # (expected_ticks counts to the last frame's end; TRICK_DONE goes out on
-    # the tick after it, on the core as in the sim.)
-    assert ticks(t_done - t_play) == expected + 1
-    d = core.dump()
-    assert not d["trick_run"] and d["posture"] == int(trick.end_posture)
-    # Pre-emption: an epoch bump (here the watchdog of a stalled mind) ends a
-    # playing trick with TRICK_DONE(PREEMPTED) carrying the new epoch.
-    stand(core, client)
-    e = link.state.epoch
-    tid, n = client.start_trick(trick)
-    core.step(5)
-    assert core.dump()["trick_run"]
-    assert core.run_until(lambda: client.trick_done_since(n, tid) is not None, 2, alive=False) is not None
-    m = client.trick_done_since(n, tid)
-    assert m.arg >> 8 == P.TrickDoneReason.PREEMPTED and m.epoch == e + 1
-    # SET_POSTURE LIMP stops a trick at once: STOPPED.
-    assert core.run_until(lambda: bool(events(link, "LINK_RESTORED")), 1) is not None
-    stand(core, client)
-    tid, n = client.start_trick(trick)
-    core.step(5)
-    client.limp()
-    assert core.run_until(lambda: client.trick_done_since(n, tid) is not None, 1) is not None
-    assert client.trick_done_since(n, tid).arg >> 8 == P.TrickDoneReason.STOPPED
-    assert core.dump()["out"] == [OFF] * 11
-
-
-# ---- the gait -------------------------------------------------------------------------------------
-
-def test_feet_stream(rig):
-    """Protocol 2.0 at the link: FEET a few ticks ahead puts the core in GAIT
-    with the reference and the support feet in TELEMETRY; a stale epoch is
-    refused; when the stream stops the core underruns, holds, settles and
-    ends GAIT with GAIT_STOPPED arg 1 (kilo.vbody.feet is the Python stand-in)."""
+def test_pose_stream(rig):
+    """Protocol 3.0 at the link: POSE a few ticks ahead puts the core in mode
+    STREAM with the reference and the support feet in TELEMETRY; a stale
+    epoch is refused; when the stream stops the core underruns, holds,
+    settles and ends the stream with STREAM_STOPPED arg 1 (kilo.vbody.pose is
+    the Python stand-in)."""
     core, link, client = rig()
     client.set_balance(True)  # the reference reads 0 while the balance is off
     client.posture("stance")
     assert core.run_until(lambda: (d := core.dump())["posture"] == STANCE and not d["idle_moving"], 2) is not None
-    link.clear_goal("SET_POSTURE")  # a posture refresh would end GAIT
+    link.clear_goal("SET_POSTURE")  # a posture refresh would end the stream
     epoch = link.state.epoch
 
     def send(ahead, epoch=epoch, roll=0, support=0xF):
         t = (link.state.telemetry.tick + ahead) & 0xFFFF
-        return link.send_stream("FEET", P.Feet(epoch=epoch, tick=t, x_mm=[0] * 4, z_mm=[76] * 4, pitch=0,
-                                               roll=roll, support=support).pack())
+        return link.send_stream("POSE", pack_pose_feet(epoch, t, [0] * 4, [76] * 4, 0, roll, support))
 
     assert send(3, epoch=(epoch + 5) & 0xFF)
-    assert core.run_until(lambda: refused(link, "FEET", "STALE"), 1) is not None
+    assert core.run_until(lambda: refused(link, "POSE", "STALE"), 1) is not None
     for _ in range(20):
-        for ahead in range(2, 6):
+        for ahead in range(2, 5):
             send(ahead, roll=-3 * 16)
         core.step(1)
-    assert link.state.mode == "GAIT" and "gait" in link.state.flags and link.state.owners[0] == "GAIT"
+    assert link.state.mode == "STREAM" and "stream" in link.state.flags and link.state.owners[0] == "STREAM"
     tel = link.state.telemetry
-    assert tel.ref_roll == -3 * 16 and tel.support == 0xF and tel.feet_queued >= 1
-    assert core.run_until(lambda: events(link, "FEET_UNDERRUN"), 1) is not None
-    assert events(link, "FEET_UNDERRUN")[0].arg >= 1
-    assert core.run_until(lambda: events(link, "GAIT_STOPPED"), 2) is not None
-    assert events(link, "GAIT_STOPPED")[0].arg == 1
+    assert tel.ref_roll == -3 * 16 and tel.support == 0xF and tel.pose_queued >= 1
+    d = core.dump()
+    assert d["stream_state"] == 1 and d["pose_dropped"] == 0
+    assert core.run_until(lambda: events(link, "POSE_UNDERRUN"), 1) is not None
+    assert events(link, "POSE_UNDERRUN")[0].arg >= 1
+    assert core.run_until(lambda: events(link, "STREAM_STOPPED"), 2) is not None
+    assert events(link, "STREAM_STOPPED")[0].arg == 1
     core.step(5)
-    assert link.state.mode == "IDLE"
+    assert link.state.mode == "IDLE" and core.dump()["pose_underruns"] == 1
 
 
 # ---- the fall reflex ---------------------------------------------------------------------------
 
 def test_fall_reflex_timeline(rig):
+    """FELL, the pose held until he is still, then LYING: REST, LIMP 2 s
+    after the 1 s REST move, and the reflex lets go. No get-up: that is the
+    mind's (a POSE with FALL_OK)."""
     core, link, client = rig()
     stand(core, client)
     e0 = link.state.epoch
@@ -325,36 +281,41 @@ def test_fall_reflex_timeline(rig):
     # A posture goal of the new epoch is refused FALLEN while the reflex holds.
     client.stand()
     assert core.run_until(lambda: bool(refused(link, "SET_POSTURE", "FALLEN")), 1) is not None
-    # Still for 10 samples (it already is): rc starts, mode RECOVERING.
+    # Still for 10 samples (it already is): LYING, REST, EVENT LYING (the FELL arg).
     t = core.run_until(lambda: core.dump()["fall_state"] == 2, 1)
     assert t is not None and t <= 10
     core.step(1)
-    assert link.state.mode == "RECOVERING"
-    # rc rolls the body upright; once CHECK sees 25 level samples: RECOVERED.
-    core.set_attitude()
-    t = core.run_until(lambda: core.dump()["fall_state"] == 3, 5)
-    assert t is not None
-    t = core.run_until(lambda: core.dump()["fall_state"] == 0, 2)
-    assert t == 25
-    core.step(1)
-    assert len(events(link, "RECOVERED")) == 1
+    assert [e.arg for e in events(link, "LYING")] == [1]
+    assert core.dump()["reflex_posture"] == REST and link.state.mode == "FALLEN"
+    # LIMP 2 s after the 1 s REST move; then the reflex lets go.
+    assert core.run_until(lambda: core.dump()["out"] == [OFF] * 11, 4) is not None
+    core.step(2)
     d = core.dump()
-    assert (d["posture"], d["holder"], d["mode"]) == (STAND, 0, P.Mode.IDLE)
-    # The latched stand (new epoch) is no longer refused: the body stands.
-    core.step(15)
-    assert link.state.mode == "IDLE" and not link.state.fallen
+    assert (d["fall_state"], d["holder"]) == (0, 0) and link.state.mode == "LIMP"
 
 
-def test_fall_without_recovery_fails_then_limps(rig):
+def test_a_fall_ok_pose_takes_the_joints_from_the_fall_reflex(rig):
+    """The mind's get-up: while the fall reflex holds the joints a POSE is
+    refused FALLEN unless it has FALL_OK, which ends the reflex and starts
+    the stream (fall detection stays off while it plays)."""
     core, link, client = rig()
     stand(core, client)
     core.set_attitude(roll_deg=85)
-    # Never comes upright: 3 rc tries, then RECOVERY_FAILED, REST, LIMP 2 s later.
-    assert core.run_until(lambda: bool(events(link, "RECOVERY_FAILED")), 15) is not None
-    assert core.dump()["fall_state"] == 4 and core.dump()["fall_tries"] == 3
-    assert core.run_until(lambda: core.dump()["out"] == [OFF] * 11, 3) is not None
-    core.step(2)
-    assert core.dump()["fall_state"] == 0 and link.state.mode == "LIMP"
+    assert core.run_until(lambda: core.dump()["fall_state"] == 1, 1) is not None
+    core.step(1)
+    epoch = link.state.epoch
+    t = (link.state.telemetry.tick + 5) & 0xFFFF
+    joints = P.Pose(epoch=epoch, tick=t, flags=0x0F, leg=[30 * 16, 30 * 16] * 4, head=[-32768] * 3, support=0)
+    assert link.send_stream("POSE", joints.pack())
+    assert core.run_until(lambda: bool(refused(link, "POSE", "FALLEN")), 1) is not None
+    joints.flags |= P.PoseFlags.FALL_OK
+    joints.tick = (link.state.telemetry.tick + 5) & 0xFFFF
+    assert link.send_stream("POSE", joints.pack())
+    assert core.run_until(lambda: core.dump()["stream_state"] != 0, 1) is not None
+    d = core.dump()
+    assert (d["fall_state"], d["holder"], d["mode"]) == (0, 0, P.Mode.STREAM)
+    core.step(20)  # still at 85 deg of roll: no new FELL while the FALL_OK stream plays
+    assert len(events(link, "FELL")) == 1 and core.dump()["mode"] == P.Mode.STREAM
 
 
 # ---- balance ------------------------------------------------------------------------------------

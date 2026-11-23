@@ -1,6 +1,6 @@
 // remote: what the IR remote's keys do, as a cooperative state machine:
 // one action at a time; the waits for the planned stop and a trick's
-// TRICK_STOP are phases of poll(), and keys that come meanwhile queue.
+// stop are phases of poll(), and keys that come meanwhile queue.
 // Keys by grid (keys.h): columns A-C left to right, rows 1-7
 // from the bottom.
 //
@@ -73,7 +73,7 @@
 //   set_rear_up_key, KILO_REAR_UP=1|2|3: the highest stage allowed; off, A1
 //   is a row 1-3 key and never reaches perform()): not playing a trick, stop a walk, then
 //   start the stage's trick (rear_up, rear_up_2 or rear_up_3: the highest
-//   allowed; the key is done once TRICK_PLAY is out). Kilo goes up to stage
+//   allowed; the key is done once its play starts). Kilo goes up to stage
 //   1 and holds it: in rear_up_2 and rear_up_3 the lower stages' tops hold
 //   4 s (rear_up.py STEP_HOLD). A1 while he goes up to or holds such a top
 //   takes him on to the next stage (up to the build's); without it, the
@@ -81,14 +81,14 @@
 //   down to SIT (step_gate()). The trick's own guards (pitch and roll at
 //   every guarded hold, each stage's top among them) still stop it when
 //   the body is not where the model says. A1 at any other moment, B6 and
-//   C7 bring him down (TRICK_STOP over the trick's stop_ticks). Each stage
+//   C7 bring him down (its end posture over the trick's stop_ticks). Each stage
 //   reached, gone on from or left is a log line and a mark in the trick's
 //   flight-recorder run. Refused below kTrickMinMv at rest (the highest
 //   reading of the last 20 s, TrickNotes::rested_mv: a walk just stopped
 //   sags the reading for a moment) or on USB power (NO_BATTERY), so that
 //   the body's low-battery reflex does not take Kilo to REST half way up.
 // - Stopping a trick (A1, the posture keys, a walk from standing, C7) sends
-//   TRICK_STOP over the trick's stop_ticks (rear_up: 1.5 s to SIT, the
+//   its end posture over the trick's stop_ticks (rear_up: 1.5 s to SIT, the
 //   higher stages 2 and 2.5 s, not the body's 0.2 s); a key that then
 //   takes a posture or walks waits for
 //   that crossfade first (Phase::Settle).
@@ -253,7 +253,7 @@ class RemoteControl {
 
  private:
   enum class Phase : uint8_t { Idle, StopWalk, StopTrick, Settle, MeasureStand };
-  void stop_trick();  // TRICK_STOP over the trick's stop_ticks; settle_us_ for Phase::Settle
+  void stop_trick();  // the end posture over the trick's stop_ticks; settle_us_ for Phase::Settle
   void start_trick();
   int mode() const;
   bool body_walking() const;

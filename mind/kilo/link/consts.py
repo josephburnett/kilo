@@ -37,7 +37,7 @@ MOTION_GOALS = EPOCH_GOALS
 # de-duplicated by the body, retried with a fresh seq.
 QUERIES = frozenset(n for n, c in _CLS.items() if c.IS_QUERY)
 REPLIES: dict[str, str] = {NAMES[q]: NAMES[r] for q, r in P.QUERY_REPLY.items()}
-# Pi->body streams (FEET): sent as they are made, never acked, refreshed or retried.
+# Pi->body streams (POSE): sent as they are made, never acked, refreshed or retried.
 STREAMS_OUT = frozenset(n for n, c in _CLS.items() if c.KIND is P.Kind.STREAM and c.DIR is P.Dir.PI_TO_BODY)
 
 # --- ACK status ------------------------------------------------------------------

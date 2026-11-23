@@ -332,7 +332,7 @@ def commands(frames, start: Mapping = STAND, stop_tick: int | None = None, stop_
     order) and the frame per tick (-2 after a stop or the end), then
     ``tail_ticks`` holding the last. With ``stop_tick`` the play is cut there
     and the joints go in a straight line to ``end`` over ``stop_ticks``
-    (TRICK_STOP)."""
+    (a stop)."""
     fr = as_frames(frames)
     cur = np.array([float(start[k]) for k in JOINTS])
     rows, idx = [], []

@@ -18,10 +18,10 @@ from typing import Any
 import pytest
 
 from kilo import cli
-from kilo.logs import decode, flight, trickrec, walkrec
+from kilo.logs import decode, flight, proto2, trickrec, walkrec
 from kilo.protocol import kilo_protocol as P
 from kilo.tricks import library
-from kilo.tricks.player import phase_ticks
+from kilo.tricks.model import phase_ticks
 from test_hostlink import FakeMind
 from test_walks import synthetic
 
@@ -85,7 +85,7 @@ def blocks(records: list[tuple[int, int, bytes]], boot: int = 0, seq0: int = 0, 
 def tel(t_us: int, tick: int, nose_up: float = 0.0, roll: float = 0.0, mode: int = P.Mode.IDLE, batt: int = 7900,
         frame_k: int = 0xFF, rate_pitch: float = 0.0) -> tuple[int, int, bytes]:
     m = P.Telemetry(tick=tick & 0xFFFF, pitch=int(round(-nose_up * 16)), roll=int(round(roll * 16)), mode=int(mode),
-                    batt_mv=batt, trick_frame=frame_k, rate_pitch=int(round(rate_pitch * 16)), epoch=4,
+                    batt_mv=batt, limited=frame_k, rate_pitch=int(round(rate_pitch * 16)), epoch=4,
                     flags=int(P.TelemetryFlags.SERVOS_POWERED))
     return frame(P.WalkRecord.RX, t_us, m, tick)
 
@@ -95,6 +95,8 @@ def event(t_us: int, code: int, arg: int = 0) -> tuple[int, int, bytes]:
 
 
 # ---- a trick run: rear_up_2, tipping over backwards at "rise" --------------------------
+# (as protocol 2 recorded it: TRICK_PLAY, mode TRICK, the body's keyframe in
+# TELEMETRY's trick_frame byte, now `limited`: kilo.logs.proto2)
 
 def trick_records(name: str = "rear_up_2", run_id: int = 3, tip_at: str | None = "rise", end: str = "FELL",
                   key: str | None = None, crc: str | None = None) -> tuple[list, float]:
@@ -147,8 +149,8 @@ def trick_records(name: str = "rear_up_2", run_id: int = 3, tip_at: str | None =
         if tip_s is not None and s > tip_s:
             nu += 30 * (s - tip_s)  # over backwards
             rate = 30.0
-        mode = P.Mode.TRICK if 0 <= s <= end_s else P.Mode.IDLE
-        out.append(tel(t_us, tick, nu, mode=mode, batt=7900 - int(max(0, s) * 10), frame_k=fk if mode == P.Mode.TRICK
+        mode = proto2.MODE_TRICK if 0 <= s <= end_s else P.Mode.IDLE
+        out.append(tel(t_us, tick, nu, mode=mode, batt=7900 - int(max(0, s) * 10), frame_k=fk if mode == proto2.MODE_TRICK
                        else 0xFF, rate_pitch=rate))
         tick += 1
         t_us += TEL_US
@@ -159,7 +161,7 @@ def trick_records(name: str = "rear_up_2", run_id: int = 3, tip_at: str | None =
         out.append(log(end_us - 90_000, key))
     if end == "FELL":
         out.append(event(end_us - 20_000, P.EventCode.FELL))
-    out.append(frame(P.WalkRecord.TX, play - 20_000, P.TrickPlay(epoch=4, trick_id=77, speed_q6=64, flags=0)))
+    out.append(rec(P.WalkRecord.TX, play - 20_000, bytes([0x23, 0, 4, 77, 64, 0])))  # TRICK_PLAY (protocol 2)
     out.append(mark(end_us, f"end reason={end} elapsed_ms={int(end_s * 1000)} expected_ticks={tt} battery_mv=7850 "
                             f"mode=FALLEN why=the body fell"))
     out.append(run_mark(end_us + 10, run_id, P.RunKind.TRICK, P.RunEvent.END))
@@ -192,8 +194,8 @@ def test_blocks_parse_times_crc_and_a_cut_last_block():
 def test_mark_fields():
     assert flight.parse_mark("end reason=FELL elapsed_ms=900 why=the body fell over") == (
         "end", {"reason": "FELL", "elapsed_ms": "900", "why": "the body fell over"})
-    assert flight.parse_mark("end ok=0 streamed=1 reason=the body left GAIT (mode STANCE)")[1]["reason"] == \
-        "the body left GAIT (mode STANCE)"
+    assert flight.parse_mark("end ok=0 streamed=1 reason=the body left STREAM (mode STANCE)")[1]["reason"] == \
+        "the body left STREAM (mode STANCE)"
     assert flight.parse_mark("key remote B6 (0x02, stand): trick stopped") == (
         "key", {"text": "remote B6 (0x02, stand): trick stopped"})
 

@@ -191,8 +191,14 @@ def test_steering_shrugs_off_the_model_errors(pattern, direction):
                 assert sim.run(TICKS) == TICKS and not sim.fell()
                 st = sim.planner.stats
                 what = (speed, steer, kw, sim.max_error(), st)
-                assert sim.max_error() < bound and st["catches"] == 0, what
-                assert st["holds"] == 0 or (pattern == "walk" and kw.get("lag_ms") == 20 and st["holds"] < 10), what
+                # (protocol 3.0's 3-tick look-ahead: the fastest servos (20 ms lag) walking backward at
+                # 58 mm/s steering 0.25 get one catch, at the same largest error as with 5 ticks)
+                fast = kw.get("lag_ms") == 20 and pattern == "walk" and direction == "back"
+                assert sim.max_error() < bound and (st["catches"] == 0 or fast and st["catches"] <= 1), what
+                # (protocol 3.0's 3-tick look-ahead, 2026-11-22: one gate hold in the walk backward at
+                # 58 mm/s steering 0.25 with the mass 10 mm forward and 5 mm left; none with 5 ticks)
+                walk_ok = pattern == "walk" and (kw.get("lag_ms") == 20 and st["holds"] < 10 or st["holds"] <= 1)
+                assert st["holds"] == 0 or walk_ok, what
 
 
 def test_steering_the_crawl_stays_on_its_plan():
@@ -246,7 +252,7 @@ def test_a_turn_in_place_then_straight_steering_then_stop(pattern):
     # the virtual body, within the trot's straight-walk bound (5)
     assert sim.max_error() < (5.0 if pattern == "trot" else 4.5) and sim.planner.stats["catches"] == 0 \
         and sim.planner.stats["holds"] == 0
-    assert sim.vb.feet_underruns == 0 and not sim.vb.feet_refused
+    assert sim.vb.pose_underruns == 0 and not sim.vb.pose_refused
 
 
 def test_the_trot_no_longer_rocks_at_mid_speeds():
@@ -309,18 +315,20 @@ def test_speed_and_gait_changes_mid_walk_stay_up():
     # most; out of the trot's long swing (184 mm/s: its strides shrink 0.75 mm a tick) WALKBACK
     assert switched["trot"] - 1000 < 110 and switched["walk"] - 1200 < 120
     assert sim.planner.pattern.name == "crawl" and sim.planner.stats["catches"] == 0
-    assert sim.vb.feet_underruns == 0 and not sim.vb.feet_refused
+    assert sim.vb.pose_underruns == 0 and not sim.vb.pose_refused
 
 
 @pytest.mark.parametrize("pattern", ("crawl", "walk", "trot"))
 def test_a_stalled_producer_is_caught_up(pattern):
-    """60 ms (three ticks) without a wake: the five ticks of lookahead carry
-    the body; the next wake sends the ticks it missed. No underrun, no fall."""
+    """40 ms (two ticks) without a wake: the three ticks of look-ahead
+    (link.pose_lookahead_ticks) carry the body; the next wake sends the
+    ticks it missed. No underrun, no fall. (A third missed wake runs the
+    queue dry: the body holds the last pose, the next wake resumes.)"""
     sim = WalkSim(pattern)
-    assert sim.run(300, stall=(100, 103)) == 300
-    assert ("FEET_UNDERRUN", 1) not in sim.events and sim.vb.feet_underruns == 0
-    assert sim.stream.max_behind >= 4 and sim.stream.skipped == 0
-    assert sim.vb.feet_late == 0 and not sim.fell() and sim.max_error() < 4.5
+    assert sim.run(300, stall=(100, 102)) == 300
+    assert sim.vb.pose_underruns == 0
+    assert sim.stream.max_behind >= 3 and sim.stream.skipped == 0
+    assert sim.vb.pose_dropped == 0 and not sim.fell() and sim.max_error() < 4.5
     ticks = [f.tick for f in sim.link.sent]
     assert ticks == list(range(ticks[0], ticks[0] + len(ticks)))  # every tick sent once, in order
 
@@ -330,9 +338,9 @@ def test_a_long_stall_underruns_then_settles_and_the_stream_ends():
     sim.run(150)
     n = sim.run(60, stall=(0, 60))  # 1.2 s without a wake: the queue runs dry
     assert n == 60
-    assert sim.vb.feet is None and sim.vb.posture == "STANCE" and not sim.fell()
-    names = [e for e in sim.events if e[0] in ("FEET_UNDERRUN", "GAIT_STOPPED")]
-    assert names[0] == ("FEET_UNDERRUN", 6) and names[-1] == ("GAIT_STOPPED", 1)  # 6 ticks since the last FEET
+    assert sim.vb.stream is None and sim.vb.posture == "STANCE" and not sim.fell()
+    names = [e for e in sim.events if e[0] in ("POSE_UNDERRUN", "STREAM_STOPPED")]
+    assert names[0] == ("POSE_UNDERRUN", 4) and names[-1] == ("STREAM_STOPPED", 1)  # ticks since the last POSE
     assert sim.step() is False and "underrun" in sim.stream.ended and not sim.stream.ok
     # the settle put the lifted feet down at their x: all four feet at one height
     assert max(sim.vb.joint_angles()[3:]) is not None
@@ -349,7 +357,7 @@ def test_the_planned_stop_hands_over_to_stance(pattern):
     n = sim.run(600)
     assert n < 600 and sim.stream.ended == "stopped" and sim.stream.ok and sim.handovers == 1
     assert n * 0.02 < stop_timeout(sim.planner.timing().period_ms) - 1.0, n
-    assert ("GAIT_STOPPED", 0) in sim.events and sim.vb.feet is None and sim.vb.posture == "STANCE"
+    assert ("STREAM_STOPPED", 0) in sim.events and sim.vb.stream is None and sim.vb.posture == "STANCE"
     assert sim.max_error() < 4.5 and not sim.fell()
 
 
@@ -381,12 +389,12 @@ def test_the_model_error_is_seen():
     assert not sim.fell()
 
 
-def test_feet_are_sent_five_ticks_ahead():
+def test_poses_are_sent_three_ticks_ahead():
     sim = WalkSim("trot")
     seen = []
     sim.run(50, each=lambda i: seen.append(sim.link.sent[-1].tick - (sim.vb.tick & 0xFFFF)))
-    assert set(seen[1:]) == {P.FEET_LOOKAHEAD_TICKS}
-    assert all(t.feet_queued >= P.FEET_LOOKAHEAD_TICKS - 1 for t in sim.gait()[2:])
+    assert set(seen[1:]) == {P.POSE_LOOKAHEAD_TICKS}
+    assert all(t.pose_queued >= P.POSE_LOOKAHEAD_TICKS - 1 for t in sim.gait()[2:])
 
 
 def wrong_mass(dx: float, dy: float, battery_g: float) -> BodyModel:

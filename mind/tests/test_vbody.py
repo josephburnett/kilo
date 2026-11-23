@@ -204,12 +204,15 @@ def test_fall_clears_goals_and_bumps_epoch(rig):
     link.set_goal("SET_POSTURE", posture=3, transition_ticks=0, flags=0)
     link._goals["SET_POSTURE"].epoch = e0
     assert link.wait_until(lambda: "SET_POSTURE" not in link.goals(), 1)
-    # 1 s down, then a 1 s recovery (from the first tick after the fall ends)
-    stepped_alive(link, t_fall + 1.98 - clock(), 0.02)
-    assert vb.recover_until is not None and not _events(client, "RECOVERED")
+    # 1 s FALLEN, then LYING (REST, EVENT LYING) and LIMP 3 s later: the body does not get up
+    stepped_alive(link, t_fall + 0.98 - clock(), 0.02)
+    assert vb.fall_until is not None and not _events(client, "LYING")
     stepped_alive(link, 0.08, 0.02)
-    assert vb.recover_until is None
-    assert link.wait_until(lambda: _events(client, "RECOVERED"), 1)
+    assert vb.fall_until is None and vb.lying_until is not None and vb.posture == "REST"
+    assert link.wait_until(lambda: _events(client, "LYING"), 1)
+    assert [e.arg for e in _events(client, "LYING")] == [-1]  # the FELL arg
+    stepped_alive(link, 3.0, 0.02)
+    assert not vb.fallen and vb.posture == "LIMP"
 
 
 def test_watchdog_when_mind_stalls(rig):
@@ -378,10 +381,10 @@ def test_contract_d_goals():
     cls = P.MESSAGES[M.SET_EYES]  # the eyes (2026-11-17): kept, never refused
     assert events(s.raw(cls.ID, cls(led_mask=0x3F, g=0x30).pack())) == []
     assert s.vb.eyes == (0x3F, 0, 0x30, 0)
-    # SET_BODY_POSE is accepted; FEET (a stream: never acked) is refused STALE for another epoch
+    # SET_BODY_POSE is accepted; POSE (a stream: never acked) is refused STALE for another epoch
     assert events(s.raw(M.SET_BODY_POSE, P.SetBodyPose().pack())) == []
-    assert events(s.raw(M.FEET, P.Feet(epoch=9, tick=s.vb.tick + 2, z_mm=[76] * 4).pack())) == [
-        refused(M.FEET, R.STALE)]
+    assert events(s.raw(M.POSE, P.Pose(epoch=9, tick=s.vb.tick + 2, leg=[0, 304] * 4).pack())) == [
+        refused(M.POSE, R.STALE)]
     assert s.send("BEEP", notes=[P.Note(note=12, dur_10ms=10)]) == []
     # SET_BALANCE (P1): accepted silently, BAD_ARG out of range, never stale.
     assert s.send("SET_BALANCE", enable=1, kp_q8=128, kd_ms=30, deadband_deg=2, max_corr_deg=15) == []
@@ -427,7 +430,7 @@ def test_contract_d_head():
     s.vb._tick(s.now + P.HEAD_HOLD_MS / 1000.0 + 0.01)
     assert s.vb.head_until is None
     # An epoch bump (a fall) releases it; while fallen SET_HEAD and postures
-    # but LIMP are refused FALLEN, TRICK_PLAY REFUSED_FALLEN.
+    # but LIMP are refused FALLEN.
     s.now += 1.1
     s.send("SET_HEAD", epoch=0, **hold)
     s.vb.trigger_fall(1)
@@ -449,7 +452,7 @@ def test_contract_e_queries_reply_only_never_deduped():
         assert [t for t, _ in out] == [P.MsgId.PONG] and out[0][1].token == 0x1234
     (t, h), = s.send("HELLO_REQ")
     assert t == P.MsgId.HELLO and (h.proto_major, h.proto_minor) == (P.PROTO_MAJOR, P.PROTO_MINOR)
-    assert (h.trick_capacity, h.joint_count, h.max_payload) == (P.TRICK_CAPACITY, P.JOINT_COUNT, P.MAX_PAYLOAD)
+    assert (h.pose_depth, h.joint_count, h.max_payload) == (P.POSE_DEPTH, P.JOINT_COUNT, P.MAX_PAYLOAD)
     assert [t for t, _ in s.send("STATS_REQ")] == [P.MsgId.STATS]
     assert [t for t, _ in s.send("PCA_READ")] == [P.MsgId.PCA_COUNTS]
     assert s.send("CAL_GET")[0][1].offset == [0] * 16
@@ -493,12 +496,9 @@ def test_contract_f_commands_and_dedup():
     assert acks(s.send("PARAM_SET", id=99, value=0, persist=0)) == [(M.PARAM_SET, S.BAD_ARG)]
     assert acks(s.send("PARAM_SET", id=0, value=600, persist=2)) == [(M.PARAM_SET, S.BAD_ARG)]
     assert acks(s.send("PARAM_SET", id=0, value=700, persist=1)) == [(M.PARAM_SET, S.OK)]
-    # P1 trick commands on an empty store (all-zero payloads); tests/test_trick_player.py has the rest
-    expect = {"TRICK_BEGIN": S.BAD_ARG, "TRICK_COMMIT": S.NO_TRICK, "TRICK_PLAY": S.NO_TRICK, "TRICK_STOP": S.OK}
-    for name, st in expect.items():
-        assert acks(s.send(name, epoch=s.vb.epoch) if name == "TRICK_PLAY" else s.send(name)) == [(M[name], st)], name
-    tf = P.TrickFrames(first=0, frames=[P.Keyframe(dur=1)])
-    assert acks(s.raw(M.TRICK_FRAMES, tf.pack())) == [(M.TRICK_FRAMES, S.NO_TRICK)]
+    # the trick store's commands of protocol 2 (0x20..0x24) are gone: UNKNOWN_TYPE
+    for typ in range(0x20, 0x25):
+        assert acks(s.raw(typ, b"\x00")) == [(typ, S.UNKNOWN_TYPE)], typ
     assert acks(s.send("REBOOT", magic=1)) == [(M.REBOOT, S.BAD_ARG)]
     s.vb.epoch = 7
     out = s.send("REBOOT", magic=P.REBOOT_MAGIC)

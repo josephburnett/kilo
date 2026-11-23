@@ -59,7 +59,7 @@ bool Intent::be(State goal, int8_t balance, const char* who, const char** why) {
     steps_ = fails_ = rightings_ = 0;
     asked_at_ = now;
     known_play_ = player_.result().play;
-    // a posture takes the legs from the stream: end a walk first, so no FEET re-enters GAIT under the move
+    // a posture takes the legs from the stream: end a walk first, so no POSE restarts the stream under the move
     if (walker_.active()) walker_.abort();
     enter(Phase::Settle, now);
   }
@@ -88,8 +88,7 @@ void Intent::cancel(const char* why) {
 
 void Intent::on_event(const kilo_event_t& e) {
   if (phase_ != Phase::Reflex) return;
-  if (e.code == KILO_EVENT_RECOVERED) recovered_ = true;
-  if (e.code == KILO_EVENT_RECOVERY_FAILED) recovery_failed_ = true;
+  if (e.code == KILO_EVENT_LYING) lying_ = true;
 }
 
 void Intent::finish(bool reached, const char* why) {
@@ -151,18 +150,19 @@ void Intent::body_posture(State to, uint64_t now, const char* why) {
 
 bool Intent::reflex_busy() const {
   const BodyState& b = link_.state();
-  return b.has_telemetry && (b.telemetry.mode == KILO_MODE_FALLEN || b.telemetry.mode == KILO_MODE_RECOVERING);
+  return b.has_telemetry && b.telemetry.mode == KILO_MODE_FALLEN;
 }
 
-// The placeholder step from a fallen state: wait for the body's fall reflex (it ends in STAND).
+// The placeholder step from a fallen state: wait for the body's fall reflex to let go (it lays him
+// down: no get-up of its own), or for a hand to right him.
 void Intent::wait_reflex(State st, uint64_t now) {
   from_ = st;
   if (!fallen(st)) to_ = State::Standing;
   move_ = nullptr;
-  recovered_ = recovery_failed_ = false;
+  lying_ = false;
   steps_++;
   n_.reflex_waits++;
-  logf(log_, LogLevel::Info, "intent: step %d: he is %s: waiting for the body's fall reflex to right him", steps_,
+  logf(log_, LogLevel::Info, "intent: step %d: he is %s: waiting for a hand to right him (the body has no get-up)", steps_,
        fallen(st) ? state_name(st) : "fallen (the body says)");
   char l[96];
   format(l, sizeof l, "intent step=%d kind=wait_reflex from=%s", steps_, state_name(st));
@@ -295,7 +295,7 @@ void Intent::poll() {
       }
       if (player_.busy()) return;
       const tricks::PlayResult& r = player_.result();
-      bool done = r.play == play_ && r.state == tricks::PlayState::Done && r.reason == KILO_TRICK_DONE_REASON_DONE;
+      bool done = r.play == play_ && r.state == tricks::PlayState::Done && r.reason == tricks::kDone;
       if (done) {
         // the body is in the move's end posture: latch it, so nothing else pulls him out of it
         latch(move_->end_posture, to_ == goal_ && balance_);
@@ -314,14 +314,12 @@ void Intent::poll() {
       enter(Phase::Check, now);
       return;
     case Phase::Reflex:
-      if (recovery_failed_) {
-        give_up(st, "the body's fall reflex could not right him: he needs a hand");
+      if (lying_) {
+        give_up(st, "the body's fall reflex laid him down (no get-up without the righting experiment): he needs a hand");
         return;
       }
-      if (recovered_ || (!reflex_busy() && !fallen(st) && st != State::Moving && st != State::Unknown)) {
-        // righted (by the reflex, which ends in STAND, or by a hand): latch where he is meant to be
-        if (recovered_) latch(KILO_POSTURE_STAND, goal_ == State::Standing && balance_);
-        enter(Phase::Check, now);
+      if (!reflex_busy() && !fallen(st) && st != State::Moving && st != State::Unknown) {
+        enter(Phase::Check, now);  // righted by a hand
         return;
       }
       if (now - phase_at_ >= kReflexWaitUs) give_up(st, "nothing righted him: he needs a hand");

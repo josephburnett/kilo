@@ -35,17 +35,17 @@ struct Watch : LinkListener {
   explicit Watch(Walker& w) : walker(w) {}
   void on_telemetry(const kilo_telemetry_t& t) override {
     walker.on_telemetry(t);
-    if (t.mode == KILO_MODE_GAIT) {
+    if (t.mode == KILO_MODE_STREAM) {
       gait_frames++;
       supports |= 1u << (t.support & 0xF);  // which support sets were seen
-      if (t.feet_queued > max_queued) max_queued = t.feet_queued;
+      if (t.pose_queued > max_queued) max_queued = t.pose_queued;
     }
   }
   void on_event(const kilo_event_t& e) override {
     walker.on_event(e);
     if (e.code == KILO_EVENT_GOAL_REFUSED) refused++;
     if (e.code == KILO_EVENT_FELL) fell++;
-    if (e.code == KILO_EVENT_FEET_UNDERRUN) underruns++;
+    if (e.code == KILO_EVENT_POSE_UNDERRUN) underruns++;
   }
   Walker& walker;
   uint32_t gait_frames = 0;

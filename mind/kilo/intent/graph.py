@@ -9,9 +9,10 @@ SITTING and RESTING. An EDGE is one step:
                straight to the posture's angle. Used only where no chain of
                shipped moves leads to the goal, and from UNKNOWN (settled,
                upright enough, but in no pose the model knows);
-  WAIT_REFLEX  from a fallen state: wait for the body's fall reflex to
-               right him (EVENT RECOVERED: he stands). What the mind does
-               unless it is built with the righting experiment;
+  WAIT_REFLEX  from a fallen state: wait for the body's fall reflex (it lays
+               him down, EVENT LYING: given up, he needs a hand; the body has
+               no get-up of its own) or for a hand to right him. What the mind
+               does unless it is built with the righting experiment;
   RIGHT        from a side or his back, with the righting experiment
                (KILO_RIGHTING=1, docs/righting.md): a righting move
                (kilo.intent.righting, RIGHTING below), played by the trick

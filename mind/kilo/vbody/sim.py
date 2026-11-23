@@ -14,56 +14,51 @@ both the same frames and compares the replies:
   command, EVENT GOAL_REFUSED(type, BAD_LEN) for a goal; body→Pi types ignored;
 - goals are never acked. SET_POSTURE: BAD_ARG / STALE / FALLEN / LOW_BATT /
   UNCALIBRATED refusals, LIMP and REST never stale, every posture but LIMP
-  refused FALLEN while the fall reflex holds the joints (LIMP ends it; LIMP
-  also ends a trick and a gait at once); STANCE (P2) accepted like SIT; BEEP
+  refused FALLEN while the fall reflex holds the joints (LIMP ends it; any
+  posture ends a stream at once); STANCE (P2) accepted like SIT (refused
+  UNCALIBRATED like STAND); BEEP
   accepted; SET_BALANCE (P1) accepted (BAD_ARG if enable > 1 or a band/clamp
   > 30 deg); SET_HEAD (P1, §3c layer 1): BAD_ARG for mode > 1, mode 0
   releases (never stale), mode 1 holds (STALE, FALLEN, LOW_BATT) until
   HEAD_HOLD_MS without a refresh or an epoch bump: TELEMETRY flag HEAD_HELD
-  and head owner PI_HOLD (unless a trick owns the head or a reflex holds
-  it); SET_EYES is kept as `eyes` (mask, r, g, b; HELLO caps EYES), or
+  and head owner PI_HOLD (unless a reflex holds it); SET_EYES is kept as `eyes` (mask, r, g, b; HELLO caps EYES), or
   refused UNKNOWN_TYPE with eyes=False (a firmware before the eyes,
   2026-11-17). At most one GOAL_REFUSED per goal
   type per second;
-- GAIT (P2, §3d; protocol 2.0): the body plays the mind's FEET stream
-  (kilo.vbody.feet: the queue, tick matching, late and too-early drops, the
-  slew-limited play, the hold and the settle on an underrun, the balance
-  through the support feet) on the walking physics (kilo.vbody.physics: a
-  point mass on four feet that tips over an edge of its support as an
-  inverted pendulum, with the servo lag ``lag_ms``). FEET is never acked. A
-  FEET is refused (EVENT GOAL_REFUSED, rate-limited like a goal) BAD_ARG
-  (x, z, pitch or roll (+-30 deg) out of range, support bits above 3),
-  STALE, FALLEN, LOW_BATT or UNCALIBRATED (config DEFAULTED, as STAND); the
-  first accepted one enters GAIT from STANCE's feet (the posture becomes
-  STANCE, also from LIMP or REST: the legs are powered; a playing trick
-  keeps the legs it moves): mode GAIT, flag GAIT, leg owner GAIT, TELEMETRY's
-  measured attitude from the physics (plus ``imu_offset``), ref_* (0 while
-  the balance is off), corr_*, feet_queued and support from the player,
-  flag BALANCE_HELD while a foot is up. Outside GAIT, support is all four in
-  SIT, STAND and STANCE, else 0. GAIT ends with EVENT GAIT_STOPPED: arg 0 on a SET_POSTURE (the
+- the POSE stream (protocol 3.0, docs/movement-engine.md): the body plays
+  the mind's stream of poses (kilo.vbody.pose: the queue in tick order, the
+  drops, the move toward each key that reaches it on its tick, straight or
+  cosine, foot-mode and joint-mode legs, the hold and the settle on an
+  underrun, the balance through the support feet) on the walking physics
+  (kilo.vbody.physics: a point mass on four feet that tips over an edge of
+  its support as an inverted pendulum, with the servo lag ``lag_ms``).
+  POSE is never acked. It is refused (EVENT GOAL_REFUSED, rate-limited like
+  a goal) BAD_ARG (a foot outside x -480..480, z 60..440 q2, a joint angle
+  of -32768, pitch or roll beyond +-30 deg, support bits above 3, an unknown
+  flag), STALE, FALLEN (unless FALL_OK: it takes the joints from the fall
+  reflex), LOW_BATT, UNCALIBRATED (config DEFAULTED, as STAND), BUSY (LIMP,
+  CALIB, or another reflex). The first key accepted starts the stream (a
+  stream of feet makes the posture STANCE): mode STREAM, flag STREAM, leg
+  owner STREAM, TELEMETRY's measured attitude from the physics (plus
+  ``imu_offset``), ref_* (0 while the balance is off), corr_*, pose_queued,
+  support and limited from the player, flag BALANCE_HELD while a foot is
+  up. Outside a stream, support is all four in SIT, STAND and STANCE, else
+  0. A stream ends with EVENT STREAM_STOPPED: arg 0 on a SET_POSTURE (the
   posture takes the legs), an epoch bump (watchdog, fall, low battery) or a
   reflex (at once), arg 1 the tick the settle after an underrun has every
-  foot down (posture STANCE, mode IDLE). In STANCE outside a reflex the
-  physics goes on for the arbiter's XFADE_TICKS crossfade to STANCE's feet
-  (``xfade``). Past 35 degrees of
-  tilt the physics falls: the fall reflex as ``trigger_fall``. SET_BODY_POSE:
-  STALE, FALLEN, LOW_BATT (the spec gives its fields no range: no BAD_ARG);
-  the pose tilts the reported pitch/roll in STANCE; an epoch bump resets it;
+  foot down (posture STANCE, mode IDLE; a stream with a joint-mode leg keeps
+  holding). In STANCE outside a reflex the physics goes on for the
+  arbiter's XFADE_TICKS crossfade to STANCE's feet (``xfade``). Past 35
+  degrees of tilt the physics falls: the fall reflex as ``trigger_fall``
+  (not while a FALL_OK stream plays). SET_BODY_POSE: STALE, FALLEN,
+  LOW_BATT (the spec gives its fields no range: no BAD_ARG); the pose tilts
+  the reported pitch/roll in STANCE; an epoch bump resets it;
 - JOINTS at the SET_STREAM joints divider: fake angles (LIMP: -32768);
 - balance (P1): the SET_POSTURE balance flag or SET_BALANCE enable (both
   cleared by an epoch bump; SET_BALANCE's gains stay) turns it on in SIT and
   STAND outside any reflex; TELEMETRY
   flags bit 0 mirrors that, and the simulated pitch/roll wobble shrinks. The
   controller itself is not simulated;
-- tricks (P1, docs §3e): the body's upload rules (TRICK_BEGIN / TRICK_FRAMES
-  in order / TRICK_COMMIT with the CRC, idempotent as the cache check), the
-  TRICK_PLAY gating (STALE, NO_TRICK, BAD_ARG, BUSY, LOW_BATT, UNCALIBRATED)
-  and the player's tick-exact timing (kilo.tricks.player, the same stepping
-  as core/keyframe.cpp), so EVENT TRICK_DONE(reason << 8 | id) arrives on the
-  same tick as on the body: DONE, STOPPED (TRICK_STOP, SET_POSTURE LIMP),
-  PREEMPTED (an epoch bump), FELL (the simulated fall). The posture becomes
-  the trick's end posture; TELEMETRY shows mode TRICK, the TRICK flag, the
-  frame and the TRICK owner. Joint angles are not simulated;
 - queries answer with their data reply only (ACK only on failure), never
   de-duplicated;
 - other commands get exactly one ACK; a repeat of the last executed
@@ -71,9 +66,10 @@ both the same frames and compares the replies:
   executed again. BAD_ARG is checked before EEPROM_BUSY;
 - the two-stage watchdog (stop + epoch bump + EVENT WATCHDOG, REST, LIMP)
   driven by the WD_* params; a simulated fall (``trigger_fall``: EVENT
-  FELL(+-1) with the epoch bump, 1 s FALLEN, 1 s RECOVERING, then STAND (REST
-  if uncalibrated) and EVENT RECOVERED; the body's rc timing is not
-  simulated); TRICK_PLAY is refused REFUSED_FALLEN meanwhile;
+  FELL(+-1) with the epoch bump, 1 s FALLEN holding the pose (the body
+  waits until still), then LYING: REST, EVENT LYING(the FELL arg), LIMP
+  REST_MOVE_S + FALL_LIMP_S later and the reflex lets go; the body does not
+  get up by itself: a POSE with FALL_OK takes the joints from the reflex);
 - the IR remote (``ir_key``): EVENT IR_KEY as the body's decoder sends it;
 - boot: unsolicited HELLO and EVENT BOOT; TELEMETRY at the TELEM_DIV divider.
   ``boot_delay`` (seconds, default 0) mimics the real body's 0.3-2 s init:
@@ -109,11 +105,9 @@ from kilo.link import consts
 from kilo.link.codec import Codec, DecodeError, default_codec
 from kilo.link.messages import Messages, default_messages
 from kilo.link.transport import FdTransport, Transport
-from kilo.protocol import kilo_link_codec as LC
 from kilo.protocol import kilo_protocol as P
 from kilo.planner.model import BodyModel
-from kilo.tricks.player import Player
-from kilo.vbody.feet import FeetPlayer
+from kilo.vbody.pose import PosePlayer
 
 EV = consts.EventCode
 
@@ -137,12 +131,32 @@ FAKE_ANGLES = {"REST": (0, 0, 0, -60, -60, 60, 60, 60, 60, -60, -60),
 FAKE_STAND = (0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30)
 HEAD_HOLD_S = P.HEAD_HOLD_MS / 1000.0
 REST_MOVE_S = 1.0  # REST_MOVE_TICKS on the body: reflex moves to REST take 1 s
-FEET_ATT_MAX = 480  # FEET pitch / roll range, 1/16 deg (+-30 deg; feet.cpp feet_check)
+POSE_ATT_MAX = 480  # POSE pitch / roll range, 1/16 deg (+-30 deg; stream.cpp stream_check)
+FALL_LIMP_S = 2.0   # the fall reflex: LYING's LIMP comes this long after its 1 s REST move (reflex.h)
 
 
 def _a16(deg: float) -> int:
     """Degrees -> the wire's 1/16 degree, clamped to i16."""
     return max(-32768, min(32767, int(round(deg * 16))))
+
+
+def _pose_ok(msg: Any) -> bool:
+    """POSE's field check (core/stream.cpp stream_check): foot-mode legs
+    within x -480..480, z 60..440 q2, joint-mode legs without -32768, pitch
+    and roll within +-30 deg, support bits 0-3, known flags."""
+    fl = int(msg.flags)
+    if fl & ~0x7F:
+        return False
+    for i in range(4):
+        a, b = msg.leg[2 * i], msg.leg[2 * i + 1]
+        if fl >> i & 1:
+            if a == -32768 or b == -32768:
+                return False
+        elif not (-480 <= a <= 480 and 60 <= b <= 440):
+            return False
+    if not (-POSE_ATT_MAX <= msg.pitch <= POSE_ATT_MAX and -POSE_ATT_MAX <= msg.roll <= POSE_ATT_MAX):
+        return False
+    return not msg.support & 0xF0
 
 
 def boot_epoch(last_epoch: int) -> int:
@@ -155,37 +169,6 @@ def boot_epoch(last_epoch: int) -> int:
 BALANCE_DEFAULTS = {"enable": 0, **P.BALANCE_DEFAULTS}
 BALANCE_MAX_DEG = P.BALANCE_LIMIT_DEG
 BALANCE_POSTURES = ("SIT", "STAND")
-# Tricks (body/src/core/keyframe.cpp).
-TRICK_DRIVEN_MASK = 0xFF07          # joint ids 0-2 and 8-15
-TRICK_END_POSTURES = frozenset({P.Posture.REST, P.Posture.SIT, P.Posture.STAND, P.Posture.CALIB, P.Posture.ZERO})
-TRICK_FLAGS = int(P.TrickFlags.BALANCE | P.TrickFlags.FALL_OK)
-TDR = P.TrickDoneReason
-
-
-class TrickStore:
-    """The body's one-trick RAM store: header, frames as sent, running CRC."""
-
-    def __init__(self) -> None:
-        self.state = "empty"  # empty, loading, ready
-        self.hdr: Any = None
-        self.frames: list[Any] = []
-        self.crc = 0xFFFF
-        self.player: Player | None = None
-        self.mirror = False
-
-    @property
-    def running(self) -> bool:
-        return self.player is not None and self.player.running
-
-    def claims(self, joint: int) -> bool:
-        """The TRICK owner holds joint id ``joint`` (L/R swapped when mirrored)."""
-        if not self.running:
-            return False
-        if self.mirror and joint >= 8:
-            joint ^= 1
-        return bool(self.hdr.joint_mask >> joint & 1)
-
-
 def open_pty() -> tuple[FdTransport, str, int]:
     """Open a pty pair. Returns (transport on the master, slave path, slave fd).
 
@@ -209,13 +192,13 @@ class VirtualBody:
                  model: BodyModel | None = None, lag_ms: float | None = None, tau_ms: float | None = None,
                  imu_offset: tuple[float, float] = (0.0, 0.0), eyes: bool = True):
         self.t = transport
-        # p2=False: the P1 body (FEET / SET_BODY_POSE refused UNKNOWN_TYPE,
-        # SET_POSTURE STANCE BAD_ARG), for the cross-check against a firmware
-        # without GAIT.
+        # p2=False: a body without the stream (POSE / SET_BODY_POSE refused
+        # UNKNOWN_TYPE, SET_POSTURE STANCE BAD_ARG), for the cross-check
+        # against a firmware that does not play POSE.
         self.p2 = p2
         # Walking physics: the body model (kilo.planner.model; masses and
         # lengths), the servo lag (default: the model's) and a constant IMU
-        # mounting error added to the measured attitude in GAIT.
+        # mounting error added to the measured attitude while it streams.
         self.model = model or BodyModel()
         self.lag_ms = lag_ms
         self.tau_ms = tau_ms
@@ -278,8 +261,8 @@ class VirtualBody:
         self.wd_armed = False
         self.wd_stage = 0  # 0 ok, 1 stopped, 2 rest, 3 limp
         self.last_rx_at: float | None = None
-        self.fall_until: float | None = None
-        self.recover_until: float | None = None
+        self.fall_until: float | None = None   # FALLEN: holding the pose until this (the body: until still)
+        self.lying_until: float | None = None  # LYING: REST, then LIMP at this time and the reflex lets go
         self.fall_side = 1
         self.goals: dict[str, bytes] = {}
         self.balance_req = False  # SET_POSTURE flags bit 0
@@ -288,51 +271,46 @@ class VirtualBody:
         self.head: tuple[int, int, int] = (0, 0, 0)  # pan, tilt, tail a16 of the hold
         self.refused_at: dict[int, float] = {}
         self.save_until: float | None = None
-        self.trick = TrickStore()
-        self.feet: FeetPlayer | None = None  # GAIT: the FEET player
-        self.xfade: FeetPlayer | None = None  # after GAIT: IDLE STANCE's crossfade from the stream's legs
-        self.feet_late = 0
-        self.feet_underruns = 0
-        self.feet_refused: list[tuple[int, int]] = []  # (tick, reason) of refused FEET (tests)
+        self.stream: PosePlayer | None = None  # the POSE stream's player while it holds the joints
+        self.xfade: PosePlayer | None = None   # after a stream: IDLE STANCE's crossfade from the stream's legs
+        self.pose_dropped = 0
+        self.pose_underruns = 0
+        self.pose_refused: list[tuple[int, int]] = []  # (tick, reason) of refused POSE (tests)
         self.max_tilt = 0.0  # the largest |pitch| or |roll| the walking physics reached (tests)
         self.pose: tuple[int, int, int, int] = (0, 0, 0, 0)  # SET_BODY_POSE pitch, roll (a16), dheight, xshift
-        self.gait_stops: list[int] = []  # EVENT GAIT_STOPPED args sent (tests)
+        self.stream_stops: list[int] = []  # EVENT STREAM_STOPPED args sent (tests)
         self.booted_at = self.clock()
 
     # ---- derived state --------------------------------------------------------
     @property
     def mode(self) -> int:
-        if self.fall_until is not None:
-            return P.Mode.FALLEN
-        if self.recover_until is not None:
-            return P.Mode.RECOVERING
+        """TELEMETRY.mode in the body's order (body.cpp body_mode)."""
         if self.batt_level >= P.BatteryLevel.LOW:
             return P.Mode.LOW_BATT
         if self.wd_stage:
             return P.Mode.LINK_LOST
-        if self.trick.running:
-            return P.Mode.TRICK
-        if self.feet is not None:
-            return P.Mode.GAIT
+        if self.fallen:
+            return P.Mode.FALLEN
+        if self.stream is not None:
+            return P.Mode.STREAM
         return P.Mode.LIMP if self.posture == "LIMP" else P.Mode.IDLE
 
     @property
     def reflex(self) -> bool:
-        return (self.wd_stage >= 2 or self.fall_until is not None or self.recover_until is not None
-                or self.batt_level >= P.BatteryLevel.LOW)
+        return self.wd_stage >= 2 or self.fallen or self.batt_level >= P.BatteryLevel.LOW
 
     @property
     def fallen(self) -> bool:
-        """The fall reflex holds the joints (FALLEN or RECOVERING)."""
-        return self.fall_until is not None or self.recover_until is not None
+        """The fall reflex holds the joints (FALLEN or LYING)."""
+        return self.fall_until is not None or self.lying_until is not None
 
     @property
     def balance_active(self) -> bool:
-        """TELEMETRY flags bit 0, as the body gates it (§3c): requested, SIT, STAND or GAIT, no reflex."""
+        """TELEMETRY flags bit 0, as the body gates it (§3c): requested, SIT, STAND or a stream, no reflex."""
         return ((self.balance_req or bool(self.balance["enable"]))
-                and (self.posture in BALANCE_POSTURES or self.feet is not None) and not self.reflex)
+                and (self.posture in BALANCE_POSTURES or self.stream is not None) and not self.reflex)
 
-    def _epoch_bump(self, trick_reason: int = TDR.PREEMPTED) -> None:
+    def _epoch_bump(self) -> None:
         self.epoch = (self.epoch + 1) & 0xFF
         self.goals.clear()
         self.balance_req = False  # the posture flag is a motion goal
@@ -341,34 +319,23 @@ class VirtualBody:
         self.balance["enable"] = 0
         self.head_until = None    # the head hold too
         self.pose = (0, 0, 0, 0)  # and the body pose
-        self._trick_end(trick_reason)  # TRICK_DONE carries the new epoch
-        self._gait_end(0, "stopped (epoch bump)")  # GAIT_STOPPED too; the legs stay in STANCE
+        self._stream_end(0, "stopped (epoch bump)")  # STREAM_STOPPED carries the new epoch
 
-    def _gait_end(self, arg: int, why: str) -> None:
-        """GAIT is over: EVENT GAIT_STOPPED(arg) once (with the current epoch).
-        In STANCE outside a reflex IDLE takes the legs from where they are
-        (the arbiter's XFADE_TICKS crossfade, on the physics); a reflex or
-        another posture takes them at once (the physics ends)."""
-        g = self.feet
+    def _stream_end(self, arg: int, why: str) -> None:
+        """The stream is over: EVENT STREAM_STOPPED(arg) once (with the
+        current epoch). In STANCE outside a reflex IDLE takes the legs from
+        where they are (the arbiter's XFADE_TICKS crossfade, on the physics);
+        a reflex or another posture takes them at once (the physics ends)."""
+        g = self.stream
         if g is None:
             return
-        self.feet = None
+        self.stream = None
         if self.posture == "STANCE" and not self.reflex:
             g.handover(self.params[P.ParamId.XFADE_TICKS])
             self.xfade = g
-        self.gait_stops.append(arg)
-        self._event(EV.GAIT_STOPPED, arg)
-        self._say(f"gait {why}")
-
-    def _trick_end(self, reason: int) -> None:
-        """End the playing trick: TRICK_DONE(reason << 8 | id), the end posture."""
-        tr = self.trick
-        if not tr.running:
-            return
-        tr.player = None
-        self.posture = POSTURE_NAMES[tr.hdr.end_posture]
-        self._event(EV.TRICK_DONE, (int(reason) << 8) | tr.hdr.trick_id)
-        self._say(f"trick {tr.hdr.trick_id} {TDR(reason).name.lower()}")
+        self.stream_stops.append(arg)
+        self._event(EV.STREAM_STOPPED, arg)
+        self._say(f"stream {why}")
 
     def save_busy(self, now: float | None = None) -> bool:
         now = self.clock() if now is None else now
@@ -414,7 +381,7 @@ class VirtualBody:
             if self.fall_until is not None:
                 return
             self.fall_side = side
-            self._epoch_bump(TDR.FELL)
+            self._epoch_bump()
             self.fall_until = self.clock() + 1.0
             self._event(EV.FELL, side)
         self._say("fell")
@@ -513,7 +480,7 @@ class VirtualBody:
                    last_alive_tick=self.last_alive_tick,
                    caps=int(P.HelloCaps.BUZZER | P.HelloCaps.IR | P.HelloCaps.DMP | P.HelloCaps.ULTRASONIC
                             | (P.HelloCaps.EYES if self.has_eyes else 0)),
-                   max_payload=P.MAX_PAYLOAD, trick_capacity=P.TRICK_CAPACITY, joint_count=P.JOINT_COUNT,
+                   max_payload=P.MAX_PAYLOAD, pose_depth=P.POSE_DEPTH, joint_count=P.JOINT_COUNT,
                    config_state=self.config_state, epoch=self.epoch)
 
     def _housekeeping(self, now: float) -> None:
@@ -531,15 +498,17 @@ class VirtualBody:
         if self.fall_after is not None and now - self._start_time >= self.fall_after:
             self.fall_after = None
             self.trigger_fall()
-        # fall / recovery timeline
+        # the fall reflex: FALLEN (holding the pose) -> LYING (REST, then LIMP; the reflex lets go)
         if self.fall_until is not None and now >= self.fall_until:
             self.fall_until = None
-            self.recover_until = now + 1.0
-        if self.recover_until is not None and now >= self.recover_until:
-            self.recover_until = None
-            self.posture = "REST" if self.config_state == P.ConfigState.DEFAULTED else "STAND"
-            self._event(EV.RECOVERED, 0)
-            self._say("recovered")
+            self.lying_until = now + REST_MOVE_S + FALL_LIMP_S
+            self.posture = "REST"
+            self._event(EV.LYING, self.fall_side)
+            self._say("lying")
+        if self.lying_until is not None and now >= self.lying_until:
+            self.lying_until = None
+            self.posture = "LIMP"
+            self._say("lying: limp")
         if self.head_until is not None and now >= self.head_until:
             self.head_until = None  # HEAD_HOLD_MS without a refresh
             self._say("head released (no refresh)")
@@ -565,17 +534,13 @@ class VirtualBody:
                 self.wd_stage = 3
                 self.posture = "LIMP"
                 self._say("watchdog: limp")
-        # the keyframe player steps after the reflexes, as in body_tick
-        if self.trick.running and self.trick.player.step():
-            self.trick.player.running = True  # _trick_end ends a running trick
-            self._trick_end(TDR.DONE)
-        # the FEET player (body.cpp): a reflex ends the stream at once
-        if self.feet is not None and self.reflex:
-            self._gait_end(0, "ended: a reflex took the legs")
+        # the POSE player (body.cpp): a reflex ends the stream at once
+        if self.stream is not None and self.reflex:
+            self._stream_end(0, "ended: a reflex took the joints")
         if self.reflex:
             self.xfade = None
-        if self.feet is not None:
-            self._walk_tick()
+        if self.stream is not None:
+            self._stream_tick()
         elif self.xfade is not None:
             self._xfade_tick()
         if self.joints_div and self.tick % self.joints_div == 0:
@@ -594,28 +559,28 @@ class VirtualBody:
         if self.balance_active:
             flags |= F.BALANCE_ACTIVE
             pitch, roll = pitch * 0.25, roll * 0.25  # the body holds itself level
-        g = self.feet
+        g = self.stream
         rate_p, rate_r = 1.4 * math.cos(t * 0.7), 1.6 * math.cos(t * 1.1)
         ref = corr = (0.0, 0.0)
-        queued, support = 0, 0
+        queued, support, limited = 0, 0, 0
         if g is None and self.xfade is not None:  # STANCE taking the legs from the stream: still the physics
             ph = self.xfade.physics
             pitch, roll = ph.pitch + self.imu_offset[0], ph.roll + self.imu_offset[1]
             rate_p, rate_r = ph.rates
             corr = (self.xfade.corr[0], self.xfade.corr[1])
-        elif g is not None:  # walking: the physics' attitude
+        elif g is not None:  # streaming: the physics' attitude
             ph = g.physics
             pitch, roll = ph.pitch + self.imu_offset[0], ph.roll + self.imu_offset[1]
             rate_p, rate_r = ph.rates
             ref = g.ref if self.balance_active else (0.0, 0.0)  # 0 while the balance is off
             corr = (g.corr[0], g.corr[1])
-            queued, support = g.queued(self.tick), g.support
-            if g.support != 0xF and self.balance_active:
+            queued, support, limited = g.queued(), g.support, g.limited
+            if g.support != 0xF and self.balance_active and g.feet_only:
                 flags |= F.BALANCE_HELD  # held while a foot is up
         elif self.posture == "STANCE":
             pitch += self.pose[0] / 16.0  # the body pose tilts the body (IK, §3d pose terms)
             roll += self.pose[1] / 16.0
-        if g is None and self.posture in ("SIT", "STAND", "STANCE") and not self.reflex and not self.trick.running:
+        if g is None and self.posture in ("SIT", "STAND", "STANCE") and not self.reflex:
             support = 0xF  # IDLE standing or sitting: all four
         if self.fall_until is not None:
             roll = 85.0 * self.fall_side
@@ -630,32 +595,34 @@ class VirtualBody:
         owner = int(P.Owner.REFLEX if self.reflex else P.Owner.IDLE)
         leg = head = owner
         if g is not None and not self.reflex:
-            flags |= F.GAIT
-            leg = int(P.Owner.GAIT)
-        if self.trick.running:
-            flags |= F.TRICK
-            leg = int(P.Owner.TRICK) if self.trick.claims(8) else leg
-            head = int(P.Owner.TRICK) if self.trick.claims(0) else head
+            flags |= F.STREAM
+            leg = int(P.Owner.STREAM)
+            if g.cur.head[0] != -32768:
+                head = int(P.Owner.STREAM)
         if self.head_until is not None:
             flags |= F.HEAD_HELD
-            if head in (P.Owner.IDLE, P.Owner.GAIT) and self.head[0] != -32768:
+            if head == P.Owner.IDLE and self.head[0] != -32768:
                 head = int(P.Owner.PI_HOLD)
         self._send("TELEMETRY", tick=self.tick, pitch=_a16(pitch), roll=_a16(roll),
                    rate_pitch=_a16(rate_p), rate_roll=_a16(rate_r),
                    rate_yaw=0, dist_mm=600 + int(100 * math.sin(t * 0.3)), batt_mv=self.batt_mv,
                    mode=int(self.mode), owners=leg | head << 4, flags=int(flags),
                    last_rx_seq=self.last_rx_seq,
-                   trick_frame=self.trick.player.frame if self.trick.running else 0xFF,
+                   limited=limited,
                    ref_pitch=_a16(ref[0]), ref_roll=_a16(ref[1]), corr_pitch=_a16(corr[0]),
-                   corr_roll=_a16(corr[1]), feet_queued=queued, support=support, tick_load=31,
+                   corr_roll=_a16(corr[1]), pose_queued=queued, support=support, tick_load=31,
                    rx_err=(self.rx_crc_err + self.rx_overflow) & 0xFF, epoch=self.epoch)
 
     def joint_angles(self) -> list[float | None]:
         """The fake output angles in degrees (canonical order; None = limp)."""
-        g = self.feet
-        if self.posture == "LIMP" and g is None and not self.trick.running:
+        g = self.stream
+        if self.posture == "LIMP" and g is None:
             return [None] * P.JOINT_COUNT
         a = [float(v) for v in FAKE_ANGLES.get(self.posture, FAKE_STAND)]
+        if g is not None:  # the stream's head
+            for i, v in enumerate(g.cur.head):
+                if v != -32768:
+                    a[i] = v / 16.0
         g = g if g is not None else self.xfade
         if g is not None:  # the IK angles of the played feet (core/ik.h: before the per-joint dir)
             for leg in range(4):
@@ -737,7 +704,7 @@ class VirtualBody:
         if cls.KIND is P.Kind.GOAL:
             self._goal(name, item.type, msg, item.payload, now)
         elif cls.KIND is P.Kind.STREAM:
-            self._feet_msg(msg, now)
+            self._pose_msg(msg, now)
         elif cls.IS_QUERY:
             self._query(name, item, msg)
         else:
@@ -783,20 +750,19 @@ class VirtualBody:
             # The fall reflex holds the joints; only LIMP (the emergency stop) ends it.
             if msg.posture != P.Posture.LIMP:
                 return self._refuse(type, R.FALLEN, now)
-            self.fall_until = self.recover_until = None
+            self.fall_until = self.lying_until = None
         if not safe:
             if self.batt_level >= P.BatteryLevel.LOW:
                 return self._refuse(type, R.LOW_BATT, now)
-            if msg.posture == P.Posture.STAND and self.config_state == P.ConfigState.DEFAULTED:
+            if (msg.posture in (P.Posture.STAND, P.Posture.STANCE)
+                    and self.config_state == P.ConfigState.DEFAULTED):
                 return self._refuse(type, R.UNCALIBRATED, now)
         self.goals[name] = payload
         self.balance_req = bool(msg.flags & P.PostureFlags.BALANCE)
-        if msg.posture == P.Posture.LIMP:
-            self._trick_end(TDR.STOPPED)  # LIMP is the emergency stop
         new = POSTURE_NAMES[msg.posture]
-        if self.feet is not None:  # a posture takes the legs from the stream
+        if self.stream is not None:  # a posture takes the joints from the stream
             self.posture = new
-            self._gait_end(0, f"stopped (posture {new})")
+            self._stream_end(0, f"stopped (posture {new})")
         if new != self.posture:
             self._say(f"posture {new}")
         self.posture = new
@@ -824,49 +790,54 @@ class VirtualBody:
         self.head_until = now + HEAD_HOLD_S
         return None
 
-    def _feet_msg(self, msg: Any, now: float) -> None:
-        """FEET (stream, never acked): gated like a motion goal, then queued;
-        the first one accepted enters GAIT."""
+    def _pose_msg(self, msg: Any, now: float) -> None:
+        """POSE (stream, never acked): checked and gated in the body's order
+        (core/body.cpp body_pose), then queued (or dropped); the first one
+        accepted starts the stream."""
         R = P.GoalRefusedReason
-        t = P.MsgId.FEET
+        t = P.MsgId.POSE
         reason = None
+        fl = int(msg.flags)
+        fall_ok = bool(fl & P.PoseFlags.FALL_OK)
         if not self.p2:
             reason = R.UNKNOWN_TYPE
-        elif (any(not -60 <= v <= 60 for v in msg.x_mm) or any(not 30 <= v <= 95 for v in msg.z_mm)
-              or not -FEET_ATT_MAX <= msg.pitch <= FEET_ATT_MAX or not -FEET_ATT_MAX <= msg.roll <= FEET_ATT_MAX
-              or msg.support > 0xF):
+        elif not _pose_ok(msg):
             reason = R.BAD_ARG
         elif msg.epoch != self.epoch:
             reason = R.STALE
-        elif self.fallen:
+        elif self.fallen and not fall_ok:
             reason = R.FALLEN
         elif self.batt_level >= P.BatteryLevel.LOW:
             reason = R.LOW_BATT
         elif self.config_state == P.ConfigState.DEFAULTED:
             reason = R.UNCALIBRATED
+        elif self.posture in ("LIMP", "CALIB"):
+            reason = R.BUSY
+        if reason is None and self.fallen:  # the mind's get-up takes the joints from the fall reflex
+            self.fall_until = self.lying_until = None
+            self._say("fall reflex: a FALL_OK POSE took the joints")
+        if reason is None and self.reflex:  # another reflex holds the joints
+            reason = R.BUSY
         if reason is not None:
-            self.feet_refused.append((msg.tick, int(reason)))
+            self.pose_refused.append((msg.tick, int(reason)))
             return self._refuse(t, reason, now)
-        g = self.feet
+        g = self.stream
         if g is None:
-            g = FeetPlayer(self.tick, self.model, lag_ms=self.lag_ms, tau_ms=self.tau_ms)
+            g = PosePlayer(self.tick, self.model, lag_ms=self.lag_ms, tau_ms=self.tau_ms)
         if not g.offer(msg, self.tick):
-            self.feet_late += 1
+            self.pose_dropped += 1
             return None
-        if self.feet is None:  # GAIT (a playing trick keeps the legs it moves)
-            self.feet = g
+        if self.stream is None:
+            self.stream = g
             self.xfade = None
-            # body_feet: IDLE becomes STANCE (also from LIMP or REST: the legs
-            # are powered); a reflex keeps its posture and ends the stream on
-            # its next tick
-            if not self.reflex:
+            if not fl & 0x0F:  # a stream of feet: IDLE's posture is STANCE
                 self.posture = "STANCE"
-            self._say(f"gait: FEET from tick {msg.tick}")
+            self._say(f"stream: POSE from tick {msg.tick}")
         return None
 
-    def _walk_tick(self) -> None:
-        """GAIT: play this tick's FEET on the physics."""
-        g = self.feet
+    def _stream_tick(self) -> None:
+        """A stream: play this tick's pose on the physics."""
+        g = self.stream
         ph = g.physics
         on = bool(self.balance_req or self.balance["enable"])
         what, arg = g.tick(self.tick, (ph.pitch + self.imu_offset[0], ph.roll + self.imu_offset[1]), ph.rates,
@@ -874,13 +845,14 @@ class VirtualBody:
         ph.step()
         self.max_tilt = max(self.max_tilt, ph.max_tilt)
         if what == "underrun":
-            self.feet_underruns += 1
-            self._event(EV.FEET_UNDERRUN, arg)
-            self._say(f"FEET underrun ({arg} ticks since the last)")
+            self.pose_underruns += 1
+            self._event(EV.POSE_UNDERRUN, arg)
+            self._say(f"POSE underrun ({arg} ticks since the last)")
         elif what == "settled":
-            self._gait_end(1, "settled after an underrun")
+            self.posture = "STANCE"
+            self._stream_end(1, "settled after an underrun")
             return
-        if ph.fallen:
+        if ph.fallen and not g.fall_ok:  # (detection is off while a FALL_OK stream plays)
             self.trigger_fall(1 if ph.roll >= 0 else -1)
 
     def _xfade_tick(self) -> None:
@@ -934,7 +906,7 @@ class VirtualBody:
             self._send("STATS", uptime_s=int(self.clock() - self.booted_at), overruns=0,
                        max_tick_us=3100, stack_free_min=420, rx_crc_err=self.rx_crc_err,
                        rx_overflow=self.rx_overflow, i2c_err=0, imu_stale=0, dmp_rate_hz=100,
-                       feet_late=self.feet_late & 0xFFFF, feet_underruns=self.feet_underruns & 0xFFFF)
+                       pose_dropped=self.pose_dropped & 0xFFFF, pose_underruns=self.pose_underruns & 0xFFFF)
         elif t == M.PCA_READ:
             off = P.PCA_FULL_OFF_BIT
             self._send("PCA_COUNTS", counts=[off if self.posture == "LIMP" else 1500] * P.CHANNEL_COUNT)
@@ -1016,71 +988,7 @@ class VirtualBody:
                 self.params_saved[p.id] = msg.value
                 self._start_save(now)
             return S.OK
-        if t in (M.TRICK_BEGIN, M.TRICK_FRAMES, M.TRICK_COMMIT, M.TRICK_PLAY, M.TRICK_STOP):
-            return self._trick_command(t, msg)
         return S.UNKNOWN_TYPE
-
-    def _trick_command(self, t: int, msg: Any) -> int:
-        """TRICK_* with the body's checks, in the body's order (core/keyframe.cpp, body.cpp)."""
-        M, S = P.MsgId, P.AckStatus
-        tr = self.trick
-        if t == M.TRICK_BEGIN:
-            if tr.running:
-                return S.BUSY
-            if (not 1 <= msg.n_frames <= P.TRICK_CAPACITY or msg.loop_end >= msg.n_frames
-                    or msg.loop_start > msg.loop_end or not msg.joint_mask or msg.joint_mask & ~TRICK_DRIVEN_MASK
-                    or msg.flags & ~TRICK_FLAGS or msg.end_posture not in TRICK_END_POSTURES):
-                return S.BAD_ARG
-            tr.hdr, tr.frames, tr.crc, tr.state = msg, [], 0xFFFF, "loading"
-            return S.OK
-        if t == M.TRICK_FRAMES:
-            if tr.running:
-                return S.BUSY
-            if tr.state != "loading":
-                return S.NO_TRICK
-            if msg.first != len(tr.frames) or msg.first + len(msg.frames) > tr.hdr.n_frames:
-                return S.BAD_ARG
-            if any(f.dur == 0 or (f.flags & 3) == 3 for f in msg.frames):
-                return S.BAD_ARG
-            for f in msg.frames:
-                tr.crc = LC.crc16(f.pack(), tr.crc)
-                tr.frames.append(f)
-            return S.OK
-        if t == M.TRICK_COMMIT:
-            if tr.state == "empty" or msg.trick_id != tr.hdr.trick_id:
-                return S.NO_TRICK
-            if len(tr.frames) != tr.hdr.n_frames:
-                return S.BAD_ARG
-            if msg.crc16 != tr.crc:
-                return S.CRC_MISMATCH
-            tr.state = "ready"
-            return S.OK
-        if t == M.TRICK_STOP:
-            self._trick_end(TDR.STOPPED)
-            return S.OK
-        # TRICK_PLAY
-        if msg.epoch != self.epoch:
-            return S.STALE
-        if tr.state != "ready" or msg.trick_id != tr.hdr.trick_id:
-            return S.NO_TRICK
-        if msg.speed_q6 < 16 or msg.flags & ~int(P.TrickPlayFlags.MIRROR):
-            return S.BAD_ARG
-        if tr.running:
-            return S.BUSY
-        if self.fallen:
-            return S.REFUSED_FALLEN
-        if self.batt_level >= P.BatteryLevel.LOW:
-            return S.REFUSED_LOW_BATT
-        if self.reflex or self.posture in ("LIMP", "CALIB"):
-            return S.BUSY
-        if self.config_state == P.ConfigState.DEFAULTED:
-            return S.UNCALIBRATED
-        h = tr.hdr
-        tr.mirror = bool(msg.flags & P.TrickPlayFlags.MIRROR)
-        tr.player = Player([f.dur for f in tr.frames], [f.hold for f in tr.frames], h.loop_start, h.loop_end,
-                           h.repeats, msg.speed_q6)
-        self._say(f"trick {h.trick_id} play x{msg.speed_q6 / 64:g}" + (" mirrored" if tr.mirror else ""))
-        return S.OK
 
     # ---- tx ------------------------------------------------------------------------
     def _ack(self, seq: int, type: int, status: int) -> None:

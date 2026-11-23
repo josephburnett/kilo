@@ -1,7 +1,7 @@
 """The step planner: one tick of the whole body at a time.
 
 ``Planner.next()`` returns the plan for the next tick: where each foot is
-(x, z per leg, as FEET carries them), the feet on the ground, and the
+(x, z per leg in whole mm, as the POSE keys carry them), the feet on the ground, and the
 attitude the body is predicted to have at that tick. The streamer
 (kilo.planner.walker) calls it once per tick, about five ticks ahead of the
 body, and tells it what the body reports (``observe``) in between.
@@ -50,7 +50,7 @@ How a tick is made (docs/walking-and-balance.md §10):
   feet the planner commanded, delayed by the servos' dead time and passed
   through their first-order response (BodyModel.servo_lag_ms and
   servo_tau_ms, fitted to the floor recordings: the body follows its
-  commands that way). It goes in FEET as the balance's reference:
+  commands that way). It goes in POSE as the balance's reference:
   the body corrects only what the plan did not predict.
 - **From the measured state.** ``observe`` gives the error the body
   reports (measured minus predicted, less the steady offset the walker
@@ -86,8 +86,8 @@ How a tick is made (docs/walking-and-balance.md §10):
   way out of the trot) long enough for no joint to turn more than
   TrotConfig.joint_deg_per_tick along its path. Out of the trot directly
   (into the walk) once its swing is back to 8 ticks.
-- **The sent attitude** stays inside FEET's +-30 deg (the body refuses a
-  FEET beyond it).
+- **The sent attitude** stays inside POSE's +-30 deg (the body refuses a
+  POSE beyond it).
 """
 
 from __future__ import annotations
@@ -101,9 +101,9 @@ from kilo.planner.model import (FRONT, G_MM_S2, LEFT, LEGS, BodyModel, _solve3, 
                                 stability, view_numbers, world_points)
 from kilo.protocol import kilo_protocol as P
 
-X_RANGE = (-60, 60)   # FEET x_mm (spec range)
-Z_RANGE = (30, 95)    # FEET z_mm
-ATT_MAX_DEG = 30.0    # FEET pitch / roll (the body refuses a FEET beyond it: BAD_ARG ends the stream)
+X_RANGE = (-60, 60)   # foot x mm the walk keeps to (protocol 2 FEET's range; POSE takes -120..120)
+Z_RANGE = (30, 95)    # foot z mm (FEET's; POSE takes 15..110)
+ATT_MAX_DEG = 30.0    # POSE pitch / roll (the body refuses a POSE beyond it: BAD_ARG ends the stream)
 HEIGHT_SLEW_MM = 0.5  # per tick
 RECENTRED_MM = 1.5    # a stopping leg this close to its target does not step again
 CENTRE_SLEW_MM = 0.5  # the strides' centre (patterns.Pattern.centre_com) moves at most this much a tick

@@ -117,8 +117,7 @@ bool Mind::safe_for_card(uint64_t now) {
   // Not before the body's first HELLO (or 3 s without one): the card's first call mounts it,
   // which stalls the loop (1.5 s on the Pi), and the HELLO's answer was lost in that stall.
   bool booting = !b.has_hello && now - started_us_ < kCardHelloWaitUs;
-  bool moving = b.has_telemetry && (b.telemetry.mode == KILO_MODE_GAIT || b.telemetry.mode == KILO_MODE_TRICK ||
-                                    b.telemetry.mode == KILO_MODE_FALLEN || b.telemetry.mode == KILO_MODE_RECOVERING ||
+  bool moving = b.has_telemetry && (b.telemetry.mode == KILO_MODE_STREAM || b.telemetry.mode == KILO_MODE_FALLEN ||
                                     b.telemetry.mode == KILO_MODE_CALIB || b.telemetry.mode == KILO_MODE_BOOT);
   bool busy = booting || moving || walker_.active() || player_.busy() || remote_.busy() || measure_.active() ||
               recorder_.recording() ||
@@ -146,8 +145,8 @@ void Mind::start() {
        cfg_.intent ? "ON: stand, sit and rest are moves planned from the model (B6, A7, the behaviour, the guard)"
                    : "off: postures change as before (KILO_INTENT=1 turns them on)");
   logf(log_, LogLevel::Info, "righting experiment %s (docs/righting.md)",
-       cfg_.righting ? "ON: B1 rights him from a side or his back; the body's rc is off (FALL_RC 0)"
-                     : "off: the body's fall reflex rights him (KILO_RIGHTING=1 turns it on)");
+       cfg_.righting ? "ON: B1 rights him from a side or his back"
+                     : "off: after a fall he lies still (KILO_RIGHTING=1 turns it on)");
   logf(log_, LogLevel::Info,
        "distance guard %s (walking forward BLUE from %d mm, RED below %d mm; otherwise BLUE below %d, RED below %d; "
        "docs/distance-guard.md)",
@@ -195,14 +194,21 @@ void Mind::poll() {
   }
   link_.poll();
   host_.collect();  // a CAL's answer, before anyone else uses the command slot
-  // the command slot's answer, to its owner, before anyone sends another
-  player_.collect();
   stats(now);
-  fall_rc_step();
   walker_.poll();
   if (measure_.active() && host_controls()) measure_.stop("a laptop client taking the body");
   measure_.poll();
   player_.poll();
+  {
+    // A trick that ended (or was stopped) left the body in its end posture: the estimate's prior.
+    const tricks::PlayResult& pr = player_.result();
+    if (pr.play != prior_play_ && (pr.state == tricks::PlayState::Done || pr.state == tricks::PlayState::Failed)) {
+      prior_play_ = pr.play;
+      bool ended = pr.state == tricks::PlayState::Done && (pr.reason == tricks::kDone || pr.reason == tricks::kStopped);
+      prior_ = ended && player_.trick() != nullptr ? intent::cmd_of_posture(player_.trick()->end_posture)
+                                                   : intent::Cmd::None;
+    }
+  }
   if (intent_.active()) {
     // someone else took the body: the intent is dropped (a move under way is stopped)
     if (host_controls()) intent_.cancel("a laptop client took the body");
@@ -292,9 +298,7 @@ void Mind::battery_step() {
 // ---- Kilo's sounds (docs/sound.md) ----------------------------------------------------------
 
 bool Mind::trick_playing() const {
-  const BodyState& b = link_.state();
-  if (player_.busy()) return player_.trick() != &alive_.sit_trick();
-  return b.has_telemetry && b.telemetry.mode == KILO_MODE_TRICK && !alive_.sitting();
+  return player_.busy() && player_.trick() != &alive_.sit_trick();
 }
 
 uint8_t Mind::say(const char* name, const char* why, bool always) {
@@ -386,10 +390,10 @@ void Mind::stats(uint64_t now) {
       kilo_stats_t st;
       mem_copy(&st, r.reply, sizeof st);
       logf(log_.status(), LogLevel::Info,
-           "body STATS: uptime %u s overruns %u max tick %u us rx_crc_err %u rx_overflow %u feet_late %u "
-           "feet_underruns %u",
-           (unsigned)st.uptime_s, st.overruns, st.max_tick_us, st.rx_crc_err, st.rx_overflow, st.feet_late,
-           st.feet_underruns);
+           "body STATS: uptime %u s overruns %u max tick %u us rx_crc_err %u rx_overflow %u pose_dropped %u "
+           "pose_underruns %u",
+           (unsigned)st.uptime_s, st.overruns, st.max_tick_us, st.rx_crc_err, st.rx_overflow, st.pose_dropped,
+           st.pose_underruns);
     }
   }
   if (cfg_.stats_period_ms == 0 || now < next_stats_us_) return;
@@ -408,8 +412,6 @@ void Mind::on_connection(bool connected, bool alive) {
 }
 
 void Mind::on_hello(const kilo_hello_t& hello, bool solicited) {
-  fall_rc_off_ = false;  // a body that (re)booted has FALL_RC 1 again: set it once more
-  fall_rc_refused_ = false;
   if (tap_ != nullptr) tap_->on_hello(hello, solicited);
 }
 
@@ -451,45 +453,11 @@ void Mind::intent_gave_up_down() {
 
 // ---- the righting experiment (docs/righting.md) --------------------------------------------
 
-// With it on, the body's param FALL_RC goes to 0 (live, not persisted) after every HELLO: its fall reflex
-// then never plays rc, and takes the mind's FALL_OK righting move instead. Only the body's ACK refusing it
-// is a refusal (B1 refused until the next HELLO); no answer (the link's request timed out, e.g. while the
-// main loop waited for the SD card or the USB scan at boot, boot 17) or our request no longer in the slot
-// just asks again.
-void Mind::fall_rc_step() {
-  if (!cfg_.righting) return;
-  const Request& r = link_.req();
-  bool ours = r.type == KILO_MSG_PARAM_SET && r.seq == fall_rc_seq_;
-  if (fall_rc_asked_ && !(ours && r.state == RequestState::Waiting)) {
-    fall_rc_asked_ = false;
-    if (ours && r.state == RequestState::Done && r.status == KILO_ACK_STATUS_OK) {
-      fall_rc_off_ = true;
-      logf(log_, LogLevel::Info, "righting: the body's fall reflex will not play rc (FALL_RC 0): B1 rights him");
-    } else if (ours && r.state == RequestState::Done) {
-      fall_rc_refused_ = true;
-      logf(log_, LogLevel::Warn, "righting: the body refused FALL_RC 0 (status %u; an older body?): B1 is refused",
-           (unsigned)r.status);
-    } else {
-      logf(log_, LogLevel::Debug, "righting: no answer to FALL_RC 0 yet: asking again");
-    }
-  }
-  const BodyState& b = link_.state();
-  if (fall_rc_off_ || fall_rc_refused_ || fall_rc_asked_ || !b.has_hello || b.proto_ok != 1 ||
-      b.hello.proto_minor < 1)
-    return;
-  kilo_param_set_t p = {(uint8_t)KILO_PARAM_FALL_RC, 0, 0};
-  if (link_.request(KILO_MSG_PARAM_SET, (const uint8_t*)&p, sizeof p)) {
-    fall_rc_asked_ = true;
-    fall_rc_seq_ = link_.req().seq;
-  }
-}
-
+// The body has no get-up of its own (protocol 3): after a fall its reflex holds him, lays him down and
+// lets go; a righting move is a FALL_OK stream, which takes the joints from the reflex.
 const char* Mind::RightingHookImpl::start() {
   Mind& m = m_;
   if (!m.cfg_.righting) return "the righting experiment is not built in (KILO_RIGHTING=1, docs/righting.md)";
-  const BodyState& b = m.link_.state();
-  if (b.has_hello && b.hello.proto_minor < 1) return "the body firmware is older than protocol 2.1 (no FALL_RC): flash it";
-  if (!m.fall_rc_off_) return "the body has not taken FALL_RC 0 yet";
   intent::State st = m.estimator_.state();
   if (st != intent::State::OnLeftSide && st != intent::State::OnRightSide && st != intent::State::OnBack) {
     format(why_, sizeof why_, "he is %s: B1 rights him only from a side or his back", intent::state_name(st));
@@ -521,6 +489,7 @@ bool Mind::posture(const char* name, int8_t balance, const char* who) {
 
 void Mind::on_telemetry(const kilo_telemetry_t& t) {
   estimate_step(t);
+  player_.on_telemetry(t);
   walker_.on_telemetry(t);
   measure_.on_telemetry(t);
   sleep_.on_telemetry(t);
@@ -547,17 +516,10 @@ void Mind::on_event(const kilo_event_t& e) {
   player_.on_event(e);
   intent_.on_event(e);
   // the state estimate's prior when no posture goal is latched (intent_cmd())
-  if (e.code == KILO_EVENT_TRICK_DONE) {
-    uint8_t reason = (uint8_t)((uint16_t)e.arg >> 8);
-    const tricks::Trick* t = player_.trick();
-    bool ended = reason == KILO_TRICK_DONE_REASON_DONE || reason == KILO_TRICK_DONE_REASON_STOPPED;
-    prior_ = ended && t != nullptr ? intent::cmd_of_posture(t->end_posture) : intent::Cmd::None;
-  } else if (e.code == KILO_EVENT_FELL) {
+  if (e.code == KILO_EVENT_FELL) {
     prior_ = intent::Cmd::None;
-  } else if (e.code == KILO_EVENT_RECOVERED) {
-    prior_ = intent::Cmd::Stand;  // the body's fall reflex ends in STAND
-  } else if (e.code == KILO_EVENT_RECOVERY_FAILED) {
-    prior_ = intent::Cmd::Rest;   // ...or in REST, then LIMP
+  } else if (e.code == KILO_EVENT_LYING) {
+    prior_ = intent::Cmd::Rest;  // the body's fall reflex lays him down (REST), then LIMP
   }
   if (n_events_ == behaviour::Snapshot::kEvents) {
     for (int i = 1; i < n_events_; i++) events_[i - 1] = events_[i];
@@ -567,7 +529,7 @@ void Mind::on_event(const kilo_event_t& e) {
   event_count_++;
   metrics_.events++;
   if (e.code == KILO_EVENT_FELL) metrics_.falls++;
-  if (e.code == KILO_EVENT_RECOVERED) metrics_.recovered++;
+  if (e.code == KILO_EVENT_LYING) metrics_.lying++;
   if (e.code == KILO_EVENT_WATCHDOG) metrics_.watchdogs++;
   if (e.code == KILO_EVENT_LOW_BATTERY) metrics_.low_battery++;
   if (e.code == KILO_EVENT_IR_KEY) sleep_.key((uint16_t)e.arg, cfg_.remote && !host_controls());  // wakes first
@@ -701,9 +663,9 @@ void Mind::metric_line(uint32_t i, char* out, uint32_t n) {
       named(out, n, &len, m.refusals);
       return;
     case 5:
-      format(out, n, "body: falls=%u recovered=%u watchdog=%u low_battery=%u events=%u reboots=%u battery_mv=%u "
+      format(out, n, "body: falls=%u lying=%u watchdog=%u low_battery=%u events=%u reboots=%u battery_mv=%u "
                      "battery_min_mv=%u",
-             (unsigned)m.falls, (unsigned)m.recovered, (unsigned)m.watchdogs, (unsigned)m.low_battery,
+             (unsigned)m.falls, (unsigned)m.lying, (unsigned)m.watchdogs, (unsigned)m.low_battery,
              (unsigned)m.events, (unsigned)m.body_reboots, (unsigned)m.battery_mv, (unsigned)m.battery_min_mv);
       return;
     case 6: {
@@ -791,7 +753,7 @@ bool Mind::lying(const kilo_telemetry_t& t) const {
 }
 
 // Lying in REST with the servos powered, for light sleep's idle count (power/sleep.h): the body IDLE
-// with its servos on, no walk, trick or FEET, no feet it balances on (TELEMETRY support 0: the body
+// with its servos on, no walk or trick (no POSE stream), no feet it balances on (TELEMETRY support 0: the body
 // reports all four feet in SIT, STAND and STANCE, none in REST, LIMP, CALIB and ZERO), and no other
 // posture asked. After a mind restart there is no goal on record (the body kept the REST its watchdog
 // took, or the last one asked): then TELEMETRY alone must say it. support 0 is also the body's pose
@@ -811,7 +773,7 @@ bool Mind::lying_rest() {
   }
   if (walker_.active() || player_.busy()) return false;
   if (t.mode != KILO_MODE_IDLE || !(t.flags & KILO_TELEMETRY_FLAGS_SERVOS_POWERED) ||
-      (t.flags & (KILO_TELEMETRY_FLAGS_GAIT | KILO_TELEMETRY_FLAGS_TRICK)) || t.support != 0)
+      (t.flags & KILO_TELEMETRY_FLAGS_STREAM) || t.support != 0)
     return false;
   const Goal* g = link_.goal(KILO_MSG_SET_POSTURE);
   if (g != nullptr && g->len >= 2) return g->payload[1] == KILO_POSTURE_REST;
@@ -834,8 +796,7 @@ bool Mind::forward_key(const remote::Key& key) const {
 
 const char* Mind::cal_refusal() {
   if (walker_.active()) return "a walk is running: stop it first";
-  const BodyState& b = link_.state();
-  if (player_.busy() || (b.has_telemetry && b.telemetry.mode == KILO_MODE_TRICK)) return "a trick is playing";
+  if (player_.busy()) return "a trick is playing";
   if (behaviour_active() && !host_controls()) return "the behaviour runner is on (B6 stops it)";
   return nullptr;
 }
@@ -1044,7 +1005,7 @@ behaviour::Status Mind::Body::play_status(uint32_t handle) {
   const tricks::PlayResult& r = m_.player_.result();
   if (r.play != handle) return behaviour::Status::Failure;  // another play took the player
   if (r.state == tricks::PlayState::Running) return behaviour::Status::Running;
-  if (r.state == tricks::PlayState::Done && r.reason == KILO_TRICK_DONE_REASON_DONE) return behaviour::Status::Success;
+  if (r.state == tricks::PlayState::Done && r.reason == tricks::kDone) return behaviour::Status::Success;
   return behaviour::Status::Failure;
 }
 

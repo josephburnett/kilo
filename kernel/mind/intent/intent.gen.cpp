@@ -9,32 +9,32 @@ namespace intent {
 namespace {
 
 // stand_to_sit: 1 frame, end SIT; margin 34.4 mm, 21 bands of the dynamics
-const kilo_keyframe_t kStandToSit[] = {
+const tricks::Keyframe kStandToSit[] = {
     {42, 10, 0x01, {10, -20, -60, 30, 30, -80, -80, 60, 60, 45, 45}},
 };
 // stand_to_rest: 2 frames, end REST; margin 8.7 mm, 21 bands of the dynamics
-const kilo_keyframe_t kStandToRest[] = {
+const tricks::Keyframe kStandToRest[] = {
     {45, 5, 0x01, {-30, -80, -45, 30, 30, -30, -30, -45, -45, -30, -30}},
     {42, 10, 0x01, {-30, -80, -45, 60, 60, -60, -60, -45, -45, 45, 45}},
 };
 // sit_to_stand: 1 frame, end STAND; margin 34.4 mm, 21 bands of the dynamics
-const kilo_keyframe_t kSitToStand[] = {
+const tricks::Keyframe kSitToStand[] = {
     {42, 10, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
 };
 // rest_to_stand: 2 frames, end STAND; margin 8.7 mm, 21 bands of the dynamics
-const kilo_keyframe_t kRestToStand[] = {
+const tricks::Keyframe kRestToStand[] = {
     {45, 5, 0x01, {0, 0, 0, 60, 60, -30, -30, -45, -45, -30, -30}},
     {42, 10, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
 };
 // righting_side: 4 frames, end REST, FALL_OK; the righting experiment: ends on his belly in 69 of 95 simulated runs (variants x starts), leg servos at most 1.28 kg cm
-const kilo_keyframe_t kRightingSide[] = {
+const tricks::Keyframe kRightingSide[] = {
     {30, 25, 0x01, {0, 30, 0, -90, -90, 90, 90, 0, 70, -70, 0}},
     {3, 15, 0x01, {0, -75, 0, 30, -90, 90, -30, 30, 0, 0, -30}},
     {8, 10, 0x01, {0, -75, 0, 30, -90, 90, -30, 30, 90, -90, -30}},
     {25, 25, 0x01, {0, -80, 0, 60, 60, -60, -60, -45, -45, 45, 45}},
 };
 // righting_back: 3 frames, end REST, FALL_OK; the righting experiment: ends on his right side in 52 of 76 simulated runs (variants x starts), leg servos at most 1.13 kg cm
-const kilo_keyframe_t kRightingBack[] = {
+const tricks::Keyframe kRightingBack[] = {
     {30, 25, 0x01, {0, 0, 0, -90, 30, -30, 90, 70, 30, -30, -70}},
     {3, 25, 0x01, {0, 0, 0, -90, 30, -30, 90, 0, 30, -30, 0}},
     {25, 25, 0x01, {0, -80, 0, 60, 60, -60, -60, -45, -45, 45, 45}},

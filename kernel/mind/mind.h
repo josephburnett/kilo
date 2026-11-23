@@ -3,7 +3,7 @@
 //
 //   LogRing      the RAM log (every line also goes to the platform's Log)
 //   SerialLink   the body link (link/)
-//   Walker       the FEET stream (planner/)
+//   Walker       the walk's POSE stream (planner/)
 //   TrickPlayer  tricks from the compiled-in library (tricks/)
 //   Percepts     fed by every TELEMETRY (perception/)
 //   Runner       the behaviour layer at 10 Hz, when enabled (behaviour/)
@@ -207,7 +207,7 @@ class Mind final : public LinkListener,
   intent::Intent& intent() { return intent_; }
   // What the mind last asked the body for, as the state estimate's prior (kilo.intent.replay rebuilds it
   // the same way): the SET_POSTURE goal latched; else, after a trick that ended DONE or STOPPED, its end
-  // posture; after EVENT RECOVERED stand, after RECOVERY_FAILED rest; nothing while a walk, a trick or the
+  // posture; after EVENT LYING (the fall reflex laid him down) rest; nothing while a walk, a trick or the
   // self-measurement runs or after a fall.
   intent::Cmd intent_cmd() const;
   // A posture by name, as the remote's keys, the behaviour layer and the guard ask for it: with
@@ -337,13 +337,9 @@ class Mind final : public LinkListener,
   intent::Intent intent_;
   PostureHookImpl posture_hook_;
   RightingHookImpl righting_hook_;
-  // The righting experiment's param on the body: FALL_RC 0 (no rc) is set after every HELLO.
-  bool fall_rc_off_ = false;      // the body acknowledged FALL_RC 0 since its last HELLO
-  bool fall_rc_asked_ = false;
-  bool fall_rc_refused_ = false;  // the body's ACK refused FALL_RC 0 since its last HELLO (an older body)
-  uint8_t fall_rc_seq_ = 0;
-  void fall_rc_step();
+
   intent::Cmd prior_ = intent::Cmd::None;  // intent_cmd() when no SET_POSTURE goal is latched
+  uint32_t prior_play_ = 0;                // the trick play whose end set prior_
   uint32_t state_entered_[intent::kStates] = {};  // how often the estimate entered each state (METRICS "state:")
   void estimate_step(const kilo_telemetry_t& t);
   power::Sleep sleep_;  // light sleep after A7 or lying idle (power/sleep.h)

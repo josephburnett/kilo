@@ -6,7 +6,7 @@
 //
 // The sequence (timings in flasher.cpp, with where they come from):
 //  1. Take the UART: while owns_uart() the main loop must not poll() the
-//     link or stream FEET (the walker); the body's watchdog covers the gap
+//     link or stream POSE (the walker, a trick); the body's watchdog covers the gap
 //     until the reset. set_baud(host.flash_baud, 115200).
 //  2. RESET: Gpio::reset_assert() for link.reset_pulse_ms (100 ms), then
 //     reset_release() (an emulated open drain, platform.h Gpio).

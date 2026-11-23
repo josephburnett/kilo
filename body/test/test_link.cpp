@@ -112,17 +112,13 @@ static const std::map<std::string, Expect> EXPECT = {
     {"stats_req", {REPLY, KILO_MSG_STATS}},
     {"pca_read", {REPLY, KILO_MSG_PCA_COUNTS}},
     {"set_posture_rest_epoch255", {NOTHING, 0}},  // REST is never stale
-    {"feet_walk", {REFUSED, KILO_GOAL_REFUSED_REASON_STALE}},  // epoch 3, body at 0; a stream: never acked
-    {"feet_zero", {NOTHING, 0}},  // tick 0 was the body's last: late, dropped and counted, no reply
+    {"pose_walk", {REFUSED, KILO_GOAL_REFUSED_REASON_STALE}},  // epoch 3, body at 0; a stream: never acked
+    {"pose_zero", {REFUSED, KILO_GOAL_REFUSED_REASON_BUSY}},  // the fresh body is limp: a stream starts from a posture
+    {"pose_joints", {REFUSED, KILO_GOAL_REFUSED_REASON_STALE}},  // epoch 7, body at 0
     {"set_head_hold", {REFUSED, KILO_GOAL_REFUSED_REASON_STALE}},  // epoch 3, body at 0
     {"set_body_pose", {REFUSED, KILO_GOAL_REFUSED_REASON_STALE}},  // epoch 3, body at 0
     {"set_balance", {NOTHING, 0}},
-    {"trick_begin", {ACK, KILO_ACK_STATUS_OK}},
-    {"trick_frames_1", {ACK, KILO_ACK_STATUS_NO_TRICK}},  // no TRICK_BEGIN yet
-    {"trick_frames_4_max", {ACK, KILO_ACK_STATUS_NO_TRICK}},
-    {"trick_commit", {ACK, KILO_ACK_STATUS_NO_TRICK}},
-    {"trick_play_mirror", {ACK, KILO_ACK_STATUS_STALE}},  // epoch 3, body at 0
-    {"trick_stop", {ACK, KILO_ACK_STATUS_OK}},  // nothing playing is not an error
+
     {"set_eyes_left_green", {NOTHING, 0}},  // shown (link_hal_eyes), never acked
     {"beep_1", {NOTHING, 0}},
     {"beep_8_max", {NOTHING, 0}},
@@ -140,7 +136,7 @@ static const std::map<std::string, Expect> EXPECT = {
 static void test_vectors(void) {
   std::vector<Vec> frames, errors;
   load_vectors(frames, errors);
-  CHECKF(frames.size() >= 50 && errors.size() >= 15, "frames.json: %zu frames, %zu errors", frames.size(),
+  CHECKF(frames.size() >= 45 && errors.size() >= 15, "frames.json: %zu frames, %zu errors", frames.size(),
          errors.size());
   bool seen[256] = {};
   for (const Vec& v : frames) {
@@ -224,7 +220,7 @@ static void test_hello_and_queries(void) {
   std::memcpy(&h, out[0].payload.data(), sizeof h);
   CHECK(h.proto_major == KILO_PROTO_MAJOR && h.proto_minor == KILO_PROTO_MINOR && h.fw_build == 0xC0FFEE01u);
   CHECK(h.reset_cause == RESET_FLASHED && h.last_alive_tick == 1234 && h.caps == KILO_HELLO_CAPS_DMP);
-  CHECK(h.max_payload == 60 && h.trick_capacity == KF_CAPACITY && h.joint_count == 11);
+  CHECK(h.max_payload == 60 && h.pose_depth == POSE_DEPTH && h.joint_count == 11);
   CHECK(h.config_state == CFG_MIGRATED && h.epoch == 7);
   // A boot epoch from the reset record (body_init) is what HELLO reports.
   body_init(b, b.cfg, nullptr, true, 0x2A);
@@ -428,7 +424,7 @@ static void test_streams_and_priority(void) {
   std::memcpy(&t, out[0].payload.data(), sizeof t);
   CHECK(t.tick == 42 && t.epoch == 9 && t.dist_mm == 345 && t.tick_load == 47 && t.mode == KILO_MODE_LIMP);
   CHECK((t.flags & KILO_TELEMETRY_FLAGS_DIST_FRESH) && !(t.flags & KILO_TELEMETRY_FLAGS_SERVOS_POWERED));
-  CHECK(!(t.flags & KILO_TELEMETRY_FLAGS_LINK_OK) && t.trick_frame == 0xFF);
+  CHECK(!(t.flags & KILO_TELEMETRY_FLAGS_LINK_OK) && t.limited == 0 && t.pose_queued == 0);
   // The first valid frame arms the watchdog; LINK_OK follows.
   rx(KILO_MSG_HEARTBEAT, 0, {});
   b.tick = 44;

@@ -3,9 +3,9 @@ how long (docs/self-measurement.md). kernel/mind/measure/script.cpp is its
 port, tick for tick (kernel/host/tests/measure_vectors.txt, made by
 gen_measure_vectors.py from this module, checks they agree).
 
-A pose is where the four feet are, as FEET gives them: ``x`` mm fore-aft
+A pose is where the four feet are, as a POSE key in foot mode gives them: ``x`` mm fore-aft
 from under the shoulder (+ forward) and ``z`` mm below it, whole mm (the
-FEET fields are integers). Every pose is the home pose (x 0, z HOME_Z: the
+routine sends whole mm, times 4 in q2). Every pose is the home pose (x 0, z HOME_Z: the
 body's STANCE) plus each step's offsets. Moving the feet back (x < 0) moves
 the body forward over them.
 
@@ -336,8 +336,8 @@ def max_ticks(script: ScriptDef = SCRIPT) -> int:
 class Tick:
     tick: int                   # since the script's first tick (0..)
     step: int                   # STEPS index
-    x: tuple                    # FEET x_mm
-    z: tuple                    # FEET z_mm
+    x: tuple                    # foot x mm (whole)
+    z: tuple                    # foot z mm
     first: bool                 # the step's first tick (a mark)
     into: int = 0               # ticks into its step (0..)
 

@@ -16,7 +16,8 @@ import pytest
 
 from kilo import cli
 from kilo.hostlink import HostError, HostLink
-from kilo.logs import reader, walkrec
+from kilo.logs import proto2, reader, walkrec
+from kilo.planner.walker import pack_pose_feet
 from kilo.protocol import kilo_protocol as P
 from test_hostlink import FakeMind
 
@@ -40,10 +41,11 @@ def a16(deg: float) -> int:
     return int(round(deg * 16))
 
 
-def synthetic(n: int = 400, offset=(2.0, -1.0), lag_plan=10, lag_model=8, lead_us=90000) -> bytes:
-    """A walk whose plan rolls on a sine; the FEET prediction is the plan
+def synthetic(n: int = 400, offset=(2.0, -1.0), lag_plan=10, lag_model=8, lead_us=90000, proto2_feet=False) -> bytes:
+    """A walk whose plan rolls on a sine; the POSE prediction is the plan
     lag_model ticks late, the body lag_plan ticks late plus an offset; LF is
-    in the air (and the corrections held) a quarter of the time."""
+    in the air (and the corrections held) a quarter of the time.
+    proto2_feet: the stream as protocol 2 recordings have it (FEET, 16 B)."""
     plan = [5.0 * math.sin(2 * math.pi * t / 40) for t in range(-20, n)]  # index t + 20
     out = [mark(0, f"walk id=7 format=1 t0_us_hi=0 t0_us_lo=1000000 setup_us=0 mind_build=1e1405f0 "
                    f"body_build=45524f43 epoch=4 tick_ms=20"),
@@ -62,14 +64,18 @@ def synthetic(n: int = 400, offset=(2.0, -1.0), lag_plan=10, lag_model=8, lead_u
         out.append(rec(P.WalkRecord.PLAN, tp, P.WalkPlan(tick=tick, sent=1, lifting=lifting, support=15 & ~lifting,
                                                            margin=margin, plan_pitch=0, plan_roll=a16(p_roll),
                                                            pitch=0, roll=a16(pred_roll)).pack()))
-        out.append(frame(P.WalkRecord.TX, tp, P.Feet(epoch=4, tick=tick & 0xFFFF, x_mm=[0] * 4, z_mm=[60] * 4,
-                                                      pitch=0, roll=a16(pred_roll), support=15 & ~lifting), t))
-        flags = P.TelemetryFlags.GAIT | P.TelemetryFlags.BALANCE_ACTIVE
+        if proto2_feet:
+            stream = struct.pack("<BHbbbbBBBBhhB", 4, tick & 0xFFFF, 0, 0, 0, 0, 60, 60, 60, 60, 0, a16(pred_roll),
+                                 15 & ~lifting)
+        else:
+            stream = pack_pose_feet(4, tick, [0] * 4, [60] * 4, 0, a16(pred_roll), 15 & ~lifting)
+        out.append(rec(P.WalkRecord.TX, tp, bytes([0x11, t & 0xFF]) + stream))
+        flags = P.TelemetryFlags.STREAM | P.TelemetryFlags.BALANCE_ACTIVE
         if lifting:
             flags |= P.TelemetryFlags.BALANCE_HELD
-        tel = P.Telemetry(tick=tick & 0xFFFF, pitch=a16(offset[0]), roll=a16(meas_roll), mode=int(P.Mode.GAIT),
+        tel = P.Telemetry(tick=tick & 0xFFFF, pitch=a16(offset[0]), roll=a16(meas_roll), mode=int(P.Mode.STREAM),
                           flags=int(flags), ref_pitch=0, ref_roll=a16(pred_roll), corr_pitch=-8, corr_roll=a16(-0.5),
-                          feet_queued=4, support=15 & ~lifting, epoch=4)
+                          pose_queued=4, support=15 & ~lifting, epoch=4)
         out.append(frame(P.WalkRecord.RX, tp + lead_us, tel, t))
         if t % 100 == 50:
             out.append(rec(P.WalkRecord.PLANNER, tp, P.WalkPlanner(tick=tick, holds=t // 100, catches=0, waits=1,
@@ -77,19 +83,23 @@ def synthetic(n: int = 400, offset=(2.0, -1.0), lag_plan=10, lag_model=8, lead_u
     te = n * TICK_US + lead_us
     out.append(mark(te, f"result sent={n} skipped=0 underruns=0 max_behind=1 dropped_rx=0 holds=3 catches=0 waits=4 "
                         f"min_margin_mm=10.0 tick={FIRST + n} clock_resets=0"))
-    out.append(mark(te, "end ok=1 streamed=1 reason=stopped (no GAIT_STOPPED seen after the STANCE posture)"))
+    out.append(mark(te, "end ok=1 streamed=1 reason=stopped (no STREAM_STOPPED seen after the STANCE posture)"))
     return b"".join(out)
 
 
 def test_parse_mark():
-    assert walkrec.parse_mark("end ok=0 streamed=1 reason=the body left GAIT (mode STANCE)") == (
-        "end", {"ok": "0", "streamed": "1", "reason": "the body left GAIT (mode STANCE)"})
+    assert walkrec.parse_mark("end ok=0 streamed=1 reason=the body left STREAM (mode STANCE)") == (
+        "end", {"ok": "0", "streamed": "1", "reason": "the body left STREAM (mode STANCE)"})
     assert walkrec.parse_mark("stop tick=345") == ("stop", {"tick": "345"})
     assert walkrec.parse_mark("walk") == ("walk", {})
 
 
-def test_the_summary_finds_the_error_put_in():
-    w = walkrec.parse_records(synthetic())
+@pytest.mark.parametrize("old", [False, True], ids=["pose", "protocol2_feet"])
+def test_the_summary_finds_the_error_put_in(old):
+    w = walkrec.parse_records(synthetic(proto2_feet=old))
+    tx = [f.msg for f in w.frames if f.direction == "tx"]
+    assert all(isinstance(m, proto2.Feet if old else P.Pose) for m in tx) and len(tx) == 400
+    assert {f.name for f in w.frames if f.direction == "tx"} == {"FEET" if old else "POSE"}
     assert w.bad == 0 and len(w.plans) == 400 and w.t0_us == 1000000 and len(w.planner) == 4
     rows = walkrec.tick_table(w)
     assert [r["tick"] for r in rows] == list(range(FIRST, FIRST + 400))  # unwrapped across 65535
@@ -108,7 +118,7 @@ def test_the_summary_finds_the_error_put_in():
     assert s["margin"]["min_one_leg_up_mm"] == 10.0 and s["margin"]["planner_min_mm"] == 10.0
     assert s["lead_ms"] == {"min": 90.0, "mean": 90.0, "max": 90.0}
     assert s["planner"]["holds"] == 3 and len(s["planner"]["events"]) == 4
-    assert s["end"]["reason"].startswith("stopped (no GAIT_STOPPED") and s["stream"]["pattern"] == "walk"
+    assert s["end"]["reason"].startswith("stopped (no STREAM_STOPPED") and s["stream"]["pattern"] == "walk"
     text = walkrec.format_summary(s)
     assert "pitch rms 2.00" in text and "offset +2.00" in text and "LF" in text and "+40 ms vs the model" in text
 
@@ -126,12 +136,12 @@ def test_files_csv_kilolog_and_the_existing_tools(tmp_path):
     # the .kilolog: kilo log summary reads it unchanged
     kl = walkrec.to_kilolog(w, tmp_path / "w.kilolog")
     d = reader.load(kl)
-    assert d.format == "kilolog" and len(d.samples) == 200 and d.tx_types["FEET"] == 200
+    assert d.format == "kilolog" and len(d.samples) == 200 and d.tx_types["POSE"] == 200
     assert d.meta["walk"] == {"id": 7} and d.meta["start_wall"] == 1.0e9
     assert d.samples[0].t == pytest.approx(0.09, abs=0.002)  # ms since t0
     # ... and the .kwalk itself
     d2 = reader.load(kw)
-    assert d2.format == "kwalk" and len(d2.samples) == 200 and d2.samples[0].mode == "GAIT"
+    assert d2.format == "kwalk" and len(d2.samples) == 200 and d2.samples[0].mode == "STREAM"
     assert cli.main(["log", "summary", str(kl)]) == 0
     assert cli.main(["log", "walk", str(kw), "--csv", str(tmp_path / "x.csv"), "--plot", str(tmp_path / "x.png")]) == 0
     assert (tmp_path / "x.csv").exists() and ((tmp_path / "x.png").exists() or (tmp_path / "x.csv").exists())

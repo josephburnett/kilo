@@ -15,7 +15,7 @@ constexpr uint64_t kConfirmUs = 300000;   // a new answer holds this long before
 constexpr int16_t kEndA16 = 960;        // |pitch| folded about 90 deg at least this: ON_END
 constexpr int16_t kSideA16 = 960;       // |roll| from here: on a side
 constexpr int16_t kBackA16 = 1920;      // ...past here: on the back
-constexpr uint16_t kMovingModes = 0x0019;  // bit m: the body's mode m is a moving one
+constexpr uint16_t kMovingModes = 0x0009;  // bit m: the body's mode m is a moving one
 
 constexpr int kRowCount = 3;
 // The upright states as the body model predicts them (TELEMETRY's a16) and their tolerance.

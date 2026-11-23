@@ -3,11 +3,12 @@
 
 The tricks are mind/kilo/tricks/library/*.json (kilo.tricks.library, which
 the legacy importer writes). The C++ mind has no filesystem at boot, so
-this script encodes each of them exactly as the Python reference
-(kilo.body.client) uploads it (kilo.tricks.model: Trick.begin() and the 14 B
-frames from Keyframe.to_wire(), so the rounding and clamping are Python's)
-into const tables, with the CRC-16, the trick_id and the duration Python
-computes, which kernel/host/tests/test_tricks.cpp checks the C++ against.
+this script encodes each of them exactly as the Python design tools see
+them (kilo.tricks.model: Trick.begin() and the 14 B frames from
+Keyframe.to_wire(), so the rounding and clamping are Python's) into const
+tables, with the CRC-16, the trick_id and the duration Python computes,
+which kernel/host/tests/test_tricks.cpp checks the C++ against. The mind's
+player (tricks/player.h) sends them to the body as POSE keys.
 
 It lives next to its output, as protocol/vendor.py does, because it is
 part of the build's sources, not a test.
@@ -25,8 +26,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 sys.path.insert(0, str(REPO / "mind"))
 
-from kilo.body.client import trick_id_for  # noqa: E402
-from kilo.protocol import kilo_protocol as P  # noqa: E402
+from kilo.tricks.model import trick_id_for  # noqa: E402
 from kilo.tricks import library  # noqa: E402
 
 OUT_H = HERE / "library.gen.h"
@@ -56,7 +56,7 @@ def render() -> tuple[str, str, int]:
          "// What Python computes for each kLibrary entry, for the tests.",
          "struct TrickCheck {",
          "  uint16_t crc16;        // Trick.crc16()",
-         "  uint8_t trick_id;      // client.trick_id_for()",
+         "  uint8_t trick_id;      // model.trick_id_for()",
          "  uint16_t total_ticks;  // Trick.duration_ticks at 1x (0: until stopped)",
          "};",
          "extern const TrickCheck kLibraryCheck[kLibrarySize];", "",
@@ -73,12 +73,12 @@ def render() -> tuple[str, str, int]:
         c.append(f"// {name} ({'legacy ' + legacy if legacy else 'authored'}): {n} frame{'s' if n != 1 else ''}, "
                  f"loop {t.loop_start}..{t.loop_end} x{t.repeats}, end {t.end_posture.name}"
                  + (f", stop over {t.stop_ticks} ticks" if t.stop_ticks else ""))
-        c.append(f"const kilo_keyframe_t {ident(name)}[] = {{")
+        c.append(f"const Keyframe {ident(name)}[] = {{")
         for f in t.frames:
             w = f.to_wire()
             c.append(f"    {{{w.dur}, {w.hold}, 0x{w.flags:02X}, {{{', '.join(str(a) for a in w.ang)}}}}},")
         c.append("};")
-        data_bytes += len(t.frames) * P.Keyframe.SIZE
+        data_bytes += len(t.frames) * 14  # Keyframe (model.h)
         guards = "nullptr, 0"
         if t.guards:
             c.append(f"const TrickGuard {ident(name)}Guards[] = {{")

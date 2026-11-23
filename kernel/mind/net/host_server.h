@@ -192,7 +192,7 @@ class HostServer final : public record::BenchSink {
   // The bridge is open: the link is paused, do not poll() or request() it.
   bool bridge_open() const { return bridge_; }
   // The bridge is open or the flasher has the UART: do not poll() the link,
-  // request(), set goals that must go out, or stream FEET. The main loop
+  // request(), set goals that must go out, or stream POSE. The main loop
   // tests this instead of bridge_open().
   bool link_paused() const { return bridge_ || (flasher_ != nullptr && flasher_->owns_uart()) || updating(); }
   // A flash is running (from FLASH_COMMIT until DONE or FAILED).

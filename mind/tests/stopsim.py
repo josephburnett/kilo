@@ -1,7 +1,7 @@
 """How Kilo stops: the planned stop against the quick stop (docs/walking-and-balance.md §14).
 
 Each case walks the virtual body (tests/walksim.py: the planner, the
-stream, the body's FEET player and the walking physics with the servo lag)
+stream, the body's POSE player and the walking physics with the servo lag)
 at a gait and speed until the walk is steady, then asks for the stop at a
 tick of the cycle, at every second tick over a whole cycle, and measures
 from that moment:
@@ -52,7 +52,7 @@ def level_speed(pattern: str, level: int) -> float:
 
 
 def _physics(sim):
-    g = sim.vb.feet if sim.vb.feet is not None else sim.vb.xfade
+    g = sim.vb.stream if sim.vb.stream is not None else sim.vb.xfade
     return None if g is None else g.physics
 
 

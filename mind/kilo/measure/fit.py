@@ -221,7 +221,7 @@ class Run:
     exp: np.ndarray             # (N,) the script's experiments index
     phase: list                 # (N,) the step's phase name
     meas: np.ndarray            # (N, 2) measured pitch, roll (NaN: no TELEMETRY)
-    pred: np.ndarray            # (N, 2) the routine's prediction (FEET pitch, roll; NaN if none)
+    pred: np.ndarray            # (N, 2) the routine's prediction (POSE pitch, roll; NaN if none)
     batt_mv: np.ndarray         # (N,) NaN if none
     rate: np.ndarray | None = None  # (N, 2) TELEMETRY rate_pitch, rate_roll
     heading: int = 1            # -1: turned round (the floor's slope the other way)

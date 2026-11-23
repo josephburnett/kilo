@@ -1,4 +1,4 @@
-"""Walking: the planner's ticks streamed to the body as FEET, 50 Hz.
+"""Walking: the planner's ticks streamed to the body as POSE keys, 50 Hz.
 
 ``Stream`` is one walk's producer, woken every 20 ms (``Stream.wake``) by
 its driver: the walking simulations of the tests (tests/walksim.py) here,
@@ -11,14 +11,16 @@ Every wake (docs/walking-and-balance.md §10 "Stream timing"):
    time) of the last two seconds (the least delayed frame is the best
    estimate; the window follows the drift between the body's crystal and
    the Pi's clock), restarted when five frames in a row are more than a
-   tick below it (the body's tick fell back after a stall: BodyClock). In GAIT each one also gives the model's error to the
-   ErrorTracker (offset, lag, spike) and to the planner (``observe``).
-2. New EVENTs: GAIT_STOPPED (arg 0: a posture or an epoch bump took the
-   legs; arg 1: the body settled after an underrun), FEET_UNDERRUN
-   (counted), GOAL_REFUSED for FEET, FELL end the stream; so do a reboot, an
+   tick below it (the body's tick fell back after a stall: BodyClock). In mode STREAM each one also gives the model's
+   error to the ErrorTracker (offset, lag, spike) and to the planner (``observe``).
+2. New EVENTs: STREAM_STOPPED (arg 0: a posture or an epoch bump took the
+   legs; arg 1: the body settled after an underrun), POSE_UNDERRUN
+   (counted), GOAL_REFUSED for POSE, FELL end the stream; so do a reboot, an
    epoch change, and the mind's loop stalling (``mind_alive``) for 0.5 s.
-3. Every planned tick from the last one sent up to the body's tick + 5
-   (link.feet_lookahead_ticks, 100 ms) goes out at once, so a late wake
+3. Every planned tick from the last one sent up to the body's tick + 3
+   (link.pose_lookahead_ticks, 60 ms) goes out at once, each a POSE key
+   in foot mode for its tick (feet in whole mm, sent as q2 = 1/4 mm; the
+   head left to IDLE; flags 0), so a late wake
    (a garbage-collector pause, an SD-card stall) is caught up, and ticks
    the body has already played are skipped (counted, not sent).
 
@@ -27,8 +29,8 @@ log's queue (kilo.log.JsonlLogger.log only enqueues).
 
 Stop: when the planner's stop is done (each leg stepped back under its
 shoulder, the body levelled at the stance height) the stream calls
-``on_done``; its driver then latches the STANCE posture, which ends GAIT on
-the body (EVENT GAIT_STOPPED arg 0).
+``on_done``; its driver then latches the STANCE posture, which ends the
+stream on the body (EVENT STREAM_STOPPED arg 0).
 """
 
 from __future__ import annotations
@@ -47,15 +49,16 @@ from kilo.protocol import kilo_protocol as P
 log = logging.getLogger("kilo.walk")
 
 TICK_S = P.TICK_MS / 1000.0
-LOOKAHEAD = P.FEET_LOOKAHEAD_TICKS
+LOOKAHEAD = P.POSE_LOOKAHEAD_TICKS
 CLOCK_WINDOW = 100            # telemetry frames in the body-clock estimate (2 s at 50 Hz)
 CLOCK_RESET_FRAMES = 5        # ...restarted after this many frames in a row a tick below its maximum
-ENTER_TIMEOUT_S = 0.6         # the body must be in GAIT this soon after the first FEET
+ENTER_TIMEOUT_S = 0.6         # the body must be in STREAM this soon after the first POSE
 HANDOVER_TIMEOUT_S = 1.0      # ...and out of it this soon after the STANCE posture
 MIND_STALL_S = 0.5
-_FEET = P.Feet._FMT           # the FEET payload layout (generated)
+_POSE = P.Pose._FMT           # the POSE payload layout (generated)
 _A16 = 16.0
-_ATT_RANGE = (-480, 480)      # FEET pitch / roll, 1/16 deg (protocol/spec.toml: +-30 deg)
+_ATT_RANGE = (-480, 480)      # POSE pitch / roll, 1/16 deg (protocol/spec.toml: +-30 deg)
+HEAD_IDLE = -32768            # a POSE head value: left to IDLE
 
 
 def stop_timeout(period_ms: float | None = None) -> float:
@@ -77,8 +80,8 @@ class BodyClock:
     against real time: a stall of its loop over 40 ms makes the scheduler
     resync (body/src/core/sched.cpp), so every later frame's offset is
     smaller by the stall. The window's old maximum would then put the
-    estimate ahead of the body for the window's length (FEET sent more than
-    the queue's depth ahead are dropped), so once ``CLOCK_RESET_FRAMES``
+    estimate ahead of the body for the window's length (keys sent too far
+    ahead are dropped, or crowd the queue), so once ``CLOCK_RESET_FRAMES``
     frames in a row are all more than a tick below the maximum, the window
     restarts from them. (A burst of late frames after a pause of the mind's
     reader can do the same; the next prompt frame puts the maximum back.)"""
@@ -131,14 +134,22 @@ class BodyClock:
         return (t + self._max) / TICK_S
 
 
-def pack_feet(epoch: int, tp: TickPlan) -> bytes:
-    """FEET for one planned tick; pitch and roll kept inside the field's
-    range (the body refuses a FEET beyond it, BAD_ARG, which ends the walk)."""
-    x, z = tp.x, tp.z
+def pack_pose_feet(epoch: int, tick: int, x_mm, z_mm, pitch_a16: int, roll_a16: int, support: int) -> bytes:
+    """A POSE key in foot mode: every leg a foot (x, z in whole mm, per leg
+    LF RF RB LB, sent as q2), the head left to IDLE, flags 0."""
+    return _POSE.pack(epoch, tick & 0xFFFF, 0,
+                      x_mm[0] * 4, z_mm[0] * 4, x_mm[1] * 4, z_mm[1] * 4,
+                      x_mm[2] * 4, z_mm[2] * 4, x_mm[3] * 4, z_mm[3] * 4,
+                      HEAD_IDLE, HEAD_IDLE, HEAD_IDLE, pitch_a16, roll_a16, support)
+
+
+def pack_pose(epoch: int, tp: TickPlan) -> bytes:
+    """The POSE key of one planned tick; pitch and roll kept inside the
+    field's range (the body refuses a POSE beyond it, BAD_ARG, which ends
+    the walk)."""
     lo, hi = _ATT_RANGE
-    return _FEET.pack(epoch, tp.tick & 0xFFFF, x[0], x[1], x[2], x[3], z[0], z[1], z[2], z[3],
-                      min(hi, max(lo, int(round(tp.pitch * _A16)))), min(hi, max(lo, int(round(tp.roll * _A16)))),
-                      tp.support)
+    return pack_pose_feet(epoch, tp.tick, tp.x, tp.z, min(hi, max(lo, int(round(tp.pitch * _A16)))),
+                          min(hi, max(lo, int(round(tp.roll * _A16)))), tp.support)
 
 
 class Stream:
@@ -162,7 +173,7 @@ class Stream:
             self._reboots = st.reboots
         self.sent = 0
         self.skipped = 0            # planned ticks already past when planned: not sent
-        self.underruns = 0          # EVENT FEET_UNDERRUN seen
+        self.underruns = 0          # EVENT POSE_UNDERRUN seen
         self.max_behind = 0         # the most ticks one wake had to catch up
         self.last_sent: int | None = None
         self.gait_seen = False
@@ -203,23 +214,23 @@ class Stream:
         tel, evs = self._new_items()
         EV = consts.EV
         for _, e in evs:
-            if e.code == EV["GAIT_STOPPED"]:
+            if e.code == EV["STREAM_STOPPED"]:
                 if self.handover_at is not None:
                     self._end("stopped", ok=True)
                 elif e.arg == 1:
-                    self._end("the body settled after a FEET underrun (the stream was late)")
+                    self._end("the body settled after a POSE underrun (the stream was late)")
                 else:
-                    self._end("the body stopped the gait (a posture or an epoch bump took the legs)")
-            elif e.code == EV["FEET_UNDERRUN"]:
+                    self._end("the body stopped the stream (a posture or an epoch bump took the legs)")
+            elif e.code == EV["POSE_UNDERRUN"]:
                 self.underruns += 1
                 self._log("walk_underrun", ticks=e.arg)
             elif e.code == EV["GOAL_REFUSED"]:
                 gtype, reason = (e.arg & 0xFFFF) >> 8, e.arg & 0xFF
-                if gtype == int(P.MsgId.FEET):
-                    self._end(f"the body refused FEET: {consts.REFUSE_REASON.get(reason, reason)}")
+                if gtype == int(P.MsgId.POSE):
+                    self._end(f"the body refused POSE: {consts.REFUSE_REASON.get(reason, reason)}")
             elif e.code == EV["FELL"]:
                 self._end("Kilo fell")
-        gait = int(P.Mode.GAIT)
+        gait = int(P.Mode.STREAM)
         for rx, m in tel:
             tick = self.clock.add(m.tick, rx)
             self.last_tel = m
@@ -228,7 +239,7 @@ class Stream:
                 ep, er = self.tracker.add(tick, m, self.pred.get(m.tick))
                 self.planner.observe(ep, er)
             elif self.gait_seen and self.handover_at is None and self.ended is None:
-                self._end(f"the body left GAIT (mode {consts.MODES.get(m.mode, m.mode)})")
+                self._end(f"the body left STREAM (mode {consts.MODES.get(m.mode, m.mode)})")
 
     # ---- one wake ------------------------------------------------------------------------------
     def wake(self, now: float) -> bool:
@@ -243,10 +254,10 @@ class Stream:
         if st.epoch != self.epoch:
             return self._end(f"the body's epoch changed ({self.epoch} -> {st.epoch})")
         if self.handover_at is not None:
-            if self.gait_seen and self.last_tel is not None and self.last_tel.mode != int(P.Mode.GAIT):
+            if self.gait_seen and self.last_tel is not None and self.last_tel.mode != int(P.Mode.STREAM):
                 return self._end("stopped", ok=True)
             if now - self.handover_at > HANDOVER_TIMEOUT_S:
-                return self._end("stopped (no GAIT_STOPPED seen after the STANCE posture)", ok=True)
+                return self._end("stopped (no STREAM_STOPPED seen after the STANCE posture)", ok=True)
             return True
         if not self.link.mind_alive():
             if self.stalled_since is None:
@@ -262,7 +273,7 @@ class Stream:
         if self.started_at is None:
             self.started_at = now
         elif not self.gait_seen and now - self.started_at > ENTER_TIMEOUT_S:
-            return self._end("the body did not enter GAIT")
+            return self._end("the body did not enter STREAM")
         p = self.planner
         target = cur + LOOKAHEAD
         behind = 0
@@ -272,7 +283,7 @@ class Stream:
                 self.skipped += 1
                 continue
             behind += 1
-            if self.link.send_stream("FEET", pack_feet(self.epoch, tp)):
+            if self.link.send_stream("POSE", pack_pose(self.epoch, tp)):
                 self.sent += 1
                 self.last_sent = tp.tick
                 self.pred[tp.tick & 0xFFFF] = (tp.pitch, tp.roll)
@@ -282,7 +293,7 @@ class Stream:
                           support=tp.support, margin=round(tp.margin, 1))
         self.max_behind = max(self.max_behind, behind)
         if p.done and self.handover_at is None:
-            # every planned tick is out; the STANCE posture ends GAIT after them
+            # every planned tick is out; the STANCE posture ends the stream after them
             self.handover_at = now
             self.on_done()
         return True

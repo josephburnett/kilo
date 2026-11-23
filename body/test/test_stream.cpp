@@ -1,19 +1,24 @@
-// The FEET player, STANCE and the body pose (core/feet.*, doc §3d), as wired
-// into body_tick, the arbiter and the link, and the balance in GAIT (doc
-// §3f) against a plant that tips (test/tip_plant.h). Every FEET goes
+// The POSE stream, STANCE and the body pose (core/stream.*), as wired into
+// body_tick, the arbiter and the link, and the balance of a stream of feet
+// (doc §3f) against a plant that tips (test/tip_plant.h). Every POSE goes
 // through the real link path (COBS, CRC, dispatch) and every tick runs as
 // app/main.cpp's run_tick: link_poll, body_tick, link_poll, link_tick.
 //   STANCE: the IK posture, the pose terms, the foot nudge; the geometric
 //     balance closed through a four-foot plant (slopes, a flipped sensor,
 //     a commanded pose as the target).
-//   The queue: tick matching, late and too-far ticks dropped and counted
-//     (STATS feet_late), a repeat replacing its tick, no ACK, refusals.
-//   Playing: the IK of the pose, a lost tick held, a wild pose slew-limited.
-//   Underrun: FEET_UNDERRUN, the hold, the settle, GAIT_STOPPED 1; a FEET
+//   The queue: tick order, past, too-far and no-room keys dropped and
+//     counted (STATS pose_dropped), a repeat replacing its tick, no ACK,
+//     refusals.
+//   Playing: the IK of the pose, a lost key moved toward the next, a wild
+//     pose slew-limited; keys far apart reached on their tick in a straight
+//     line or along a cosine; joint-angle legs, the head, a leg changing
+//     between a foot and angles, the joint-space balance; TELEMETRY limited.
+//   Underrun: POSE_UNDERRUN, the hold, the settle, STREAM_STOPPED 1; a POSE
 //     during the hold resumes; the settle on a leaning body (the plane of
-//     the support feet; on two feet their mean).
-//   The end: SET_POSTURE, an epoch bump (a fall), a reflex: GAIT_STOPPED 0.
-//   TELEMETRY at 50 Hz with FEET at 50 Hz on a 250 kbaud budget.
+//     the support feet; on two feet their mean); joint-angle legs hold.
+//   The end: SET_POSTURE (over its ticks), an epoch bump (a fall), a
+//     reflex: STREAM_STOPPED 0.
+//   TELEMETRY at 50 Hz with POSE at 50 Hz on a 250 kbaud budget.
 //   The tipping plant: its time constant; a walk plan that moves the mass
 //     into each support triangle stays up with small corrections; the same
 //     plan without the shift tips; a three-foot stance at Kp 0.99 shoved.
@@ -109,26 +114,34 @@ static void posture(uint8_t p, uint8_t flags = 0, uint8_t ticks = 0) {
   send(KILO_MSG_SET_POSTURE, {b.epoch, p, ticks, flags});
 }
 
-// One FEET pose in mm and degrees.
+// One POSE in mm and degrees: four feet (the walk's), unless `joint` says a
+// leg is joint angles (sh, kn in degrees); the head left to IDLE unless
+// given (degrees).
 struct Pose {
   double x[4] = {0, 0, 0, 0}, z[4] = {76, 76, 76, 76};
   double pitch = 0, roll = 0;
   uint8_t sup = 0xF;
+  uint8_t flags = 0;  // KILO_POSE_FLAGS_*: JOINT_* legs, BALANCE, FALL_OK, EASE
+  double sh[4] = {0, 0, 0, 0}, kn[4] = {0, 0, 0, 0};
+  double head[3] = {NAN, NAN, NAN};
 };
+static int16_t i16(double v) { return (int16_t)std::lround(v); }
+// Feet in whole mm (x 4 for q2), as the mind's walk sends them (the walk's
+// tests below then play exactly what the FEET player played).
 static std::vector<uint8_t> feet_msg(uint16_t t, const Pose& p, int epoch = -1) {
-  std::vector<uint8_t> m(KILO_FEET_LEN);
-  m[0] = (uint8_t)(epoch < 0 ? b.epoch : epoch);
-  m[1] = (uint8_t)t, m[2] = (uint8_t)(t >> 8);
+  std::vector<uint8_t> m(KILO_POSE_LEN);
+  int16_t legs[8], head[3];
   for (int l = 0; l < 4; l++) {
-    m[3 + l] = (uint8_t)(int8_t)std::lround(p.x[l]);
-    m[7 + l] = (uint8_t)std::lround(p.z[l]);
+    bool j = (p.flags >> l) & 1;
+    legs[2 * l] = j ? i16(p.sh[l] * 16) : (int16_t)(std::lround(p.x[l]) * 4);
+    legs[2 * l + 1] = j ? i16(p.kn[l] * 16) : (int16_t)(std::lround(p.z[l]) * 4);
   }
-  int16_t pp = (int16_t)std::lround(p.pitch * 16), rr = (int16_t)std::lround(p.roll * 16);
-  m[11] = (uint8_t)pp, m[12] = (uint8_t)(pp >> 8), m[13] = (uint8_t)rr, m[14] = (uint8_t)(rr >> 8);
-  m[15] = p.sup;
+  for (int k = 0; k < 3; k++) head[k] = std::isnan(p.head[k]) ? JOINT_OFF : i16(p.head[k] * 16);
+  fixture_pose(m.data(), (uint8_t)(epoch < 0 ? b.epoch : epoch), t, p.flags, legs, head, i16(p.pitch * 16),
+               i16(p.roll * 16), p.sup);
   return m;
 }
-static void feet(uint16_t t, const Pose& p, int epoch = -1) { send(KILO_MSG_FEET, feet_msg(t, p, epoch)); }
+static void feet(uint16_t t, const Pose& p, int epoch = -1) { send(KILO_MSG_POSE, feet_msg(t, p, epoch)); }
 
 // The model in double: OpenCat angles (a16) -> foot (mm), leg frame.
 static void fk(int leg, int16_t sh, int16_t kn, double* x, double* z) {
@@ -144,7 +157,7 @@ static void out_foot(int leg, double* x, double* z) { fk(leg, b.arb.out[3 + leg]
 static bool at_pose(const Pose& p) {
   for (int l = 0; l < 4; l++) {
     int16_t sh, kn;
-    ik_leg((uint8_t)l, (int16_t)(std::lround(p.x[l]) * 4), (int16_t)(std::lround(p.z[l]) * 4), &sh, &kn);
+    ik_leg((uint8_t)l, i16(p.x[l] * 4), i16(p.z[l] * 4), &sh, &kn);
     if (b.arb.out[3 + l] != sh || b.arb.out[7 + l] != kn) return false;
   }
   return true;
@@ -212,12 +225,12 @@ static void test_stance_pose() {
     CHECKF(std::fabs(z - z0[l] - (leg_left((uint8_t)l) ? -dr : dr) + 8) < 0.3, "roll leg %d: dz %.2f", l, z - z0[l]);
   }
   // STANCE re-entered from another posture starts at the default height.
-  b.feet.h = 280;
+  b.stream.h = 280;
   posture(POSTURE_STAND);
   tick(30);
   posture(POSTURE_STANCE);
   tick();
-  CHECK(b.feet.h == h);
+  CHECK(b.stream.h == h);
 }
 
 // ---- The geometric balance in STANCE, closed through a four-foot plant ---------------
@@ -254,21 +267,21 @@ static void test_stance_balance() {
     stance(KILO_POSTURE_FLAGS_BALANCE);
     CHECK(body_goal_balance(b, BAL_KP99) == GOAL_OK);
     double r, p = run_board(-10, 10, k, 50, false, &r);  // nose up 10, right up 10
-    std::printf("feet: STANCE balance, leg response %.1fx: 10 deg slope -> pitch %+.2f roll %+.2f after 1 s\n", k, p,
+    std::printf("stream: STANCE balance, leg response %.1fx: 10 deg slope -> pitch %+.2f roll %+.2f after 1 s\n", k, p,
                 r);
     CHECK(std::fabs(p) <= 3 && std::fabs(r) <= 3);  // H13
-    CHECK(b.bal.active && b.feet.geo && !body_balance_held(b));
+    CHECK(b.bal.active && b.stream.geo && !body_balance_held(b));
     // No joint-space corrections: the legs are exactly the IK's.
-    int16_t legs[8];
-    feet_legs(b.feet, b.bal.ax[BAL_ROLL].corr, b.bal.ax[BAL_PITCH].corr, legs);
+    int16_t legs[DRIVEN_COUNT];
+    stream_joints(b.stream, b.bal.ax[BAL_ROLL].corr, b.bal.ax[BAL_PITCH].corr, legs);
     bool ik_only = true;
-    for (int l = 0; l < 8; l++) ik_only = ik_only && b.arb.out[3 + l] == legs[l];
+    for (int l = 3; l < (int)DRIVEN_COUNT; l++) ik_only = ik_only && b.arb.out[l] == legs[l];
     CHECK(ik_only && b.arb.out[1] == 0);
     p = run_board(-10, 10, k, 200, false, &r);
     CHECKF(std::fabs(p) <= 2.5 && std::fabs(r) <= 2.5, "settled %.2f %.2f", p, r);
     // TELEMETRY: the reference (the pose, 0), the correction, all four feet.
     const kilo_telemetry_t& m = tlog.back();
-    CHECK(m.ref_pitch == 0 && m.ref_roll == 0 && m.support == 0xF && m.feet_queued == 0);
+    CHECK(m.ref_pitch == 0 && m.ref_roll == 0 && m.support == 0xF && m.pose_queued == 0);
     CHECKF(m.corr_pitch == b.bal.ax[BAL_PITCH].corr && m.corr_roll == b.bal.ax[BAL_ROLL].corr && m.corr_roll < -64,
            "corr %d %d / %d %d", m.corr_pitch, m.corr_roll, b.bal.ax[BAL_PITCH].corr, b.bal.ax[BAL_ROLL].corr);
   }
@@ -288,7 +301,7 @@ static void test_stance_balance() {
   // Leaving the geometric balance for a joint-space posture zeroes it.
   posture(POSTURE_STAND);
   tick();
-  CHECK(!b.feet.geo && b.bal.ax[BAL_PITCH].corr == 0);
+  CHECK(!b.stream.geo && b.bal.ax[BAL_PITCH].corr == 0);
   in.att.pitch = in.att.roll = 0;
 }
 
@@ -296,49 +309,56 @@ static void test_stance_balance() {
 static void test_queue() {
   stance();
   Pose p;
-  CHECK(body_mode(b) == KILO_MODE_IDLE && !body_gait_active(b));
+  CHECK(body_mode(b) == KILO_MODE_IDLE && !body_stream_on(b));
   uint16_t n = b.tick;
   // Late (this tick, an earlier one) and too far ahead: dropped, counted,
-  // and none of them enters GAIT.
+  // and none of them starts a stream.
   feet(n, p);
   feet((uint16_t)(n - 3), p);
-  feet((uint16_t)(n + KILO_FEET_DEPTH + 1), p);
+  feet((uint16_t)(n + KILO_POSE_MAX_AHEAD_TICKS + 1), p);
   link_poll();
-  CHECK(b.feet.late == 3 && !body_gait_active(b) && b.feet.have == 0);
-  // (From SIT a dropped first FEET leaves IDLE's posture alone.)
+  CHECK(b.stream.dropped == 3 && !body_stream_on(b) && b.stream.n == 0);
+  // (From SIT a dropped first key leaves IDLE's posture alone.)
   posture(POSTURE_SIT);
   feet(n, p);
   link_poll();
-  CHECK(arbiter_idle_posture(b.arb) == POSTURE_SIT && b.feet.late == 4);
+  CHECK(arbiter_idle_posture(b.arb) == POSTURE_SIT && b.stream.dropped == 4);
   posture(POSTURE_STANCE);
   tick(30);
   n = b.tick;
-  // The window: n+1 .. n+8 all queued (8 slots, 8 ticks).
-  for (int a = 1; a <= (int)KILO_FEET_DEPTH; a++) {
+  // Out of order, n+1 .. n+5: all queued, in tick order.
+  const int order[KILO_POSE_DEPTH] = {3, 1, 5, 2, 4};
+  for (int a : order) {
     Pose q = p;
     q.x[0] = a;
     feet((uint16_t)(n + a), q);
   }
   link_poll();
-  CHECK(feet_queued(b.feet) == KILO_FEET_DEPTH && b.feet.late == 4);
-  CHECK(body_gait_active(b) && body_mode(b) == KILO_MODE_GAIT && b.feet.state == FT_WAIT);
-  // A repeat replaces its tick.
+  CHECK(stream_queued(b.stream) == KILO_POSE_DEPTH && b.stream.dropped == 4);
+  bool sorted = true;
+  for (int i = 0; i < (int)KILO_POSE_DEPTH; i++) sorted = sorted && b.stream.q[i].tick == n + 1 + i;
+  CHECK(sorted && body_stream_on(b) && body_mode(b) == KILO_MODE_STREAM && b.stream.state == ST_PLAY);
+  // Full: one later than every queued key is dropped; an earlier one makes
+  // room (the latest goes); a repeat replaces its tick.
+  feet((uint16_t)(n + 7), p);
+  link_poll();
+  CHECK(b.stream.dropped == 5 && b.stream.q[KILO_POSE_DEPTH - 1].tick == n + 5);
   Pose q = p;
   q.x[0] = 30;
   feet((uint16_t)(n + 2), q);
   link_poll();
-  CHECK(feet_queued(b.feet) == KILO_FEET_DEPTH && b.feet.q[(n + 2) % KILO_FEET_DEPTH].x[0] == 30);
-  // Each plays on its own tick: the GAIT owner takes the legs on n+1.
+  CHECK(stream_queued(b.stream) == KILO_POSE_DEPTH && b.stream.q[1].v[3] == 30 * 4 && b.stream.dropped == 5);
+  // Each is reached on its own tick: the STREAM owner takes the legs on n+1.
   tick();
-  CHECK(b.tick == n + 1 && b.feet.state == FT_PLAY && b.feet.cur.x[0] == 1 && b.arb.owner[3] == OWN_GAIT);
-  CHECK(feet_queued(b.feet) == KILO_FEET_DEPTH - 1 && tlog.back().feet_queued == KILO_FEET_DEPTH - 1);
+  CHECK(b.tick == n + 1 && b.stream.state == ST_PLAY && b.stream.cur.v[3] == 4 && b.arb.owner[3] == OWN_STREAM);
+  CHECK(stream_queued(b.stream) == KILO_POSE_DEPTH - 1 && tlog.back().pose_queued == KILO_POSE_DEPTH - 1);
   tick();
-  CHECK(b.feet.cur.x[0] == 30);
-  // A FEET for the tick just played, or one 9 ahead of it: dropped.
+  CHECK(b.stream.cur.v[3] == 30 * 4);
+  // A key for the tick just played, or one too far ahead: dropped.
   feet(b.tick, p);
-  feet((uint16_t)(b.tick + KILO_FEET_DEPTH + 1), p);
+  feet((uint16_t)(b.tick + KILO_POSE_MAX_AHEAD_TICKS + 1), p);
   tick();
-  CHECK(b.feet.late == 6 && b.feet.cur.x[0] == 3);
+  CHECK(b.stream.dropped == 7 && b.stream.cur.v[3] == 3 * 4);
   // STATS through the link.
   other.clear();
   send(KILO_MSG_STATS_REQ, {});
@@ -348,11 +368,11 @@ static void test_queue() {
     if (f.type == KILO_MSG_STATS) {
       kilo_stats_t st;
       memcpy(&st, f.payload.data(), sizeof st);
-      stats = st.feet_late == 6 && st.feet_underruns == 0;
+      stats = st.pose_dropped == 7 && st.pose_underruns == 0;
     }
   CHECK(stats);
   // A stream is never acked (nor refused while it is right).
-  for (const TxFrame& f : other) CHECK(!(f.type == KILO_MSG_ACK && f.payload[1] == KILO_MSG_FEET));
+  for (const TxFrame& f : other) CHECK(!(f.type == KILO_MSG_ACK && f.payload[1] == KILO_MSG_POSE));
   CHECK(count_ev(EV_GOAL_REFUSED) == 0);
 }
 
@@ -367,77 +387,103 @@ static void test_refusals() {
     tick();
   }
   // (30 ticks: within one rate-limit second, or across one boundary.)
-  int nref = count_ev(EV_GOAL_REFUSED, (KILO_MSG_FEET << 8) | KILO_GOAL_REFUSED_REASON_STALE);
+  int nref = count_ev(EV_GOAL_REFUSED, (KILO_MSG_POSE << 8) | KILO_GOAL_REFUSED_REASON_STALE);
   CHECKF(nref >= 1 && nref <= 2, "%d refusals", nref);
-  CHECK(!body_gait_active(b) && b.feet.have == 0);
-  // A field out of range: BAD_ARG (and nothing queued).
+  CHECK(!body_stream_on(b) && b.stream.n == 0);
+  // A field out of range: BAD_ARG (and nothing queued). Offsets: flags 3,
+  // LF's x 4 and z 6, support 30, pitch 26, roll 28.
   std::vector<uint8_t> m = feet_msg((uint16_t)(b.tick + 3), p);
-  CHECK(body_feet(b, m.data()) == GOAL_OK);
-  feet_stop(b.feet);
-  m[7] = 29;
-  CHECK(body_feet(b, m.data()) == GOAL_BAD_ARG);
-  m[7] = 96;
-  CHECK(body_feet(b, m.data()) == GOAL_BAD_ARG);
-  m[7] = 76, m[4] = (uint8_t)(int8_t)-61;
-  CHECK(body_feet(b, m.data()) == GOAL_BAD_ARG);
-  m[4] = 0, m[15] = 0x10;
-  CHECK(body_feet(b, m.data()) == GOAL_BAD_ARG && b.feet.have == 0 && !b.feet.state);
-  m[15] = 0xF;
+  CHECK(body_pose(b, m.data()) == GOAL_OK);
+  stream_stop(b.stream);
+  auto put = [&](int at, int16_t v) { m[at] = (uint8_t)v, m[at + 1] = (uint8_t)(v >> 8); };
+  put(6, 59);
+  CHECK(body_pose(b, m.data()) == GOAL_BAD_ARG);
+  put(6, 441);
+  CHECK(body_pose(b, m.data()) == GOAL_BAD_ARG);
+  put(6, 304), put(4, -481);
+  CHECK(body_pose(b, m.data()) == GOAL_BAD_ARG);
+  put(4, 481);
+  CHECK(body_pose(b, m.data()) == GOAL_BAD_ARG);
+  put(4, 0), m[30] = 0x10;
+  CHECK(body_pose(b, m.data()) == GOAL_BAD_ARG && b.stream.n == 0 && !b.stream.state);
+  m[30] = 0xF, m[3] = 0x80;  // an unknown flag
+  CHECK(body_pose(b, m.data()) == GOAL_BAD_ARG);
+  m[3] = KILO_POSE_FLAGS_JOINT_LF, put(4, JOINT_OFF);  // a joint angle may not be left to IDLE
+  CHECK(body_pose(b, m.data()) == GOAL_BAD_ARG);
+  put(4, 30 * 16), put(6, -2000);  // any other angle passes (the limits clamp it)
+  CHECK(body_pose(b, m.data()) == GOAL_OK);
+  stream_stop(b.stream);
+  m[3] = 0, put(4, 0), put(6, 304);
   // pitch and roll beyond +-30 deg (480 a16): BAD_ARG (in int16 the
   // reference and the balance's residual could otherwise wrap).
-  for (int f = 11; f <= 13; f += 2) {
+  for (int f = 26; f <= 28; f += 2) {
     for (int16_t a : {(int16_t)481, (int16_t)-481, (int16_t)32767, (int16_t)-32768}) {
       m[f] = (uint8_t)a, m[f + 1] = (uint8_t)(a >> 8);
-      CHECK(body_feet(b, m.data()) == GOAL_BAD_ARG && b.feet.have == 0 && !b.feet.state);
+      CHECK(body_pose(b, m.data()) == GOAL_BAD_ARG && b.stream.n == 0 && !b.stream.state);
     }
     for (int16_t a : {(int16_t)480, (int16_t)-480}) {
       m[f] = (uint8_t)a, m[f + 1] = (uint8_t)(a >> 8);
-      CHECK(body_feet(b, m.data()) == GOAL_OK);
-      feet_stop(b.feet);
+      CHECK(body_pose(b, m.data()) == GOAL_OK);
+      stream_stop(b.stream);
     }
     m[f] = m[f + 1] = 0;
   }
   // LOW_BATT, FALLEN, UNCALIBRATED, as SET_POSTURE STAND.
   b.batt.level = BATT_LOW;
-  CHECK(body_feet(b, m.data()) == GOAL_LOW_BATT);
+  CHECK(body_pose(b, m.data()) == GOAL_LOW_BATT);
   b.batt.level = BATT_OK;
   b.fall.state = FS_FALLEN;
-  CHECK(body_feet(b, m.data()) == GOAL_FALLEN);
+  CHECK(body_pose(b, m.data()) == GOAL_FALLEN);
   b.fall.state = FS_UPRIGHT;
   cfg.state = CFG_DEFAULTED;
-  CHECK(body_feet(b, m.data()) == GOAL_UNCALIBRATED);
+  CHECK(body_pose(b, m.data()) == GOAL_UNCALIBRATED);
   cfg.state = CFG_MIGRATED;
-  CHECK(b.feet.have == 0 && !b.feet.state);
-  // From SIT: the first FEET makes IDLE's posture STANCE (STAND's head, the
-  // default height), the legs stay IDLE's until the first tick plays.
+  CHECK(b.stream.n == 0 && !b.stream.state);
+  // LIMP and CALIB: BUSY (a stream starts from a posture, never from limp).
+  posture(POSTURE_LIMP);
+  tick();
+  CHECK(body_pose(b, m.data()) == GOAL_BUSY);
+  posture(POSTURE_CALIB);
+  tick(30);
+  CHECK(body_pose(b, m.data()) == GOAL_BUSY && !b.stream.state);
+  // From SIT: the first key of feet makes IDLE's posture STANCE (STAND's
+  // head, the default height); the stream takes the legs from where they
+  // are on the next tick.
   posture(POSTURE_SIT);
   tick(30);
-  b.feet.h = 250;
+  b.stream.h = 250;
   feet((uint16_t)(b.tick + 3), p);
   tick();
-  CHECK(arbiter_idle_posture(b.arb) == POSTURE_STANCE && b.feet.h == 304 && b.feet.state == FT_WAIT);
-  CHECK(b.arb.owner[3] == OWN_IDLE && tlog.back().mode == KILO_MODE_GAIT &&
-        (tlog.back().owners & 0xF) == KILO_OWNER_GAIT && (tlog.back().flags & KILO_TELEMETRY_FLAGS_GAIT));
-  tick(2);
-  CHECK(b.feet.state == FT_PLAY && b.arb.owner[3] == OWN_GAIT);
+  CHECK(arbiter_idle_posture(b.arb) == POSTURE_STANCE && b.stream.h == 304 && b.stream.state == ST_PLAY);
+  CHECK(b.arb.owner[3] == OWN_STREAM && tlog.back().mode == KILO_MODE_STREAM &&
+        (tlog.back().owners & 0xF) == KILO_OWNER_STREAM && (tlog.back().flags & KILO_TELEMETRY_FLAGS_STREAM));
+  // A stream of joint angles leaves IDLE's posture alone.
+  posture(POSTURE_SIT);
+  tick(30);
+  Pose j;
+  j.flags = 0x0F;
+  for (int l = 0; l < 4; l++) j.sh[l] = posture_angle(POSTURE_SIT, (uint8_t)(3 + l)) / 16.0, j.kn[l] = posture_angle(POSTURE_SIT, (uint8_t)(7 + l)) / 16.0;
+  feet((uint16_t)(b.tick + 3), j);
+  tick();
+  CHECK(arbiter_idle_posture(b.arb) == POSTURE_SIT && b.stream.state == ST_PLAY && b.arb.owner[3] == OWN_STREAM);
 }
 
 // ---- Playing ------------------------------------------------------------------------------
 // A stream whose sender is `lookahead` ticks ahead, as the mind is: before
 // tick N + 1 plays it sends N + 1 + lookahead, so after each tick
 // `lookahead` ticks wait in the queue.
-struct Stream {
+struct Sender {
   uint16_t t0;  // the first tick of the plan
-  int lookahead = KILO_FEET_LOOKAHEAD_TICKS;
+  int lookahead = KILO_POSE_LOOKAHEAD_TICKS;
 };
-static Stream start_stream(const Pose& p) {
-  Stream st;
+static Sender start_stream(const Pose& p) {
+  Sender st;
   st.t0 = (uint16_t)(b.tick + 1);
   for (int a = 0; a < st.lookahead; a++) feet((uint16_t)(st.t0 + a), p);
   return st;
 }
 // Send the pose the sender owes, then tick.
-static void stream_tick(const Stream& st, const Pose& p) {
+static void stream_tick(const Sender& st, const Pose& p) {
   feet((uint16_t)(b.tick + 1 + st.lookahead), p);
   tick();
   (void)st;
@@ -446,16 +492,16 @@ static void stream_tick(const Stream& st, const Pose& p) {
 static void test_play() {
   stance();
   Pose p;
-  Stream st = start_stream(p);
+  Sender st = start_stream(p);
   for (int t = 0; t < 30; t++) stream_tick(st, p);
-  CHECK(at_pose(p) && body_mode(b) == KILO_MODE_GAIT && b.arb.owner[3] == OWN_GAIT);
-  CHECK(tlog.back().feet_queued == KILO_FEET_LOOKAHEAD_TICKS && tlog.back().support == 0xF);
+  CHECK(at_pose(p) && body_mode(b) == KILO_MODE_STREAM && b.arb.owner[3] == OWN_STREAM);
+  CHECK(tlog.back().pose_queued == KILO_POSE_LOOKAHEAD_TICKS && tlog.back().support == 0xF);
   // A new pose: the IK of it (after the crossfade and slew).
   Pose q;
   q.x[LEG_LF] = 20, q.x[LEG_RB] = -15, q.z[LEG_RF] = 60, q.z[LEG_LB] = 90, q.sup = 0xD;  // RF lifted
   for (int t = 0; t < 30; t++) stream_tick(st, q);
-  CHECK(at_pose(q) && tlog.back().support == 0xD && b.feet.cur.zs[LEG_RF] == 60);
-  // A lost tick holds the pose: one FEET never sent.
+  CHECK(at_pose(q) && tlog.back().support == 0xD && (b.stream.cur.v[7 + LEG_RF] / 4) == 60);
+  // A lost key: the pose moves toward the next one, no event.
   Pose r = q;
   r.x[LEG_LF] = 25;
   feet((uint16_t)(b.tick + 1 + st.lookahead), r);  // on time
@@ -468,8 +514,8 @@ static void test_play() {
     else
       stream_tick(st, r);
   }
-  // Every tick from here on is r; the gap was held at q, no event.
-  CHECK(count_ev(EV_FEET_UNDERRUN) == 0 && b.feet.state == FT_PLAY);
+  // Every tick from here on is r; the gap moved toward it, no event.
+  CHECK(count_ev(EV_POSE_UNDERRUN) == 0 && b.stream.state == ST_PLAY);
   for (int t = 0; t < 30; t++) stream_tick(st, r);
   CHECK(at_pose(r));
   // A wild pose: every foot 60 mm forward at once. The safety slew paces
@@ -484,7 +530,7 @@ static void test_play() {
   }
   CHECKF(worst <= PARAM(SLEW_MAX_A16) / 16.0 + 1e-9, "step %.2f deg", worst);
   CHECK(worst > 5);  // it was the slew that paced it
-  std::printf("feet: a 60 mm jump of every foot: largest joint step %.2f deg/tick (the safety slew %.1f)\n", worst,
+  std::printf("stream: a 60 mm jump of every foot: largest joint step %.2f deg/tick (the safety slew %.1f)\n", worst,
               PARAM(SLEW_MAX_A16) / 16.0);
 }
 
@@ -493,53 +539,53 @@ static void test_underrun() {
   stance();
   Pose p;
   p.z[LEG_LB] = 61, p.x[LEG_LB] = -10, p.sup = 0x7;  // LB lifted 15 mm
-  Stream st = start_stream(p);
+  Sender st = start_stream(p);
   for (int t = 0; t < 40; t++) stream_tick(st, p);
   CHECK(at_pose(p));
   // The sender stops: the queued ticks play, then the queue is dry. (The
-  // last FEET was handled before the last tick: at b.tick - 1.)
+  // last POSE was handled before the last tick: at b.tick - 1.)
   uint16_t last_rx = (uint16_t)(b.tick - 1);
   int16_t held[DRIVEN_COUNT];
   int t = 0;
-  while (count_ev(EV_FEET_UNDERRUN) == 0 && t++ < 20) tick();
-  CHECK(t == KILO_FEET_LOOKAHEAD_TICKS + 1);  // the five queued ticks, then the first dry one
-  CHECK(count_ev(EV_FEET_UNDERRUN, (int16_t)(b.tick - last_rx)) == 1);
-  CHECK(b.feet.underruns == 1 && b.feet.state == FT_HOLD);
+  while (count_ev(EV_POSE_UNDERRUN) == 0 && t++ < 20) tick();
+  CHECK(t == KILO_POSE_LOOKAHEAD_TICKS + 1);  // the five queued ticks, then the first dry one
+  CHECK(count_ev(EV_POSE_UNDERRUN, (int16_t)(b.tick - last_rx)) == 1);
+  CHECK(b.stream.underruns == 1 && b.stream.state == ST_HOLD);
   memcpy(held, b.arb.out, sizeof held);
-  for (int i = 1; i < (int)KILO_FEET_HOLD_TICKS; i++) {
+  for (int i = 1; i < (int)KILO_POSE_HOLD_TICKS; i++) {
     tick();
-    CHECK(memcmp(held, b.arb.out, sizeof held) == 0 && b.feet.state == FT_HOLD);
+    CHECK(memcmp(held, b.arb.out, sizeof held) == 0 && b.stream.state == ST_HOLD);
   }
   // The settle: LB goes down at its x, 2 mm per tick, to the ground (the
   // other three feet's depth); then IDLE STANCE, GAIT_STOPPED 1.
   tick();
-  CHECK(b.feet.state == FT_SETTLE && (b.feet.cur.zs[LEG_LB] & 0x7F) == 63 && b.feet.cur.x[LEG_LB] == -10);
+  CHECK(b.stream.state == ST_SETTLE && b.stream.cur.v[7 + LEG_LB] == 63 * 4 && b.stream.cur.v[3 + LEG_LB] == -10 * 4);
   double x0, z0, x, z;
   out_foot(LEG_LB, &x0, &z0);
   int n = 1;
-  while (count_ev(EV_GAIT_STOPPED) == 0 && n++ < 30) {
+  while (count_ev(EV_STREAM_STOPPED) == 0 && n++ < 30) {
     tick();
     out_foot(LEG_LB, &x, &z);
     CHECK(std::fabs(x - x0) < 0.5);
   }
-  std::printf("feet: underrun: FEET_UNDERRUN %d ticks after the last FEET, held %d ticks, settled in %d ticks\n",
-              KILO_FEET_LOOKAHEAD_TICKS + 1, KILO_FEET_HOLD_TICKS, n);
+  std::printf("stream: underrun: POSE_UNDERRUN %d ticks after the last POSE, held %d ticks, settled in %d ticks\n",
+              KILO_POSE_LOOKAHEAD_TICKS + 1, KILO_POSE_HOLD_TICKS, n);
   CHECK(n == 8);  // 61 -> 76 mm at 2 mm per tick, the last step on the 8th
-  CHECK(count_ev(EV_GAIT_STOPPED, 1) == 1 && count_ev(EV_GAIT_STOPPED, 0) == 0);
-  CHECK(body_mode(b) == KILO_MODE_IDLE && arbiter_idle_posture(b.arb) == POSTURE_STANCE && !body_gait_active(b));
+  CHECK(count_ev(EV_STREAM_STOPPED, 1) == 1 && count_ev(EV_STREAM_STOPPED, 0) == 0);
+  CHECK(body_mode(b) == KILO_MODE_IDLE && arbiter_idle_posture(b.arb) == POSTURE_STANCE && !body_stream_on(b));
   tick(30);
-  CHECK(b.arb.owner[3] == OWN_IDLE && tlog.back().feet_queued == 0 && tlog.back().support == 0xF);
-  // A FEET during the hold: the stream goes on (no GAIT_STOPPED).
+  CHECK(b.arb.owner[3] == OWN_IDLE && tlog.back().pose_queued == 0 && tlog.back().support == 0xF);
+  // A POSE during the hold: the stream goes on (no STREAM_STOPPED).
   stance();
   st = start_stream(p);
   for (int i = 0; i < 20; i++) stream_tick(st, p);
-  while (b.feet.state != FT_HOLD) tick();
+  while (b.stream.state != ST_HOLD) tick();
   tick(2);
   feet((uint16_t)(b.tick + 2), p);
   tick(2);
-  CHECK(b.feet.state == FT_PLAY && count_ev(EV_FEET_UNDERRUN) == 1);
-  tick(KILO_FEET_HOLD_TICKS + 12);
-  CHECK(count_ev(EV_FEET_UNDERRUN) == 2 && count_ev(EV_GAIT_STOPPED, 1) == 1);
+  CHECK(b.stream.state == ST_PLAY && count_ev(EV_POSE_UNDERRUN) == 1);
+  tick(KILO_POSE_HOLD_TICKS + 12);
+  CHECK(count_ev(EV_POSE_UNDERRUN) == 2 && count_ev(EV_STREAM_STOPPED, 1) == 1);
 }
 
 // The settle on a leaning body: the lifted foot goes to the plane through
@@ -563,11 +609,11 @@ static double plane_z(const Pose& p, const int abc[3], int leg) {
 static int settle_run(const Pose& p, int16_t lb = 0) {
   stance();
   if (lb) g_param[KILO_PARAM_LEG_LB_MM] = lb;
-  Stream st = start_stream(p);
+  Sender st = start_stream(p);
   for (int t = 0; t < 40; t++) stream_tick(st, p);
   int n = 0;
-  while (count_ev(EV_GAIT_STOPPED) == 0 && n++ < 60) tick();
-  CHECK(count_ev(EV_GAIT_STOPPED, 1) == 1 && feet_support(b.feet) == 0xF);
+  while (count_ev(EV_STREAM_STOPPED) == 0 && n++ < 60) tick();
+  CHECK(count_ev(EV_STREAM_STOPPED, 1) == 1 && b.stream.support == 0xF);
   return n;
 }
 static void test_settle_plane() {
@@ -586,12 +632,12 @@ static void test_settle_plane() {
   int abc[3] = {LEG_RF, LEG_RB, LEG_LB};
   double want = plane_z(p, abc, LEG_LF), mean = (p.z[LEG_RF] + p.z[LEG_RB] + p.z[LEG_LB]) / 3;
   settle_run(p);
-  int got = b.feet.cur.zs[LEG_LF] & 0x7F;
-  std::printf("feet: settle on a leaning body: LF at %d mm (the support plane %.2f, their mean %.2f)\n", got, want,
+  int got = b.stream.cur.v[7 + LEG_LF] / 4;
+  std::printf("stream: settle on a leaning body: LF at %d mm (the support plane %.2f, their mean %.2f)\n", got, want,
               mean);
   CHECKF(std::fabs(got - want) <= 0.5, "LF settled at %d, plane %.2f", got, want);
   CHECK(std::fabs(want - mean) > 10);  // the mean would have left it ~20 mm off the floor
-  CHECK(b.feet.cur.x[LEG_LF] == 20);
+  CHECK((b.stream.cur.v[3 + LEG_LF] / 4) == 20);
   // Each leg lifted in turn: on the plane of the other three.
   for (int lift = 0; lift < 4; lift++) {
     Pose q = q0;
@@ -601,7 +647,7 @@ static void test_settle_plane() {
       if (l != lift) sup[k++] = l;
     double wz = plane_z(q, sup, lift);
     settle_run(q);
-    int g = b.feet.cur.zs[lift] & 0x7F;
+    int g = b.stream.cur.v[7 + lift] / 4;
     CHECKF(std::fabs(g - wz) <= 0.5 && std::fabs(g - q0.z[lift]) <= 1, "leg %d settled at %d, plane %.2f", lift, g,
            wz);
   }
@@ -610,39 +656,39 @@ static void test_settle_plane() {
   d.z[LEG_LF] = 60, d.z[LEG_RB] = 60, d.sup = 0xA;  // RF, LB down
   settle_run(d);
   int m2 = (int)std::lround((d.z[LEG_RF] + d.z[LEG_LB]) / 2);
-  CHECK((b.feet.cur.zs[LEG_LF] & 0x7F) == m2 && (b.feet.cur.zs[LEG_RB] & 0x7F) == m2);
+  CHECK((b.stream.cur.v[7 + LEG_LF] / 4) == m2 && (b.stream.cur.v[7 + LEG_RB] / 4) == m2);
   // Three support feet on no plane: with Lb = 80 mm, RF 40 mm back and RB
   // 40 mm forward stand on the same spot (D = 0): their mean.
   Pose c;
   c.x[LEG_RF] = -40, c.x[LEG_RB] = 40, c.x[LEG_LB] = 40;
   c.z[LEG_RF] = 70, c.z[LEG_RB] = 80, c.z[LEG_LB] = 70, c.z[LEG_LF] = 60, c.sup = 0xE;
   settle_run(c, 80);
-  CHECK((b.feet.cur.zs[LEG_LF] & 0x7F) == 73);
+  CHECK((b.stream.cur.v[7 + LEG_LF] / 4) == 73);
   // A thin triangle (RB 1 mm further forward): the plane is steep, the
-  // quotient is capped and the depth kept in FEET's 30..95.
+  // quotient is capped and the depth kept in 30..95 mm.
   c.x[LEG_RB] = 41;
   settle_run(c, 80);
-  CHECK((b.feet.cur.zs[LEG_LF] & 0x7F) == 95);
+  CHECK((b.stream.cur.v[7 + LEG_LF] / 4) == 95);
   c.z[LEG_RB] = 60;
   settle_run(c, 80);
-  CHECK((b.feet.cur.zs[LEG_LF] & 0x7F) == 30);
+  CHECK((b.stream.cur.v[7 + LEG_LF] / 4) == 30);
 }
 
 // ---- The end: a posture, an epoch bump, a reflex ------------------------------------------
 static void test_end() {
   Pose p;
-  // SET_POSTURE: GAIT_STOPPED 0, IDLE takes the legs (STAND) from where they are.
+  // SET_POSTURE: STREAM_STOPPED 0, IDLE takes the legs (STAND) from where they are.
   stance();
-  Stream st = start_stream(p);
+  Sender st = start_stream(p);
   for (int t = 0; t < 20; t++) stream_tick(st, p);
   posture(POSTURE_STAND);
   tick();
-  CHECK(count_ev(EV_GAIT_STOPPED, 0) == 1 && !body_gait_active(b) && b.feet.have == 0);
+  CHECK(count_ev(EV_STREAM_STOPPED, 0) == 1 && !body_stream_on(b) && b.stream.n == 0);
   CHECK(body_mode(b) == KILO_MODE_IDLE && arbiter_idle_posture(b.arb) == POSTURE_STAND);
   tick(40);
   CHECK(b.arb.owner[3] == OWN_IDLE && b.arb.out[3] == posture_angle(POSTURE_STAND, 3));
-  // A fall (an epoch bump): GAIT_STOPPED 0 with the new epoch, the old
-  // epoch's FEET refused.
+  // A fall (an epoch bump): STREAM_STOPPED 0 with the new epoch, the old
+  // epoch's POSE refused.
   stance();
   st = start_stream(p);
   for (int t = 0; t < 20; t++) stream_tick(st, p);
@@ -654,9 +700,9 @@ static void test_end() {
   }
   CHECK(count_ev(EV_FELL) == 1 && b.epoch == (uint8_t)(e0 + 1));
   bool ep = false;
-  for (const Ev& e : evlog) ep = ep || (e.code == EV_GAIT_STOPPED && e.arg == 0 && e.epoch == e0 + 1);
-  CHECK(ep && count_ev(EV_GAIT_STOPPED) == 1 && !body_gait_active(b));
-  CHECK(count_ev(EV_GOAL_REFUSED, (KILO_MSG_FEET << 8) | KILO_GOAL_REFUSED_REASON_STALE) == 1);
+  for (const Ev& e : evlog) ep = ep || (e.code == EV_STREAM_STOPPED && e.arg == 0 && e.epoch == e0 + 1);
+  CHECK(ep && count_ev(EV_STREAM_STOPPED) == 1 && !body_stream_on(b));
+  CHECK(count_ev(EV_GOAL_REFUSED, (KILO_MSG_POSE << 8) | KILO_GOAL_REFUSED_REASON_STALE) == 1);
   in.att.roll = 0;
   // The link watchdog's stop (an epoch bump) while a stream holds: no frame
   // for 500 ms; the stream underran and settled first.
@@ -665,7 +711,7 @@ static void test_end() {
   for (int t = 0; t < 20; t++) stream_tick(st, p);
   heartbeat = false;
   tick(KILO_PARAM_WD_STOP_MS_DEFAULT / 20 + 5);
-  CHECK(count_ev(EV_GAIT_STOPPED, 1) == 1 && count_ev(EV_WATCHDOG) == 1 && count_ev(EV_GAIT_STOPPED) == 1);
+  CHECK(count_ev(EV_STREAM_STOPPED, 1) == 1 && count_ev(EV_WATCHDOG) == 1 && count_ev(EV_STREAM_STOPPED) == 1);
   // A reflex (low battery: an epoch bump and REST) ends it with arg 0.
   stance();
   st = start_stream(p);
@@ -673,8 +719,116 @@ static void test_end() {
   b.arb.reflex_active = 1;
   b.arb.reflex.posture = POSTURE_HOLD;
   stream_tick(st, p);
-  CHECK(count_ev(EV_GAIT_STOPPED, 0) == 1 && !body_gait_active(b));
+  CHECK(count_ev(EV_STREAM_STOPPED, 0) == 1 && !body_stream_on(b));
   b.arb.reflex_active = 0;
+}
+
+// ---- Keys far apart ---------------------------------------------------------------------
+// One key 40 ticks ahead: the legs reach it exactly on its tick, in a
+// straight line (in joint space for the first key of a stream: it starts
+// from the joints' outputs), or along a cosine (EASE: slow at both ends).
+// Then keys between feet far apart: x moves the same each tick.
+static void test_sparse() {
+  for (int eased = 0; eased <= 1; eased++) {
+    stance();
+    int16_t from = b.arb.out[3];
+    Pose p;
+    p.x[LEG_LF] = 20;
+    p.flags = eased ? KILO_POSE_FLAGS_EASE : 0;
+    int16_t want_sh, want_kn;
+    ik_leg(LEG_LF, 80, 304, &want_sh, &want_kn);
+    uint16_t t = (uint16_t)(b.tick + 40);
+    feet(t, p);
+    std::vector<int16_t> sh;
+    for (int i = 0; i < 40; i++) {
+      tick();
+      sh.push_back(b.arb.out[3]);
+    }
+    CHECKF(b.tick == t && b.arb.out[3] == want_sh && b.arb.out[7] == want_kn, "eased %d: %d %d, want %d %d", eased,
+           b.arb.out[3], b.arb.out[7], want_sh, want_kn);
+    CHECK(stream_feet(b.stream) && b.stream.n == 0);
+    double first = std::fabs(sh[0] - from), mid = std::fabs(sh[20] - sh[19]), d = std::fabs(want_sh - from);
+    std::printf("stream: one key 40 ticks ahead (%s): the first tick moves %.2f deg, the middle one %.2f, of %.1f\n",
+                eased ? "cosine" : "straight", first / 16, mid / 16, d / 16);
+    if (eased)
+      CHECK(first < d / 40 / 4 && mid > d / 40 * 1.3);
+    else
+      CHECK(std::fabs(first - d / 40) <= 2 && std::fabs(mid - d / 40) <= 2);
+    // Then two keys 20 ticks apart, all feet: x itself moves 1 mm a tick.
+    if (eased) continue;
+    Pose q = p;
+    q.x[LEG_LF] = 0;
+    feet((uint16_t)(b.tick + 20), q);
+    tick(10);
+    CHECK(b.stream.cur.v[3] == 40);  // halfway, 10 mm in q2
+    tick(10);
+    CHECK(b.stream.cur.v[3] == 0 && at_pose(q));
+    // Nothing more: hold (no foot up: nothing to settle), then the stream
+    // of feet ends in STANCE.
+    tick(KILO_POSE_HOLD_TICKS + 2);
+    CHECK(count_ev(EV_POSE_UNDERRUN) == 1 && count_ev(EV_STREAM_STOPPED, 1) == 1 && !body_stream_on(b));
+  }
+}
+
+// ---- Joint angles, the head, the joint-space balance, limits --------------------------------
+static void test_joints() {
+  // SIT's legs as joint angles, the pan driven: reached on the key's tick,
+  // tail and tilt left to IDLE (STANCE: STAND's 0).
+  stance();
+  Pose j;
+  j.flags = 0x0F;
+  for (int l = 0; l < 4; l++)
+    j.sh[l] = posture_angle(POSTURE_SIT, (uint8_t)(3 + l)) / 16.0, j.kn[l] = posture_angle(POSTURE_SIT, (uint8_t)(7 + l)) / 16.0;
+  j.head[0] = 25;
+  feet((uint16_t)(b.tick + 30), j);
+  tick(30);
+  bool sit = true;
+  for (uint8_t k = 3; k < DRIVEN_COUNT; k++)
+    sit = sit && b.arb.out[k] == joint_clamp(joint_id(k), posture_angle(POSTURE_SIT, k));
+  CHECK(sit && b.arb.out[0] == 25 * 16 && b.arb.out[2] == 0 && b.arb.owner[0] == OWN_STREAM &&
+        b.arb.owner[2] == OWN_IDLE);
+  // SIT asks the back shoulders for -90, below their -80 limit: TELEMETRY
+  // limited says so (RB, LB).
+  CHECK((tlog.back().limited & 0xF) == (KILO_LIMITED_FLAGS_RB | KILO_LIMITED_FLAGS_LB));
+  // The last key reached with joint-angle legs: held, never settled or ended.
+  tick(KILO_POSE_HOLD_TICKS + 40);
+  CHECK(body_stream_on(b) && b.stream.state == ST_SETTLE && count_ev(EV_STREAM_STOPPED) == 0 && sit);
+  // Back to four feet: the legs move in joint space to the feet's IK, and
+  // the leg is a foot again on the key's tick.
+  Pose f;
+  feet((uint16_t)(b.tick + 25), f);
+  tick(12);
+  CHECK(b.stream.cur.flags == 0x0F);
+  tick(13);
+  CHECK(at_pose(f) && stream_feet(b.stream) && b.stream.cur.flags == 0);
+  // A posture ends it over its ticks (from where the stream left the joints,
+  // even when IDLE already had that posture): SIT over 50 ticks from STANCE.
+  feet((uint16_t)(b.tick + 3), j);
+  tick(3);
+  posture(POSTURE_STANCE, 0, 50);
+  tick();
+  CHECK(!body_stream_on(b) && arbiter_idle_moving(b.arb) && b.arb.idle.n == 50);
+  // The joint-space balance: with BALANCE the correction acts toward the
+  // key's attitude (a steady 6 deg roll read: it builds), without it the
+  // correction decays.
+  stance(KILO_POSTURE_FLAGS_BALANCE);
+  CHECK(body_goal_balance(b, BAL_KP99) == GOAL_OK);
+  Pose s = j;
+  s.head[0] = NAN;
+  for (int l = 0; l < 4; l++) s.sh[l] = posture_angle(POSTURE_STAND, (uint8_t)(3 + l)) / 16.0, s.kn[l] = posture_angle(POSTURE_STAND, (uint8_t)(7 + l)) / 16.0;
+  s.flags = 0x0F | KILO_POSE_FLAGS_BALANCE;
+  in.att.roll = 6 * 16;
+  feet((uint16_t)(b.tick + 10), s);
+  tick(60);
+  int16_t c = b.bal.ax[BAL_ROLL].corr;
+  CHECKF(b.bal.active && c < -32 && !b.stream.geo, "joint-space corr %d", c);
+  CHECK(b.arb.out[3] == joint_clamp(joint_id(3), (int16_t)(posture_angle(POSTURE_STAND, 3) + balance_joint(b.bal, 3))));
+  CHECK(tlog.back().ref_roll == 0 && tlog.back().corr_roll == c);
+  s.flags = 0x0F;
+  feet((uint16_t)(b.tick + 3), s);
+  tick(80);
+  CHECK(b.bal.ax[BAL_ROLL].corr == 0 && !b.bal.active);
+  in.att.roll = 0;
 }
 
 // ---- The correction's shares --------------------------------------------------------------
@@ -688,7 +842,7 @@ static void test_shares() {
   CHECK(body_goal_balance(b, BAL_KP99) == GOAL_OK);
   in.att.roll = 6 * 16;
   Pose p;
-  Stream st = start_stream(p);
+  Sender st = start_stream(p);
   for (int t = 0; t < 60; t++) stream_tick(st, p);
   int16_t c = b.bal.ax[BAL_ROLL].corr;
   CHECKF(c < -40, "corr %d", c);  // -Kp (6 - 2) with the IK's own effect taken out: the body reads 6 whatever
@@ -697,7 +851,7 @@ static void test_shares() {
   Pose q = p;
   q.sup = 0x7;  // LB "up" (same z: only the bit)
   // The ticks already queued play first; then q.
-  for (int t = 0; t < (int)KILO_FEET_LOOKAHEAD_TICKS; t++) stream_tick(st, q);
+  for (int t = 0; t < (int)KILO_POSE_LOOKAHEAD_TICKS; t++) stream_tick(st, q);
   // LB, a left leg, carried -(W/2) sin(corr) (corr < 0: longer); it gives that back.
   double term = PARAM(LEG_W_MM) / 2.0 * std::sin(c / 16.0 * D2R);
   double prev = z0[LEG_LB], steps[6];
@@ -733,24 +887,24 @@ static void test_budget() {
   Pose p;
   p.roll = -3;
   p.pitch = 1.5;
-  Stream st = start_stream(p);
+  Sender st = start_stream(p);
   int frames = 0;
   for (int t = 0; t < 200; t++) {
     g_lh.ring_used = std::max(0, g_lh.ring_used - 500);
     size_t before = g_lh.tx.size();
-    rx0 += KILO_FEET_LEN + KILO_FRAME_OVERHEAD;
+    rx0 += KILO_POSE_LEN + KILO_FRAME_OVERHEAD;
     stream_tick(st, p);
     frames += (int)(g_lh.tx.size() - before);
   }
   g_lh.drain = 1000;
   size_t n = tlog.size() - t0;
   const kilo_telemetry_t& m = tlog.back();
-  std::printf("feet: 4 s of FEET and TELEMETRY at 50 Hz: %zu TELEMETRY, body->Pi %d B (%.0f B/s of 25000), Pi->body "
+  std::printf("stream: 4 s of POSE and TELEMETRY at 50 Hz: %zu TELEMETRY, body->Pi %d B (%.0f B/s of 25000), Pi->body "
               "%zu B (%.0f B/s)\n",
               n, frames, frames / 4.0, rx0, rx0 / 4.0);
   CHECK(n == 200 && link_counters().tx_dropped == 0 && count_ev(EV_TX_DROPPED) == 0);
-  CHECK(m.mode == KILO_MODE_GAIT && m.feet_queued == KILO_FEET_LOOKAHEAD_TICKS && m.support == 0xF);
-  CHECK(m.ref_pitch == 24 && m.ref_roll == -48);  // the FEET prediction (the pose is 0)
+  CHECK(m.mode == KILO_MODE_STREAM && m.pose_queued == KILO_POSE_LOOKAHEAD_TICKS && m.support == 0xF);
+  CHECK(m.ref_pitch == 24 && m.ref_roll == -48);  // the POSE prediction (the body pose is 0)
   CHECK((m.flags & KILO_TELEMETRY_FLAGS_BALANCE_ACTIVE) && !(m.flags & KILO_TELEMETRY_FLAGS_BALANCE_HELD));
   // On two support feet: held, the reference still reported.
   p.sup = 0x5;
@@ -807,7 +961,7 @@ static void test_plant_tip() {
     if (t2 < 0 && tilt >= 2) t2 = t;
     if (tilt >= 30) t30 = t;
   }
-  std::printf("feet: tipping plant: three feet, the mass 3 mm outside: 2 to 30 deg in %d ms (roll %+.1f pitch %+.1f; "
+  std::printf("stream: tipping plant: three feet, the mass 3 mm outside: 2 to 30 deg in %d ms (roll %+.1f pitch %+.1f; "
               "the floor 2026-10-14: about 30 deg in 0.2 s)\n",
               (t30 - t2) * 20, plant.roll, plant.pitch);
   CHECK(t2 >= 0 && t30 > t2 && (t30 - t2) * 20 >= 160 && (t30 - t2) * 20 <= 300);
@@ -891,12 +1045,12 @@ static WalkResult walk_run(const std::vector<Pose>& plan, const uint8_t* bal, do
   plant.tips = 0;
   uint16_t t0 = (uint16_t)(b.tick + 1);
   int n = (int)plan.size();
-  for (int a = 0; a < (int)KILO_FEET_LOOKAHEAD_TICKS && a < n; a++) feet((uint16_t)(t0 + a), plan[a]);
+  for (int a = 0; a < (int)KILO_POSE_LOOKAHEAD_TICKS && a < n; a++) feet((uint16_t)(t0 + a), plan[a]);
   for (int k = 0; k < n; k++) {
-    int ahead = k + (int)KILO_FEET_LOOKAHEAD_TICKS;
+    int ahead = k + (int)KILO_POSE_LOOKAHEAD_TICKS;
     if (ahead < n) feet((uint16_t)(t0 + ahead), plan[ahead]);
     plant_tick();
-    if (b.feet.state == FT_PLAY) {
+    if (b.stream.state == ST_PLAY) {
       r.max_res = std::fmax(r.max_res, std::fabs(plant.roll - plan[k].roll));
       r.max_corr = std::fmax(r.max_corr, std::fmax(std::fabs(b.bal.ax[BAL_ROLL].corr), std::fabs(b.bal.ax[BAL_PITCH].corr)) / 16.0);
     }
@@ -917,7 +1071,7 @@ static void test_walk_plant() {
   // The plan itself: the mass's margin inside each support (the plant's
   // static check on the planned feet, no lag).
   WalkResult on = walk_run(plan, BAL_KP99), off = walk_run(plan, nullptr);
-  std::printf("feet: walk plan with the body shift (A %.0f deg), 4 cycles: balance Kp 0.99: %s, tilt %.1f, residual "
+  std::printf("stream: walk plan with the body shift (A %.0f deg), 4 cycles: balance Kp 0.99: %s, tilt %.1f, residual "
               "%.2f, corrections %.2f deg, %d tips; balance off: %s, tilt %.1f, %d tips\n",
               w.A, on.fell ? "FELL" : "up", on.max_tilt, on.max_res, on.max_corr, on.tips, off.fell ? "FELL" : "up",
               off.max_tilt, off.tips);
@@ -928,7 +1082,7 @@ static void test_walk_plant() {
   w0.A = 0;
   std::vector<Pose> plan0 = walk_plan(w0, 4 * w.T);
   WalkResult on0 = walk_run(plan0, BAL_KP99), off0 = walk_run(plan0, nullptr);
-  std::printf("feet: the same walk with no body shift: balance Kp 0.99: %s, %.1f deg off the plan, corrections %.2f deg; "
+  std::printf("stream: the same walk with no body shift: balance Kp 0.99: %s, %.1f deg off the plan, corrections %.2f deg; "
               "balance off: %s, %.1f deg off the plan\n",
               on0.fell ? "FELL" : "up", on0.max_res, on0.max_corr, off0.fell ? "FELL" : "up", off0.max_res);
   // The plant is honest: with the mass over the diagonal a lifting foot
@@ -972,12 +1126,12 @@ static ShoveResult shove_run(double A, double rate, const uint8_t* bal, bool lev
   std::vector<Pose> plan;
   for (int k = 0; k < 220; k++) plan.push_back(pose_at(k, &pred));
   uint16_t t0 = (uint16_t)(b.tick + 1);
-  for (int a = 0; a < (int)KILO_FEET_LOOKAHEAD_TICKS; a++) feet((uint16_t)(t0 + a), plan[a]);
+  for (int a = 0; a < (int)KILO_POSE_LOOKAHEAD_TICKS; a++) feet((uint16_t)(t0 + a), plan[a]);
   ShoveResult r = {false, 0, 0, 0, 0};
   int sign = 0;
   double dir_x = -PARAM(LEG_LB_MM), dir_y = PARAM(LEG_W_MM), dl = std::hypot(dir_x, dir_y);
   for (int k = 0; k < 220; k++) {
-    int ahead = k + (int)KILO_FEET_LOOKAHEAD_TICKS;
+    int ahead = k + (int)KILO_POSE_LOOKAHEAD_TICKS;
     if (ahead < 220) feet((uint16_t)(t0 + ahead), plan[ahead]);
     if (k == 100) plant.shove(dir_x / dl, dir_y / dl, rate);
     plant_tick();
@@ -1002,7 +1156,7 @@ static void test_three_foot_shove() {
     for (double rate : {30.0, 60.0}) {
       ShoveResult off = shove_run(A, rate, nullptr, false), plan = shove_run(A, rate, BAL_KP99, false),
                   half = shove_run(A, rate, BAL_KP50, false), lvl = shove_run(A, rate, BAL_KP99, true);
-      std::printf("feet: three feet, mass %.0f deg of roll inside, a %.0f deg/s shove toward LB: peak / after 1 s / "
+      std::printf("stream: three feet, mass %.0f deg of roll inside, a %.0f deg/s shove toward LB: peak / after 1 s / "
                   "swings past 2 deg: off %.1f / %.1f / %d%s; Kp 0.99 ref = plan %.1f / %.1f / %d%s (corr %.1f); "
                   "Kp 0.5 %.1f / %.1f / %d%s; Kp 0.99 ref level %.1f / %.1f / %d%s (corr %.1f)\n",
                   A, rate, off.peak, off.last, off.swings, off.fell ? " FELL" : "", plan.peak, plan.last, plan.swings,
@@ -1017,13 +1171,13 @@ static void test_three_foot_shove() {
              off.peak, plan.swings, off.swings, plan.last);
       any_worse = any_worse || lvl.fell || lvl.last > plan.last + 1;
     }
-  std::printf("feet: three-foot shove: a level reference (the loop fighting the planned lean) %s\n",
+  std::printf("stream: three-foot shove: a level reference (the loop fighting the planned lean) %s\n",
               any_worse ? "does worse than the plan as the reference" : "does no worse here");
 }
 
 // ---- The per-tick cost -------------------------------------------------------------------
-// fx calls in one GAIT tick with the balance on (4 legs of IK, the pose and
-// the correction terms) against one STANCE tick.
+// fx calls in one tick of a stream of feet with the balance on (4 legs of
+// IK, the pose and the correction terms) against one STANCE tick.
 static void test_cost() {
   stance(KILO_POSTURE_FLAGS_BALANCE);
   CHECK(body_goal_balance(b, BAL_KP99) == GOAL_OK);
@@ -1032,13 +1186,13 @@ static void test_cost() {
   FxOps c = g_fx_ops;
   uint32_t s0 = c.sin - a.sin, t0 = c.atan2 - a.atan2, q0 = c.isqrt - a.isqrt;
   Pose p;
-  Stream st = start_stream(p);
+  Sender st = start_stream(p);
   for (int t = 0; t < 10; t++) stream_tick(st, p);
   a = g_fx_ops;
   stream_tick(st, p);
   c = g_fx_ops;
   uint32_t sn = c.sin - a.sin, at = c.atan2 - a.atan2, sq = c.isqrt - a.isqrt;
-  std::printf("feet: one GAIT tick: %u sin/cos, %u atan2, %u isqrt (+ 4 IK int32 divisions); STANCE: %u, %u, %u\n", sn,
+  std::printf("stream: one tick of feet: %u sin/cos, %u atan2, %u isqrt (+ 4 IK int32 divisions); STANCE: %u, %u, %u\n", sn,
               at, sq, s0, t0, q0);
   CHECK(at == 12 && sq == 4 && sn <= s0 + 2);
 }
@@ -1052,11 +1206,13 @@ int main() {
   test_underrun();
   test_settle_plane();
   test_end();
+  test_sparse();
+  test_joints();
   test_shares();
   test_budget();
   test_plant_tip();
   test_walk_plant();
   test_three_foot_shove();
   test_cost();
-  return report("feet");
+  return report("stream");
 }

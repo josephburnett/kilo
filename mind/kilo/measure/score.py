@@ -1,18 +1,19 @@
 """The body model judged by prediction: what Kilo was told, replayed through
 the model and the virtual body, against what his tilt sensor read.
 
-Every run of a recording in which the mind streamed FEET (the walks, trots
-and crawls, and the self-measurement routine) is a *segment*: the feet the
-mind sent for each body tick, the corrections the body's own balance loop
-reported adding, and the pitch and roll the body reported. ``replay`` plays
-the segment's FEET through the virtual body's FEET player (kilo.vbody.feet,
+Every run of a recording in which the mind streamed feet (FEET in protocol 2
+recordings, POSE with four feet since: the walks, trots and crawls, and the
+self-measurement routine) is a *segment*: the feet the mind sent for each
+body tick, the corrections the body's own balance loop reported adding, and
+the pitch and roll the body reported. ``replay`` plays the segment's feet
+through the virtual body's POSE player (kilo.vbody.pose,
 the recorded corrections in place of its balance loop) on a judge physics
 (kilo.vbody.rocking.RockingPhysics by default, its ``inset_mm`` and
 ``line_lag_ms`` as given) with a body model; the predicted reading is the
 virtual body's attitude plus the model's IMU offset. ``score`` compares it
 with the reading, tick by tick, in degrees.
 
-The score of a model is the rms of (read - predicted) over the GAIT ticks of
+The score of a model is the rms of (read - predicted) over the streaming (mode STREAM, GAIT in protocol 2) ticks of
 a set of segments, pitch and roll apart. Two sets, fixed by boot
 (``HOLDOUT``): the fit may look at the first only; the second says whether
 what it found predicts what it never saw.
@@ -44,7 +45,7 @@ from typing import Any
 
 import numpy as np
 
-from kilo.logs import flight
+from kilo.logs import flight, proto2
 from kilo.logs import walkrec as W
 from kilo.planner.model import BodyModel
 from kilo.protocol import kilo_protocol as P
@@ -184,16 +185,17 @@ def segments_of(boot: int, s: flight.Stream, min_ticks: int = 50) -> list[Segmen
         for f in s.frames:
             if f.msg is None or not lo <= f.t_us <= hi:
                 continue
-            if f.direction == "tx" and isinstance(f.msg, P.Feet):
+            fm = proto2.feet_of(f.msg) if f.direction == "tx" else None
+            if fm is not None and None not in fm[0]:  # a tick of a walk (FEET, or POSE with four feet)
                 last = f.msg.tick if last is None else last
                 k = W._unwrap(f.msg.tick, last)
                 m = f.msg
-                feet[k] = Feet(k, tuple(m.x_mm), tuple(m.z_mm), m.pitch, m.roll, m.support)  # the last one plays
+                feet[k] = Feet(k, tuple(fm[0]), tuple(fm[1]), m.pitch, m.roll, m.support)  # the last one plays
             elif f.direction == "rx" and isinstance(f.msg, P.Telemetry):
                 last = f.msg.tick if last is None else last
                 last = W._unwrap(f.msg.tick, last)
                 tel[last] = f.msg
-        gait = [k for k, t in tel.items() if t.mode == P.Mode.GAIT]
+        gait = [k for k, t in tel.items() if t.mode == P.Mode.STREAM]
         if not feet or len([k for k in gait if k in feet]) < min_ticks:
             continue
         k0, k1 = min(feet), max(gait)
@@ -205,7 +207,7 @@ def segments_of(boot: int, s: flight.Stream, min_ticks: int = 50) -> list[Segmen
             t = tel.get(k0 + i)
             if t is not None:
                 c = (t.corr_pitch / A16, t.corr_roll / A16)
-                if t.mode == P.Mode.GAIT:
+                if t.mode == P.Mode.STREAM:
                     meas[i] = (t.pitch / A16, t.roll / A16)
             corr[i] = c
         begin = run.begin_us if run.begin_us is not None else lo
@@ -263,13 +265,13 @@ class Judge:
 def replay(seg: Segment, model: BodyModel, judge: Judge = Judge()) -> np.ndarray:
     """(n, 2) the predicted reading (pitch, roll) for every tick of the segment: the virtual body's
     attitude plus the model's IMU offset."""
-    from kilo.vbody.feet import FeetPlayer
-    old = FeetPlayer.PHYSICS
-    FeetPlayer.PHYSICS = lambda m, **a: judge.make(m, **a)
+    from kilo.vbody.pose import Key, PosePlayer
+    old = PosePlayer.PHYSICS
+    PosePlayer.PHYSICS = lambda m, **a: judge.make(m, **a)
     try:
-        g = FeetPlayer(seg.k0 - 1, model)
+        g = PosePlayer(seg.k0 - 1, model)
     finally:
-        FeetPlayer.PHYSICS = old
+        PosePlayer.PHYSICS = old
     rec = [0.0, 0.0]
     g._balance = lambda *a, **k: g.corr.__setitem__(slice(None), rec)
     out = np.empty((seg.n, 2))
@@ -278,7 +280,7 @@ def replay(seg: Segment, model: BodyModel, judge: Judge = Judge()) -> np.ndarray
         k = seg.k0 + i
         f = seg.feet.get(k)
         if f is not None:
-            g.queue[k] = f
+            g.queue.append(Key(k, 0, f.support, list(f.x_mm), list(f.z_mm), pitch=f.pitch / 16.0, roll=f.roll / 16.0))
         rec = [float(seg.corr[i, 0]), float(seg.corr[i, 1])]
         g.tick(k, (ph.pitch, ph.roll), ph.rates, {}, True)
         ph.step()

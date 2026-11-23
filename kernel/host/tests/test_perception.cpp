@@ -276,12 +276,12 @@ void test_body_state_derived() {
   CHECK(st.upright() == 1 && !st.fallen() && !st.moving());
   t.flags |= KILO_TELEMETRY_FLAGS_NO_BATTERY;
   t.pitch = 31 * 16;
-  t.mode = KILO_MODE_RECOVERING;
+  t.mode = KILO_MODE_FALLEN;
   st.on_telemetry(t, 2000000u, &prev);
-  CHECK(!st.battery_pct(&v) && st.upright() == 0 && st.fallen() && st.moving());
+  CHECK(!st.battery_pct(&v) && st.upright() == 0 && st.fallen() && !st.moving());  // FALLEN: the reflex holds him still
   t.mode = KILO_MODE_IDLE;
   t.pitch = 0;
-  t.flags = KILO_TELEMETRY_FLAGS_TRICK;
+  t.flags = KILO_TELEMETRY_FLAGS_STREAM;
   st.on_telemetry(t, 2100000u, &prev);
   CHECK(st.moving() && !st.fallen() && st.upright() == 1);
   st.reset_session();

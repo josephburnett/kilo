@@ -1,6 +1,6 @@
 // The flight recorder's cost on this machine (`make bench`), optimised as
 // the kernel is, no sanitizers: what a walk tick adds to the mind's pass
-// (the link's frame tap for TELEMETRY in and FEET out, a PLAN record, a
+// (the link's frame tap for TELEMETRY in and POSE out, a PLAN record, a
 // block sealed now and then), and a host server pass while a client
 // downloads 5 MB of blocks (REC_FETCH, at the idle rate and at the
 // one-chunk rate used while a run is recorded), against a pass with the
@@ -67,8 +67,8 @@ int main() {
   rec.attach(mem.data(), (uint32_t)mem.size(), 0);
   record::FlightStore& f = rec.flight();
 
-  // a walk tick's recording: TELEMETRY in, FEET out (the tap), a PLAN record
-  uint8_t tel[KILO_TELEMETRY_LEN] = {}, feet[KILO_FEET_LEN] = {};
+  // a walk tick's recording: TELEMETRY in, POSE out (the tap), a PLAN record
+  uint8_t tel[KILO_TELEMETRY_LEN] = {}, feet[KILO_POSE_LEN] = {};
   kilo_walk_plan_t plan = {};
   Stat tick;
   const int ticks = 60000;  // 20 minutes
@@ -76,7 +76,7 @@ int main() {
     uint64_t at = 1000000 + (uint64_t)t * 20000;
     double a = now_us();
     rec.on_frame(false, KILO_MSG_TELEMETRY, (uint8_t)t, tel, sizeof tel, at);
-    rec.on_frame(true, KILO_MSG_FEET, (uint8_t)t, feet, sizeof feet, at);
+    rec.on_frame(true, KILO_MSG_POSE, (uint8_t)t, feet, sizeof feet, at);
     f.append(KILO_WALK_RECORD_PLAN, at, &plan, sizeof plan);
     tick.add(now_us() - a);
   }

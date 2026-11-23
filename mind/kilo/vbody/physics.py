@@ -1,4 +1,4 @@
-"""The virtual body's physics while it walks (kilo.vbody.sim plays FEET).
+"""The virtual body's physics while it walks (kilo.vbody.sim plays POSE keys).
 
 A rigid body on four point feet over flat ground, with the masses and
 geometry of kilo.planner.model.BodyModel, at 2 ms steps:

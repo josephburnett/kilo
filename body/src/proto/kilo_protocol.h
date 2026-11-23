@@ -30,8 +30,8 @@ extern "C" {
 #endif
 
 /* ---- Versions and link constants ---- */
-#define KILO_PROTO_MAJOR 2u
-#define KILO_PROTO_MINOR 1u
+#define KILO_PROTO_MAJOR 3u
+#define KILO_PROTO_MINOR 0u
 #define KILO_BAUD 250000UL
 #define KILO_MAX_PAYLOAD 60u
 #define KILO_HEADER_BYTES 2u
@@ -49,9 +49,10 @@ extern "C" {
 #define KILO_TELEMETRY_DEFAULT_DIV 2u
 #define KILO_TELEMETRY_DEFAULT_HZ 25u
 #define KILO_GOAL_REFRESH_HZ 5u
-#define KILO_FEET_DEPTH 8u
-#define KILO_FEET_LOOKAHEAD_TICKS 5u
-#define KILO_FEET_HOLD_TICKS 5u
+#define KILO_POSE_DEPTH 5u
+#define KILO_POSE_LOOKAHEAD_TICKS 3u
+#define KILO_POSE_HOLD_TICKS 5u
+#define KILO_POSE_MAX_AHEAD_TICKS 250u
 #define KILO_HEARTBEAT_IDLE_MS 100u
 #define KILO_MIND_ALIVE_MS 1000u
 #define KILO_CMD_RETRY_MS 50u
@@ -67,12 +68,9 @@ extern "C" {
 #define KILO_REBOOT_MAGIC 0x4B49u
 #define KILO_RESET_PULSE_MS 100u
 #define KILO_PARAM_SLOTS 20u
-#define KILO_TRICK_CAPACITY 24u
-#define KILO_TRICK_FRAMES_PER_MSG 4u
 #define KILO_BEEP_MAX_NOTES 8u
 #define KILO_JOINT_COUNT 11u
 #define KILO_CHANNEL_COUNT 16u
-#define KILO_TRICK_SPEED_UNITY_Q6 64u
 #define KILO_PCA_FULL_OFF_BIT 0x1000u
 
 /* ---- Message ids ---- */
@@ -84,15 +82,10 @@ enum kilo_msg_id {
     KILO_MSG_STATS_REQ = 0x05,
     KILO_MSG_PCA_READ = 0x06,
     KILO_MSG_SET_POSTURE = 0x10,
-    KILO_MSG_FEET = 0x11,
+    KILO_MSG_POSE = 0x11,
     KILO_MSG_SET_HEAD = 0x12,
     KILO_MSG_SET_BODY_POSE = 0x13,
     KILO_MSG_SET_BALANCE = 0x14,
-    KILO_MSG_TRICK_BEGIN = 0x20,
-    KILO_MSG_TRICK_FRAMES = 0x21,
-    KILO_MSG_TRICK_COMMIT = 0x22,
-    KILO_MSG_TRICK_PLAY = 0x23,
-    KILO_MSG_TRICK_STOP = 0x24,
     KILO_MSG_SET_EYES = 0x30,
     KILO_MSG_BEEP = 0x31,
     KILO_MSG_CAL_GET = 0x38,
@@ -135,8 +128,6 @@ enum kilo_ack_status {
     KILO_ACK_STATUS_BAD_ARG = 2,
     KILO_ACK_STATUS_BUSY = 3,
     KILO_ACK_STATUS_UNKNOWN_TYPE = 4,
-    KILO_ACK_STATUS_CRC_MISMATCH = 5,
-    KILO_ACK_STATUS_NO_TRICK = 6,
     KILO_ACK_STATUS_REFUSED_LOW_BATT = 7,
     KILO_ACK_STATUS_REFUSED_FALLEN = 8,
     KILO_ACK_STATUS_EEPROM_BUSY = 9,
@@ -147,6 +138,7 @@ enum kilo_ack_status {
 enum kilo_goal_refused_reason {
     KILO_GOAL_REFUSED_REASON_BAD_LEN = 1,
     KILO_GOAL_REFUSED_REASON_BAD_ARG = 2,
+    KILO_GOAL_REFUSED_REASON_BUSY = 3,
     KILO_GOAL_REFUSED_REASON_UNKNOWN_TYPE = 4,
     KILO_GOAL_REFUSED_REASON_LOW_BATT = 7,
     KILO_GOAL_REFUSED_REASON_FALLEN = 8,
@@ -157,33 +149,29 @@ enum kilo_goal_refused_reason {
 enum kilo_event {
     KILO_EVENT_BOOT = 1,
     KILO_EVENT_FELL = 2,
-    KILO_EVENT_RECOVERED = 3,
-    KILO_EVENT_RECOVERY_FAILED = 4,
+    KILO_EVENT_LYING = 4,
     KILO_EVENT_LOW_BATTERY = 5,
     KILO_EVENT_BATTERY_OK = 6,
     KILO_EVENT_WATCHDOG = 7,
     KILO_EVENT_LINK_RESTORED = 8,
     KILO_EVENT_IMU_FAULT = 9,
     KILO_EVENT_IMU_OK = 10,
-    KILO_EVENT_TRICK_DONE = 11,
-    KILO_EVENT_GAIT_STOPPED = 12,
+    KILO_EVENT_STREAM_STOPPED = 12,
     KILO_EVENT_GOAL_REFUSED = 13,
     KILO_EVENT_CONFIG_MIGRATED = 14,
     KILO_EVENT_CONFIG_DEFAULTED = 15,
     KILO_EVENT_EEPROM_SAVED = 16,
     KILO_EVENT_TX_DROPPED = 17,
     KILO_EVENT_IR_KEY = 18,
-    KILO_EVENT_FEET_UNDERRUN = 19,
+    KILO_EVENT_POSE_UNDERRUN = 19,
 };
 
 enum kilo_mode {
     KILO_MODE_BOOT = 0,
     KILO_MODE_LIMP = 1,
     KILO_MODE_IDLE = 2,
-    KILO_MODE_GAIT = 3,
-    KILO_MODE_TRICK = 4,
+    KILO_MODE_STREAM = 3,
     KILO_MODE_FALLEN = 5,
-    KILO_MODE_RECOVERING = 6,
     KILO_MODE_LOW_BATT = 7,
     KILO_MODE_CALIB = 8,
     KILO_MODE_LINK_LOST = 9,
@@ -191,8 +179,7 @@ enum kilo_mode {
 
 enum kilo_owner {
     KILO_OWNER_IDLE = 0,
-    KILO_OWNER_GAIT = 1,
-    KILO_OWNER_TRICK = 2,
+    KILO_OWNER_STREAM = 1,
     KILO_OWNER_REFLEX = 3,
     KILO_OWNER_PI_HOLD = 4,
 };
@@ -229,20 +216,6 @@ enum kilo_battery_level {
     KILO_BATTERY_LEVEL_WARN = 1,
     KILO_BATTERY_LEVEL_LOW = 2,
     KILO_BATTERY_LEVEL_CRITICAL = 3,
-};
-
-enum kilo_trick_done_reason {
-    KILO_TRICK_DONE_REASON_DONE = 0,
-    KILO_TRICK_DONE_REASON_STOPPED = 1,
-    KILO_TRICK_DONE_REASON_PREEMPTED = 2,
-    KILO_TRICK_DONE_REASON_FELL = 3,
-};
-
-enum kilo_easing {
-    KILO_EASING_LINEAR = 0,
-    KILO_EASING_COSINE = 1,
-    KILO_EASING_STEP = 2,
-    KILO_EASING_SPLINE_RESERVED = 3,
 };
 
 enum kilo_host_result_code {
@@ -433,8 +406,7 @@ enum kilo_rec_fetch_what {
 #define KILO_TELEMETRY_FLAGS_BALANCE_ACTIVE (1u << 0)
 #define KILO_TELEMETRY_FLAGS_IMU_FAULT (1u << 1)
 #define KILO_TELEMETRY_FLAGS_SERVOS_POWERED (1u << 2)
-#define KILO_TELEMETRY_FLAGS_GAIT (1u << 3)
-#define KILO_TELEMETRY_FLAGS_TRICK (1u << 4)
+#define KILO_TELEMETRY_FLAGS_STREAM (1u << 3)
 #define KILO_TELEMETRY_FLAGS_HEAD_HELD (1u << 5)
 #define KILO_TELEMETRY_FLAGS_BATT_WARN (1u << 6)
 #define KILO_TELEMETRY_FLAGS_LINK_OK (1u << 7)
@@ -457,12 +429,19 @@ enum kilo_rec_fetch_what {
 #define KILO_SUPPORT_FLAGS_RB (1u << 2)
 #define KILO_SUPPORT_FLAGS_LB (1u << 3)
 
-#define KILO_TRICK_FLAGS_BALANCE (1u << 0)
-#define KILO_TRICK_FLAGS_FALL_OK (1u << 1)
+#define KILO_POSE_FLAGS_JOINT_LF (1u << 0)
+#define KILO_POSE_FLAGS_JOINT_RF (1u << 1)
+#define KILO_POSE_FLAGS_JOINT_RB (1u << 2)
+#define KILO_POSE_FLAGS_JOINT_LB (1u << 3)
+#define KILO_POSE_FLAGS_BALANCE (1u << 4)
+#define KILO_POSE_FLAGS_FALL_OK (1u << 5)
+#define KILO_POSE_FLAGS_EASE (1u << 6)
 
-#define KILO_TRICK_PLAY_FLAGS_MIRROR (1u << 0)
-
-#define KILO_KEYFRAME_FLAGS_BALANCE (1u << 2)
+#define KILO_LIMITED_FLAGS_LF (1u << 0)
+#define KILO_LIMITED_FLAGS_RF (1u << 1)
+#define KILO_LIMITED_FLAGS_RB (1u << 2)
+#define KILO_LIMITED_FLAGS_LB (1u << 3)
+#define KILO_LIMITED_FLAGS_HEAD (1u << 4)
 
 #define KILO_EYES_MASK_R0 (1u << 0)
 #define KILO_EYES_MASK_R1 (1u << 1)
@@ -493,19 +472,6 @@ enum kilo_rec_fetch_what {
 #define KILO_WALK_FLAGS_EARLIER_BOOT (1u << 6)
 
 /* ---- Shared element structs ---- */
-typedef struct KILO_PACKED kilo_keyframe_s {
-    uint8_t dur; /* tick; range 1..255; ticks from the previous frame */
-    uint8_t hold; /* tick; ticks to hold after arriving */
-    uint8_t flags; /* flags keyframe_flags; bits 0-1 easing (enum easing), bit 2 balance */
-    int8_t ang[11]; /* deg; canonical joint order; -128 = unchanged (the previous frame's angle by index; in frame 0 the pose at the start) */
-} kilo_keyframe_t;
-#define KILO_KEYFRAME_SIZE 14u
-KILO_STATIC_ASSERT(sizeof(kilo_keyframe_t) == 14, kilo_sa_keyframe_size);
-KILO_STATIC_ASSERT(offsetof(kilo_keyframe_t, dur) == 0, kilo_sa_keyframe_dur);
-KILO_STATIC_ASSERT(offsetof(kilo_keyframe_t, hold) == 1, kilo_sa_keyframe_hold);
-KILO_STATIC_ASSERT(offsetof(kilo_keyframe_t, flags) == 2, kilo_sa_keyframe_flags);
-KILO_STATIC_ASSERT(offsetof(kilo_keyframe_t, ang) == 3, kilo_sa_keyframe_ang);
-
 typedef struct KILO_PACKED kilo_note_s {
     int8_t note; /* note; pitch index; mapping fixed by the body buzzer (P1) */
     uint8_t dur_10ms; /* ms x 10 */
@@ -561,14 +527,14 @@ KILO_STATIC_ASSERT(offsetof(kilo_walk_record_header_t, len) == 1, kilo_sa_walk_r
 KILO_STATIC_ASSERT(offsetof(kilo_walk_record_header_t, t_us) == 2, kilo_sa_walk_record_header_t_us);
 
 typedef struct KILO_PACKED kilo_walk_plan_s {
-    uint32_t tick; /* tick; the body tick, unwrapped (FEET.tick is its low 16 bits) */
-    uint8_t sent; /* 1 = written as FEET; 0 = already past when planned (skipped), or the link did not take it */
+    uint32_t tick; /* tick; the body tick, unwrapped (POSE.tick is its low 16 bits) */
+    uint8_t sent; /* 1 = written as POSE; 0 = already past when planned (skipped), or the link did not take it */
     uint8_t lifting; /* bit i: leg i in the air (swinging) this tick */
     uint8_t support; /* flags support_flags: the feet on the ground */
     int16_t margin; /* 0.1 mm; the centre of mass inside the polygon of the feet down (- = outside); -32768 = none. The planner's min_margin counts ticks with one leg up only */
     int16_t plan_pitch; /* a16; the attitude these feet give, no servo lag */
     int16_t plan_roll; /* a16 */
-    int16_t pitch; /* a16; predicted at this tick, servo lag included (FEET.pitch before its clamp) */
+    int16_t pitch; /* a16; predicted at this tick, servo lag included (POSE.pitch before its clamp) */
     int16_t roll; /* a16 */
 } kilo_walk_plan_t;
 #define KILO_WALK_PLAN_SIZE 17u
@@ -690,35 +656,33 @@ KILO_STATIC_ASSERT(offsetof(kilo_set_posture_t, posture) == 1, kilo_sa_set_postu
 KILO_STATIC_ASSERT(offsetof(kilo_set_posture_t, transition_ticks) == 2, kilo_sa_set_posture_transition_ticks);
 KILO_STATIC_ASSERT(offsetof(kilo_set_posture_t, flags) == 3, kilo_sa_set_posture_flags);
 
-/* 0x11 FEET: stream, epoch. One tick of the mind's plan (doc §3d): where each foot is at `tick` and the attitude the plan predicts there. Sent every tick, about link.feet_lookahead_ticks ahead; not acked, not refreshed, not retried. The body queues up to link.feet_depth ticks and plays each at its tick, slew-limited from where the feet are (a late or missing tick never snaps). A field outside its range (x_mm, z_mm, pitch, roll) or a support bit above bit 3 is refused BAD_ARG. The first FEET accepted enters GAIT (gated: BAD_ARG, STALE, FALLEN, LOW_BATT, UNCALIBRATED -> EVENT GOAL_REFUSED, rate-limited) and the stream owns the legs until a SET_POSTURE or an epoch bump (GAIT_STOPPED arg 0). A tick already past is dropped (STATS feet_late). When the queue runs dry the body holds the last pose for link.feet_hold_ticks (EVENT FEET_UNDERRUN), then settles: swing feet down at their x to the ground (the plane through the support feet when three are down, else their mean depth), IDLE in STANCE (GAIT_STOPPED arg 1). In GAIT the balance loop's reference is this pitch/roll, it corrects through the support feet only, and it holds its corrections while any support bit is clear (TELEMETRY flag BALANCE_HELD; doc §3f). */
-#define KILO_FEET_LEN 16u
-typedef struct KILO_PACKED kilo_feet_s {
+/* 0x11 POSE: stream, epoch. One key of the mind's stream of poses (docs/movement-engine.md): the pose the body is to reach by `tick`. The body queues up to link.pose_depth keys in tick order (a second key for a queued tick replaces it) and moves from where it is toward the next one, reaching it exactly on its tick: in a straight line, or along a cosine ease (flag EASE), from the last key reached (for the first key of a stream, from the joints' outputs when it arrived). So keys may come every tick (a walk) or far apart (a slow move, a hold). Every value passes the joint limits and the safety slew (TELEMETRY.limited says what they cut). Each leg is a foot (x, z in q2 = 1/4 mm, through the body's IK, SET_BODY_POSE on top) or, with its JOINT flag, two joint angles (a16); a leg changing between the two moves in joint space. -32768 in a head value leaves that joint to IDLE; the legs are always the stream's. Not acked, not refreshed, not retried. Refused (EVENT GOAL_REFUSED, rate-limited like a goal) BAD_ARG (a foot outside x -480..480, z 60..440 q2, a joint angle of -32768, a pitch or roll beyond +-30 deg, a support bit above 3, an unknown flag), STALE, FALLEN (unless FALL_OK), LOW_BATT, UNCALIBRATED (as STAND), BUSY (another reflex holds the joints, or IDLE is LIMP or CALIB). A key already past, too far ahead or with no room is dropped (STATS pose_dropped). The first key accepted starts the stream (mode STREAM); a stream whose legs are all feet makes IDLE's posture STANCE, as a walk needs. The stream holds the joints until a SET_POSTURE, an epoch bump or a reflex (STREAM_STOPPED arg 0). Reaching its last key with none queued, the body holds it (EVENT POSE_UNDERRUN), and after link.pose_hold_ticks the feet whose support bit is clear settle at their x to the ground (the plane through the support feet when three are down, else their mean depth); a stream of feet then ends in STANCE (STREAM_STOPPED arg 1), one with joint-mode legs keeps holding. Balance: with every leg a foot it corrects through the support feet toward this pitch/roll and holds its corrections while any support bit is clear (TELEMETRY flag BALANCE_HELD; doc §3f); with joint-mode legs it corrects in joint space while the next key has flag BALANCE. */
+#define KILO_POSE_LEN 31u
+typedef struct KILO_PACKED kilo_pose_s {
     uint8_t epoch;
-    uint16_t tick; /* tick; the body tick this pose is for (TELEMETRY.tick's clock) */
-    int8_t x_mm[4]; /* mm; range -60..60; foot fore-aft from under the hip, + forward; legs LF RF RB LB */
-    uint8_t z_mm[4]; /* mm; range 30..95; foot depth below the hip, i.e. the body height at that leg; legs LF RF RB LB */
-    int16_t pitch; /* deg x 0.0625; range -480..480; the attitude the plan predicts at tick: the balance reference (TELEMETRY conventions), +-30 deg */
+    uint16_t tick; /* tick; the body tick by which the pose is reached (TELEMETRY.tick's clock) */
+    uint8_t flags; /* flags pose_flags */
+    int16_t leg[8]; /* per leg LF RF RB LB two values: foot x (+ forward of the hip) and z (below the hip) in q2 (1/4 mm), or with the leg's JOINT flag the shoulder and knee angles in a16 (1/16 deg, OpenCat convention) */
+    int16_t head[3]; /* deg x 0.0625; pan, tilt, tail; -32768 = left to IDLE (the posture, or a SET_HEAD hold) */
+    int16_t pitch; /* deg x 0.0625; range -480..480; the attitude the mind predicts at tick: the balance reference (TELEMETRY conventions), +-30 deg */
     int16_t roll; /* deg x 0.0625; range -480..480; +-30 deg */
     uint8_t support; /* flags support_flags; the feet on the ground at tick; the balance corrects through these only */
-} kilo_feet_t;
-KILO_STATIC_ASSERT(sizeof(kilo_feet_t) == 16, kilo_sa_feet_size);
-KILO_STATIC_ASSERT(offsetof(kilo_feet_t, epoch) == 0, kilo_sa_feet_epoch);
-KILO_STATIC_ASSERT(offsetof(kilo_feet_t, tick) == 1, kilo_sa_feet_tick);
-KILO_STATIC_ASSERT(offsetof(kilo_feet_t, x_mm) == 3, kilo_sa_feet_x_mm);
-KILO_STATIC_ASSERT(offsetof(kilo_feet_t, z_mm) == 7, kilo_sa_feet_z_mm);
-KILO_STATIC_ASSERT(offsetof(kilo_feet_t, pitch) == 11, kilo_sa_feet_pitch);
-KILO_STATIC_ASSERT(offsetof(kilo_feet_t, roll) == 13, kilo_sa_feet_roll);
-KILO_STATIC_ASSERT(offsetof(kilo_feet_t, support) == 15, kilo_sa_feet_support);
-#define KILO_FEET_X_MM_MIN (-60)
-#define KILO_FEET_X_MM_MAX (60)
-#define KILO_FEET_Z_MM_MIN (30)
-#define KILO_FEET_Z_MM_MAX (95)
-#define KILO_FEET_PITCH_MIN (-480)
-#define KILO_FEET_PITCH_MAX (480)
-#define KILO_FEET_ROLL_MIN (-480)
-#define KILO_FEET_ROLL_MAX (480)
+} kilo_pose_t;
+KILO_STATIC_ASSERT(sizeof(kilo_pose_t) == 31, kilo_sa_pose_size);
+KILO_STATIC_ASSERT(offsetof(kilo_pose_t, epoch) == 0, kilo_sa_pose_epoch);
+KILO_STATIC_ASSERT(offsetof(kilo_pose_t, tick) == 1, kilo_sa_pose_tick);
+KILO_STATIC_ASSERT(offsetof(kilo_pose_t, flags) == 3, kilo_sa_pose_flags);
+KILO_STATIC_ASSERT(offsetof(kilo_pose_t, leg) == 4, kilo_sa_pose_leg);
+KILO_STATIC_ASSERT(offsetof(kilo_pose_t, head) == 20, kilo_sa_pose_head);
+KILO_STATIC_ASSERT(offsetof(kilo_pose_t, pitch) == 26, kilo_sa_pose_pitch);
+KILO_STATIC_ASSERT(offsetof(kilo_pose_t, roll) == 28, kilo_sa_pose_roll);
+KILO_STATIC_ASSERT(offsetof(kilo_pose_t, support) == 30, kilo_sa_pose_support);
+#define KILO_POSE_PITCH_MIN (-480)
+#define KILO_POSE_PITCH_MAX (480)
+#define KILO_POSE_ROLL_MIN (-480)
+#define KILO_POSE_ROLL_MAX (480)
 
-/* 0x12 SET_HEAD: goal, epoch. Hold (mode 1) or release (mode 0) pan, tilt, tail. Held joints follow the targets slew-limited at max_speed_dps (0 = only the safety slew) while the head joints' owner is IDLE or GAIT, without balance corrections; released by mode 0, head_hold_ms without a refresh, or an epoch bump. BAD_ARG for mode > 1; mode 0 is never stale; mode 1: STALE, FALLEN, LOW_BATT. TELEMETRY flags HEAD_HELD, head owner nibble PI_HOLD. */
+/* 0x12 SET_HEAD: goal, epoch. Hold (mode 1) or release (mode 0) pan, tilt, tail. Held joints follow the targets slew-limited at max_speed_dps (0 = only the safety slew) while the head joints' owner is IDLE (not a stream whose pose drives them), without balance corrections; released by mode 0, head_hold_ms without a refresh, or an epoch bump. BAD_ARG for mode > 1; mode 0 is never stale; mode 1: STALE, FALLEN, LOW_BATT. TELEMETRY flags HEAD_HELD, head owner nibble PI_HOLD. */
 #define KILO_SET_HEAD_LEN 10u
 typedef struct KILO_PACKED kilo_set_head_s {
     uint8_t epoch;
@@ -736,7 +700,7 @@ KILO_STATIC_ASSERT(offsetof(kilo_set_head_t, tilt) == 4, kilo_sa_set_head_tilt);
 KILO_STATIC_ASSERT(offsetof(kilo_set_head_t, tail) == 6, kilo_sa_set_head_tail);
 KILO_STATIC_ASSERT(offsetof(kilo_set_head_t, max_speed_dps) == 8, kilo_sa_set_head_max_speed_dps);
 
-/* 0x13 SET_BODY_POSE: goal, epoch. Body pitch, roll, height delta, x-shift (on top of gait / STANCE). */
+/* 0x13 SET_BODY_POSE: goal, epoch. Body pitch, roll, height delta, x-shift (on top of STANCE and of a POSE stream's feet). */
 #define KILO_SET_BODY_POSE_LEN 7u
 typedef struct KILO_PACKED kilo_set_body_pose_s {
     uint8_t epoch;
@@ -773,82 +737,6 @@ KILO_STATIC_ASSERT(offsetof(kilo_set_balance_t, max_corr_deg) == 4, kilo_sa_set_
 #define KILO_SET_BALANCE_DEADBAND_DEG_MAX (30)
 #define KILO_SET_BALANCE_MAX_CORR_DEG_MIN (0)
 #define KILO_SET_BALANCE_MAX_CORR_DEG_MAX (30)
-
-/* 0x20 TRICK_BEGIN: command. Trick header; empties the store. BUSY while a trick plays; BAD_ARG for n_frames outside 1..trick_capacity (24), loop_end >= n_frames, loop_start > loop_end, a joint_mask bit outside the 11 driven joints (or none), unknown flags, or an end_posture without angles (LIMP, STANCE). */
-#define KILO_TRICK_BEGIN_LEN 11u
-typedef struct KILO_PACKED kilo_trick_begin_s {
-    uint8_t trick_id;
-    uint8_t n_frames; /* range 1..24 */
-    uint8_t loop_start;
-    uint8_t loop_end;
-    uint8_t repeats; /* total plays of loop_start..loop_end: 0 and 1 = once, 255 = until stopped */
-    uint16_t joint_mask;
-    uint8_t flags; /* flags trick_flags */
-    uint8_t end_posture; /* enum posture */
-    int8_t exp_roll; /* deg; balance reference for frames with the balance bit (right side up +) */
-    int8_t exp_pitch; /* deg; balance reference (nose down +; legacy header byte) */
-} kilo_trick_begin_t;
-KILO_STATIC_ASSERT(sizeof(kilo_trick_begin_t) == 11, kilo_sa_trick_begin_size);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_begin_t, trick_id) == 0, kilo_sa_trick_begin_trick_id);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_begin_t, n_frames) == 1, kilo_sa_trick_begin_n_frames);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_begin_t, loop_start) == 2, kilo_sa_trick_begin_loop_start);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_begin_t, loop_end) == 3, kilo_sa_trick_begin_loop_end);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_begin_t, repeats) == 4, kilo_sa_trick_begin_repeats);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_begin_t, joint_mask) == 5, kilo_sa_trick_begin_joint_mask);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_begin_t, flags) == 7, kilo_sa_trick_begin_flags);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_begin_t, end_posture) == 8, kilo_sa_trick_begin_end_posture);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_begin_t, exp_roll) == 9, kilo_sa_trick_begin_exp_roll);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_begin_t, exp_pitch) == 10, kilo_sa_trick_begin_exp_pitch);
-#define KILO_TRICK_BEGIN_N_FRAMES_MIN (1)
-#define KILO_TRICK_BEGIN_N_FRAMES_MAX (24)
-
-/* 0x21 TRICK_FRAMES: command. Up to 4 keyframes starting at index `first`, in order: first must equal the number of frames received since TRICK_BEGIN (else BAD_ARG), first + count <= n_frames, dur >= 1, easing != 3. NO_TRICK without a header; BUSY while a trick plays. */
-#define KILO_TRICK_FRAMES_MIN_LEN 16u
-#define KILO_TRICK_FRAMES_MAX_LEN 58u
-#define KILO_TRICK_FRAMES_LEN_FOR(n) (2u + 14u * (uint8_t)(n))
-typedef struct KILO_PACKED kilo_trick_frames_s {
-    uint8_t first;
-    uint8_t count;
-    kilo_keyframe_t frames[4]; /* count = 1..4 */
-} kilo_trick_frames_t;
-KILO_STATIC_ASSERT(sizeof(kilo_trick_frames_t) == 58, kilo_sa_trick_frames_size);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_frames_t, first) == 0, kilo_sa_trick_frames_first);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_frames_t, count) == 1, kilo_sa_trick_frames_count);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_frames_t, frames) == 2, kilo_sa_trick_frames_frames);
-
-/* 0x22 TRICK_COMMIT: command. crc16 = CRC-16/CCITT-FALSE over the n_frames x 14 B frame array as sent; mismatch -> CRC_MISMATCH. NO_TRICK if no header or another trick_id, BAD_ARG if frames are missing. Idempotent: on a committed store it is the cache check (OK = the body holds exactly this trick). */
-#define KILO_TRICK_COMMIT_LEN 3u
-typedef struct KILO_PACKED kilo_trick_commit_s {
-    uint8_t trick_id;
-    uint16_t crc16;
-} kilo_trick_commit_t;
-KILO_STATIC_ASSERT(sizeof(kilo_trick_commit_t) == 3, kilo_sa_trick_commit_size);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_commit_t, trick_id) == 0, kilo_sa_trick_commit_trick_id);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_commit_t, crc16) == 1, kilo_sa_trick_commit_crc16);
-
-/* 0x23 TRICK_PLAY: command, epoch. Play the committed trick with speed (64 = 1x; scales dur and hold) and mirror (L/R swap, pan, tail and expected roll negated). STALE on an epoch mismatch, NO_TRICK if trick_id is not committed, BAD_ARG for speed < 16 or unknown flags, BUSY while a trick plays, under a reflex, or in LIMP or CALIB, REFUSED_FALLEN while the fall reflex holds the joints (but with param FALL_RC 0 a FALL_OK trick takes them from it), REFUSED_LOW_BATT, UNCALIBRATED. Ends with EVENT TRICK_DONE. */
-#define KILO_TRICK_PLAY_LEN 4u
-typedef struct KILO_PACKED kilo_trick_play_s {
-    uint8_t epoch;
-    uint8_t trick_id;
-    uint8_t speed_q6; /* x x 0.015625; range 16..255 */
-    uint8_t flags; /* flags trick_play_flags */
-} kilo_trick_play_t;
-KILO_STATIC_ASSERT(sizeof(kilo_trick_play_t) == 4, kilo_sa_trick_play_size);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_play_t, epoch) == 0, kilo_sa_trick_play_epoch);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_play_t, trick_id) == 1, kilo_sa_trick_play_trick_id);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_play_t, speed_q6) == 2, kilo_sa_trick_play_speed_q6);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_play_t, flags) == 3, kilo_sa_trick_play_flags);
-#define KILO_TRICK_PLAY_SPEED_Q6_MIN (16)
-#define KILO_TRICK_PLAY_SPEED_Q6_MAX (255)
-
-/* 0x24 TRICK_STOP: command. Stop the playing trick: crossfade over transition_ticks (0 = XFADE_TICKS) to its end posture, EVENT TRICK_DONE(STOPPED). OK also when nothing plays. */
-#define KILO_TRICK_STOP_LEN 1u
-typedef struct KILO_PACKED kilo_trick_stop_s {
-    uint8_t transition_ticks; /* tick */
-} kilo_trick_stop_t;
-KILO_STATIC_ASSERT(sizeof(kilo_trick_stop_t) == 1, kilo_sa_trick_stop_size);
-KILO_STATIC_ASSERT(offsetof(kilo_trick_stop_t, transition_ticks) == 0, kilo_sa_trick_stop_transition_ticks);
 
 /* 0x30 SET_EYES: goal. LED mask plus RGB. */
 #define KILO_SET_EYES_LEN 4u
@@ -975,7 +863,7 @@ typedef struct KILO_PACKED kilo_hello_s {
     uint16_t last_alive_tick; /* tick */
     uint16_t caps; /* flags hello_caps */
     uint8_t max_payload;
-    uint8_t trick_capacity; /* keyframes; 0 = no trick store (P0) */
+    uint8_t pose_depth; /* POSE keys the body queues (link.pose_depth) */
     uint8_t joint_count; /* driven joints (11) */
     uint8_t config_state; /* enum config_state */
     uint8_t epoch;
@@ -988,12 +876,12 @@ KILO_STATIC_ASSERT(offsetof(kilo_hello_t, reset_cause) == 6, kilo_sa_hello_reset
 KILO_STATIC_ASSERT(offsetof(kilo_hello_t, last_alive_tick) == 7, kilo_sa_hello_last_alive_tick);
 KILO_STATIC_ASSERT(offsetof(kilo_hello_t, caps) == 9, kilo_sa_hello_caps);
 KILO_STATIC_ASSERT(offsetof(kilo_hello_t, max_payload) == 11, kilo_sa_hello_max_payload);
-KILO_STATIC_ASSERT(offsetof(kilo_hello_t, trick_capacity) == 12, kilo_sa_hello_trick_capacity);
+KILO_STATIC_ASSERT(offsetof(kilo_hello_t, pose_depth) == 12, kilo_sa_hello_pose_depth);
 KILO_STATIC_ASSERT(offsetof(kilo_hello_t, joint_count) == 13, kilo_sa_hello_joint_count);
 KILO_STATIC_ASSERT(offsetof(kilo_hello_t, config_state) == 14, kilo_sa_hello_config_state);
 KILO_STATIC_ASSERT(offsetof(kilo_hello_t, epoch) == 15, kilo_sa_hello_epoch);
 
-/* 0x81 TELEMETRY: stream. Body state, 25 Hz by default (50 Hz while the mind streams FEET: SET_STREAM telem_div 1). */
+/* 0x81 TELEMETRY: stream. Body state, 25 Hz by default (50 Hz while the mind streams POSE: SET_STREAM telem_div 1). */
 #define KILO_TELEMETRY_LEN 35u
 typedef struct KILO_PACKED kilo_telemetry_s {
     uint16_t tick; /* tick; wraps every 21.8 min */
@@ -1008,12 +896,12 @@ typedef struct KILO_PACKED kilo_telemetry_s {
     uint8_t owners; /* low nibble leg owner, high nibble head owner (enum owner) */
     uint16_t flags; /* flags telemetry_flags */
     uint8_t last_rx_seq;
-    uint8_t trick_frame; /* 0xFF = none */
-    int16_t ref_pitch; /* deg x 0.0625; the balance reference in use, 0 while the balance is off: in GAIT the FEET prediction plus SET_BODY_POSE, in STANCE the pose, else the posture's or the trick's */
+    uint8_t limited; /* flags limited_flags; the legs (and the head) whose pose a joint limit, the slew limit or the leg's reach cut this tick */
+    int16_t ref_pitch; /* deg x 0.0625; the balance reference in use, 0 while the balance is off: in a stream of feet the POSE prediction plus SET_BODY_POSE, in STANCE the pose, with joint-mode legs the POSE prediction, else the posture's */
     int16_t ref_roll; /* deg x 0.0625 */
     int16_t corr_pitch; /* deg x 0.0625; the balance correction the legs carry this tick (frozen while BALANCE_HELD; decays to 0 when the balance is off) */
     int16_t corr_roll; /* deg x 0.0625 */
-    uint8_t feet_queued; /* tick; FEET ticks waiting in the queue (0 outside GAIT) */
+    uint8_t pose_queued; /* POSE keys waiting in the queue (0 outside a stream) */
     uint8_t support; /* flags support_flags; the feet the balance corrects through this tick */
     uint8_t tick_load; /* us x 100; max tick time since the last telemetry */
     uint8_t rx_err; /* cumulative, mod 256 */
@@ -1032,12 +920,12 @@ KILO_STATIC_ASSERT(offsetof(kilo_telemetry_t, mode) == 16, kilo_sa_telemetry_mod
 KILO_STATIC_ASSERT(offsetof(kilo_telemetry_t, owners) == 17, kilo_sa_telemetry_owners);
 KILO_STATIC_ASSERT(offsetof(kilo_telemetry_t, flags) == 18, kilo_sa_telemetry_flags);
 KILO_STATIC_ASSERT(offsetof(kilo_telemetry_t, last_rx_seq) == 20, kilo_sa_telemetry_last_rx_seq);
-KILO_STATIC_ASSERT(offsetof(kilo_telemetry_t, trick_frame) == 21, kilo_sa_telemetry_trick_frame);
+KILO_STATIC_ASSERT(offsetof(kilo_telemetry_t, limited) == 21, kilo_sa_telemetry_limited);
 KILO_STATIC_ASSERT(offsetof(kilo_telemetry_t, ref_pitch) == 22, kilo_sa_telemetry_ref_pitch);
 KILO_STATIC_ASSERT(offsetof(kilo_telemetry_t, ref_roll) == 24, kilo_sa_telemetry_ref_roll);
 KILO_STATIC_ASSERT(offsetof(kilo_telemetry_t, corr_pitch) == 26, kilo_sa_telemetry_corr_pitch);
 KILO_STATIC_ASSERT(offsetof(kilo_telemetry_t, corr_roll) == 28, kilo_sa_telemetry_corr_roll);
-KILO_STATIC_ASSERT(offsetof(kilo_telemetry_t, feet_queued) == 30, kilo_sa_telemetry_feet_queued);
+KILO_STATIC_ASSERT(offsetof(kilo_telemetry_t, pose_queued) == 30, kilo_sa_telemetry_pose_queued);
 KILO_STATIC_ASSERT(offsetof(kilo_telemetry_t, support) == 31, kilo_sa_telemetry_support);
 KILO_STATIC_ASSERT(offsetof(kilo_telemetry_t, tick_load) == 32, kilo_sa_telemetry_tick_load);
 KILO_STATIC_ASSERT(offsetof(kilo_telemetry_t, rx_err) == 33, kilo_sa_telemetry_rx_err);
@@ -1157,8 +1045,8 @@ typedef struct KILO_PACKED kilo_stats_s {
     uint16_t i2c_err;
     uint16_t imu_stale;
     uint8_t dmp_rate_hz; /* Hz */
-    uint16_t feet_late; /* FEET dropped because their tick had passed */
-    uint16_t feet_underruns; /* times the FEET queue ran dry in GAIT */
+    uint16_t pose_dropped; /* POSE keys dropped: already past, too far ahead, or no room */
+    uint16_t pose_underruns; /* times a stream reached its last key with none queued */
 } kilo_stats_t;
 KILO_STATIC_ASSERT(sizeof(kilo_stats_t) == 23, kilo_sa_stats_size);
 KILO_STATIC_ASSERT(offsetof(kilo_stats_t, uptime_s) == 0, kilo_sa_stats_uptime_s);
@@ -1170,8 +1058,8 @@ KILO_STATIC_ASSERT(offsetof(kilo_stats_t, rx_overflow) == 12, kilo_sa_stats_rx_o
 KILO_STATIC_ASSERT(offsetof(kilo_stats_t, i2c_err) == 14, kilo_sa_stats_i2c_err);
 KILO_STATIC_ASSERT(offsetof(kilo_stats_t, imu_stale) == 16, kilo_sa_stats_imu_stale);
 KILO_STATIC_ASSERT(offsetof(kilo_stats_t, dmp_rate_hz) == 18, kilo_sa_stats_dmp_rate_hz);
-KILO_STATIC_ASSERT(offsetof(kilo_stats_t, feet_late) == 19, kilo_sa_stats_feet_late);
-KILO_STATIC_ASSERT(offsetof(kilo_stats_t, feet_underruns) == 21, kilo_sa_stats_feet_underruns);
+KILO_STATIC_ASSERT(offsetof(kilo_stats_t, pose_dropped) == 19, kilo_sa_stats_pose_dropped);
+KILO_STATIC_ASSERT(offsetof(kilo_stats_t, pose_underruns) == 21, kilo_sa_stats_pose_underruns);
 
 /* 0x8B PCA_COUNTS: event, reply to PCA_READ. 16 PCA9685 OFF counts (bit 12 = full-off). */
 #define KILO_PCA_COUNTS_LEN 32u
@@ -1213,14 +1101,14 @@ static inline uint8_t kilo_payload_len_check(uint8_t type, const uint8_t *payloa
 {
     static const uint8_t t[KILO_MAX_MSG_ID + 1u] KILO_TABLE_ATTR = {
         0xFF, 0, 0, 2, 3, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,  /* 0x00 */
-        4, 16, 10, 7, 5, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,  /* 0x10 */
-        11, 0x80, 3, 4, 1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,  /* 0x20 */
-        4, 0x81, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0, 3, 0, 0, 13, 1, 4, 3,  /* 0x30 */
+        4, 31, 10, 7, 5, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,  /* 0x10 */
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,  /* 0x20 */
+        4, 0x80, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0, 3, 0, 0, 13, 1, 4, 3,  /* 0x30 */
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,  /* 0x40 */
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,  /* 0x50 */
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,  /* 0x60 */
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 2, 0xFF,  /* 0x70 */
-        16, 35, 24, 14, 3, 6, 32, 9, 0x82, 4, 23, 32, 0xFF, 0xFF, 0xFF, 0x83,  /* 0x80 */
+        16, 35, 24, 14, 3, 6, 32, 9, 0x81, 4, 23, 32, 0xFF, 0xFF, 0xFF, 0x82,  /* 0x80 */
     };
     uint8_t e;
     if (type > KILO_MAX_MSG_ID) return KILO_LEN_UNKNOWN_TYPE;
@@ -1228,15 +1116,12 @@ static inline uint8_t kilo_payload_len_check(uint8_t type, const uint8_t *payloa
     if (e == 0xFFu) return KILO_LEN_UNKNOWN_TYPE;
     if (e < 0x80u) return len == e ? KILO_LEN_OK : KILO_LEN_BAD;
     switch (e) {
-    case 0x80u: /* TRICK_FRAMES */
-        if (len < 16u || len > 58u) return KILO_LEN_BAD;
-        return len == 2u + 14u * payload[1] ? KILO_LEN_OK : KILO_LEN_BAD;
-    case 0x81u: /* BEEP */
+    case 0x80u: /* BEEP */
         if (len < 3u || len > 17u) return KILO_LEN_BAD;
         return len == 1u + 2u * payload[0] ? KILO_LEN_OK : KILO_LEN_BAD;
-    case 0x82u: /* EEPROM_DATA */
+    case 0x81u: /* EEPROM_DATA */
         return (len >= 3u && len <= 58u) ? KILO_LEN_OK : KILO_LEN_BAD;
-    case 0x83u: /* LOG */
+    case 0x82u: /* LOG */
         return (len >= 1u && len <= 60u) ? KILO_LEN_OK : KILO_LEN_BAD;
     default:
         return KILO_LEN_BAD;
@@ -1260,11 +1145,6 @@ static inline uint8_t kilo_msg_kind(uint8_t type)
     case KILO_MSG_SET_STREAM:
     case KILO_MSG_STATS_REQ:
     case KILO_MSG_PCA_READ:
-    case KILO_MSG_TRICK_BEGIN:
-    case KILO_MSG_TRICK_FRAMES:
-    case KILO_MSG_TRICK_COMMIT:
-    case KILO_MSG_TRICK_PLAY:
-    case KILO_MSG_TRICK_STOP:
     case KILO_MSG_CAL_GET:
     case KILO_MSG_CAL_SET:
     case KILO_MSG_CAL_SAVE:
@@ -1275,7 +1155,7 @@ static inline uint8_t kilo_msg_kind(uint8_t type)
     case KILO_MSG_EEPROM_READ:
     case KILO_MSG_REBOOT:
         return KILO_KIND_COMMAND;
-    case KILO_MSG_FEET:
+    case KILO_MSG_POSE:
     case KILO_MSG_TELEMETRY:
     case KILO_MSG_JOINTS:
     case KILO_MSG_IMU_RAW:
@@ -1321,13 +1201,12 @@ static inline uint8_t kilo_msg_is_query(uint8_t type)
     return (uint8_t)((m >> (type & 15u)) & 1u);
 }
 
-/* Nonzero if the type's payload begins with the goal epoch byte (SET_POSTURE, FEET, SET_HEAD, SET_BODY_POSE, TRICK_PLAY). A bit mask per high nibble: smaller than a switch on AVR. */
+/* Nonzero if the type's payload begins with the goal epoch byte (SET_POSTURE, POSE, SET_HEAD, SET_BODY_POSE). A bit mask per high nibble: smaller than a switch on AVR. */
 static inline uint8_t kilo_msg_has_epoch(uint8_t type)
 {
     uint16_t m;
     switch (type >> 4) {
     case 1u: m = 0x000Fu; break;
-    case 2u: m = 0x0008u; break;
     default: return 0u;
     }
     return (uint8_t)((m >> (type & 15u)) & 1u);
@@ -1338,7 +1217,7 @@ enum kilo_param_id {
     KILO_PARAM_WD_STOP_MS = 0, /* ms: Link watchdog stage 1: stop motion, epoch bump, EVENT WATCHDOG (20 ms resolution). */
     KILO_PARAM_WD_REST_MS = 1, /* ms: Link watchdog stage 2: REFLEX -> REST (never earlier than stage 1). */
     KILO_PARAM_WD_LIMP_S = 2, /* s: Watchdog REST -> LIMP after this long. */
-    KILO_PARAM_XFADE_TICKS = 3, /* tick: Crossfade length out of TRICK or REFLEX. */
+    KILO_PARAM_XFADE_TICKS = 3, /* tick: Crossfade length out of a POSE stream or REFLEX. */
     KILO_PARAM_POSTURE_TICKS = 4, /* tick: Default IDLE posture transition (SET_POSTURE transition_ticks = 0). */
     KILO_PARAM_SLEW_MAX_A16 = 5, /* a16/tick: Safety-stage slew limit per joint per tick (160 = 10 deg/tick = 500 deg/s). */
     KILO_PARAM_BATT_WARN_MV = 6, /* mV: Battery WARN trip (filtered, held 5 s). */
@@ -1354,9 +1233,8 @@ enum kilo_param_id {
     KILO_PARAM_LEG_W_MM = 16, /* mm: Left-right foot track, foot centre to foot centre (roll lever arm). Kilo: 70 (the owner's tape 2026-10-15, and what predicts the recordings best: docs/model-fit-results.md; 65 until 2026-11-22). */
     KILO_PARAM_LEG_SH_ZERO_DEG = 17, /* deg: Upper link angle from straight down (+ = foot forward) at joint angle 0 (the calibration posture). Petoi: upper leg vertical = 0; verify on Kilo. */
     KILO_PARAM_LEG_KN_ZERO_DEG = 18, /* deg: Knee bend relative to the upper link at joint angle 0 (the calibration posture). Petoi: lower leg at 90 deg; verify on Kilo. */
-    KILO_PARAM_FALL_RC = 19, /* bool: 1: after a roll fall the fall reflex plays rc (up to three tries). 0: it never does: once he is still, FAILED at once (REST, EVENT RECOVERY_FAILED, LIMP), and while the reflex holds the joints TRICK_PLAY of a FALL_OK trick is accepted and ends the reflex (the mind's righting, docs/righting.md). Set live, never persisted, by a mind built with KILO_RIGHTING=1. */
 };
-#define KILO_PARAM_COUNT 20u
+#define KILO_PARAM_COUNT 19u
 #define KILO_PARAM_WD_STOP_MS_DEFAULT 500
 #define KILO_PARAM_WD_STOP_MS_MIN 100
 #define KILO_PARAM_WD_STOP_MS_MAX 5000
@@ -1414,9 +1292,6 @@ enum kilo_param_id {
 #define KILO_PARAM_LEG_KN_ZERO_DEG_DEFAULT 90
 #define KILO_PARAM_LEG_KN_ZERO_DEG_MIN 30
 #define KILO_PARAM_LEG_KN_ZERO_DEG_MAX 150
-#define KILO_PARAM_FALL_RC_DEFAULT 1
-#define KILO_PARAM_FALL_RC_MIN 0
-#define KILO_PARAM_FALL_RC_MAX 1
 /* Initializer for an int16_t [KILO_PARAM_COUNT][3] table of {min, max, default}, in id order. */
 #define KILO_PARAM_TABLE_INIT { \
     {100, 5000, 500}, /* WD_STOP_MS */ \
@@ -1438,10 +1313,9 @@ enum kilo_param_id {
     {30, 150, 70}, /* LEG_W_MM */ \
     {-45, 45, 0}, /* LEG_SH_ZERO_DEG */ \
     {30, 150, 90}, /* LEG_KN_ZERO_DEG */ \
-    {0, 1, 1}, /* FALL_RC */ \
 }
 /* Initializer for an int16_t [KILO_PARAM_COUNT] array of defaults, in id order. */
-#define KILO_PARAM_DEFAULTS_INIT { 500, 1500, 10, 10, 25, 160, 6500, 6700, 6200, 6600, 6000, 2, 4, 45, 50, 123, 70, 0, 90, 1 }
+#define KILO_PARAM_DEFAULTS_INIT { 500, 1500, 10, 10, 25, 160, 6500, 6700, 6200, 6600, 6000, 2, 4, 45, 50, 123, 70, 0, 90 }
 
 /* ---- Shared defaults and limits (spec [gait], [[joints]], [balance], [head], [battery], [model]) ---- */
 #define KILO_GAIT_STANCE_H_256 205 /* STANCE's body height, /256 of L1 + L2 */
@@ -2023,7 +1897,7 @@ typedef struct KILO_PACKED kilo_host_walk_info_s {
     uint32_t duration_ms; /* ms; setup to the end (so far, while recording) */
     uint32_t bytes; /* B; the recording's size: what WALK_FETCH sends */
     uint32_t records;
-    uint32_t feet; /* FEET frames sent */
+    uint32_t feet; /* POSE frames sent */
     uint8_t flags; /* flags walk_flags */
     uint8_t text[120]; /* 0..120 B, length implied */
 } kilo_host_walk_info_t;
@@ -2516,13 +2390,14 @@ static const kilo_field_info_t kilo_field_table[] = {
     {KILO_MSG_SET_POSTURE, "posture", 1, 1, 0, 1},
     {KILO_MSG_SET_POSTURE, "transition_ticks", 2, 1, 0, 1},
     {KILO_MSG_SET_POSTURE, "flags", 3, 1, 0, 1},
-    {KILO_MSG_FEET, "epoch", 0, 1, 0, 1},
-    {KILO_MSG_FEET, "tick", 1, 2, 0, 1},
-    {KILO_MSG_FEET, "x_mm", 3, 1, 1, 4},
-    {KILO_MSG_FEET, "z_mm", 7, 1, 0, 4},
-    {KILO_MSG_FEET, "pitch", 11, 2, 1, 1},
-    {KILO_MSG_FEET, "roll", 13, 2, 1, 1},
-    {KILO_MSG_FEET, "support", 15, 1, 0, 1},
+    {KILO_MSG_POSE, "epoch", 0, 1, 0, 1},
+    {KILO_MSG_POSE, "tick", 1, 2, 0, 1},
+    {KILO_MSG_POSE, "flags", 3, 1, 0, 1},
+    {KILO_MSG_POSE, "leg", 4, 2, 1, 8},
+    {KILO_MSG_POSE, "head", 20, 2, 1, 3},
+    {KILO_MSG_POSE, "pitch", 26, 2, 1, 1},
+    {KILO_MSG_POSE, "roll", 28, 2, 1, 1},
+    {KILO_MSG_POSE, "support", 30, 1, 0, 1},
     {KILO_MSG_SET_HEAD, "epoch", 0, 1, 0, 1},
     {KILO_MSG_SET_HEAD, "mode", 1, 1, 0, 1},
     {KILO_MSG_SET_HEAD, "pan", 2, 2, 1, 1},
@@ -2539,25 +2414,6 @@ static const kilo_field_info_t kilo_field_table[] = {
     {KILO_MSG_SET_BALANCE, "kd_ms", 2, 1, 0, 1},
     {KILO_MSG_SET_BALANCE, "deadband_deg", 3, 1, 0, 1},
     {KILO_MSG_SET_BALANCE, "max_corr_deg", 4, 1, 0, 1},
-    {KILO_MSG_TRICK_BEGIN, "trick_id", 0, 1, 0, 1},
-    {KILO_MSG_TRICK_BEGIN, "n_frames", 1, 1, 0, 1},
-    {KILO_MSG_TRICK_BEGIN, "loop_start", 2, 1, 0, 1},
-    {KILO_MSG_TRICK_BEGIN, "loop_end", 3, 1, 0, 1},
-    {KILO_MSG_TRICK_BEGIN, "repeats", 4, 1, 0, 1},
-    {KILO_MSG_TRICK_BEGIN, "joint_mask", 5, 2, 0, 1},
-    {KILO_MSG_TRICK_BEGIN, "flags", 7, 1, 0, 1},
-    {KILO_MSG_TRICK_BEGIN, "end_posture", 8, 1, 0, 1},
-    {KILO_MSG_TRICK_BEGIN, "exp_roll", 9, 1, 1, 1},
-    {KILO_MSG_TRICK_BEGIN, "exp_pitch", 10, 1, 1, 1},
-    {KILO_MSG_TRICK_FRAMES, "first", 0, 1, 0, 1},
-    {KILO_MSG_TRICK_FRAMES, "count", 1, 1, 0, 1},
-    {KILO_MSG_TRICK_COMMIT, "trick_id", 0, 1, 0, 1},
-    {KILO_MSG_TRICK_COMMIT, "crc16", 1, 2, 0, 1},
-    {KILO_MSG_TRICK_PLAY, "epoch", 0, 1, 0, 1},
-    {KILO_MSG_TRICK_PLAY, "trick_id", 1, 1, 0, 1},
-    {KILO_MSG_TRICK_PLAY, "speed_q6", 2, 1, 0, 1},
-    {KILO_MSG_TRICK_PLAY, "flags", 3, 1, 0, 1},
-    {KILO_MSG_TRICK_STOP, "transition_ticks", 0, 1, 0, 1},
     {KILO_MSG_SET_EYES, "led_mask", 0, 1, 0, 1},
     {KILO_MSG_SET_EYES, "r", 1, 1, 0, 1},
     {KILO_MSG_SET_EYES, "g", 2, 1, 0, 1},
@@ -2586,7 +2442,7 @@ static const kilo_field_info_t kilo_field_table[] = {
     {KILO_MSG_HELLO, "last_alive_tick", 7, 2, 0, 1},
     {KILO_MSG_HELLO, "caps", 9, 2, 0, 1},
     {KILO_MSG_HELLO, "max_payload", 11, 1, 0, 1},
-    {KILO_MSG_HELLO, "trick_capacity", 12, 1, 0, 1},
+    {KILO_MSG_HELLO, "pose_depth", 12, 1, 0, 1},
     {KILO_MSG_HELLO, "joint_count", 13, 1, 0, 1},
     {KILO_MSG_HELLO, "config_state", 14, 1, 0, 1},
     {KILO_MSG_HELLO, "epoch", 15, 1, 0, 1},
@@ -2602,12 +2458,12 @@ static const kilo_field_info_t kilo_field_table[] = {
     {KILO_MSG_TELEMETRY, "owners", 17, 1, 0, 1},
     {KILO_MSG_TELEMETRY, "flags", 18, 2, 0, 1},
     {KILO_MSG_TELEMETRY, "last_rx_seq", 20, 1, 0, 1},
-    {KILO_MSG_TELEMETRY, "trick_frame", 21, 1, 0, 1},
+    {KILO_MSG_TELEMETRY, "limited", 21, 1, 0, 1},
     {KILO_MSG_TELEMETRY, "ref_pitch", 22, 2, 1, 1},
     {KILO_MSG_TELEMETRY, "ref_roll", 24, 2, 1, 1},
     {KILO_MSG_TELEMETRY, "corr_pitch", 26, 2, 1, 1},
     {KILO_MSG_TELEMETRY, "corr_roll", 28, 2, 1, 1},
-    {KILO_MSG_TELEMETRY, "feet_queued", 30, 1, 0, 1},
+    {KILO_MSG_TELEMETRY, "pose_queued", 30, 1, 0, 1},
     {KILO_MSG_TELEMETRY, "support", 31, 1, 0, 1},
     {KILO_MSG_TELEMETRY, "tick_load", 32, 1, 0, 1},
     {KILO_MSG_TELEMETRY, "rx_err", 33, 1, 0, 1},
@@ -2646,8 +2502,8 @@ static const kilo_field_info_t kilo_field_table[] = {
     {KILO_MSG_STATS, "i2c_err", 14, 2, 0, 1},
     {KILO_MSG_STATS, "imu_stale", 16, 2, 0, 1},
     {KILO_MSG_STATS, "dmp_rate_hz", 18, 1, 0, 1},
-    {KILO_MSG_STATS, "feet_late", 19, 2, 0, 1},
-    {KILO_MSG_STATS, "feet_underruns", 21, 2, 0, 1},
+    {KILO_MSG_STATS, "pose_dropped", 19, 2, 0, 1},
+    {KILO_MSG_STATS, "pose_underruns", 21, 2, 0, 1},
     {KILO_MSG_PCA_COUNTS, "counts", 0, 2, 0, 16},
 };
 #define KILO_FIELD_TABLE_LEN (sizeof(kilo_field_table) / sizeof(kilo_field_table[0]))
@@ -2670,15 +2526,10 @@ static const kilo_msg_info_t kilo_msg_table[] = {
     {KILO_MSG_STATS_REQ, "STATS_REQ", KILO_KIND_COMMAND, 0, 0, 0, 0, 255},
     {KILO_MSG_PCA_READ, "PCA_READ", KILO_KIND_COMMAND, 0, 0, 0, 0, 255},
     {KILO_MSG_SET_POSTURE, "SET_POSTURE", KILO_KIND_GOAL, 4, 0, 0, 0, 255},
-    {KILO_MSG_FEET, "FEET", KILO_KIND_STREAM, 16, 0, 0, 0, 255},
+    {KILO_MSG_POSE, "POSE", KILO_KIND_STREAM, 31, 0, 0, 0, 255},
     {KILO_MSG_SET_HEAD, "SET_HEAD", KILO_KIND_GOAL, 10, 0, 0, 0, 255},
     {KILO_MSG_SET_BODY_POSE, "SET_BODY_POSE", KILO_KIND_GOAL, 7, 0, 0, 0, 255},
     {KILO_MSG_SET_BALANCE, "SET_BALANCE", KILO_KIND_GOAL, 5, 0, 0, 0, 255},
-    {KILO_MSG_TRICK_BEGIN, "TRICK_BEGIN", KILO_KIND_COMMAND, 11, 0, 0, 0, 255},
-    {KILO_MSG_TRICK_FRAMES, "TRICK_FRAMES", KILO_KIND_COMMAND, 2, 14, 1, 4, 1},
-    {KILO_MSG_TRICK_COMMIT, "TRICK_COMMIT", KILO_KIND_COMMAND, 3, 0, 0, 0, 255},
-    {KILO_MSG_TRICK_PLAY, "TRICK_PLAY", KILO_KIND_COMMAND, 4, 0, 0, 0, 255},
-    {KILO_MSG_TRICK_STOP, "TRICK_STOP", KILO_KIND_COMMAND, 1, 0, 0, 0, 255},
     {KILO_MSG_SET_EYES, "SET_EYES", KILO_KIND_GOAL, 4, 0, 0, 0, 255},
     {KILO_MSG_BEEP, "BEEP", KILO_KIND_GOAL, 1, 2, 1, 8, 0},
     {KILO_MSG_CAL_GET, "CAL_GET", KILO_KIND_COMMAND, 0, 0, 0, 0, 255},

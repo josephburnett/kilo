@@ -4,7 +4,7 @@
 // kernel/host/tests/measure_vectors.txt, made by gen_measure_vectors.py
 // from the Python, checks the two tick for tick.
 //
-// A pose is the four feet as FEET gives them: x mm fore-aft from under the
+// A pose is the four feet as a POSE gives them (in mm): x mm fore-aft from under the
 // shoulder (+ forward), z mm below it, whole mm. Every pose is the home
 // pose (x 0, z kHomeZ: the body's STANCE) plus a step's offsets; a step
 // moves to its offsets (Move, linearly, in integers), holds (Hold) or

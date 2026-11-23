@@ -65,7 +65,9 @@ def test_look_dropped_by_an_epoch_bump(rig):
     vb.trigger_fall(-1)
     assert client.link.wait_until(lambda: "SET_HEAD" not in client.link.goals(), 1)
     assert vb.head_until is None
-    # After RECOVERED the body stands (doc §3g) and a new look works.
-    assert client.link.wait_until(lambda: vb.posture == "STAND" and not vb.fallen, 3)
+    # The fall reflex lies him down and lets go (LIMP); stood up again, a new look works.
+    assert client.link.wait_until(lambda: not vb.fallen, 6)
+    client.stand()
+    assert client.link.wait_until(lambda: vb.posture == "STAND", 1)
     client.look(-15, 5)
     assert client.link.wait_until(lambda: _held(client), 1)

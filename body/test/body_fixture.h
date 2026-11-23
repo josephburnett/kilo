@@ -7,6 +7,7 @@
 // body their own way (cold or warm, with or without the link).
 #ifndef KILO_TEST_BODY_FIXTURE_H
 #define KILO_TEST_BODY_FIXTURE_H
+#include <string.h>
 #include <vector>
 #include "../src/core/body.h"
 #include "../src/core/params.h"
@@ -39,6 +40,30 @@ static inline TickIn fixture_upright() {
   in.att.gz = 16384;
   return in;
 }
+
+// A POSE payload (core/stream.h) into p[KILO_POSE_LEN]: legs as per leg
+// (a, b) pairs LF RF RB LB (a foot's x, z in q2, or with the leg's JOINT
+// flag shoulder and knee a16), head pan, tilt, tail a16 (JOINT_OFF: IDLE's).
+static inline void fixture_pose(uint8_t* p, uint8_t epoch, uint16_t tick, uint8_t flags, const int16_t legs[8],
+                                const int16_t head[3], int16_t pitch = 0, int16_t roll = 0,
+                                uint8_t support = 0xF) {
+  kilo_pose_t m;
+  m.epoch = epoch;
+  m.tick = tick;
+  m.flags = flags;
+  for (int i = 0; i < 8; i++) m.leg[i] = legs[i];
+  for (int i = 0; i < 3; i++) m.head[i] = head[i];
+  m.pitch = pitch;
+  m.roll = roll;
+  m.support = support;
+  static_assert(sizeof m == KILO_POSE_LEN, "kilo_pose_t");
+  memcpy(p, &m, sizeof m);
+}
+
+// STAND's legs as a joint-mode POSE's (a, b) pairs: shoulder, knee per leg.
+static const int16_t FIXTURE_STAND_LEGS[8] = {30 * 16, 30 * 16, 30 * 16, 30 * 16,
+                                              -30 * 16, -30 * 16, -30 * 16, -30 * 16};
+#define FIXTURE_ALL_JOINT 0x0Fu  // POSE flags: every leg joint angles
 
 // Move every queued event into log, oldest first.
 static inline void fixture_drain(EventQueue& q, std::vector<Event>& log) {

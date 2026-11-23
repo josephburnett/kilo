@@ -40,7 +40,7 @@ struct Metrics {
   NamedCounts trick_names;  // started, by trick
   NamedCounts refusals;     // trick refusals by why, goals the body refused
   // the body
-  uint32_t falls = 0, recovered = 0, watchdogs = 0, low_battery = 0, events = 0, body_reboots = 0;
+  uint32_t falls = 0, lying = 0, watchdogs = 0, low_battery = 0, events = 0, body_reboots = 0;
   uint32_t battery_mv = 0, battery_min_mv = 0;  // 0: no reading yet
   // the platform's loop (the Circle kernel sets them each second)
   uint32_t loop_max_us = 0, loop_period_max_us = 0;

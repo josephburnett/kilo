@@ -167,8 +167,8 @@
    "note": "epoch byte first"
   },
   {
-   "name": "feet_walk",
-   "msg": "FEET",
+   "name": "pose_walk",
+   "msg": "POSE",
    "type": 17,
    "dir": "pi_to_body",
    "kind": "stream",
@@ -176,30 +176,34 @@
    "fields": {
     "epoch": 3,
     "tick": 51239,
-    "x_mm": [
-     12,
-     -8,
-     15,
-     -20
+    "flags": 0,
+    "leg": [
+     48,
+     304,
+     -32,
+     304,
+     60,
+     244,
+     -80,
+     304
     ],
-    "z_mm": [
-     76,
-     76,
-     61,
-     76
+    "head": [
+     -32768,
+     -32768,
+     -32768
     ],
     "pitch": -32,
     "roll": 128,
     "support": 11
    },
-   "payload": "0327c80cf80fec4c4c3d4ce0ff80000b",
-   "decoded": "11090327c80cf80fec4c4c3d4ce0ff80000b9797",
-   "wire": "1111090327c80cf80fec4c4c3d4ce0ff80040b979700",
-   "note": "epoch byte first; LB lifting, the body planned to roll right"
+   "payload": "0327c80030003001e0ff30013c00f400b0ff3001008000800080e0ff80000b",
+   "decoded": "11090327c80030003001e0ff30013c00f400b0ff3001008000800080e0ff80000b761d",
+   "wire": "0611090327c80230083001e0ff30013c02f405b0ff3001028002800580e0ff80040b761d00",
+   "note": "epoch byte first; four feet, LB lifting, the body planned to roll right"
   },
   {
-   "name": "feet_zero",
-   "msg": "FEET",
+   "name": "pose_zero",
+   "msg": "POSE",
    "type": 17,
    "dir": "pi_to_body",
    "kind": "stream",
@@ -207,26 +211,65 @@
    "fields": {
     "epoch": 0,
     "tick": 0,
-    "x_mm": [
+    "flags": 0,
+    "leg": [
      0,
+     240,
+     0,
+     240,
+     0,
+     240,
+     0,
+     240
+    ],
+    "head": [
      0,
      0,
      0
-    ],
-    "z_mm": [
-     30,
-     30,
-     30,
-     30
     ],
     "pitch": 0,
     "roll": 0,
     "support": 0
    },
-   "payload": "000000000000001e1e1e1e0000000000",
-   "decoded": "110a000000000000001e1e1e1e000000000049fd",
-   "wire": "03110a010101010101051e1e1e1e010101010349fd00",
+   "payload": "000000000000f0000000f0000000f0000000f0000000000000000000000000",
+   "decoded": "110a000000000000f0000000f0000000f0000000f0000000000000000000000000e777",
+   "wire": "03110a010101010102f0010102f0010102f0010102f0010101010101010101010103e77700",
    "note": "many zero bytes"
+  },
+  {
+   "name": "pose_joints",
+   "msg": "POSE",
+   "type": 17,
+   "dir": "pi_to_body",
+   "kind": "stream",
+   "seq": 14,
+   "fields": {
+    "epoch": 7,
+    "tick": 900,
+    "flags": 127,
+    "leg": [
+     480,
+     480,
+     -1280,
+     960,
+     -960,
+     -960,
+     960,
+     720
+    ],
+    "head": [
+     1520,
+     -480,
+     -32768
+    ],
+    "pitch": -480,
+    "roll": 32,
+    "support": 14
+   },
+   "payload": "0784037fe001e00100fbc00340fc40fcc003d002f00520fe008020fe20000e",
+   "decoded": "110e0784037fe001e00100fbc00340fc40fcc003d002f00520fe008020fe20000eca8f",
+   "wire": "0b110e0784037fe001e00110fbc00340fc40fcc003d002f00520fe058020fe20040eca8f00",
+   "note": "four joint-mode legs (a paw up), balance, fall-ok, eased; the tail left to IDLE"
   },
   {
    "name": "set_head_hold",
@@ -284,203 +327,6 @@
    "payload": "018014010f",
    "decoded": "140d018014010f2463",
    "wire": "0a140d018014010f246300",
-   "note": ""
-  },
-  {
-   "name": "trick_begin",
-   "msg": "TRICK_BEGIN",
-   "type": 32,
-   "dir": "pi_to_body",
-   "kind": "command",
-   "seq": 14,
-   "fields": {
-    "trick_id": 7,
-    "n_frames": 22,
-    "loop_start": 2,
-    "loop_end": 5,
-    "repeats": 3,
-    "joint_mask": 65287,
-    "flags": 1,
-    "end_posture": 2,
-    "exp_roll": 0,
-    "exp_pitch": 0
-   },
-   "payload": "071602050307ff01020000",
-   "decoded": "200e071602050307ff010200000707",
-   "wire": "0c200e071602050307ff01020103070700",
-   "note": ""
-  },
-  {
-   "name": "trick_frames_1",
-   "msg": "TRICK_FRAMES",
-   "type": 33,
-   "dir": "pi_to_body",
-   "kind": "command",
-   "seq": 15,
-   "fields": {
-    "first": 0,
-    "frames": [
-     {
-      "dur": 25,
-      "hold": 0,
-      "flags": 1,
-      "ang": [
-       0,
-       -10,
-       30,
-       45,
-       45,
-       -45,
-       -45,
-       10,
-       10,
-       -10,
-       -10
-      ]
-     }
-    ]
-   },
-   "payload": "000119000100f61e2d2dd3d30a0af6f6",
-   "decoded": "210f000119000100f61e2d2dd3d30a0af6f64ca5",
-   "wire": "03210f03011902010df61e2d2dd3d30a0af6f64ca500",
-   "note": "min variable length"
-  },
-  {
-   "name": "trick_frames_4_max",
-   "msg": "TRICK_FRAMES",
-   "type": 33,
-   "dir": "pi_to_body",
-   "kind": "command",
-   "seq": 16,
-   "fields": {
-    "first": 4,
-    "frames": [
-     {
-      "dur": 25,
-      "hold": 0,
-      "flags": 1,
-      "ang": [
-       0,
-       -10,
-       30,
-       45,
-       45,
-       -45,
-       -45,
-       10,
-       10,
-       -10,
-       -10
-      ]
-     },
-     {
-      "dur": 10,
-      "hold": 5,
-      "flags": 5,
-      "ang": [
-       -128,
-       -128,
-       -128,
-       60,
-       60,
-       -60,
-       -60,
-       -128,
-       -128,
-       -128,
-       -128
-      ]
-     },
-     {
-      "dur": 1,
-      "hold": 0,
-      "flags": 2,
-      "ang": [
-       0,
-       0,
-       0,
-       0,
-       0,
-       0,
-       0,
-       0,
-       0,
-       0,
-       0
-      ]
-     },
-     {
-      "dur": 255,
-      "hold": 255,
-      "flags": 0,
-      "ang": [
-       127,
-       -127,
-       0,
-       1,
-       -1,
-       0,
-       -128,
-       0,
-       0,
-       0,
-       0
-      ]
-     }
-    ]
-   },
-   "payload": "040419000100f61e2d2dd3d30a0af6f60a05058080803c3cc4c4808080800100020000000000000000000000ffff007f810001ff008000000000",
-   "decoded": "2110040419000100f61e2d2dd3d30a0af6f60a05058080803c3cc4c4808080800100020000000000000000000000ffff007f810001ff0080000000004d1a",
-   "wire": "06211004041902011af61e2d2dd3d30a0af6f60a05058080803c3cc4c4808080800102020101010101010101010103ffff037f810301ff0280010101034d1a00",
-   "note": "58 B payload, -128 and zero bytes"
-  },
-  {
-   "name": "trick_commit",
-   "msg": "TRICK_COMMIT",
-   "type": 34,
-   "dir": "pi_to_body",
-   "kind": "command",
-   "seq": 17,
-   "fields": {
-    "trick_id": 7,
-    "crc16": 7439
-   },
-   "payload": "070f1d",
-   "decoded": "2211070f1d1a66",
-   "wire": "082211070f1d1a6600",
-   "note": ""
-  },
-  {
-   "name": "trick_play_mirror",
-   "msg": "TRICK_PLAY",
-   "type": 35,
-   "dir": "pi_to_body",
-   "kind": "command",
-   "seq": 18,
-   "fields": {
-    "epoch": 3,
-    "trick_id": 7,
-    "speed_q6": 96,
-    "flags": 1
-   },
-   "payload": "03076001",
-   "decoded": "23120307600166b0",
-   "wire": "0923120307600166b000",
-   "note": "epoch byte first"
-  },
-  {
-   "name": "trick_stop",
-   "msg": "TRICK_STOP",
-   "type": 36,
-   "dir": "pi_to_body",
-   "kind": "command",
-   "seq": 19,
-   "fields": {
-    "transition_ticks": 10
-   },
-   "payload": "0a",
-   "decoded": "24130af061",
-   "wire": "0624130af06100",
    "note": ""
   },
   {
@@ -716,21 +562,21 @@
    "kind": "event",
    "seq": 0,
    "fields": {
-    "proto_major": 2,
+    "proto_major": 3,
     "proto_minor": 0,
     "fw_build": 3735928559,
     "reset_cause": 1,
     "last_alive_tick": 0,
     "caps": 29,
     "max_payload": 60,
-    "trick_capacity": 32,
+    "pose_depth": 5,
     "joint_count": 11,
     "config_state": 0,
     "epoch": 0
    },
-   "payload": "0200efbeadde0100001d003c200b0000",
-   "decoded": "80000200efbeadde0100001d003c200b00008d7a",
-   "wire": "0280020206efbeadde0101021d043c200b01038d7a00",
+   "payload": "0300efbeadde0100001d003c050b0000",
+   "decoded": "80000300efbeadde0100001d003c050b0000a259",
+   "wire": "0280020306efbeadde0101021d043c050b0103a25900",
    "note": "unsolicited on boot"
   },
   {
@@ -753,20 +599,20 @@
     "owners": 17,
     "flags": 2221,
     "last_rx_seq": 22,
-    "trick_frame": 255,
+    "limited": 4,
     "ref_pitch": -32,
     "ref_roll": 128,
     "corr_pitch": 4,
     "corr_roll": -16,
-    "feet_queued": 5,
+    "pose_queued": 3,
     "support": 11,
     "tick_load": 47,
     "rx_err": 0,
     "epoch": 3
    },
-   "payload": "22c8ddff0c00a000f0ff000038018c1e0311ad0816ffe0ff80000400f0ff050b2f0003",
-   "decoded": "810122c8ddff0c00a000f0ff000038018c1e0311ad0816ffe0ff80000400f0ff050b2f0003b574",
-   "wire": "08810122c8ddff0c02a003f0ff010e38018c1e0311ad0816ffe0ff80020406f0ff050b2f0403b57400",
+   "payload": "22c8ddff0c00a000f0ff000038018c1e0311ad081604e0ff80000400f0ff030b2f0003",
+   "decoded": "810122c8ddff0c00a000f0ff000038018c1e0311ad081604e0ff80000400f0ff030b2f000301f8",
+   "wire": "08810122c8ddff0c02a003f0ff010e38018c1e0311ad081604e0ff80020406f0ff030b2f040301f800",
    "note": ""
   },
   {
@@ -836,7 +682,7 @@
    "note": ""
   },
   {
-   "name": "ack_stale_trick_play",
+   "name": "ack_bad_arg_param_set",
    "msg": "ACK",
    "type": 132,
    "dir": "body_to_pi",
@@ -844,12 +690,12 @@
    "seq": 5,
    "fields": {
     "seq": 18,
-    "type": 35,
-    "status": 10
+    "type": 62,
+    "status": 2
    },
-   "payload": "12230a",
-   "decoded": "840512230a63d9",
-   "wire": "08840512230a63d900",
+   "payload": "123e02",
+   "decoded": "8405123e02442d",
+   "wire": "088405123e02442d00",
    "note": ""
   },
   {
@@ -886,7 +732,7 @@
    "payload": "0d0a11041004",
    "decoded": "85070d0a110410048c67",
    "wire": "0b85070d0a110410048c6700",
-   "note": "GAIT refused STALE"
+   "note": "POSE refused STALE"
   },
   {
    "name": "event_goal_refused_uncalibrated",
@@ -1089,8 +935,8 @@
     "i2c_err": 2,
     "imu_stale": 0,
     "dmp_rate_hz": 100,
-    "feet_late": 3,
-    "feet_underruns": 1
+    "pose_dropped": 3,
+    "pose_underruns": 1
    },
    "payload": "8051010000009426d40001000000020000006403000100",
    "decoded": "8a0e8051010000009426d40001000000020000006403000100c5bc",
@@ -1206,10 +1052,10 @@
    "seq": 10
   },
   {
-   "name": "trick_frames_count_mismatch",
-   "wire": "03210b03021902010df61e2d2dd3d30a0af6f6e10500",
+   "name": "beep_count_mismatch",
+   "wire": "04310b071205020504050505070509050b05f432ffe500",
    "error": "bad_length",
-   "type": 33,
+   "type": 49,
    "seq": 11
   },
   {
@@ -1258,7 +1104,7 @@
  "streams": [
   {
    "name": "back_to_back_with_resync_zeros",
-   "bytes": "00000201033e2e00060303efbed501000008810122c8ddff0c02a003f0ff010e38018c1e0311ad0816ffe0ff80020406f0ff050b2f0403b57400",
+   "bytes": "00000201033e2e00060303efbed501000008810122c8ddff0c02a003f0ff010e38018c1e0311ad081604e0ff80020406f0ff030b2f040301f800",
    "expect": [
     {
      "ok": 1,

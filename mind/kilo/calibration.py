@@ -22,9 +22,9 @@ The protocol does not report them; they change only with a new EEPROM.
 What is asked (``ASKED``): every angle the body is sent, after the joint
 limits, from
 
-- the postures (body/src/core/posture.cpp: REST, SIT, STAND, CALIB and the
-  fall recovery's three rows; ``POSTURES`` below, checked against the C
-  table by mind/tests/test_calibration.py),
+- the postures (body/src/core/posture.cpp: REST, SIT, STAND, CALIB;
+  ``POSTURES`` below, checked against the C table by
+  mind/tests/test_calibration.py),
 - the gaits: the planner (kilo.planner) at every remote level the walk, the
   trot and the crawl have, forward, backward, turning and steering as the
   remote drives them (the trot backward to -3 and at +4, +5 steering one
@@ -74,16 +74,7 @@ POSTURES = {
     "sit": (10, -20, -60, 30, 30, -90, -90, 60, 60, 45, 45),
     "stand": (0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30),
     "calib": (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-    "recovery 1": (30, -74, 34, 30, 30, -30, -30, 30, 30, -59, -31),
-    "recovery 2": (62, 0, -20, -3, -99, 115, 0, 81, 9, -9, -71),
-    "recovery 3": (0, 17, 0, 30, 30, -30, -30, 30, 30, -30, -30),
 }
-
-
-def mirror(row: Sequence[float]) -> tuple:
-    """A canonical-order row with left and right swapped, pan and tail negated (posture.cpp)."""
-    pan, tilt, tail, lf, rf, rb, lb, klf, krf, krb, klb = row
-    return (-pan, tilt, -tail, rf, lf, lb, rb, krf, klf, klb, krb)
 
 
 def offset_from_czp(j: int, czp: float) -> float:
@@ -199,12 +190,8 @@ def compute_asked(ticks: int = 200) -> dict[str, dict[int, Asked]]:
     cats: dict[str, dict] = {c: {} for c in CATEGORIES}
     acc = cats["postures"]
     for name, row in POSTURES.items():
-        rows = [(name.upper() if not name.startswith("rec") else name, row)]
-        if name.startswith("rec"):  # the recovery plays its rows mirrored too (posture.cpp POSTURE_RC_MIRROR)
-            rows.append((name + " mirrored", mirror(row)))
-        for label, r in rows:
-            for k, j in enumerate(DRIVEN):
-                _note(acc, j, r[k], label)
+        for k, j in enumerate(DRIVEN):
+            _note(acc, j, row[k], name.upper())
     acc = cats["gaits"]
     model = BodyModel()
     for gait, d, f, steer, label in _gait_cases():
@@ -234,17 +221,17 @@ def compute_asked(ticks: int = 200) -> dict[str, dict[int, Asked]]:
 # python -m kilo.calibration prints it)
 ASKED: dict[str, dict[int, Asked]] = {
     'postures': {
-        0: Asked(-62.0, 62.0, 'recovery 2 mirrored', 'recovery 2'),
-        1: Asked(-80.0, 17.0, 'REST', 'recovery 3'),
-        2: Asked(-60.0, 34.0, 'SIT', 'recovery 1'),
-        8: Asked(-99.0, 60.0, 'recovery 2 mirrored', 'REST'),
-        9: Asked(-99.0, 60.0, 'recovery 2', 'REST'),
-        10: Asked(-80.0, 100.0, 'SIT', 'recovery 2'),
-        11: Asked(-80.0, 100.0, 'SIT', 'recovery 2 mirrored'),
-        12: Asked(-45.0, 81.0, 'REST', 'recovery 2'),
-        13: Asked(-45.0, 81.0, 'REST', 'recovery 2 mirrored'),
-        14: Asked(-71.0, 45.0, 'recovery 2 mirrored', 'REST'),
-        15: Asked(-71.0, 45.0, 'recovery 2', 'REST'),
+        0: Asked(-30.0, 10.0, 'REST', 'SIT'),
+        1: Asked(-80.0, 0.0, 'REST', 'STAND'),
+        2: Asked(-60.0, 0.0, 'SIT', 'STAND'),
+        8: Asked(0.0, 60.0, 'CALIB', 'REST'),
+        9: Asked(0.0, 60.0, 'CALIB', 'REST'),
+        10: Asked(-80.0, 0.0, 'SIT', 'CALIB'),
+        11: Asked(-80.0, 0.0, 'SIT', 'CALIB'),
+        12: Asked(-45.0, 60.0, 'REST', 'SIT'),
+        13: Asked(-45.0, 60.0, 'REST', 'SIT'),
+        14: Asked(-30.0, 45.0, 'STAND', 'REST'),
+        15: Asked(-30.0, 45.0, 'STAND', 'REST'),
     },
     'gaits': {
         8: Asked(-9.3, 75.3, 'crawl -5', 'crawl -5'),

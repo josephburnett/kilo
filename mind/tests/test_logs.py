@@ -58,7 +58,7 @@ def _session(t0: float = 1000.0):
                           rate_pitch=round(rng.uniform(-2, 2) * 16), rate_roll=0, rate_yaw=0,
                           dist_mm=dist, batt_mv=7900 - i // 50, mode=mode, owners=0,
                           flags=SERVOS | (1 << 7) | (FRESH if fresh else 0), last_rx_seq=0,
-                          trick_frame=255, tick_load=55, rx_err=0, epoch=1)
+                          limited=0, tick_load=55, rx_err=0, epoch=1)
         frames.append((t0 + t, "rx", tel, i & 0xFF))
         if i % 3 == 0:
             frames.append((t0 + t + 0.001, "tx", P.Heartbeat() if hasattr(P, "Heartbeat") else None, i & 0xFF))

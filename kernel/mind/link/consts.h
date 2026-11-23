@@ -21,7 +21,7 @@ inline bool is_latched_goal(uint8_t type) { return kilo_msg_is_goal(type) && typ
 // the epoch byte (SET_POSTURE, SET_HEAD, SET_BODY_POSE). Cleared on an
 // epoch change.
 inline bool is_epoch_goal(uint8_t type) { return kilo_msg_is_goal(type) && kilo_msg_has_epoch(type); }
-// A Pi->body stream (FEET): sent as made, never acked, refreshed or retried.
+// A Pi->body stream (POSE): sent as made, never acked, refreshed or retried.
 inline bool is_stream_out(uint8_t type) { return type < 0x80 && kilo_msg_kind(type) == KILO_KIND_STREAM; }
 // consts.CLEARING_EVENTS: events that clear the motion goals whatever the epoch.
 inline bool is_clearing_event(uint8_t code) {

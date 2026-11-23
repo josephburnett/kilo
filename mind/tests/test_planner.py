@@ -209,7 +209,7 @@ def fast_bound(name: str, v: float, steer: float = 0.0) -> float:
     floor runs of 2026-11 asked up to 414 at 180 mm/s and kept up). The
     trot above its 8-tick swing (150 mm/s) and steering at any speed (its
     outer side takes the longer stride): 9.7 (485 deg/s, test_trot.py
-    BOUND), under the body's 10 deg/tick slew, 0.1 of it for FEET's 1 mm
+    BOUND), under the body's 10 deg/tick slew, 0.1 of it for POSE's 1 mm
     rounding at its long strides. The walk (since 2026-11-22): 9.5 (475
     deg/s), its 54 mm stride in a 220 ms swing with the 3 mm fore-aft sway
     asks up to 452 at its top, 471 backward with the steer at its full."""
@@ -238,7 +238,7 @@ def test_steering_bends_the_path_inside_the_reach_and_the_slew(name, direction):
     speed: inside fast_bound() in the walk and the trot, the body's slew in
     the crawl (whose backward swing at its top asked 11.9 deg a tick before
     steering existed: §12.3; the steer does not add to it), every foot in
-    reach and inside FEET's range."""
+    reach and inside POSE's range."""
     lo, hi = pat.speed_range(name)
     for v in (pat.default_speed(name), hi):
         for steer in (0.25, 0.5, 1.0, -1.0):
@@ -423,9 +423,9 @@ def test_direction_and_pattern_changes():
 
 
 def check_ticks(ticks, what=""):
-    """Every tick inside FEET's ranges and the legs' reach, every joint
+    """Every tick inside POSE's ranges and the legs' reach, every joint
     under the body's 10 deg/tick slew from the tick before (until 2026-11-15
-    the bound was 9.5 with the slower swings; the 1 mm rounding of FEET alone
+    the bound was 9.5 with the slower swings; the 1 mm rounding of the feet alone
     is up to 2 deg a tick at the knee)."""
     for t in ticks:
         assert all(-60 <= x <= 60 for x in t.x) and all(30 <= z <= 95 for z in t.z), (what, t)
@@ -487,17 +487,17 @@ def test_the_stance_time_is_slewed():
     assert p.stance_ticks == pytest.approx(p.stance_tgt)
 
 
-def test_the_predicted_attitude_stays_inside_feet_range():
-    """Pitch and roll go out inside FEET's +-30 deg whatever the plan
-    predicts (a bad model, a pose offset): the body refuses a FEET beyond it
+def test_the_predicted_attitude_stays_inside_the_pose_range():
+    """Pitch and roll go out inside POSE's +-30 deg whatever the plan
+    predicts (a bad model, a pose offset): the body refuses a POSE beyond it
     (BAD_ARG), which would end the walk."""
-    from kilo.planner.walker import pack_feet
+    from kilo.planner.walker import pack_pose
     p = Planner(M, "crawl", tick=0)
     p._lagged = lambda: (45.0, -31.0)
     for _ in range(60):  # through the servos' response (70 ms) to the bad prediction
         t = p.next()
     assert (t.pitch, t.roll) == (30.0, -30.0)
-    f = P.Feet.unpack(pack_feet(1, replace(t, pitch=45.0, roll=-45.0)))
+    f = P.Pose.unpack(pack_pose(1, replace(t, pitch=45.0, roll=-45.0)))
     assert (f.pitch, f.roll) == (480, -480)
 
 
@@ -593,7 +593,7 @@ def test_the_walk_catches_its_swinging_leg():
 def _tel(tick, meas, ref, corr=(0.0, 0.0)):
     return P.Telemetry(tick=tick & 0xFFFF, pitch=round(meas[0] * 16), roll=round(meas[1] * 16),
                        ref_pitch=round(ref[0] * 16), ref_roll=round(ref[1] * 16),
-                       corr_pitch=round(corr[0] * 16), corr_roll=round(corr[1] * 16), mode=P.Mode.GAIT)
+                       corr_pitch=round(corr[0] * 16), corr_roll=round(corr[1] * 16), mode=P.Mode.STREAM)
 
 
 def test_error_offset_lag_and_spike():
@@ -613,9 +613,9 @@ def test_error_offset_lag_and_spike():
     for t in range(100):
         flat.add(t, _tel(t, (0.0, 0.3), (0.0, 0.0)))
     assert flat.estimate()["lag_ms"] is None
-    # from a telemetry history: the newest run in GAIT, ticks unwrapped
+    # from a telemetry history: the newest run in STREAM, ticks unwrapped
     hist = [(t * 0.02, _tel(65500 + t, (0, 8 * math.sin(t / 10)), (0, 8 * math.sin(t / 10)))) for t in range(120)]
-    assert errors.from_history(hist, int(P.Mode.GAIT))["lag_ms"] == 0
+    assert errors.from_history(hist, int(P.Mode.STREAM))["lag_ms"] == 0
 
 
 def test_a_heavier_side_shifts_the_lean():

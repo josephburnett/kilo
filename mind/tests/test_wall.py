@@ -2,7 +2,7 @@
 measured with the distance sensor against a wall ahead.
 
 Synthetic recordings built byte for byte as the mind records (the blocks of
-test_flight): he stands, the walk starts, the plan's FEET push the body, the
+test_flight): he stands, the walk starts, the plan's POSE feet push the body, the
 body goes a known share of that push a few ticks late, turns slowly, pitches
 with the steps, and the sensor reads the wall from where the body is (with
 noise, stray echoes and missed ones); then the quick stop and a sit. The
@@ -26,6 +26,14 @@ from test_flight import T0, blocks, frame, mark, run_mark
 
 M = BodyModel()
 HELD = int(P.TelemetryFlags.SERVOS_POWERED | P.TelemetryFlags.HEAD_HELD)
+
+
+def _pose(tick: int, xs: list, sup: int, epoch: int = 0) -> P.Pose:
+    """One tick of a walk as the mind sends it: four feet (whole mm, as q2), the head left to the body."""
+    leg = []
+    for x in xs:
+        leg += [int(round(x)) * 4, 76 * 4]
+    return P.Pose(epoch=epoch, tick=tick, flags=0, leg=leg, head=[-32768] * 3, pitch=0, roll=0, support=sup)
 
 
 def t_of(k: int) -> int:
@@ -63,7 +71,7 @@ def wall_walk(frac: float = 0.8, v: float = 58.0, seconds: float = 8.0, wall_mm:
                 s = True
             xs.append(x)
             sup |= (1 << leg) if s else 0
-        feet[k] = P.Feet(epoch=4, tick=k & 0xFFFF, x_mm=xs, z_mm=[76] * 4, pitch=0, roll=0, support=sup)
+        feet[k] = _pose(k & 0xFFFF, xs, sup, epoch=4)
     push = wall.commanded_push(feet)
     # the body: frac of the push, lag ticks late, along a heading that turns at turn_dps
     xw, prev, psi = 0.0, 0.0, 0.0
@@ -121,10 +129,10 @@ def wall_walk(frac: float = 0.8, v: float = 58.0, seconds: float = 8.0, wall_mm:
         if k % 4 == 0:
             flags |= int(P.TelemetryFlags.DIST_FRESH)
         rate_yaw = (turn_dps if k0 < k <= k_stop else 0.0) + bias_dps + rnd.gauss(0, 0.3)
-        mode = P.Mode.GAIT if k0 <= k <= k_last else P.Mode.IDLE
+        mode = P.Mode.STREAM if k0 <= k <= k_last else P.Mode.IDLE
         m = P.Telemetry(tick=k & 0xFFFF, pitch=round(e * 16), roll=0, rate_pitch=0, rate_roll=0,
                         rate_yaw=round(rate_yaw * 16), dist_mm=max(0, round(r)), batt_mv=7900, mode=int(mode),
-                        flags=flags, trick_frame=0xFF, epoch=4)
+                        flags=flags, epoch=4)
         recs.append(frame(P.WalkRecord.RX, t_of(k), m, k))
     return recs, truth
 
@@ -165,11 +173,11 @@ def test_the_noise_of_one_reading_from_its_neighbours():
 
 
 def test_the_push_is_the_support_feet_travel():
-    feet = {k: P.Feet(tick=k, x_mm=[10 - k, 10 - k, 0, 0], support=0b0011) for k in range(10)}
+    feet = {k: _pose(k, [10 - k, 10 - k, 0, 0], 0b0011) for k in range(10)}
     push = wall.commanded_push(feet)
     assert push[9] == pytest.approx(9)
     # a foot in the air does not push; a foot that just landed starts pushing on its next tick
-    feet[5] = P.Feet(tick=5, x_mm=[5, 30, 0, 0], support=0b0001)
+    feet[5] = _pose(5, [5, 30, 0, 0], 0b0001)
     push = wall.commanded_push(feet)
     assert push[9] == pytest.approx(9)
 
