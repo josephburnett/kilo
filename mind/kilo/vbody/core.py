@@ -477,6 +477,14 @@ class CoreBody:
 
     def close(self) -> None:
         self._running = False
+        # Stop the pump and tick threads before any descriptor they use is
+        # closed: a closed fd number is reused at once (the next CoreBody's
+        # pipes), and a thread still reading the old pty master then reads
+        # the new harness's stdin and the harness never sees its command.
+        # Both come back within READ_TIMEOUT_S or one tick.
+        for t in (self._pump_t, self._rt):
+            if t is not None and t is not threading.current_thread():
+                t.join()
         try:
             self.proc.stdin.close()
         except OSError:
@@ -485,8 +493,10 @@ class CoreBody:
             self.proc.wait(5)
         except subprocess.TimeoutExpired:
             self.proc.kill()
-        if self._port is not None:
-            self._port.close()
+        with self._hlock:  # the control thread (not joinable) delivers under it: no write to a closed fd
+            port, self._port = self._port, None
+        if port is not None:
+            port.close()
             os.close(self._slave_fd)
 
     def __enter__(self) -> "CoreBody":
