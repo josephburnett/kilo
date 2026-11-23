@@ -91,6 +91,7 @@ def test_the_consumers_read_the_model():
         -M.imu_pitch_deg, M.imu_roll_deg, M.tail.droop_deg)
     assert T.Geometry3().imu_pitch == -M.imu_pitch_deg
     assert RU.AS_RECORDED.com_dy == PM.view_numbers("tricks_rigid")["com_dy_mm"]
+    assert RU.AS_RECORDED.g.com_dx == PM.view_numbers("tricks_rigid")["com_dx_mm"]
     # the trot's pendulum is the "trot" view
     v = PM.view_numbers("trot")
     assert (PL.TROT_FIT.com_x_mm, PL.TROT_FIT.com_h_mm, PL.TROT_FIT.extra_ms, PL.TROT_FIT.clamp_deg) == (
@@ -107,10 +108,9 @@ def test_kilo_czp_is_the_body_tests_table():
 
 def test_a_view_replaces_the_models_numbers():
     v = M.view("tricks_rigid")
-    assert v.com_dy_mm == PM.view_numbers("tricks_rigid")["com_dy_mm"] and v.com_dx_mm == M.com_dx_mm
-    assert v.com([0.0] * 4, [76.0] * 4)[1] == pytest.approx(M.com([0.0] * 4, [76.0] * 4)[1] - M.com_dy_mm
-                                                             + v.com_dy_mm)
-    assert T.Geometry3.of(v).com_dy == v.com_dy_mm
+    assert (v.com_dx_mm, v.com_dy_mm) == (0.0, -2.0) and v.sag_deg_per_kg_cm == M.sag_deg_per_kg_cm
+    assert v.com([0.0] * 4, [76.0] * 4)[0] == pytest.approx(M.com([0.0] * 4, [76.0] * 4)[0] - M.com_dx_mm)
+    assert T.Geometry3.of(v).com_dy == -2.0 and S.Geometry.of(v).com_dx == 0.0
     assert M.view("trot") == M  # its numbers are the pendulum's own: nothing of BodyModel changes
 
 
@@ -121,7 +121,7 @@ def test_a_view_replaces_the_models_numbers():
 VIEWS = {
     "trot": {"com_x_mm": (3.5, 4.43), "com_h_mm": (79.0, 79.24), "extra_ms": (120.0, None),
                  "clamp_deg": (2.3, None)},
-    "tricks_rigid": {"com_dy_mm": (-2.0, 0.0)},
+    "tricks_rigid": {"com_dx_mm": (0.0, -3.0), "com_dy_mm": (-2.0, 0.0), "imu_pitch_deg": (1.9, 2.3)},
 }
 
 

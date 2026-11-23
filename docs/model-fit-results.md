@@ -103,8 +103,10 @@ Read:
 ## The numbers
 
 Each was fitted by replaying all of the fit set again and again (a search
-one number at a time, three rounds), then checked boot by boot: each
-boot's own best value. Simulated, not observed on Kilo.
+one number at a time, two rounds, the legs' give held at 4 and the length
+at 128 while the rest moved; `kilo model score --fit` does the same), then
+checked boot by boot around the search's end point: each boot's own best
+value. Simulated, not observed on Kilo.
 
 | number | model before | fit set | held out | boot by boot (median, +-) | applied | verdict |
 |---|---|---|---|---|---|---|
@@ -225,7 +227,14 @@ than that are left as they were (the servo timing).
   remain: the trot's fitted pendulum (its centre of mass 3.5 mm is the
   trot's effective one, fitted to its floor rock, and stays), and the
   rigid fit of the falls of 2026-11-17 (`tricks_rigid`, a record of Kilo
-  before his right hind shoulder was re-seated).
+  before his right hind shoulder was re-seated; it keeps that day's
+  numbers: the centre of mass at the hand measurement, 2 mm to the right,
+  the sensor reading 1.9 on that floor; with the one model's 3 mm back its
+  rigid legs put the sink 5 degrees higher than Kilo was).
+- The gaits' joint ranges in `kilo/calibration.py` (what the calibration
+  check asks of each servo) moved with the feet: the crawl backward now
+  asks the hind shoulders for -80 and -79.9 degrees, their limit (-79.4
+  before).
 - The virtual body (`kilo.vbody.physics`) can now give its legs and time
   each leg's servos as the model says (`legs_give`). The walks' virtual
   body in the tests stays rigid; the score's judge turns it on.

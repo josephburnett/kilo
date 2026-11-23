@@ -113,7 +113,7 @@ DESIGN_CZP = D.DESIGN_CZP
 DESIGN = T.Geometry3(czp=DESIGN_CZP)
 # Kilo before the re-seat (the EEPROM dump of 2026-10-10: the right hind shoulder stops at -57):
 # the rigid model's fit of 2026-11-17 (the history: test_rear_up).
-AS_RECORDED = T.Geometry3(czp=T.KILO_CZP, com_dy=PM.view_numbers("tricks_rigid")["com_dy_mm"])
+AS_RECORDED = T.Geometry3.of(PM.BodyModel().view("tricks_rigid"), czp=T.KILO_CZP)
 # The model the trick is judged in: the one body model in the compliant dynamics (dynamics.NOMINAL).
 MODEL = D.NOMINAL
 REACH_MARGIN = 2.0  # deg: every angle at least this far inside what the servo reaches (DESIGN)

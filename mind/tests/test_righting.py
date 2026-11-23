@@ -181,33 +181,35 @@ def test_bands_cover_the_estimates():
 
 
 def test_the_verdict_today():
-    """What docs/righting.md reports (2026-11-21), pinned: with the fitted numbers and the
-    estimated sizes the model lies as Kilo lay, but rc gets him up in none of the four floor
-    tries where it got Kilo up. If a measurement changes this, the doc's verdict changes with it."""
+    """What docs/righting-results.md reports, pinned: on the one body model (2026-11-22; until then
+    the tricks' own numbers, with which the model lay as Kilo lay) the model no longer lies as Kilo
+    lay (up to 64 deg off), and rc gets him up in none of the four floor tries where it got Kilo up.
+    If a measurement changes this, the doc's verdict changes with it."""
     rs = R.replay_all(workers=1, floor_only=True)
     assert len(rs) == 6 and all(r.floor for r in rs)
     v = R.verdict(rs)
-    assert v.rest_ok and not v.outcome_ok and not v.motion_ok and not v.credible
+    assert not v.rest_ok and not v.outcome_ok and not v.motion_ok and not v.credible
     assert sum(r.righted for r in rs if r.recorded_righted) == 0
     assert sum(r.righted for r in rs if not r.recorded_righted) == 0
-    # the one thing it follows: from his right side he goes through "on his side" when Kilo did
+    # the one thing it followed on the tricks' numbers (from his right side through "on his side" when
+    # Kilo did) it does not on the one model: it stays on his back there
     b8 = next(r for r in rs if r.label == "b8@114s try 1")
-    assert abs(b8.side_t - b8.side_t_rec) < 0.1
+    assert b8.side_t is None and b8.side_t_rec is not None
     # the leg servos' load stays far under the stall estimate (3 kg cm)
     assert max(r.torque for r in rs) < 2.0
     assert "upright" in R.table(rs)
 
 
 def test_the_phases_today():
-    """docs/righting-results.md, pinned (2026-11-22): with the fitted numbers rc's first frame leaves
-    him on his side where Kilo rolled onto his back, and the model gets none of the four up."""
+    """docs/righting-results.md, pinned (2026-11-22, the one body model): from a side, where Kilo
+    rolled onto his back at rc's first frame 3 times of 3, the model stays on his side in 2 of them."""
     rows = R.phases()
     assert len(rows) == 6
     sides = [r for r in rows if abs(r["kilo"][0]) > 150 and "side" in next(
         t["start_lying"] for f in R.fixture()["falls"] for t in f["tries"]
         if f"{f['file'].replace('rec-card-', '').replace('.krec', '')}@{f['uptime_s']:.0f}s try {t['n']}" == r["try"])]
     assert len(sides) == 3                                     # Kilo: from a side onto his back, 3 of 3
-    assert all(abs(r["model"][0]) < 140 for r in sides)       # the model: still on his side
+    assert sum(abs(r["model"][0]) < 140 for r in sides) == 2  # the model: still on his side in 2
     assert "Kilo after frame" in R.phases_table(rows)
 
 

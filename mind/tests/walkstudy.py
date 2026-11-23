@@ -60,10 +60,10 @@ def com_moved(dx: float = 0.0, dy: float = 0.0, base: BodyModel = M) -> BodyMode
     return replace(base, body=Mass(b.grams, b.x + dx * k, b.y + dy * k, b.z))
 
 
-# What the self-measurement of 2026-11-22 found (docs/self-measurement-results.md; not in the model):
-# the centre of mass 3.1 mm further back (4.3 mm ahead of the shoulders, not 7.4) and the feet 132 mm
-# front to back, not 123.
-MEASURED = replace(com_moved(-3.1), length_mm=132.0)
+# What the self-measurement of 2026-11-22 found (docs/self-measurement-results.md): the centre of mass
+# 3.1 mm behind the hand measurement (in the model since the same day: docs/model-fit-results.md) and the
+# feet 132 mm front to back, not 123 (not in the model).
+MEASURED = replace(M, length_mm=132.0)
 
 
 def wide_feet(base: BodyModel = M) -> BodyModel:

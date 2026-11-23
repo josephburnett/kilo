@@ -922,7 +922,8 @@ static void test_walk_plant() {
               w.A, on.fell ? "FELL" : "up", on.max_tilt, on.max_res, on.max_corr, on.tips, off.fell ? "FELL" : "up",
               off.max_tilt, off.tips);
   CHECK(!on.fell && !off.fell && on.tips == 0 && off.tips == 0);
-  CHECKF(on.max_corr <= 2.0 && on.max_res <= 2.5, "corrections %.2f, residual %.2f", on.max_corr, on.max_res);
+  // residual 3: 2.7 with the 70 mm track (2026-11-22; the plan's lean is the same angle over wider feet)
+  CHECKF(on.max_corr <= 2.0 && on.max_res <= 3.0, "corrections %.2f, residual %.2f", on.max_corr, on.max_res);
   Walk w0 = w;
   w0.A = 0;
   std::vector<Pose> plan0 = walk_plan(w0, 4 * w.T);

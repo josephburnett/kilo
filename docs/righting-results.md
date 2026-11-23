@@ -36,6 +36,25 @@ Build: ...   Floor: ...   Battery at the start: ... mV   Recording saved to the 
 | 2 | | | | | | |
 | 3 | | | | | | |
 
+## 2026-11-22, later: the simulator on the one body model (simulation only)
+
+The tricks' own numbers (the centre of mass 5 mm to the right, the tilt
+offsets 1.9 and 2) were replaced by the one body model
+(docs/model-fit-results.md: the centre of mass in the middle, 3 mm behind
+the hand measurement). In the lying simulator that changes:
+
+- **rc's replay** (`python -m kilo.tricks.righting --bands`): still up in
+  none of the four floor tries that got Kilo up; the model now lies up to
+  64 degrees from where Kilo lay at the start (before: within 15).
+- **rc's first frame from a side** (`--phases`): Kilo rolled onto his back
+  3 times of 3; the model now does once (before: never).
+- **The kick from his back** (boot 16's move): the model turns him 54 to
+  69 degrees, Kilo turned 31 to 33. Still the outline of his back.
+- **The righting moves' check** (`python -m kilo.intent.righting`): from a
+  side onto his belly in 69 of 95 runs (was 89), from his back onto his
+  right side in 52 of 76 (was 68): under the 75 % bar, so the report says
+  "NOT shipped"; B1 plays them as before.
+
 ## 2026-11-22, boot 16: the first tries on Kilo (from the recording)
 
 Build 7e92703c, kernel with `KILO_RIGHTING=1` (FALL_RC 0). What the owner

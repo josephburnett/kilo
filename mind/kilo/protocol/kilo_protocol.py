@@ -3096,10 +3096,12 @@ MODEL_VIEW_TROT_COM_X_MM = 3.5
 MODEL_VIEW_TROT_COM_H_MM = 79.0
 MODEL_VIEW_TROT_EXTRA_MS = 120.0
 MODEL_VIEW_TROT_CLAMP_DEG = 2.3
+MODEL_VIEW_TRICKS_RIGID_COM_DX_MM = 0.0
 MODEL_VIEW_TRICKS_RIGID_COM_DY_MM = -2.0
+MODEL_VIEW_TRICKS_RIGID_IMU_PITCH_DEG = 1.9
 MODEL_VIEWS: dict[str, dict[str, float]] = {
     'trot': {'com_x_mm': 3.5, 'com_h_mm': 79.0, 'extra_ms': 120.0, 'clamp_deg': 2.3},
-    'tricks_rigid': {'com_dy_mm': -2.0},
+    'tricks_rigid': {'com_dx_mm': 0.0, 'com_dy_mm': -2.0, 'imu_pitch_deg': 1.9},
 }
 MODEL_ABOUT: dict[str, tuple[str, str, str]] = {
     'foot_r_mm': ("the floor is this far below the centre of a foot's disc", 'mm', 'measured 2026-10-11'),

@@ -43,7 +43,7 @@ from walksim import WalkSim  # noqa: E402
 M = BodyModel()
 # RockingPhysics' settings: the judge that predicts the floor recordings best with the one body model
 # (kilo.measure.score.Judge, docs/model-fit-results.md; until 2026-11-22 inset 10, line lag 50)
-ROCKING = dict(inset_mm=0.0, line_lag_ms=55.0)
+ROCKING = dict(inset_mm=0.0, line_lag_ms=55.0, legs_give=True)
 TICK_S = phys.TICK_S
 
 

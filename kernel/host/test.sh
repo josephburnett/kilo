@@ -1039,11 +1039,13 @@ KPY -m kilo.cli log trick "$CREC" > "$OUT/card_trick.txt"
 expect "$OUT/card_trick.txt" "trick run 1: rear_up stage 1 of 1" "kilo log trick on the card's run"
 expect "$REC/cardfetch/kilo-card-b1.log" "remote A1 \(0x42, rear up\)" "kilo card --fetch: boot 1's saved log"
 # ---- Kilo measures himself (docs/self-measurement.md): C5 twice on the Python virtual body's walking physics --------
-# Its centre of mass 4 mm back and 3 mm right of the model and its IMU 1.5 / -2 deg off; the routine runs in
-# kilo-mind-host, kilo measure fetch downloads the run and fits it: the fit must find them.
+# Its centre of mass 4 mm behind the hand measurement (where the routine's sweeps were placed: the model's own
+# correction is taken off) and 3 mm right, and its IMU 1.5 / -2 deg off; the routine runs in kilo-mind-host,
+# kilo measure fetch downloads the run and fits it: the fit must find them.
 echo "== self-measurement: C5 twice on the virtual body's physics, kilo measure fetch --host (download and fit)"
+DCOM_X="$(PYTHONPATH="$REPO/mind" "$PYTHON" -c 'from kilo.planner.model import BodyModel; print(-4 - BodyModel().com_dx_mm)')"
 start_body "$OUT/vbody_measure.log" env PYTHONPATH="$REPO/mind" "$PYTHON" -u "$HERE/tests/measure_body.py" \
-    --dcom -4 -3 0 --imu 1.5 -2 --c5-at 1.5 --c5-again-at 4
+    --dcom "$DCOM_X" -3 0 --imu 1.5 -2 --c5-at 1.5 --c5-again-at 4
 trap stop_body EXIT
 MEAS="$OUT/measure"
 rm -rf "$MEAS"
@@ -1063,9 +1065,10 @@ expect "$OUT/host_measure.log" "measure: done \([0-9]+ ticks, [0-9]+ s, 8 tips\)
 expect "$OUT/measure_runs.txt" "self-measurement \(C5 twice\)" "kilo runs lists it"
 expect "$OUT/measure_fit.txt" "measure 1: [0-9]+ bytes in [0-9.]+ s -> .*run-[0-9-]+-measure-1\.krec" "fetched"
 expect "$OUT/measure_fit.txt" "^com_x +mm" "the fit's table"
-"$PYTHON" - "$(ls "$MEAS"/run-*-measure-1.fit.json)" <<'EOF'
+"$PYTHON" - "$(ls "$MEAS"/run-*-measure-1.fit.json)" "$DCOM_X" <<'EOF'
 import json, sys
 d = json.load(open(sys.argv[1]))
+dx = float(sys.argv[2])
 p = {k: v["value"] for k, v in d["parameters"].items()}
 sd = {k: v["sd"] for k, v in d["parameters"].items()}
 model = {k: v["model"] for k, v in d["parameters"].items()}
@@ -1074,11 +1077,11 @@ def check(cond, what):
         print(f"FAILED: the fit of the virtual body's run: {what}\n{json.dumps(d, indent=1)[:2500]}"); sys.exit(1)
 check(sum(1 for c in d["crossings"] if c["measured_x"] is not None) == 8, "a crossing from every sweep")
 check(abs(p["imu_pitch"] - 1.5) < 0.2 and abs(p["imu_roll"] + 2.0) < 0.2, "the IMU offsets")
-check(abs(p["com_x"] - (model["com_x"] - 4)) < 1.5 and abs(p["com_y"] + 3) < 1.0, "the centre of mass")
+check(abs(p["com_x"] - (model["com_x"] + dx)) < 1.5 and abs(p["com_y"] + 3) < 1.0, "the centre of mass")
 check(p["sag"] < 0.5, "no sag (rigid legs)")
 check(40 < p["lag_ms"] < 75 and 50 < p["tau_ms"] < 110, "the servo response")
 print(f"   fit: imu {p['imu_pitch']:+.2f} {p['imu_roll']:+.2f} deg (1.5, -2), com_x {p['com_x']:.2f} mm "
-      f"({model['com_x'] - 4:.2f}), com_y {p['com_y']:+.2f} (-3), com_z {p['com_z']:+.1f} +- {sd['com_z']:.1f} "
+      f"({model['com_x'] + dx:.2f}), com_y {p['com_y']:+.2f} (-3), com_z {p['com_z']:+.1f} +- {sd['com_z']:.1f} "
       f"({model['com_z']:+.1f}), lag {p['lag_ms']:.0f} ms, tau {p['tau_ms']:.0f} ms, sag {p['sag']:.2f}")
 EOF
 
@@ -1124,7 +1127,8 @@ expect "$OUT/host_intent.log" "intent: be STANDING \(remote B6; he is RESTING\)"
 expect "$OUT/host_intent.log" "intent: the servos are off: REST first" "REST before a move from LIMP"
 expect "$OUT/host_intent.log" "intent: step 1: RESTING -> STANDING by the move intent_rest_to_stand" "the model's move from REST"
 expect "$OUT/host_intent.log" "trick intent_rest_to_stand: TRICK_DONE DONE" "the body played it"
-expect "$OUT/host_intent.log" "state: MOVING -> STANDING \(pitch \+0\.0 roll \+0\.0, asked stand, confidence 100\)" "the estimate saw him stand"
+# (the virtual body reads level; the model expects the 2.3 deg of Kilo's sensor: confidence 91, not 100)
+expect "$OUT/host_intent.log" "state: MOVING -> STANDING \(pitch \+0\.0 roll \+0\.0, asked stand, confidence (9[0-9]|100)\)" "the estimate saw him stand"
 expect "$OUT/host_intent.log" "intent: STANDING reached \(1 step" "STANDING reached"
 expect "$OUT/host_intent.log" "intent: step 1: STANDING -> RESTING by the move intent_stand_to_rest" "A7's move"
 expect "$OUT/host_intent.log" "intent: RESTING reached \(1 step" "RESTING reached"

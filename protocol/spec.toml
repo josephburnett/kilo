@@ -1348,9 +1348,15 @@ extra_ms = 120.0
 clamp_deg = 2.3
 
 # The rigid 3-D model's fit of the two falls of 2026-11-17, before the right
-# hind shoulder was re-seated (kilo.tricks.rear_up AS_RECORDED, with [model.servo] czp).
+# hind shoulder was re-seated (kilo.tricks.rear_up AS_RECORDED, with [model.servo] czp):
+# a record of that day. Its centre of mass is the hand measurement's (com_dx_mm 0:
+# the one model's 3 mm back puts its sink 5 deg higher than Kilo was; that rigid
+# model has no give, which the one model's correction partly stands for), and the
+# tilt sensor read 1.9 nose down standing on that floor (the boots' mean: 2.3).
 [model.views.tricks_rigid]
+com_dx_mm = 0.0
 com_dy_mm = -2.0
+imu_pitch_deg = 1.9
 
 # What each number is, for `kilo model show`: [what, unit, where it comes from].
 # Python only (MODEL_ABOUT); keys are "name" for [model] and "table.name" below it.

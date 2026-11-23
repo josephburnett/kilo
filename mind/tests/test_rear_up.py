@@ -24,7 +24,7 @@ from kilo.tricks.player import GuardWatch
 
 from test_corebody import binary, rig, stand, events  # noqa: F401  (fixtures)
 
-G = S.Geometry()
+G = S.Geometry.of(BodyModel().view("tricks_rigid"))  # the side view as of the trials and the photo (2026-11-17)
 STAND_P = S.Pose(30, 30, -30, -30, 0)
 SIT_P = S.Pose(30, 60, -80, 45, -60, head_pan=10, head_tilt=-20)
 
@@ -42,7 +42,7 @@ def test_model_at_stand_matches_the_planner():
     r = S.rest(G, STAND_P)
     assert r.phi == pytest.approx(0.0, abs=0.01) and set(r.contacts) == {S.FRONT_FOOT, S.HIND_FOOT}
     # the centre of mass is the planner's (54 mm behind the front axles, 3 mm below), whatever the tail split
-    b = BodyModel()
+    b = BodyModel().view("tricks_rigid")  # G's
     want = b.com([2.5, 2.5, -2.5, -2.5], [82.3] * 4)
     cx, cz = S.com(G, STAND_P)
     assert cx == pytest.approx(want[0], abs=0.6) and cz == pytest.approx(want[2], abs=0.6)

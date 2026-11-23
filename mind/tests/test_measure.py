@@ -225,10 +225,13 @@ def test_compliant_statics_vectorised_and_rigid_agree():
         cx = sum(Fz[k] * feet[k][0] for k in range(4)) / Fz.sum()
         cy = sum(Fz[k] * feet[k][1] for k in range(4)) / Fz.sum()
         assert abs(cx - com[0] - d[0]) < 0.6 and abs(cy - com[1] - d[1]) < 0.6, i  # the legs' sag moves the feet a little
-    # stiff legs: the rigid model's path (the C++ prediction)
-    c = ST.candidates(P, ST.Body(sag=ST.SAG_MIN))
+    # stiff legs: the rigid model's path (the C++ prediction), on the model the routine's poses were placed
+    # on: on another one a pose can sit on a support's edge, where the two solvers may pick either tripod
+    # (two poses of 4445 with the centre of mass 3 mm further back)
+    PD = ST.Poses(DESIGN_MODEL, u[:, :4], u[:, 4:])
+    c = ST.candidates(PD, ST.Body(sag=ST.SAG_MIN, model=DESIGN_MODEL))
     p, r, _ = ST.path(c, inv.ravel())
-    rp = np.array([x[:2] for x in ST.rigid_path(M, ticks)])
+    rp = np.array([x[:2] for x in ST.rigid_path(DESIGN_MODEL, ticks)])
     assert np.abs(rp - np.stack([p, r], 1)).max() < 0.02
 
 
