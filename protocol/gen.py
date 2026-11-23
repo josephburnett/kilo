@@ -424,6 +424,7 @@ MODEL_TABLES = {
                 "nose_x_mm": 0, "nose_z_mm": 0, "half_width_mm": 0},
     "inertia": {"frame_box_mm": 3},
     "sensor": {"ultrasonic_height_mm": 0, "ultrasonic_floor_tilt_deg": 0},
+    "travel": {"walk_ground_frac": 0, "trot_ground_frac": 0, "crawl_ground_frac": 0},
 }
 
 

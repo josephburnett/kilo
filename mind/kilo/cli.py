@@ -23,7 +23,7 @@ what is done on this machine (keys, SD cards, downloaded recordings).
     kilo model show [--fit FILE] | apply FILE.fit.json [--dry-run]   the one body model (kilo.cli_model)
     kilo measure plan|fit FILE...|fetch|simulate   Kilo's self-measurement, C5 twice (kilo.cli_measure,
                                    docs/self-measurement.md)
-    kilo log summary|replay|plot|walk|trick|run FILE ...   (walk, trick, run: a .krec from kilo runs --fetch)
+    kilo log summary|replay|plot|walk|trick|run|wall FILE ...   (walk, trick, run, wall: a .krec from kilo runs --fetch)
     kilo log [--lines N] [--previous [BOOT]] ... --host IP   the mind's log (kilo.cli_host)
     kilo key init [--name NAME] | show   this laptop's key for the mind (kilo.hostkey); --key PATH / $KILO_HOST_KEY
     kilo find [--name kilo.local] [--json]   Kilo's address and build, found by name (mDNS; kilo.cli_find)
@@ -150,7 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("action", choices=("init", "show"))
     s.add_argument("--name", default=None, help="init: the key's name in the public line (default user@hostname)")
 
-    s = sub.add_parser("log", help="log tools: summary|replay|plot|walk|trick|run FILE ... (kilo.logs); "
+    s = sub.add_parser("log", help="log tools: summary|replay|plot|walk|trick|run|wall FILE ... (kilo.logs); "
                                    "with --host: the mind's log", add_help=False)
     s.add_argument("log_argv", nargs=argparse.REMAINDER, metavar="summary|replay|plot FILE ...")
     __import__("kilo.cli_find").cli_find.add_parser(sub)  # kilo find (cli_find.py)
@@ -182,7 +182,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 # ---- the commands run here ---------------------------------------------------------
 def cmd_log(args: argparse.Namespace) -> int:
-    """`kilo log summary|replay|plot|walk|trick|run FILE ...` (kilo.logs)."""
+    """`kilo log summary|replay|plot|walk|trick|run|wall FILE ...` (kilo.logs)."""
     from kilo.logs.__main__ import build_parser as log_parser, main as log_main
 
     if not args.log_argv or args.log_argv[0] in ("-h", "--help"):

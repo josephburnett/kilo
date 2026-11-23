@@ -7,6 +7,8 @@
     python -m kilo.logs walk FILE.kwalk|FILE.krec [--run ID] [--csv OUT] [--plot OUT.png] [--json]
     python -m kilo.logs trick FILE.krec [--run ID] [--csv OUT] [--plot OUT.png] [--json] [--threshold DEG]
     python -m kilo.logs run FILE.krec [--run ID] ...   walk or trick, whichever the run is
+    python -m kilo.logs wall FILE.krec [--run ID] [--json] [--tape START END]   how far he went, by the
+                              distance sensor against a wall ahead (kilo.logs.wall, docs/wall-walk.md)
 
 FILE is a link JSONL log (``kilo.log``), a ``kilo monitor`` JSONL capture,
 a ``.kilolog`` (optionally ``.gz``), or a walk recording (``.kwalk``, from
@@ -57,6 +59,13 @@ def build_parser() -> argparse.ArgumentParser:
         t.add_argument("--json", action="store_true", help="the analysis as JSON")
         t.add_argument("--threshold", type=float, default=8.0, metavar="DEG",
                        help="tricks: the error that counts as a tip-over (default 8 deg for 0.2 s)")
+    wl = sub.add_parser("wall", help="a forward walk toward a wall (.krec): distance travelled, speed, per step "
+                                     "cycle, slip, heading, with an error estimate (docs/wall-walk.md)")
+    wl.add_argument("file")
+    wl.add_argument("--run", type=int, default=None, help="this walk (default: every forward walk in the file)")
+    wl.add_argument("--json", action="store_true", help="the analysis as JSON")
+    wl.add_argument("--tape", type=float, nargs=2, metavar=("START", "END"), default=None,
+                    help="the tape measure, wall to the front of the eyes, before and after (mm)")
     return p
 
 
@@ -133,6 +142,10 @@ def main(argv: list[str] | None = None) -> int:
         return walk_main(args)
     if args.cmd in ("trick", "run"):
         return run_main(args)
+    if args.cmd == "wall":
+        from kilo.logs import wall
+
+        return wall.main(args)
     try:
         data = reader.load(args.file)
     except (OSError, ValueError) as e:

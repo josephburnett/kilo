@@ -1783,7 +1783,9 @@ such a number again (`mind/tests/test_one_model.py` fails if one does).
 **What is in it.** The masses and where they sit, the legs' reach, how late
 the servos follow (`servo_lag_ms`, `servo_tau_ms`); Kilo's servo zeros
 (`[model.servo]`), his tail (`[model.tail]`), the outline of his frame
-(`[model.outline]`), the frame's inertia, where the distance sensor sits; and
+(`[model.outline]`), the frame's inertia, where the distance sensor sits,
+how far the body goes for the feet's push (`[model.travel]`, 1 until it is
+measured against a wall: `docs/wall-walk.md`); and
 `[model.correction]`: the corrections a self-measurement finds (centre of
 mass, how much the legs give, legs a little long or short, what the tilt
 sensor reads when he stands level). The corrections are all zero until a

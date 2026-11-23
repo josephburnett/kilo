@@ -159,6 +159,15 @@ class BodyModel:
     frame_box_mm: tuple = tuple(float(v) for v in P.MODEL_INERTIA_FRAME_BOX_MM)  # the frame lump's inertia box
     ultrasonic_height_mm: float = float(P.MODEL_SENSOR_ULTRASONIC_HEIGHT_MM)
     ultrasonic_floor_tilt_deg: float = float(P.MODEL_SENSOR_ULTRASONIC_FLOOR_TILT_DEG)
+    # [model.travel]: the share of the support feet's push the body really goes, by gait (1 = no slip;
+    # not measured yet: kilo log wall, docs/wall-walk.md)
+    ground_frac: tuple = (("walk", float(P.MODEL_TRAVEL_WALK_GROUND_FRAC)),
+                          ("trot", float(P.MODEL_TRAVEL_TROT_GROUND_FRAC)),
+                          ("crawl", float(P.MODEL_TRAVEL_CRAWL_GROUND_FRAC)))
+
+    def ground_frac_of(self, gait: str) -> float | None:
+        """[model.travel]: the share of the feet's push the body goes in this gait (None: not a gait)."""
+        return dict(self.ground_frac).get(gait)
 
     # ---- derived -------------------------------------------------------------------
     @property
