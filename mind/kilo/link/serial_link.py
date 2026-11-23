@@ -64,7 +64,7 @@ Goals and the epoch rule (§3c, §4, §5):
   mind noticing within 300 ms still sees the refreshes sent meanwhile; it
   boots at a new epoch, so they are STALE: docs §3c "Boot epoch".)
 
-Streams (POSE, the stream of poses; kilo.planner.walker): ``send_stream()``
+Streams (POSE, the stream of poses; the C++ mind's engine/walker): ``send_stream()``
 writes the frame at once on the caller's thread, under the same transmit
 lock as the writer: no queue, no ack, no refresh, no retry, and not part of
 the goals and their epoch machinery (the frame carries the epoch its

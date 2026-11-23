@@ -7,7 +7,7 @@
 #define KILO_MIND_REMOTE_CLIENT_H
 #include <stdint.h>
 #include "link/serial_link.h"
-#include "planner/walker.h"
+#include "engine/walker.h"
 
 namespace kilo {
 
@@ -17,7 +17,7 @@ int posture_code(const char* name);
 // BodyClient.posture(name, balance): balance -1 is None ("balance" turns
 // the flag on, every other name off). A posture takes the legs from a walk
 // in progress: the walker's stream is aborted first.
-bool client_posture(SerialLink& link, planner::Walker* walker, const char* name, int8_t balance = -1,
+bool client_posture(SerialLink& link, engine::Walker* walker, const char* name, int8_t balance = -1,
                     uint8_t transition_ticks = 0);
 // BodyClient.set_balance(enable, kp): the gains' other values are the
 // body's defaults (Kd 30 ms, dead band 2 deg, clamp 15 deg). kp 0..0.996.

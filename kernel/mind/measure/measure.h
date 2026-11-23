@@ -44,7 +44,7 @@
 #include <stdint.h>
 #include "link/serial_link.h"
 #include "measure/script.h"
-#include "planner/walker.h"
+#include "engine/walker.h"
 #include "platform.h"
 
 namespace kilo {
@@ -127,7 +127,7 @@ class Measure {
   planner::BodyModel model_;
   MeasureObserver* obs_ = nullptr;
   Script script_;
-  planner::BodyClock clock_est_;
+  engine::BodyClock clock_est_;
 
   Phase phase_ = Phase::Idle;
   uint64_t phase_at_ = 0;

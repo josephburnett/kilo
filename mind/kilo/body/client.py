@@ -7,7 +7,7 @@ by their data reply, other commands by an ACK, de-dup safe). Message layouts
 and field names are the generated ones (protocol/spec.toml, Appendix E).
 
 Movement beyond the postures is a stream of POSE keys (protocol 3.0,
-docs/movement-engine.md): the walker streams them (kilo.planner.walker,
+docs/movement-engine.md): the walker streams them (the C++ engine's,
 ``SerialLink.send_stream``); the C++ mind plays tricks the same way. The
 body keeps no tricks.
 

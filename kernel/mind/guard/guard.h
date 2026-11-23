@@ -80,7 +80,7 @@
 #define KILO_MIND_GUARD_GUARD_H
 #include <stdint.h>
 #include "link/serial_link.h"
-#include "planner/walker.h"
+#include "engine/walker.h"
 #include "platform.h"
 #include "proto/kilo_protocol.h"
 
@@ -217,7 +217,7 @@ class GuardHost {
 
 class DistanceGuard {
  public:
-  DistanceGuard(SerialLink& link, planner::Walker& walker, Clock& clock, Log& log);
+  DistanceGuard(SerialLink& link, engine::Walker& walker, Clock& clock, Log& log);
   void set_host(GuardHost* host) { host_ = host; }
   void set_enabled(bool on);
   bool enabled() const { return on_; }
@@ -281,7 +281,7 @@ class DistanceGuard {
   void eyes_step();
 
   SerialLink& link_;
-  planner::Walker& walker_;
+  engine::Walker& walker_;
   Clock& clock_;
   Log& log_;
   GuardHost* host_ = nullptr;

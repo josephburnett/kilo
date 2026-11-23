@@ -31,7 +31,9 @@ uint32_t key_ticks(const Trick& t, uint8_t speed, std::vector<TrickKey>* out = n
 }
 
 void test_library_matches_python() {
-  CHECK(kLibrarySize == 26);  // the 13 first-version tricks, the authored rear_up's three stages, the random mode's 10
+  // the 13 first-version tricks, the authored rear_up's three stages, the random mode's 9 (standing, the face
+  // wash is the engine's: engine/paw.h)
+  CHECK(kLibrarySize == 25);
   for (uint32_t i = 0; i < kLibrarySize; i++) {
     const Trick& t = kLibrary[i];
     const char* p = trick_problem(t);

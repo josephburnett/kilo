@@ -17,7 +17,7 @@ import pytest
 from kilo import cli
 from kilo.hostlink import HostError, HostLink
 from kilo.logs import proto2, reader, walkrec
-from kilo.planner.walker import pack_pose_feet
+from kilo.engine import pack_pose_feet
 from kilo.protocol import kilo_protocol as P
 from test_hostlink import FakeMind
 

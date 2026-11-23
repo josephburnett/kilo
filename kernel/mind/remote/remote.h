@@ -40,7 +40,7 @@
 //   and walk straight forward (B7) or backward (B5) at the turn's level,
 //   without a stop first. Not walking: ignored (they never start a walk). A
 //   level the planner clamps to the same speed still changes the level, and
-//   the log shows the real mm/s (planner::timing()).
+//   the log shows the real mm/s (engine::timing()).
 // - B6 stand, A7 rest (sleep), C5 the calibration posture (CALIB): stop a
 //   walk with the quick stop (planner/plan.h halt(): the feet down where
 //   they are, the body stopped in about 0.2 s, the legs squared up) and wait
@@ -107,7 +107,7 @@
 #define KILO_MIND_REMOTE_REMOTE_H
 #include <stdint.h>
 #include "link/serial_link.h"
-#include "planner/walker.h"
+#include "engine/walker.h"
 #include "remote/keys.h"
 #include "tricks/player.h"
 
@@ -121,7 +121,7 @@ constexpr int kTrotBackSteps = 3;                    // the trot backward: to -3
 constexpr int kTrotLongFrom = 4;                     // the trot's long swing: from +4 (180 mm/s) ...
 constexpr int kTrotFastSteerSteps = 1;               // ... where it steers at kSteerLevels' first level only
 // The five levels of a gait, x its default speed.
-const double* speed_factors(const planner::Pattern& p);
+const double* speed_factors(const engine::Gait& p);
 constexpr int kSteerSteps = 3;
 extern const double kSteerLevels[kSteerSteps];   // the steer's magnitudes, level 1..3
 constexpr int kDefaultLevel = 3;                  // +3: 1x, the gait's spec defaults
@@ -214,7 +214,7 @@ class RemoteControl {
  public:
   static constexpr int kQueue = 4;
 
-  RemoteControl(SerialLink& link, planner::Walker& walker, tricks::TrickPlayer& player, Clock& clock, Log& log);
+  RemoteControl(SerialLink& link, engine::Walker& walker, tricks::TrickPlayer& player, Clock& clock, Log& log);
   void set_behaviour(BehaviourHook* hook) { behaviour_ = hook; }
   void set_trick_notes(TrickNotes* notes) { notes_ = notes; }
   void set_measure(MeasureHook* hook) { measure_ = hook; }
@@ -241,7 +241,7 @@ class RemoteControl {
   double steer_value() const;
   bool frozen() const { return frozen_; }
   // The walk the remote started; false when not walking.
-  bool direction(planner::Direction* d) const;
+  bool direction(engine::Direction* d) const;
   // The last action's outcome ("walk forward (trot) 55.6 mm/s", "posture stand") and whether it failed.
   const char* last() const { return last_; }
   bool last_failed() const { return last_failed_; }
@@ -259,7 +259,7 @@ class RemoteControl {
   bool body_walking() const;
   bool walking();
   void reset_motion();
-  planner::Direction dir() const;
+  engine::Direction dir() const;
   void begin(const Key& key, uint16_t arg);
   void freeze(const Key& key, uint16_t arg);
   void step();
@@ -272,7 +272,7 @@ class RemoteControl {
   bool take_posture(const char* name);
   // ", steering left 2", or "" when straight.
   void steer_text(char* buf, uint32_t cap) const;
-  planner::WalkGoal walk_goal() const;
+  engine::WalkGoal walk_goal() const;
   void stop_then_act(uint64_t now);
   // The rear-up's stages (above): the stage top the play is going up to or holding (1..), 0 none.
   int step_at(uint64_t* hold_end_us) const;
@@ -280,13 +280,13 @@ class RemoteControl {
   void step_note(const char* what);
 
   SerialLink& link_;
-  planner::Walker& walker_;
+  engine::Walker& walker_;
   tricks::TrickPlayer& player_;
   Clock& clock_;
   Log& log_;
   BehaviourHook* behaviour_ = nullptr;
 
-  const planner::Pattern* pattern_;
+  const engine::Gait* pattern_;
   int level_ = kDefaultLevel;
   Heading heading_ = Heading::Straight;
   int steer_ = 0;

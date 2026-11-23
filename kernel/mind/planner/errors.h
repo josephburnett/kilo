@@ -15,10 +15,12 @@
 #include <stdint.h>
 #include "planner/fmath.h"
 #include "planner/model.h"
-#include "planner/patterns.h"
+#include "link/consts.h"
 
 namespace kilo {
 namespace planner {
+
+constexpr real kTickMs = (real)KILO_TICK_MS;
 
 constexpr int kErrWindowTicks = 200;  // 4 s of 50 Hz telemetry
 constexpr int kErrMinSamples = 50;

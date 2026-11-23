@@ -1,7 +1,7 @@
 """The body model: Kilo's geometry and masses, in one place.
 
 Everything the mind knows about Kilo's body is a field of ``BodyModel``: the
-planner (kilo.planner.plan), the virtual body's physics (kilo.vbody.physics),
+engine (kernel/mind/engine, through the generated header), the virtual body's physics (kilo.vbody.physics),
 the self-measurement (kilo.measure) and the tricks' models (kilo.tricks:
 sagittal, stance, dynamics, rear_up) read it and keep no body number of
 their own (mind/tests/test_one_model.py). Where a part of the mind fitted a

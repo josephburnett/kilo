@@ -41,9 +41,11 @@ AUTHORED = {
     "rear_up_2": "kilo.tricks.rear_up",
     "rear_up_3": "kilo.tricks.rear_up",
     # the random mode's tricks (the remote's A5), from and back to SIT and STAND: legacy skills with
-    # the moves there and back (kilo.tricks.alive_set.SET; alive_set.names() is this order)
+    # the moves there and back (kilo.tricks.alive_set.SET; alive_set.names() is this order); standing,
+    # the face wash is the movement engine's, not a file (alive_set.ENGINE)
     **{f"alive_{t}_{b}": "kilo.tricks.alive_set"
-       for t in ("stretch", "wash_face", "pee", "sniff", "check_around") for b in ("sit", "stand")},
+       for t in ("stretch", "wash_face", "pee", "sniff", "check_around") for b in ("sit", "stand")
+       if (t, b) != ("wash_face", "stand")},
 }
 
 

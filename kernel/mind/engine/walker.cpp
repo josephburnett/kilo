@@ -1,11 +1,15 @@
-#include "planner/walker.h"
+#include "engine/walker.h"
 #include "link/names.h"
 #include "util/fmt.h"
 #include "util/log.h"
 #include "util/mem.h"
 
 namespace kilo {
-namespace planner {
+namespace engine {
+
+using planner::fixed_i;
+using planner::m_inf;
+using planner::round_i;
 
 // ---- the body clock -------------------------------------------------------------------
 
@@ -81,8 +85,8 @@ void pack_pose(uint8_t epoch, const TickPlan& tp, kilo_pose_t* out) {
   out->tick = (uint16_t)(tp.tick & 0xFFFF);
   out->flags = 0;  // four feet
   for (int i = 0; i < kLegs; i++) {
-    out->leg[2 * i] = (int16_t)(tp.x[i] * 4);  // whole mm, in q2
-    out->leg[2 * i + 1] = (int16_t)(tp.z[i] * 4);
+    out->leg[2 * i] = tp.xq[i];  // quarter mm
+    out->leg[2 * i + 1] = tp.zq[i];
   }
   for (int k = 0; k < 3; k++) out->head[k] = KILO_HEAD_NOT_HELD;  // the head and tail: IDLE's (STANCE: STAND's)
   int p = round_i(to_a16(tp.pitch)), r = round_i(to_a16(tp.roll));
@@ -93,8 +97,8 @@ void pack_pose(uint8_t epoch, const TickPlan& tp, kilo_pose_t* out) {
 
 // ---- the walker -----------------------------------------------------------------------
 
-Walker::Walker(SerialLink& link, Clock& clock, Log& log, const BodyModel& model, const PlannerConfig& config)
-    : link_(link), clock_(clock), log_(log), planner_(model, config) {}
+Walker::Walker(SerialLink& link, Clock& clock, Log& log, const BodyModel& model, const SolverConfig& config)
+    : link_(link), clock_(clock), log_(log), solver_(model, config) {}
 
 void Walker::on_telemetry(const kilo_telemetry_t& t) {
   uint64_t rx = link_.state().telemetry_at_us;
@@ -132,7 +136,7 @@ const char* Walker::check_can_walk() const {
 
 const char* Walker::start(const WalkGoal& goal) {
   uint64_t now = clock_.now_us();
-  if (phase_ == WalkPhase::Streaming && !planner_.stopping()) {
+  if (phase_ == WalkPhase::Streaming && !solver_.stopping()) {
     update(goal);
     mark(WalkMark::Change);
     return nullptr;
@@ -156,18 +160,19 @@ const char* Walker::start(const WalkGoal& goal) {
 }
 
 void Walker::update(const WalkGoal& goal) {
-  planner_.set_pattern(*goal.pattern);
-  planner_.set_direction(goal.direction);
-  planner_.set_steer(goal.steer);
-  if (goal.speed_mm_s >= 0) planner_.set_speed(goal.speed_mm_s);
+  solver_.set_gait(*goal.gait);
+  solver_.set_direction(goal.direction);
+  solver_.set_steer(goal.steer);
+  solver_.set_cadence(goal.cadence);
+  if (goal.speed_mm_s >= 0) solver_.set_speed(goal.speed_mm_s);
   goal_ = goal;
 }
 
 void Walker::stop() {
   queued_ = false;
   if (phase_ == WalkPhase::Streaming) {
-    bool was = planner_.stopping();
-    planner_.stop();
+    bool was = solver_.stopping();
+    solver_.stop();
     if (!was) mark(WalkMark::Stop);
   } else if (phase_ != WalkPhase::Idle) {  // not streaming yet: no walk at all
     end("stopped before the stream started", true);
@@ -178,9 +183,9 @@ void Walker::stop() {
 void Walker::halt() {
   queued_ = false;
   if (phase_ == WalkPhase::Streaming) {
-    if (planner_.halting() || planner_.done() || handover_) return;
+    if (solver_.halting() || solver_.done() || handover_) return;
     replanned_ = replan_from_now();
-    planner_.halt();
+    solver_.halt();
     mark(WalkMark::Stop);
   } else if (phase_ != WalkPhase::Idle) {  // not streaming yet: no walk at all
     end("stopped before the stream started", true);
@@ -188,20 +193,20 @@ void Walker::halt() {
   }
 }
 
-// The planner put back to the first tick the body has not played yet (its
+// The solver put back to the first tick the body has not played yet (its
 // tick + kReplanAheadTicks: the POSE for the next one may be on the wire), so
-// the next wake plans and sends those ticks again. Returns how many.
+// the next wake solves and sends those ticks again. Returns how many.
 uint32_t Walker::replan_from_now() {
   double body;
   if (!clock_est_.now(clock_.now_us(), &body)) return 0;
   int64_t cur = (int64_t)body;
   if ((double)cur > body) cur--;
   int64_t from = cur + kReplanAheadTicks;
-  if (from < 0 || from >= (int64_t)planner_.tick()) return 0;
+  if (from < 0 || from >= (int64_t)solver_.tick()) return 0;
   Snap& s = snaps_[(uint32_t)from % (uint32_t)kSnaps];
   if (!s.used || s.tick != (uint32_t)from) return 0;
-  uint32_t n = planner_.tick() - (uint32_t)from;
-  planner_ = s.p;
+  uint32_t n = solver_.tick() - (uint32_t)from;
+  solver_ = s.p;
   return n;
 }
 
@@ -296,7 +301,8 @@ bool Walker::begin_stream(uint64_t now) {
   int64_t first = (int64_t)now_tick;
   if ((double)first > now_tick) first--;
   tracker_.reset();
-  planner_.start(*goal_.pattern, goal_.direction, goal_.speed_mm_s, (uint32_t)(first + kLookahead), -1, goal_.steer);
+  solver_.start(*goal_.gait, goal_.direction, goal_.speed_mm_s, (uint32_t)(first + kLookahead), -1, goal_.steer,
+                goal_.cadence);
   const BodyState& st = link_.state();
   epoch_ = st.epoch;
   reboots_ = st.reboots;
@@ -309,8 +315,8 @@ bool Walker::begin_stream(uint64_t now) {
   phase_ = WalkPhase::Streaming;
   next_wake_ = now;
   char v[16];
-  format_fixed(v, sizeof v, fixed_i(planner_.timing().speed_mm_s, 1), 1);
-  logf(log_, LogLevel::Info, "walk %s %s at %s mm/s", goal_.pattern->name, direction_name(goal_.direction), v);
+  format_fixed(v, sizeof v, fixed_i(solver_.timing().speed_mm_s, 1), 1);
+  logf(log_, LogLevel::Info, "walk %s %s at %s mm/s", goal_.gait->name, direction_name(goal_.direction), v);
   mark(WalkMark::Stream);
   return true;
 }
@@ -322,7 +328,7 @@ void Walker::end(const char* why, bool ok) {
   ok_ = ok;
   logf(log_, ok ? LogLevel::Info : LogLevel::Warn, "walk ended: %s (sent %u skipped %u underruns %u)", ended_,
        (unsigned)stats_.sent, (unsigned)stats_.skipped, (unsigned)stats_.underruns);
-  // The walk's summary (kept in the RAM log: Info): what the planner and the
+  // The walk's summary (kept in the RAM log: Info): what the solver and the
   // error tracker made of it. A walk that ended in its setup has none.
   if (phase_ == WalkPhase::Streaming) log_status(LogLevel::Info);
   mark(WalkMark::End);
@@ -385,7 +391,7 @@ void Walker::ingest() {
       const Pred& p = pred_[m.tick % kPred];
       const Attitude* ref = p.used && p.tick == m.tick ? &p.att : nullptr;
       Attitude e = tracker_.add(tick, m.pitch, m.roll, m.ref_pitch, m.ref_roll, m.corr_pitch, m.corr_roll, ref);
-      planner_.observe(e.pitch, e.roll);
+      solver_.observe(e.pitch, e.roll);
     } else if (gait_seen_ && !handover_ && ended_ == nullptr) {
       format(why_, sizeof why_, "the body left the stream (mode %s)", mode_name(m.mode));
       end(why_, false);
@@ -443,14 +449,14 @@ bool Walker::wake(uint64_t now) {
   }
   int64_t target = cur + kLookahead;
   uint32_t behind = 0;
-  while ((int64_t)planner_.tick() <= target && !planner_.done()) {
-    if (!planner_.halting()) {  // the planner before this tick, for a quick stop that comes later (halt())
-      Snap& s = snaps_[planner_.tick() % (uint32_t)kSnaps];
+  while ((int64_t)solver_.tick() <= target && !solver_.done()) {
+    if (!solver_.halting()) {  // the solver before this tick, for a quick stop that comes later (halt())
+      Snap& s = snaps_[solver_.tick() % (uint32_t)kSnaps];
       s.used = true;
-      s.tick = planner_.tick();
-      s.p = planner_;
+      s.tick = solver_.tick();
+      s.p = solver_;
     }
-    const TickPlan& tp = planner_.next();
+    const TickPlan& tp = solver_.next();
     if ((int64_t)tp.tick <= cur) {
       stats_.skipped++;
       if (obs_ != nullptr) obs_->on_walk_tick(*this, tp, false);
@@ -468,8 +474,8 @@ bool Walker::wake(uint64_t now) {
     if (obs_ != nullptr) obs_->on_walk_tick(*this, tp, sent);
   }
   if (behind > stats_.max_behind) stats_.max_behind = behind;
-  if (planner_.done() && !handover_) {
-    // every planned tick is out; the STANCE posture ends the stream after them
+  if (solver_.done() && !handover_) {
+    // every solved tick is out; the STANCE posture ends the stream after them
     handover_ = true;
     handover_at_ = now;
     posture_stance(posture_balance_);
@@ -509,7 +515,7 @@ void Walker::poll() {
 static void fixed(char* buf, size_t cap, real v, int decimals) { format_fixed(buf, cap, fixed_i(v, decimals), decimals); }
 
 void Walker::log_status(LogLevel level) const {
-  const Planner& p = planner_;
+  const Solver& p = solver_;
   Timing tm = p.timing();
   char speed[16], stride[16], margin[16], off_p[16], off_r[16], spike[16];
   fixed(speed, sizeof speed, tm.speed_mm_s, 1);
@@ -520,7 +526,7 @@ void Walker::log_status(LogLevel level) const {
   logf(log_, level,
        "walk %s %s %s mm/s stride %s mm period %d ms%s%s: max behind %u holds %u catches %u waits %u "
        "min margin %s mm",
-       p.pattern().name, direction_name(p.direction()), speed, stride, (int)round_i(tm.period_ms),
+       p.gait().name, direction_name(p.direction()), speed, stride, (int)round_i(tm.period_ms),
        p.stopping() ? " stopping" : "", p.changing() ? " changing" : "", (unsigned)stats_.max_behind,
        (unsigned)p.stats().holds, (unsigned)p.stats().catches, (unsigned)p.stats().waits, margin);
   ErrorEstimate e;
@@ -536,5 +542,5 @@ void Walker::log_status(LogLevel level) const {
   }
 }
 
-}  // namespace planner
+}  // namespace engine
 }  // namespace kilo

@@ -786,7 +786,7 @@ bool Mind::lying_rest() {
 // (a steer: the walk bends but stays forward, §13.2). A6 / C6 from standing or backward are not.
 bool Mind::forward_key(const remote::Key& key) const {
   if (key.kind == remote::Kind::Gait) return true;
-  planner::Direction d;
+  engine::Direction d;
   if (!remote_.direction(&d)) return false;
   bool straight = remote_.heading() == remote::Heading::Straight;
   if (key.kind == remote::Kind::Turn) return straight && remote_.level() > 0;

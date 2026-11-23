@@ -1,14 +1,16 @@
 # One movement engine
 
-Written 2026-11-22 as a design; **step 1 is built** (the same day: "What
-exists now" just below), steps 2 to 6 are not. The owner's four decisions
+Written 2026-11-22 as a design; **steps 1 and 2 are built** (step 1 the
+same day, step 2 on 2026-11-23: "What exists now" just below), **step 4 in
+part** (the paw lift and face wash, 2026-11-23); steps 3, 5 and 6 are not. The owner's four decisions
 on it are at the end. Numbers marked **(est.)** are estimates; every other
 number is read from the code, the docs or the recordings named next to
 it, most of them from
 [movement-engine-results.md](movement-engine-results.md) (the old walk,
 trot, long trot and crawl of 2026-11-17 to 11-21). Nothing of it has been
-tried on Kilo: everything below about step 1 was checked on the laptop
-only (the body's real program in its host tests, the mind against it).
+tried on Kilo: everything below about steps 1 and 2 was checked on the
+laptop only (the body's real program in its host tests, the mind against
+it, the walks on the virtual body).
 
 ## What exists now (step 1, 2026-11-22)
 
@@ -52,6 +54,104 @@ only (the body's real program in its host tests, the mind against it).
   (60 ms of poses queued instead of 100). Not yet
   checked: whether 60 ms of look-ahead is enough on the Pi under load (the
   recordings say yes, results §1).
+
+## What exists now (step 2, 2026-11-23)
+
+- **One step clock** (`kernel/mind/engine/clock.h`). A phase goes round
+  once a cycle; each leg lifts when the phase passes its own point. The
+  cadence (how fast the phase goes round) is a dial that can change at any
+  tick. The clock can **wait**: a tick it does not advance, the feet hold.
+- **The gaits are rows of a table** (`engine/gait.cpp`), not programs: the
+  order the legs lift in, how the four-foot time is shared out before each
+  lift, the swing, the lift, the body's height and the **weight target**
+  (how far inside the feet on the ground the centre of mass must be): the
+  walk 3.5 mm, the crawl 8 mm, the trot none (on two feet the landing
+  balances him: each pair lands on the pendulum point fitted to the floor
+  recordings, as before).
+- **The tick solver** (`engine/solve.h`) replaces the hand-tuned planner.
+  Every tick: the commands move toward what was asked (speed, steer,
+  direction, cadence: no stop needed for any of them); the clock says which
+  legs lift; a lifted foot swings to half a stride ahead of its shoulder;
+  and the weight: the solver looks 40 ticks (0.8 s) ahead, where the clock
+  says every foot will be, and finds the smoothest path of the body (a
+  shift fore and aft over the feet and a roll) that keeps the centre of
+  mass the gait's target inside the three feet down at every one of those
+  ticks. This tick's body pose is that path's first point. The walk's old
+  fixed sway (1° of roll, 3 mm fore and aft) and the crawl's lean solve are
+  gone: one solve does both, from the model. A lift waits while the weight
+  is not yet there. The gate (no lift while the body is more than 5° off
+  the plan) and the catch (a swinging foot down at once when he tips 7°
+  toward it) are the clock's, so every gait has them. The feet go to the
+  board in quarter millimetres (they went in whole ones). Each leg's own
+  servo delay (`[model.correction]` servo_lag_d_ms) moves that leg's foot
+  earlier along its path; all are 0 until measured, so this changes
+  nothing yet.
+- **Speed and cadence are separate.** A walk goal (`WalkGoal`) has a speed
+  and a cadence (0.6 to 1.6 of the gait's own: a faster cadence, shorter
+  steps for the same speed); a stride past the gait's longest raises the
+  cadence instead. Nothing on the remote sets the cadence yet.
+- **Judged in simulation, gait by gait** (docs/movement-engine-results.md,
+  "Step 2"): against the tuned planner on the virtual body's judge, the
+  walk rocks about half as much at 40 to 72 mm/s with more margin, at the
+  same speed and prediction; its fastest joint is up to 45°/s faster at
+  its top speeds (459°/s, under the body's 500). The trot is as before
+  (its timing and pendulum landing kept). The crawl rocks less than half
+  as much, at the same speed. All three replaced the planner; the old
+  planner and its Python twin are deleted.
+- **What the owner should see on the floor** (not yet tried): C4, A4, B4
+  and B7/B5 as before. The walk should sway less from side to side (by the
+  judge about half; the floor may show less of the difference: the judge
+  rocks less than the floor does), its body moving a little fore and aft
+  instead. The crawl (B4) should roll far less (it rolled up to 14°) and
+  look smoother. The trot should look the same. A change of gait still
+  goes through standing feet (walk to trot without squaring up is not
+  built: the gaits' different lift patterns go through home).
+- **How to judge again**, after a change or with new recordings:
+  `make -C kernel/host build/engine-judge`, then
+  `PYTHONPATH=mind python mind/tests/enginejudge.py table` and `changes`.
+  The laptop reaches the engine only through that program (`kilo.engine`);
+  there is no Python copy of it.
+
+## What exists now (step 4, the first trick, 2026-11-23)
+
+- **The paw wash** (`kernel/mind/engine/paw.h`): the owner's first trick
+  as a goal (decision 4). Standing, he moves his weight back and onto the
+  other side (by the model: the body 7 mm back and rolled 5°, so that
+  the centre of mass is 7 mm inside the three feet that stay down, twice
+  the walk's 3.5 because he holds it; the lean is held until the servos
+  have it before the paw leaves the floor), lifts a front paw, first just
+  off the floor over a third of a second, then up beside his
+  muzzle, tilts his head down to it, strokes down his face and back up two
+  to four times, puts the paw down, and stands. It is made from the body
+  model each time it is asked for, at the tempo and the number of strokes
+  asked (0.5 to 2 times its own pace, 1 to 8 strokes), not played from a
+  recording; either paw (the player mirrors it).
+- **Safety.** A hold with the paw up is watched: if he is not standing
+  still on three feet (the roll more than 6° off what the lean expects, or
+  the pitch more than 6°), the trick stops and he goes back to STAND. The
+  board's balance correction is off for it. Judged on the laptop
+  (`mind/tests/test_engine_tricks.py`; results, "Step 4"): by the
+  quasi-static model the centre of mass stays at least 3.2 mm inside the
+  feet all along (6.4 mm but for the right paw on Kilo as recorded, whose
+  right hind shoulder sits differently) and the head at least 16.7 mm from
+  the paw (the rule: 10 mm,
+  either way the pan turns); played on the tricks' dynamics with the
+  servos' lag and the legs' give, it neither falls nor trips its guard in
+  the fit or at any of the 19 corners of what the recordings allow.
+- **Where it plays**: the random mode's face wash when he stands (A5, then
+  A5 again for a trick: the trick drawn is the face wash one time in five).
+  Sitting, the face wash is the library's as before. The library's standing
+  face wash (it sat down first) is deleted.
+- **What the owner should see** (not yet tried): standing in the random
+  mode, now and then he leans back and a little to one side, lifts a front
+  paw up beside his face, dips his head to it and wipes a few times, then
+  stands again. It has never run on Kilo.
+- **Not built in step 4**: the other tricks as goals (the stretch, with its
+  shake as an overlay, the sniff, the rear-up as "nose up to N degrees").
+  **Step 3** (postures as goals) is not built: sitting and lying rest the
+  body on his haunches and belly, which the engine has no model of; the
+  moves between postures stay the intent layer's, planned and checked in
+  Python's statics and dynamics (docs/intent.md).
 
 ## Summary (half a page)
 
@@ -311,8 +411,9 @@ differ.
 with it; the board does not need it (it holds poses and corrects what is
 left):
 
-- the walk's planner sends each joint its own lead: a servo 30 ms slower
-  gets its command 30 ms earlier, so the legs arrive together;
+- the engine's walks send each leg its own lead (built in step 2, per leg:
+  the mean of its shoulder's and its knee's): a leg 30 ms slower gets its
+  foot 30 ms earlier along its path, so the legs arrive together;
 - a move that loads one side (the rear-up's push, getting up) is checked in
   the tricks' model with that side's give and lag, and paced so the slower
   side keeps up: the move's duration is set by the slowest servo it loads;
@@ -363,12 +464,15 @@ Proposal:
 
 Deleted outright once its step lands (git keeps it):
 
-- Mind, C++: `kernel/mind/planner/{patterns,plan,walker,trot}.*` (become the
-  gait clock and solver); `kernel/mind/intent/intent.*`, `intent.gen.*`,
+- Mind, C++ (**done in step 2**): `kernel/mind/planner/{patterns,plan,trot}.*`
+  became `kernel/mind/engine/{gait,clock,solve}.*`, the walker moved to
+  `engine/walker.*`; `kernel/mind/intent/intent.*`, `intent.gen.*`,
   `gen_intent.py`, `table.h` (the posture graph and its moves;
   `estimate.*` moves to the observer); `kernel/mind/tricks/{player,library,library.gen}.*`,
   `gen_library.py`; the righting moves in `intent/`.
-- Mind, Python references: `mind/kilo/planner/{patterns,plan,walker}.py`,
+- Mind, Python references: `mind/kilo/planner/{patterns,plan,walker}.py`
+  (**done in step 2**, with their tests and the walk simulations
+  `walksim.py`, `stridesim.py`, `stopsim.py`),
   `mind/kilo/intent/{graph,moves}.py` and `moves/`, `mind/kilo/tricks/{library,legacy,import_legacy,player,rear_up}.py`
   and `library/`; their vector generators and vector files under
   `kernel/host/tests/`. The engine is written once, in C++, and tested in
@@ -408,17 +512,20 @@ what it replaces.
    *Why first*: every later step needs it, it gives the board back the RAM
    the rest needs, and it changes no movement, so a difference on the
    floor is the transport's fault and easy to find.
-2. **Gait clock and solver.** Walk, trot and crawl become offsets on one
-   clock; `planner/` goes. Floor try: C4, A4, B4, B7/B5 mid-walk; new: the
-   tempo changes without a stop, walk to trot without squaring up. Judged
-   by the roll numbers `walkstudy.py floor` already computes.
+2. **Gait clock and solver (built 2026-11-23, not yet tried on the floor).**
+   Walk, trot and crawl are rows on one clock; `planner/` (but the model
+   and the error) is gone. Floor try: C4, A4, B4, B7/B5 mid-walk, judged
+   by the roll numbers `walkstudy.py floor` computes. The tempo changes
+   without a stop (it did before, too). Not built: walk to trot without
+   squaring up (the offsets could slew from one to the other, the clock
+   allows it; judged in simulation only through home so far).
 3. **Postures as goals.** Stand, sit, rest from any measured state through
    the solver; `intent/` moves and the graph go. Floor try: B6, A7, the
    random mode's sitting and lying down, from odd starts.
-4. **Tricks as goals.** The kept tricks (item 11) rewritten as tasks with a
-   tempo; the keyframe library goes. First the paw lift on three feet and
-   the face wash. Floor try: A5 twice, A1 (rear up as "nose up to N
-   degrees").
+4. **Tricks as goals (begun 2026-11-23: the paw lift on three feet and the
+   face wash, standing).** The kept tricks (item 11) rewritten as tasks with
+   a tempo; the keyframe library goes. Floor try: A5 twice, A1 (rear up as
+   "nose up to N degrees").
 5. **Closed-loop getting up.** The policy of part two; the righting
    experiment goes. Floor try: B1 from each side and the back, then the
    same as a goal the engine sets itself after a fall.
@@ -434,15 +541,14 @@ to hold. The solver replaces tuned, floor-tested code (the walk, the quick
 stop) and will at first be worse at something. Between step 1 and step 5
 he does not get up by himself (decision 1).
 
-**What the remaining steps need that the laptop cannot give.** Step 2 (the
-gait clock and solver replacing the planner) has to be judged against
-RockingPhysics and then on the floor (items 8 and 10): the walk it
-replaces was tuned there. Steps 3 and 4 build on step 2's solver. Step 5
+**What the remaining steps need that the laptop cannot give.** Step 2 is
+judged against RockingPhysics (results, "Step 2"); the floor (items 8 and
+10) has the last word: the walk it replaced was tuned there. Steps 3 and 4 build on step 2's solver. Step 5
 needs falls recorded with hands off (item 12): nothing on the laptop
 predicts a get-up. Step 6 needs item 13 (a slope and a push). The
 per-servo lag and give in `[model.correction]` are all at their defaults
-(nothing measured): the engine is to read them when it plans, but until
-the measurement of "Each servo" above is built and run they change
+(nothing measured): the engine reads the lag when it plans (step 2), but
+until the measurement of "Each servo" above is built and run it changes
 nothing.
 
 **Honest unknowns.** Whether 3 mm inside three feet holds on the floor for

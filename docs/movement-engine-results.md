@@ -265,3 +265,182 @@ eyes red, no action, as designed for a trick).
   there.
 - The new walk's floor try is still needed (item 2 is inferred); no trial
   is needed for the link delay or the battery lag.
+
+## Step 2: the solver judged against the tuned planner (2026-11-23)
+
+**Question.** Is the engine's step clock and solver (kernel/mind/engine,
+docs/movement-engine.md step 2) at least as good as the hand-tuned planner
+it replaces, gait by gait? The owner's rule: replace a gait only where it
+is; the walk and the trot "looked REALLY good" on the floor.
+
+**How it was judged** (simulation only; nothing was tried on Kilo). Both
+the old planner (the C++ of main at 0142b79, built once more for this) and
+the engine planned the same walks tick by tick with no body
+(`engine-judge`); each plan was played on the virtual body with the
+judge of docs/model-fit-results.md (RockingPhysics: the weight held by
+three feet as soon as it is inside them, the support lagging 55 ms, the
+legs giving as the model says) and the body's own balance loop, over the
+whole cycles from tick 150 to 550. To recompute:
+
+```
+make -C kernel/host build/engine-judge
+PYTHONPATH=mind python mind/tests/enginejudge.py table      # the gaits at the remote's speeds
+PYTHONPATH=mind python mind/tests/enginejudge.py changes    # speed changes, stops, quick stops, steer
+```
+
+The columns: the plan's least margin of the centre of mass inside three
+feet (mm, by the model); the measured roll and pitch swing per cycle
+(degrees, peak to peak: how much he rocks); the rates' rms (deg/s); the
+measured attitude against the one the plan predicted (rms pitch / roll and
+the largest, degrees: how well the plan predicts the body); the speed over
+the ground (mm/s); the fastest joint (deg/s; the body's slew allows 500);
+ticks the body's slew or reach cut; and the largest error with the model
+wrong (the centre of mass 3 mm back, 5 mm ahead or 3 mm right, the feet
+133 x 69 mm, the servos slower or faster) and the falls among them.
+
+| gait | speed | | margin | roll / pitch swing | rate rms | error rms | largest | speed | fastest joint | cut | model wrong: largest / falls |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| walk | 23.2 | old | +0.5 | 1.52 / 0.86 | 7.8 | 0.35 / 0.60 | 0.9 | 18 | 308 | 0 | 1.8 / 0 |
+| | | **new** | **+3.5** | **1.42** / 0.91 | **6.4** | 0.35 / **0.54** | 0.9 | 17 | **277** | 0 | **1.4** / 0 |
+| walk | 40.6 | old | +1.3 | 1.89 / 0.76 | 7.9 | 0.32 / 0.49 | 0.8 | 31 | 356 | 0 | 1.4 / 0 |
+| | | **new** | **+3.4** | **0.97** / 0.81 | **5.8** | 0.32 / **0.46** | 0.8 | 31 | **330** | 0 | **1.3** / 0 |
+| walk | 58 | old | +1.8 | 2.12 / 0.66 | 8.0 | 0.28 / 0.43 | 0.7 | 44 | 405 | 0 | 1.1 / 0 |
+| | | **new** | **+3.4** | **0.63** / 0.69 | **5.2** | 0.28 / **0.41** | 0.7 | 45 | 407 | 0 | 1.2 / 0 |
+| walk | 66.7 | old | +1.8 | 2.21 / 0.59 | 7.9 | 0.27 / 0.43 | 0.7 | 50 | 386 | 0 | 1.1 / 0 |
+| | | **new** | **+2.5** | **1.13** / 0.64 | **5.7** | 0.26 / 0.40 | 0.7 | 52 | 432 | 0 | 1.3 / 0 |
+| walk | 72.5 | old | +1.8 | 2.22 / 0.57 | 7.9 | 0.26 / 0.42 | 0.7 | 53 | 444 | 0 | 1.2 / 0 |
+| | | **new** | **+2.7** | **1.00** / 0.60 | **6.0** | 0.26 / 0.44 | 0.9 | 56 | 459 | 0 | 1.4 / 0 |
+| trot | 57.6 | old | | 0.88 / 1.02 | 14.0 | 0.34 / 0.61 | 1.1 | 32 | 295 | 0 | 1.6 / 0 |
+| | | new | | 0.88 / 1.02 | 13.9 | 0.33 / 0.61 | 1.1 | 32 | 297 | 0 | 1.6 / 0 |
+| trot | 100.8 | old | | 1.15 / 0.54 | 11.5 | 0.19 / 0.34 | 0.7 | 59 | 321 | 0 | 1.8 / 0 |
+| | | new | | 1.01 / 0.52 | 9.7 | 0.18 / 0.31 | 0.6 | 59 | 310 | 0 | 1.8 / 0 |
+| trot | 144 | old | | 2.25 / 0.91 | 20.1 | 0.38 / 0.67 | 1.4 | 77 | 362 | 0 | 2.0 / 0 |
+| | | new | | 2.26 / 0.85 | 19.5 | 0.37 / 0.65 | 1.4 | 77 | 344 | 0 | 2.0 / 0 |
+| trot | 180 | old | | 4.14 / 1.40 | 29.9 | 0.74 / 1.22 | 2.1 | 81 | 380 | 0 | 3.5 / 0 |
+| | | new | | 4.10 / 1.07 | 24.9 | 0.77 / 1.26 | 2.1 | 83 | 379 | 0 | 2.7 / 0 |
+| trot | 207 | old | | 4.75 / 1.35 | 29.8 | 0.89 / 1.45 | 2.4 | 85 | 451 | 0 | 3.2 / 0 |
+| | | new | | 4.74 / 1.34 | 29.3 | 0.89 / 1.44 | 2.4 | 86 | 427 | 0 | 3.4 / 0 |
+| crawl | 8.9 | old | +13.4 | 21.5 / 0.83 | 14.3 | 0.34 / 1.01 | 2.1 | 8 | 333 | 0 | 4.0 / 0 |
+| | | **new** | +7.3 | **9.6** / 1.18 | **6.6** | 0.33 / **0.43** | **0.8** | 8 | 341 | 0 | **1.6** / 0 |
+| crawl | 15.5 | old | +13.5 | 19.5 / 0.72 | 16.7 | 0.36 / 1.06 | 2.2 | 14 | 406 | 0 | 4.4 / 0 |
+| | | **new** | +7.3 | **8.4** / 1.02 | **6.5** | 0.30 / **0.38** | **0.7** | 14 | 422 | 0 | **1.5** / 0 |
+| crawl | 22.2 | old | +13.6 | 20.7 / 0.96 | 24.6 | 0.40 / 1.17 | 2.2 | 19 | 392 | 0 | 5.8 / 0 |
+| | | **new** | +7.2 | **9.4** / 0.98 | **8.6** | 0.33 / **0.46** | **0.7** | 19 | 381 | 0 | **1.6** / 0 |
+| crawl | 25 | old | +13.6 | 20.9 / 0.93 | 27.6 | 0.42 / 1.30 | 2.3 | 21 | 392 | 0 | 6.4 / 0 |
+| | | **new** | +7.3 | **9.4** / 0.96 | **9.2** | 0.33 / **0.49** | **0.8** | 21 | 381 | 0 | **1.5** / 0 |
+
+The changes (`changes`; from the change to the end; the old against the new):
+
+| gait | asked | largest tilt (old / new) | largest error | done at tick |
+|---|---|---|---|---|
+| walk 40.6 | to 72.5 at tick 200 | 1.1 / 0.8 | 0.8 / 0.9 | |
+| walk 58 | stop at 300 | 2.8 / 1.6 | 2.8 / 1.2 | 406 / 405 |
+| walk 58 | quick stop at 300 | 2.6 / 2.5 | 2.6 / 1.2 | 370 / 380 |
+| walk 58 | steer 1 at 200, back at 350 | 3.4 / 3.3 | 3.4 / 1.9 | |
+| walk 58 | to the trot at 200 | 3.1 / 2.1 | 3.1 / 1.2 | |
+| trot 100.8 | to 201.6 at 200 | 2.5 / 2.4 | 2.5 / 2.4 | |
+| trot 144 | stop at 300 | 1.4 / 1.4 | 1.4 / 1.4 | 364 / 365 |
+| trot 201.6 | quick stop at 300 | 2.4 / 2.6 | 2.4 / 2.6 | 343 / 328 |
+| crawl 22.2 | stop at 300 | 11.9 / 6.3 | 2.9 / 1.4 | 535 / 548 |
+
+No fall in any run, old or new.
+
+Also on the virtual body's own physics (kilo.vbody.physics: the weight
+held 5 mm inside three feet, rigid legs; not the judge), a stop at tick 400
+(largest error against the prediction, old / new): the crawl 3.2 / 0.5°,
+the walk 1.5 / 1.7°, the trot 1.3 / 3.0°. The trot's 3.0° comes as he
+stands at the end of the stop; its feet are the old trot's within a
+quarter of a millimetre and a tick (the feet now go in quarter
+millimetres), and this physics' diagonal rock is sensitive to which feet
+are within 0.6 mm of the lowest. The judge (RockingPhysics) has the two
+stops equal. One run each; not followed further.
+
+**What it means.**
+
+- **The walk** (new: the weight 3.5 mm inside the three feet, solved
+  every tick, in place of the fixed 1° roll and 3 mm fore-aft sway). By
+  this judge it rocks about half as much at 40 to 72 mm/s (roll swing 0.6
+  to 1.1° against 1.9 to 2.2°), a little less at 23 mm/s, keeps more
+  margin (2.5 to 3.5 mm against 0.5 to 1.8), predicts the body as well
+  or a little better, and walks as fast (within 1 mm/s; a little faster at
+  66 and 72). Worse: its fastest joint is 30 to 45°/s faster at 66 and 72
+  mm/s (432 and 459°/s, under the body's 500°/s, nothing cut), and with
+  the model wrong its largest error is 0.1 to 0.2° larger at 58 to 72
+  mm/s (1.2 to 1.4° against 1.1 to 1.2°; the case is the centre of mass 3
+  mm to the right, which the solver cannot know of). Judged at least as
+  good: **the solver replaces the walk**. Its weight target was chosen
+  here: 3 mm let the walk rock least (0.6 to 0.9°) but its largest error
+  with the centre of mass 3 mm right was 2.0 to 2.3°; 4 mm rocked more at
+  23 mm/s (1.9°) than the old walk; 3.5 mm is the least that is not worse
+  anywhere but those two columns.
+- **The trot** has no weight target (two feet carry it); the engine keeps
+  its timing (the swing growing with the speed a tick a step) and its
+  landing on the fitted pendulum, now as the trot's row of the gait table
+  and its landing rule. Equal or better on every column at every speed
+  but one: with the model wrong at 207 mm/s its largest error is 3.4°
+  against 3.2°, and its quick stop from 201.6 mm/s tilts 2.6° against 2.4°
+  (and is done 0.3 s sooner). Judged at least as good: **replaced**.
+- **The crawl** keeps the weight 8 mm inside (the old crawl 14 mm, which
+  item 2 above found far more than needed): it rocks less than half as much
+  (roll swing 8.4 to 9.6° against 19.5 to 21.5°: the old crawl rolls
+  the body up to 14° to keep its 14 mm), predicts the body two to three
+  times better, tips far less with the model wrong (1.5 to 1.6° against
+  4.0 to 6.4°), at the same speed. Its static margin is smaller (7.2 to
+  7.3 mm against 13.4 to 13.6), by choice; with 14 mm the engine's crawl
+  was slower (16 against 19 to 21 mm/s at 22 to 25) and its joints faster.
+  **Replaced**, at 8 mm.
+- What simulation cannot show: whether the walk's smaller rock is real on
+  the floor. The judge rocks far less than the floor: the recorded walk
+  of 2026-11-22 (the old walk) swung 4.9° of roll a cycle at 58 mm/s and
+  4.3° at 72 (`walkstudy.py floor`, 3 and 2 cycles), the judge's old walk
+  2.1 and 2.2°. So the halving is the judge's; the floor may show less of
+  it. Nor can it show whether the faster joints at the walk's top speeds
+  keep up, or anything about slipping.
+  The floor try (C4 at each level, B7/B5, A4, B4) settles it.
+
+## Step 4: the paw wash judged on the body model (2026-11-23)
+
+**Question.** Is the engine's paw wash (kernel/mind/engine/paw.h: a front
+paw lifted on three feet, the face washed with it) safe to play on Kilo,
+and does it keep the head clear of the paw (the owner's rule after the
+original paw lick bumped his head: at least 10 mm)?
+
+**How** (simulation only; `mind/tests/test_engine_tricks.py`). The trick
+as the mind makes it (`engine-judge --trick paw_wash`), on the models the
+random mode's library tricks are held to (mind/tests/test_alive_tricks.py):
+the rigid quasi-static model on Kilo as designed and as recorded, both
+paws, tempos 0.5 to 2; and the tricks' dynamics (kilo.tricks.dynamics: the
+servos' lag, the legs' give, friction) with the trick's own guard, in the
+fit and at the 19 corners of `dynamics.bands()`.
+
+**Numbers.** The lean the engine chose: the body 7.0 mm back, rolled 5.1°
+right side down (the left paw; mirrored for the right); the centre of mass
+7.1 mm inside the three feet by the model with the paw up and at the
+bottom of a stroke. A first version with 6 mm, a short hold of the lean
+and the paw going straight up rocked onto the diagonal for 40 ms as the
+paw left the floor (the right hind foot unloaded) on the dynamics; with 7
+mm, the lean held until the servos have it (10 ticks) and the paw first
+just off the floor (10 mm over 16 ticks), each of the three feet keeps its
+load, the right hind's least about 12 g, in the fit and at the corners
+tested (the centre of mass 4 mm further forward is the closest).
+
+| check (tempo 1) | left paw, as designed | as recorded | right paw, as designed | as recorded |
+|---|---|---|---|---|
+| least margin of the centre of mass inside the support, all along | 6.4 mm | 6.7 mm | 6.4 mm | 3.2 mm |
+| largest roll | 5.1° | 5.1° | 5.1° | 5.1° |
+| largest single topple | 1.2 mm | 1.2 mm | 1.2 mm | 1.2 mm |
+| least gap between the head and a front leg (either way the pan turns) | 17.0 mm | 17.0 mm | 16.7 mm | 16.7 mm |
+| what touches the floor | the feet | the feet | the feet | the feet |
+
+(The right paw on Kilo as recorded keeps less: the recorded right hind
+shoulder sits differently, which the engine's model does not know.) On
+the dynamics: no fall and no stop by the guard, the three feet carrying
+him the whole time the paw is up (over a second).
+
+**What it means.** By the models he stays on his three feet with room to
+spare and the head stays clear of the paw by 17 mm (the paw cannot come
+closer to the muzzle than its leg's plane allows with the head straight:
+about 16 mm by the model's head, which is an estimate). Not known: whether
+Kilo holds the lean as the model says (the self-measurement's 3-foot tips
+came only after the mass crossed the edge, results §2), whether a paw at
+the cheek looks like washing, and whether the head model is right.

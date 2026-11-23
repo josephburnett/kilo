@@ -84,7 +84,7 @@
 #define KILO_MIND_POWER_SLEEP_H
 #include <stdint.h>
 #include "link/serial_link.h"
-#include "planner/walker.h"
+#include "engine/walker.h"
 #include "platform.h"
 #include "power/battery.h"
 #include "record/saver.h"
@@ -147,7 +147,7 @@ struct Activity {
 
 class Sleep {
  public:
-  Sleep(SerialLink& link, planner::Walker& walker, Clock& clock, Log& log);
+  Sleep(SerialLink& link, engine::Walker& walker, Clock& clock, Log& log);
   // Off (the default): it only keeps the battery trend; A7 is just rest, no limp.
   void set_enabled(bool on) { enabled_ = on; }
   bool enabled() const { return enabled_; }
@@ -198,7 +198,7 @@ class Sleep {
   bool moving_mode() const;
 
   SerialLink& link_;
-  planner::Walker& walker_;
+  engine::Walker& walker_;
   Clock& clock_;
   Log& log_;
   Hardware* hw_ = nullptr;

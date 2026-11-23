@@ -130,7 +130,7 @@ def key_of(msg: Any, tick: int) -> Key:
 
 class PosePlayer:
     # the walking physics new players use: Physics, or a callable with its signature (the long-trot
-    # study puts kilo.vbody.rocking's there, mind/tests/stridesim.py)
+    # study and the engine's judge put kilo.vbody.rocking's there, mind/tests/enginejudge.py)
     PHYSICS = Physics
 
     def __init__(self, tick: int, model: BodyModel, lag_ms: float | None = None, tau_ms: float | None = None):

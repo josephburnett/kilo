@@ -49,7 +49,7 @@
 #define KILO_MIND_RECORD_RECORDER_H
 #include <stdint.h>
 #include "link/serial_link.h"
-#include "planner/walker.h"
+#include "engine/walker.h"
 #include "platform.h"
 #include "record/flight.h"
 #include "record/metrics.h"
@@ -74,7 +74,7 @@ struct Run {
   char text[KILO_HOST_WALK_TEXT_MAX];  // WALK_INFO.text
 };
 
-class Recorder final : public FrameTap, public planner::WalkObserver, public Log {
+class Recorder final : public FrameTap, public engine::WalkObserver, public Log {
  public:
   static constexpr uint32_t kMaxRuns = 256;
   static constexpr uint64_t kPreRollUs = KILO_HOST_WALK_PREROLL_MS * 1000ull;
@@ -126,9 +126,9 @@ class Recorder final : public FrameTap, public planner::WalkObserver, public Log
   void write(LogLevel level, const char* line) override;
   // FrameTap
   void on_frame(bool tx, uint8_t type, uint8_t seq, const uint8_t* payload, uint8_t len, uint64_t now) override;
-  // planner::WalkObserver
-  void on_walk_mark(const planner::Walker& w, planner::WalkMark mark) override;
-  void on_walk_tick(const planner::Walker& w, const planner::TickPlan& tp, bool sent) override;
+  // engine::WalkObserver
+  void on_walk_mark(const engine::Walker& w, engine::WalkMark mark) override;
+  void on_walk_tick(const engine::Walker& w, const engine::TickPlan& tp, bool sent) override;
 
  private:
   Run* begin_run(uint8_t kind, uint64_t now);
@@ -137,9 +137,9 @@ class Recorder final : public FrameTap, public planner::WalkObserver, public Log
   void mark_line(const char* line, uint64_t now);
   void run_mark(uint32_t id, uint8_t kind, uint8_t event, uint64_t now);
   void set_text(Run* r, const char* text);
-  void walk_text(const planner::Walker& w, const char* end);
-  void goal_line(const char* word, const planner::WalkGoal& g, uint64_t now);
-  void timing_line(const char* word, const planner::Walker& w, uint64_t now);
+  void walk_text(const engine::Walker& w, const char* end);
+  void goal_line(const char* word, const engine::WalkGoal& g, uint64_t now);
+  void timing_line(const char* word, const engine::Walker& w, uint64_t now);
   void begin_trick(const tricks::TrickPlayer& p, uint64_t now);
   void end_trick(const char* reason, const char* why, uint32_t elapsed_ms, uint32_t expected, uint64_t now);
   void trick_header(const tricks::Trick& t, uint32_t id, uint8_t speed, bool mirror, uint64_t now);
@@ -171,7 +171,7 @@ class Recorder final : public FrameTap, public planner::WalkObserver, public Log
   uint32_t pending_play_ = 0;  // trick_stage() for a play whose run is not open yet
   int pending_allowed_ = 0, pending_reached_ = 0, pending_of_ = 0;
   bool play_marked_ = false;
-  planner::PlannerStats last_ = {};
+  engine::SolverStats last_ = {};
 };
 
 }  // namespace record

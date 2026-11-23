@@ -24,7 +24,7 @@ how the rock changes with the speed):
 - **Momentum across the support changes.** From one diagonal straight to
   the other, the part of the rotation about the new line carries over
   (``carry`` x the projection).
-- **Two optional fitted terms** (mind/tests/stridesim.py fit):
+- **Two optional fitted terms** (fitted to the trot recordings, 2026-11-17):
   ``line_lag_ms``, the support lagging the plan by that much more than the
   swing (the mass sits back over a line further forward by the speed x the
   lag), and ``swing_tau_ms``, a faster response for the legs in the air.

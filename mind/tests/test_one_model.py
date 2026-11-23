@@ -23,7 +23,6 @@ from pathlib import Path
 import pytest
 
 from kilo.measure import script as measure_script
-from kilo.planner import plan as PL
 from kilo.planner import model as PM
 from kilo.planner.model import BodyModel
 from kilo.protocol import kilo_protocol as P
@@ -53,8 +52,7 @@ TYPED_AGAIN = {
     "mind/kilo/tricks/sagittal.py": [r"tail_\w+: float = -?\d", r"(rear_x|belly_z|back_z|pi_rear_x|pi_top_z|nose_x"
                                      r"|nose_z): float = -?\d"],
     "mind/kilo/tricks/stance.py": [r"KILO_CZP = \(", r"half_width: float = \d", r"imu_pitch: float = -?\d"],
-    "mind/kilo/planner/plan.py": [r"(com_x_mm|extra_ms|clamp_deg|com_h_mm): float = \d", r"hypot\(65, 123\)"],
-    "kernel/mind/planner/trot.h": [r"kFit\w+ = \(real\)\d", r"kFit\w+ = \d"],
+    "kernel/mind/engine/gait.h": [r"kFit\w+ = \(real\)\d", r"kFit\w+ = \d"],
     "kernel/mind/guard/guard.h": [r"kSensorHeightMm = \d", r"kFloorTiltDeg = \d"],
 }
 
@@ -92,10 +90,10 @@ def test_the_consumers_read_the_model():
     assert T.Geometry3().imu_pitch == -M.imu_pitch_deg
     assert RU.AS_RECORDED.com_dy == PM.view_numbers("tricks_rigid")["com_dy_mm"]
     assert RU.AS_RECORDED.g.com_dx == PM.view_numbers("tricks_rigid")["com_dx_mm"]
-    # the trot's pendulum is the "trot" view
-    v = PM.view_numbers("trot")
-    assert (PL.TROT_FIT.com_x_mm, PL.TROT_FIT.com_h_mm, PL.TROT_FIT.extra_ms, PL.TROT_FIT.clamp_deg) == (
-        v["com_x_mm"], v["com_h_mm"], v["extra_ms"], v["clamp_deg"])
+    # the trot's pendulum is the "trot" view: the engine reads it from the generated header
+    gait_h = code("kernel/mind/engine/gait.h")
+    for name in ("COM_X_MM", "EXTRA_MS", "COM_H_MM"):
+        assert f"KILO_MODEL_VIEW_TROT_{name}" in gait_h
     # the measurement's home height is the model's STANCE
     assert M.stance_z_mm() == measure_script.HOME_Z
 
@@ -275,7 +273,7 @@ def test_model_apply_dry_run_changes_nothing_and_reports():
     from kilo import cli_model as CM
 
     watched = [REPO / "protocol" / "spec.toml", REPO / "mind" / "kilo" / "protocol" / "kilo_protocol.py",
-               REPO / "kernel" / "host" / "tests" / "planner_vectors.txt"]
+               REPO / "kernel" / "host" / "tests" / "measure_vectors.txt"]
     before = [p.read_bytes() for p in watched]
     lines: list[str] = []
     rc = CM.apply(FIT, dry_run=True, rear_up=False, say=lines.append)

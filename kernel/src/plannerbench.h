@@ -1,10 +1,10 @@
 //
-// plannerbench.h: the walking planner's cost on the Pi 2 B, measured at boot
+// plannerbench.h: the walking engine's cost on the Pi 2 B, measured at boot
 // with no body involved (docs/fast-boot.md §7: "check the 20 ms budget early
-// in P3"). A Planner of its own, not the walker's: nothing is sent to the
-// body. One planner call per main-loop pass, so the loop keeps its 1 ms
-// cadence; one log line per pattern. The host's counterpart is
-// `make -C kernel/host bench` (kernel/host/tests/bench_planner.cpp).
+// in P3"). A Solver of its own (engine/solve.h), not the walker's: nothing is sent to the
+// body. One solver call per main-loop pass, so the loop keeps its 1 ms
+// cadence; one log line per gait. The host's counterpart is
+// `make -C kernel/host bench` (kernel/host/tests/bench_engine.cpp).
 //
 // Then the host channel's Noise handshake (kernel/README.md "Who may talk to
 // Kilo: keys") between two fixed test keys, one X25519 per pass as the host
@@ -19,7 +19,7 @@
 
 #include "net/noise.h"
 #include "proto/kilo_protocol.h"
-#include "planner/plan.h"
+#include "engine/solve.h"
 #include "platform.h"
 #include <circle/types.h>
 
@@ -29,7 +29,7 @@ public:
 	CPlannerBench (kilo::Log *pLog);
 
 	// One step of the bench: a pattern's start(), or one next(). FALSE once
-	// every pattern has run (then delete it: the planner is a few KB).
+	// every gait has run (then delete it: the solver is a few KB).
 	boolean Step (void);
 
 private:
@@ -37,7 +37,7 @@ private:
 	void Report (void);
 
 	kilo::Log *m_pLog;
-	kilo::planner::Planner m_Planner;
+	kilo::engine::Solver m_Planner;
 	unsigned m_nPattern;		// index into the pattern list
 	boolean m_bStarted;		// the current pattern's start() ran
 	unsigned m_nTick;		// next() calls so far for this pattern

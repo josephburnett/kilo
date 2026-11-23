@@ -67,7 +67,7 @@
 #include "measure/measure.h"
 #include "net/host_server.h"
 #include "perception/percepts.h"
-#include "planner/walker.h"
+#include "engine/walker.h"
 #include "platform.h"
 #include "platform_net.h"
 #include "power/sleep.h"
@@ -150,7 +150,7 @@ class Mind final : public LinkListener,
 
   LogRing& log() { return log_; }
   SerialLink& link() { return link_; }
-  planner::Walker& walker() { return walker_; }
+  engine::Walker& walker() { return walker_; }
   tricks::TrickPlayer& player() { return player_; }
   perception::Percepts& percepts() { return percepts_; }
   remote::RemoteControl& remote() { return remote_; }
@@ -324,7 +324,7 @@ class Mind final : public LinkListener,
   NoListener no_listener_;
   Listener* listener_;
   HostServer host_;
-  planner::Walker walker_;
+  engine::Walker walker_;
   tricks::TrickPlayer player_;
   perception::Percepts percepts_;
   Body body_;

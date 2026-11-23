@@ -50,7 +50,7 @@ const char* net_name(Net n) {
   return "?";
 }
 
-Sleep::Sleep(SerialLink& link, planner::Walker& walker, Clock& clock, Log& log)
+Sleep::Sleep(SerialLink& link, engine::Walker& walker, Clock& clock, Log& log)
     : link_(link), walker_(walker), clock_(clock), log_(log) {}
 
 uint64_t Sleep::time_in_us(State s) const {

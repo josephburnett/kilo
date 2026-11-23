@@ -163,12 +163,18 @@ def validate(cfg: dict[str, Any]) -> None:
     _num(cfg, "alive.trick_speed", 0.25, 2.0)
     tricks = cfg["alive"]["tricks"]
     from kilo.tricks.library import AUTHORED  # names only: no JSON is read
+    # each trick sitting and standing: in the library, or made by the movement engine (the standing
+    # face wash: kilo.tricks.alive_set.ENGINE, kernel/mind/engine/paw.h)
+    engine = {("wash_face", "stand")}
+
+    def known(t, base):
+        return f"alive_{t}_{base}" in AUTHORED or (t, base) in engine
     if (not isinstance(tricks, list) or not 1 <= len(tricks) <= MAX_ALIVE_TRICKS
             or len(set(tricks)) != len(tricks)
-            or any(not isinstance(t, str) or f"alive_{t}_sit" not in AUTHORED or f"alive_{t}_stand" not in AUTHORED
-                   for t in tricks)):
+            or any(not isinstance(t, str) or not known(t, "sit") or not known(t, "stand") for t in tricks)):
         raise PersonalityError(f"alive.tricks must be 1..{MAX_ALIVE_TRICKS} different tricks of "
-                               "kilo.tricks.alive_set.SET (alive_<name>_sit and _stand in the library)")
+                               "kilo.tricks.alive_set.SET (alive_<name>_sit and _stand in the library, "
+                               "or the engine's)")
 
 
 # ---- the built-in YAML subset -------------------------------------------------------

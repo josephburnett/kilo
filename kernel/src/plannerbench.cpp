@@ -8,9 +8,9 @@
 #include <circle/util.h>
 
 using namespace kilo;
-using namespace kilo::planner;
+using namespace kilo::engine;
 
-// The walk each pattern gets, as one repetition of bench_planner.cpp: its
+// The walk each gait gets, as one repetition of bench_engine.cpp: its
 // default speed, then 40 mm/s, a turn to the left, a change of pattern, and
 // the planned stop.
 static const char *const Patterns[] = {"trot", "walk", "crawl"};
@@ -43,7 +43,7 @@ boolean CPlannerBench::Step (void)
 		return NoiseStep ();
 	}
 
-	const Pattern *pPattern = find_pattern (Patterns[m_nPattern]);
+	const Gait *pPattern = find_gait (Patterns[m_nPattern]);
 	if (pPattern == 0)
 	{
 		m_nPattern++;
@@ -74,10 +74,10 @@ boolean CPlannerBench::Step (void)
 	}
 	if (m_nTick == ChangeAt)
 	{
-		const Pattern *pOther = find_pattern (m_nPattern == 0 ? "walk" : "trot");
+		const Gait *pOther = find_gait (m_nPattern == 0 ? "walk" : "trot");
 		if (pOther != 0)
 		{
-			m_Planner.set_pattern (*pOther);
+			m_Planner.set_gait (*pOther);
 		}
 	}
 	if (m_nTick == StopAt)
@@ -189,7 +189,7 @@ void CPlannerBench::Report (void)
 {
 	unsigned nMean100 = m_nTick > 0 ? (unsigned) (m_nSumUs * 100 / m_nTick) : 0;
 	logf (*m_pLog, LogLevel::Info,
-	      "planner bench %s: start %u us; next() x%u mean %u.%02u us max %u us "
+	      "engine bench %s: start %u us; next() x%u mean %u.%02u us max %u us "
 	      "(a tick is 20000 us; Python on the Pi: max 4500 us)",
 	      Patterns[m_nPattern], m_nStartUs, m_nTick, nMean100 / 100, nMean100 % 100, m_nMaxUs);
 }

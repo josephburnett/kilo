@@ -1,5 +1,13 @@
 # Walking and balance: what we have, why the trot tips, what the model should be
 
+**Since 2026-11-23 the planner this document designs is replaced** by the
+movement engine's step clock and solver (docs/movement-engine.md, step 2;
+its judgement against the planner in docs/movement-engine-results.md). What
+follows is the history and the reasoning the engine kept (the gaits'
+timing, the trot's pendulum, the quick stop, the gate and the catch); the
+code it names under `kernel/mind/planner/` (other than the model) and
+`mind/kilo/planner/` (other than the model and the error) is gone.
+
 Written 2026-10-13 after the first floor drives (trot at 1000 ms with
 balance on: "wobbles so much when walking that he tipped over"; tricks fine).
 Numbers use Kilo's measured geometry: legs 45 + 50 mm, body 123 mm long,

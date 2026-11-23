@@ -77,6 +77,10 @@ DROPPED = {
     "push_up": "not a cat's move; the model puts his right belly on the floor (34 deg of roll)",
 }
 BASES = ("sit", "stand")
+# Variants the movement engine makes instead of the library (docs/movement-engine.md, step 4):
+# standing, the face wash is a front paw lifted on three feet (kernel/mind/engine/paw.h; its checks:
+# mind/tests/test_engine_tricks.py, the same as below). No library file for these.
+ENGINE = {("wash_face", "stand")}
 # Where a trick's original rows start from, when that is not the base (the move there first).
 # The legacy skills all start from `up`; wash_face sits first itself (its first row is a sit).
 VIA = {
@@ -152,8 +156,13 @@ def name_of(trick: str, base: str) -> str:
     return f"alive_{trick}_{base}"
 
 
+def cases() -> list[tuple[str, str]]:
+    """(trick, base) of every variant the library holds."""
+    return [(t, b) for t in SET for b in BASES if (t, b) not in ENGINE]
+
+
 def names() -> list[str]:
-    return [name_of(t, b) for t in SET for b in BASES]
+    return [name_of(t, b) for t, b in cases()]
 
 
 def base_angles(base: str) -> tuple:
@@ -278,7 +287,7 @@ def build(trick: str, base: str) -> Trick:
 
 
 def build_all() -> dict[str, Trick]:
-    return {name_of(t, b): build(t, b) for t in SET for b in BASES}
+    return {name_of(t, b): build(t, b) for t, b in cases()}
 
 
 # ---- the model check ---------------------------------------------------------------------------

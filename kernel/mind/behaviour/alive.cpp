@@ -8,6 +8,7 @@
 #include "util/log.h"
 #include "util/logring.h"
 #include "util/mem.h"
+#include "util/str.h"
 
 namespace kilo {
 namespace behaviour {
@@ -167,11 +168,25 @@ bool Alive::play_trick(double now) {
   char name[48];
   bool standing = variant_ == Variant::Stand;
   format(name, sizeof name, "alive_%s_%s", pers_.alive_tricks[k], standing ? "stand" : "sit");
-  const tricks::Trick* t = tricks::find_trick(name);
   double speed = d_clamp(pers_.alive_trick_speed > 0 ? pers_.alive_trick_speed : 1.0, 0.25, 3.98);
   uint8_t q6 = (uint8_t)d_clamp((double)d_iround(speed * tricks::kSpeedUnity), tricks::kSpeedMin, 255);
   const char* why = "no such trick in the library";
-  uint32_t play = t != nullptr ? player_.start(*t, false, q6, &why) : 0;
+  const tricks::Trick* t = nullptr;
+  bool mirror = false;
+  if (standing && str_eq(pers_.alive_tricks[k], "wash_face")) {
+    // standing, the face wash is the engine's (engine/paw.h): a front paw lifted on three feet,
+    // made from the body model at the personality's pace, the side and the strokes drawn
+    engine::PawGoal pg;
+    pg.tempo = (planner::real)d_clamp(speed, (double)engine::kPawTempoMin, (double)engine::kPawTempoMax);
+    pg.strokes = 2 + (int)(trick_rng_.random() * 3) % 3;
+    mirror = trick_rng_.random() < 0.5;
+    if (paw_.build(model_, pg)) t = &paw_.trick();
+    else why = paw_.why();
+    q6 = tricks::kSpeedUnity;  // the tempo is in its frames
+  } else {
+    t = tricks::find_trick(name);
+  }
+  uint32_t play = t != nullptr ? player_.start(*t, mirror, q6, &why) : 0;
   last_trick_ = k;
   if (play == 0) {
     trick_failures_++;

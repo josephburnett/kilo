@@ -28,7 +28,8 @@
 #include "behaviour/alive.h"
 #include "guard/guard.h"
 #include "mind.h"
-#include "planner/plan.h"
+#include "engine/paw.h"
+#include "engine/solve.h"
 #include "power/battery.h"
 #include "remote/client.h"
 #include "tests/check.h"
@@ -129,20 +130,20 @@ void test_zones() {
 // planned stop's for comparison (docs/walking-and-balance.md §14).
 void test_stop_way_against_the_planner() {
   for (const char* g : {"walk", "trot", "crawl"}) {
-    const planner::Pattern* pat = planner::find_pattern(g);
+    const engine::Gait* pat = engine::find_gait(g);
     for (double f : {0.4, 1.0, 1.25, 1.4}) {  // the remote's levels +1, +3, +4 and +5 (the trot's +5: 1.4)
       if (f > 1.25 && !str_eq(g, "trot")) continue;  // the walk and the crawl top at 1.25 (their +5)
       for (double steer : {0.0, 0.25, 1.0}) {  // straight, and steered (A6 level 1 and 3) at the top speeds
         if (steer != 0 && f < 1.25) continue;
         if (steer > 0.25 && str_eq(g, "trot")) continue;  // the trot's long swing (+4, +5) steers one level
         double v = 0, worst = 0, planned = 0, ticks = 0;
-        int period = (int)(planner::timing(*pat, (planner::real)(planner::default_speed(*pat) * f)).period_ms / 20);
+        int period = (int)(engine::timing(*pat, (planner::real)(engine::default_speed(*pat) * f)).period_ms / 20);
         for (int quick = 0; quick < 2; quick++)
           for (int at = 0; at < period; at += (quick ? 2 : period)) {
-            planner::Planner p;
-            p.start(*pat, planner::Direction::Forward, (planner::real)(planner::default_speed(*pat) * f), 0, -1,
+            engine::Solver p;
+            p.start(*pat, engine::Direction::Forward, (planner::real)(engine::default_speed(*pat) * f), 0, -1,
                     (planner::real)steer);
-            planner::TickPlan prev = p.next();
+            engine::TickPlan prev = p.next();
             for (int t = 0; t < 250 + at; t++) prev = p.next();
             v = (double)p.timing().speed_mm_s;
             double moved = 0;
@@ -150,12 +151,12 @@ void test_stop_way_against_the_planner() {
             else p.stop();
             int t = 0;
             for (; t < 1000 && !p.done(); t++) {
-              planner::TickPlan cur = p.next();
+              engine::TickPlan cur = p.next();
               double s = 0;
               int n = 0;
               for (int i = 0; i < planner::kLegs; i++)
                 if ((prev.support & cur.support) & (1 << i)) {
-                  s += prev.x[i] - cur.x[i];
+                  s += (prev.xq[i] - cur.xq[i]) / 4.0;
                   n++;
                 }
               if (n) moved += s / n;
@@ -400,7 +401,7 @@ void test_hold_refuses_forward_allows_turning_and_releases() {
   CHECK(r.mind.guard().action() == Action::Watch && r.log.has("clear: forward walking allowed again"));
   r.key(A4);
   r.run_ms(800);
-  CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Forward);
+  CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == engine::Direction::Forward);
   // the metrics line and the recorder's marks (no recorder attached here: the line is the check)
   char line[256];
   r.mind.metric_line(9, line, sizeof line);
@@ -459,14 +460,14 @@ void test_steering_while_the_guard_acts() {
     r.run_ms(1500);
     r.key(A6);
     r.run_ms(1000);
-    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Left);
+    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == engine::Direction::Left);
     uint32_t refused = r.mind.guard().refused();
     r.key(B7);
     r.run_ms(1000);
-    CHECK(r.mind.guard().refused() == refused + 1 && r.mind.walker().goal().direction == planner::Direction::Left);
+    CHECK(r.mind.guard().refused() == refused + 1 && r.mind.walker().goal().direction == engine::Direction::Left);
     r.key(B5);  // out of the turn backward: allowed
     r.run_ms(1000);
-    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Back);
+    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == engine::Direction::Back);
   }
 }
 
@@ -549,7 +550,7 @@ void test_backward_trick_pickup_and_off_do_not_trigger() {
     r.key(B5);
     r.key(B5);  // +3 -> +2 -> +1 -> -1: backward
     r.run_ms(1500);
-    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Back);
+    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == engine::Direction::Back);
     r.wall_mm = 160 - r.travel;
     r.run_ms(1500);
     CHECK(r.mind.guard().stops() == 0 && r.mind.guard().pullbacks() == 0 && r.mind.walker().active());
@@ -620,14 +621,14 @@ void test_hand_in_face_walking_every_gait() {
       r.key(g.key);
       for (int i = 0; i < (g.steer < 0 ? -g.steer : g.steer); i++) r.key(g.steer > 0 ? A6 : C6);
       r.run_ms(3000);
-      CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Forward);
+      CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == engine::Direction::Forward);
       r.fixed_mm = red ? 100 : 180;  // a hand put in front of his face, held there as he comes
       uint32_t hisses = r.mind.guard().hisses();
       double t_act = run_until(r, 3000, [&] { return r.mind.guard().action() != Action::Watch; });
       // the crawl and the trot, very close: they stop (reversing takes 4 s, 0.7 to 1.5 s)
       bool slow = std::strcmp(g.name, "crawl") == 0 || std::strcmp(g.name, "trot") == 0;
       bool backs = red && !slow;
-      double t_halt = run_until(r, 3000, [&] { return r.mind.walker().planner().halting() || backs; });
+      double t_halt = run_until(r, 3000, [&] { return r.mind.walker().solver().halting() || backs; });
       CHECKF(t_act >= 0 && t_act < 0.45, "%s steer %d %s: reacted after %.2f s", g.name, g.steer, red ? "RED" : "BLUE",
              t_act);
       CHECK(backs ? r.mind.guard().action() == Action::Backing : t_halt >= 0);
@@ -649,15 +650,15 @@ void test_hand_in_face_turning_backward_standing_sitting_lying() {
     r.wall = false;
     r.key(A6);
     r.run_ms(2000);
-    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Left);
+    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == engine::Direction::Left);
     r.fixed_mm = 180;  // closer than a forward walk stops for: not while turning (green)
     r.run_ms(1500);
-    CHECK(r.mind.walker().active() && !r.mind.walker().planner().stopping() && r.mind.guard().zone() == Zone::Green);
+    CHECK(r.mind.walker().active() && !r.mind.walker().solver().stopping() && r.mind.guard().zone() == Zone::Green);
     r.fixed_mm = 100;
     r.run_ms(1500);
-    CHECK(r.mind.walker().active() && !r.mind.walker().planner().stopping() && r.mind.guard().zone() == Zone::Blue);
+    CHECK(r.mind.walker().active() && !r.mind.walker().solver().stopping() && r.mind.guard().zone() == Zone::Blue);
     r.fixed_mm = 60;
-    double t = run_until(r, 3000, [&] { return r.mind.walker().planner().halting(); });
+    double t = run_until(r, 3000, [&] { return r.mind.walker().solver().halting(); });
     CHECKF(t >= 0 && t < 0.45, "turning: halted after %.2f s", t);
     CHECK(r.run_until_hold(6000) && r.mind.guard().hisses() == 1 && r.mind.guard().pullbacks() == 0);
     std::printf("guard: a hand in his face (RED) turning in place: the quick stop after %.2f s, sits\n", t);
@@ -670,10 +671,10 @@ void test_hand_in_face_turning_backward_standing_sitting_lying() {
     r.key(B5);
     r.key(B5);
     r.run_ms(1500);
-    CHECK(r.mind.walker().goal().direction == planner::Direction::Back);
+    CHECK(r.mind.walker().goal().direction == engine::Direction::Back);
     r.fixed_mm = 60;
     r.run_ms(1500);
-    CHECK(r.mind.walker().active() && !r.mind.walker().planner().stopping() && r.mind.guard().zone() == Zone::Red &&
+    CHECK(r.mind.walker().active() && !r.mind.walker().solver().stopping() && r.mind.guard().zone() == Zone::Red &&
           r.mind.guard().action() == Action::Watch && r.mind.guard().eyes() == Eyes::Red);
     CHECK(r.log.has("state=walk-back: eyes only (walking away from it)"));
   }
@@ -705,7 +706,7 @@ void test_hand_in_face_turning_backward_standing_sitting_lying() {
     r.fixed_mm = 60;
     double t = run_until(r, 2000, [&] { return r.mind.guard().action() == Action::Backing; });
     CHECKF(t >= 0 && t < 0.4, "standing RED: %.2f s", t);
-    CHECK(run_until(r, 3000, [&] { return r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Back; }) >= 0);
+    CHECK(run_until(r, 3000, [&] { return r.mind.walker().active() && r.mind.walker().goal().direction == engine::Direction::Back; }) >= 0);
     CHECK(r.run_until_hold(10000) && r.mind.guard().pullbacks() == 1 && r.mind.guard().hisses() == 1);
     r.run_ms(1500);
     CHECK(r.mind.sitting_variant());
@@ -817,14 +818,14 @@ void test_still_thresholds() {
     CHECK(!r.mind.walker().active() && r.mind.guard().refused() == 1 && r.mind.guard().stops() == 0);
     r.key(A6);  // turning is allowed
     r.run_ms(1000);
-    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Left);
+    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == engine::Direction::Left);
     r.key(B6);
     r.run_ms(2000);
     r.fixed_mm = 300;  // moved away: forward walking again
     r.run_ms(500);
     r.key(A4);
     r.run_ms(800);
-    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Forward);
+    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == engine::Direction::Forward);
     std::printf("guard: B6 with something at 150 mm: stands and stays standing; A4 refused\n");
   }
   {  // (b): the quick stop at the walking distance, then B6: he stands and stays standing, forward keys stay
@@ -856,7 +857,7 @@ void test_still_thresholds() {
     CHECK(r.mind.guard().action() == Action::Watch && r.log.has("clear: forward walking allowed again"));
     r.key(A4);
     r.run_ms(800);
-    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == planner::Direction::Forward);
+    CHECK(r.mind.walker().active() && r.mind.walker().goal().direction == engine::Direction::Forward);
     std::printf("guard: stopped %.0f mm short at trot +3, then B6: stands, stays standing, A4 refused until clear\n",
                 gap);
   }
@@ -1120,6 +1121,13 @@ void test_alive_tricks_through_the_mind() {
     for (const char* base : {"sit", "stand"}) {
       char name[48];
       std::snprintf(name, sizeof name, "alive_%s_%s", p.alive_tricks[i], base);
+      if (std::strcmp(name, "alive_wash_face_stand") == 0) {  // the engine's (engine/paw.h), made when asked
+        static engine::PawWash w;
+        CHECKF(w.build(planner::BodyModel(), engine::PawGoal()) && tricks::trick_problem(w.trick()) == nullptr &&
+                   w.trick().end_posture == KILO_POSTURE_STAND,
+               "the engine's paw wash: %s", w.why() ? w.why() : "");
+        continue;
+      }
       const tricks::Trick* t = tricks::find_trick(name);
       CHECKF(t != nullptr && tricks::trick_problem(*t) == nullptr, "%s", name);
       if (t != nullptr)

@@ -22,7 +22,7 @@ from kilo.body.client import BodyClient
 from kilo.link import consts
 from kilo.link.serial_link import LinkConfig, SerialLink
 from kilo.protocol import kilo_protocol as P
-from kilo.planner.walker import pack_pose_feet
+from kilo.engine import pack_pose_feet
 from kilo.vbody.core import BUILD_SCRIPT, CORE_BUILD, TICK_S, CoreBody, build_harness
 
 from conftest import FAST

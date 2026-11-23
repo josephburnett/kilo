@@ -408,29 +408,31 @@ def edit_spec(text: str, changes: list[Change], source: str) -> str:
 
 
 # ---- what the model means for Kilo (run in the tree it describes) ---------------------------------------
+GAITS = ("walk", "trot", "crawl")
+STATIC = ("walk", "crawl")  # the gaits whose weight the engine keeps inside three feet (the trot rocks on two)
+
+
 def metrics() -> dict:
     """Numbers that say what this checkout's model means for Kilo: where his centre of mass is
     standing, and for every walk the least distance his centre of mass keeps inside his feet
-    while at least three are down (the planner asks for PlannerConfig.margin_mm), and the largest
-    lean it plans. Run by ``apply`` in the tree before and after (a subprocess: the model is read
-    at import)."""
-    from kilo.planner import patterns as pat
+    while at least three are down (the engine keeps each gait's margin_mm, kernel/mind/engine/gait.cpp),
+    and the largest lean it plans. Run by ``apply`` in the tree before and after (a subprocess: the
+    model is read at import, and the engine's walks are this tree's kernel code, kilo.engine)."""
+    from kilo import engine
     from kilo.planner.model import VIEWS, BodyModel
-    from kilo.planner.plan import Planner
 
     m = BodyModel()
     cx, cy, ch = m.stance_com()
     out: dict = {"stance_com": [round(cx, 2), round(cy, 2), round(ch, 2)], "total_g": round(m.total_g, 1),
                  "walks": {}, "views": {}}
-    for name in pat.PATTERN_NAMES:
-        p = Planner(m, name, "forward", None, tick=1000)
+    for name in GAITS:
+        rows, _, _ = engine.plan(name, None, ticks=600)
         worst, pitch, roll = None, 0.0, 0.0
-        for _ in range(600):
-            t = p.next()
+        for t in rows:
             if bin(t.support).count("1") >= 3:
                 worst = t.margin if worst is None else min(worst, t.margin)
             pitch, roll = max(pitch, abs(t.plan_pitch)), max(roll, abs(t.plan_roll))
-        out["walks"][name] = {"static": bool(pat.pattern(name).lean),
+        out["walks"][name] = {"static": name in STATIC,
                               "min_margin_mm": None if worst is None else round(worst, 2),
                               "max_pitch_deg": round(pitch, 2), "max_roll_deg": round(roll, 2)}
     for name in VIEWS:
@@ -452,11 +454,11 @@ def _metrics_of(tree: Path) -> dict:
     r = _run(tree, ["-c", "import json; from kilo.cli_model import metrics; print(json.dumps(metrics()))"],
              cwd=tree / "mind")
     if r.returncode != 0:
-        raise RuntimeError("the planner failed on this model:\n" + r.stderr[-2000:])
+        raise RuntimeError("the engine's walks failed on this model:\n" + r.stderr[-2000:])
     return json.loads(r.stdout)
 
 
-VECTORS = ("planner", "measure", "behaviour", "perception", "intent")
+VECTORS = ("measure", "behaviour", "perception", "intent")
 # The intent layer's moves and the righting experiment's, planned and checked on the model (committed JSON that
 # kernel/mind/intent/gen_intent.py reads): re-planned before the intent tables are generated.
 INTENT_PLANS = ("kilo.intent.moves", "kilo.intent.righting")
@@ -577,7 +579,7 @@ def report(before: dict, after: dict, changes: list[Change], rear_up: str) -> st
     L.append(f"  centre of mass, standing: {b[0]:.1f} -> {a[0]:.1f} mm ahead of the shoulders' middle, "
              f"{b[1]:+.1f} -> {a[1]:+.1f} mm to the left, {b[2]:.1f} -> {a[2]:.1f} mm above the floor")
     L.append("  each walk: the least his centre of mass stays inside his feet with three or more down "
-             "(the planner asks for 14 mm), and the most it leans him")
+             "(the engine keeps the walk 3.5 mm and the crawl 8 mm inside), and the most it leans him")
     for name, w in after["walks"].items():
         w0 = before["walks"].get(name, {})
 
