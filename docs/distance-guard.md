@@ -266,6 +266,9 @@ To read them later:
     kilo record decode FILE --log | grep guard         the lines in it
     kilo record decode FILE --csv                       dist_mm per telemetry, to plot against them
 
+How far a walk toward a wall really carried him (the readings against the
+plan's steps): `kilo log wall FILE.krec`, `docs/wall-walk.md`.
+
 The session metrics (`kilo metrics --host kilo.local`, also in `kilo status
 --host`) have a `guard:` line: on, zone, action, eye colour, zone changes,
 stops, pullbacks, refused keys, releases, reactions (while standing,
