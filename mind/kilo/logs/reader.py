@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from kilo.link import consts
-from kilo.logs import kilolog
+from kilo.logs import kilolog, proto2
 from kilo.protocol import kilo_protocol as P
 
 A16 = 16.0
@@ -53,13 +53,13 @@ class TelemetrySample:
     epoch: int | None = None
     tick_load_ms: float | None = None
     rx_err: int | None = None
-    ref_pitch_deg: float | None = None   # the balance reference (in GAIT: the plan's prediction)
+    ref_pitch_deg: float | None = None   # the balance reference (in a stream: the plan's prediction)
     ref_roll_deg: float | None = None
     corr_pitch_deg: float | None = None  # the balance correction applied
     corr_roll_deg: float | None = None
-    feet_queued: int | None = None
+    pose_queued: int | None = None
     support: int | None = None
-    trick_frame: int | None = None
+    limited: int | None = None   # TELEMETRY.limited (protocol 2: trick_frame, 0xFF none)
     balance: bool | None = None
 
     def get(self, name: str) -> Any:
@@ -119,13 +119,13 @@ def sample_from_fields(t: float, f: dict[str, Any] | Any) -> TelemetrySample:
         rate_yaw_dps=None if g("rate_yaw") is None else g("rate_yaw") / A16,
         dist_mm=float(dist) if dist else None,
         batt_mv=g("batt_mv"),
-        mode=None if g("mode") is None else consts.MODES.get(int(g("mode")), f"?{g('mode')}"),
+        mode=None if g("mode") is None else proto2.mode_name(int(g("mode"))),
         flags=names, owners=g("owners"), epoch=g("epoch"),
         tick_load_ms=None if g("tick_load") is None else g("tick_load") / 10.0,
-        rx_err=g("rx_err"), trick_frame=g("trick_frame"),
+        rx_err=g("rx_err"), limited=g("limited", g("trick_frame")),  # (protocol 2 JSONL: trick_frame)
         ref_pitch_deg=_deg(g("ref_pitch")), ref_roll_deg=_deg(g("ref_roll")),
         corr_pitch_deg=_deg(g("corr_pitch")), corr_roll_deg=_deg(g("corr_roll")),
-        feet_queued=g("feet_queued"), support=g("support"),
+        pose_queued=g("pose_queued", g("feet_queued")), support=g("support"),  # (protocol 2: feet_queued)
         balance=None if names is None else "balance_active" in names,
     )
 
@@ -208,7 +208,7 @@ def _read_jsonl(path: Path) -> LogData:
                     src = fields if fields else _decode(typ, rec.get("payload"))
                     if src is not None:
                         g = src.get if isinstance(src, dict) else (lambda k: getattr(src, k, None))
-                        rx_events.append(LogEvent(t, consts.EVENTS.get(g("code"), str(g("code"))),
+                        rx_events.append(LogEvent(t, proto2.event_name(g("code")),
                                                   g("arg"), g("tick"), g("epoch")))
             elif kind == "tx":
                 data.tx_types[rec.get("type")] += 1
@@ -238,10 +238,7 @@ def _read_kilolog(path: Path) -> LogData:
         if r.frame is None:
             data.rx_errors[r.error] += 1
             continue
-        try:
-            name = P.MsgId(r.frame.type).name
-        except ValueError:
-            name = f"0x{r.frame.type:02X}"
+        name = proto2.type_name(r.frame.type, r.frame.payload)
         if r.direction == "tx":
             data.tx_types[name] += 1
             continue
@@ -256,7 +253,7 @@ def _read_kilolog(path: Path) -> LogData:
         if name == "TELEMETRY":
             data.samples.append(sample_from_fields(r.t, msg))
         else:
-            data.events.append(LogEvent(r.t, consts.EVENTS.get(msg.code, str(msg.code)), msg.arg,
+            data.events.append(LogEvent(r.t, proto2.event_name(msg.code), msg.arg,
                                         msg.tick, msg.epoch))
     data.t0 = float(meta.get("start_mono", 0.0))
     return data

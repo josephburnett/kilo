@@ -46,7 +46,7 @@ class ErrorTracker {
   explicit ErrorTracker(real offset_s = 2) : alpha_(kTickMs / (real)1000.0 / offset_s) {}
   void reset();
 
-  // One TELEMETRY in GAIT (tick unwrapped; angles in TELEMETRY's 1/16 deg)
+  // One TELEMETRY in mode STREAM (tick unwrapped; angles in TELEMETRY's 1/16 deg)
   // and the prediction for its tick (null: the reference the body reports,
   // 0 while its balance is off). Returns its error less the offset.
   Attitude add(int64_t tick, int16_t pitch, int16_t roll, int16_t ref_pitch, int16_t ref_roll, int16_t corr_pitch,

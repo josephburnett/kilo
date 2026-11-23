@@ -18,10 +18,6 @@ int8_t fall_detect(uint8_t& over, const Attitude& a) {
   return a.roll < 0 ? -1 : 1;
 }
 
-bool fall_level(const Attitude& a) {
-  const int16_t lim = FALL_LEVEL_DEG * A16_PER_DEG;
-  return under(a.roll, lim) && under(a.pitch, lim);
-}
 
 bool fall_still(const Attitude& a) {
   const int16_t lim = FALL_STILL_DPS * A16_PER_DEG;

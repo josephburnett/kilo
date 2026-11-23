@@ -695,7 +695,7 @@ spare at stage 1:
 | top (stage 3's top) | +46 to +55 | +48.6 to +51.3 | the same, at the top |
 
 The C++ mind on the Pi does this (`kernel/mind/tricks/player.cpp`), from the
-trick's own entry in the library; `kilo.tricks.player.GuardWatch` is the
+trick's own entry in the library; `kilo.tricks.model.GuardWatch` is the
 Python reference the C++ is checked against. The remote finds each stage's
 top by its guard's name (`up`, `mid`, `top`).
 

@@ -177,8 +177,8 @@ struct Rig : MindRig {
   }
   void pass() override {
     if (follow) {
-      body.pitch = body.mode == KILO_MODE_GAIT ? fp[body.tick] : (int16_t)0;
-      body.roll = body.mode == KILO_MODE_GAIT ? fr[body.tick] : (int16_t)0;
+      body.pitch = body.mode == KILO_MODE_STREAM ? fp[body.tick] : (int16_t)0;
+      body.roll = body.mode == KILO_MODE_STREAM ? fr[body.tick] : (int16_t)0;
     }
     body.step();
     mind.poll();
@@ -186,8 +186,8 @@ struct Rig : MindRig {
     body.react();
     for (size_t i = before; i < body.sent.size(); i++) {
       const Sent& s = body.sent[i];
-      if (s.type != KILO_MSG_FEET) continue;
-      kilo_feet_t f;
+      if (s.type != KILO_MSG_POSE) continue;
+      kilo_pose_t f;
       std::memcpy(&f, s.payload.data(), sizeof f);
       fp[f.tick] = f.pitch;
       fr[f.tick] = f.roll;
@@ -195,9 +195,9 @@ struct Rig : MindRig {
     // the real body: any posture ends GAIT (the rig's ends it only on STANCE)
     for (size_t i = before; i < body.sent.size(); i++) {
       const Sent& s = body.sent[i];
-      if (s.type == KILO_MSG_SET_POSTURE && s.payload.size() == 4 && body.mode == KILO_MODE_GAIT) {
+      if (s.type == KILO_MSG_SET_POSTURE && s.payload.size() == 4 && body.mode == KILO_MODE_STREAM) {
         body.mode = KILO_MODE_IDLE;
-        body.event(KILO_EVENT_GAIT_STOPPED, 0);
+        body.event(KILO_EVENT_STREAM_STOPPED, 0);
       }
     }
     if (each) each(*this);
@@ -262,7 +262,7 @@ void test_full_run() {
   r.run_ms(1000);
   const Goal* b = r.goal(KILO_MSG_SET_BALANCE);
   CHECK(b != nullptr && b->payload[0] == 0);  // the balance off while it measures
-  CHECK(r.goal(KILO_MSG_SET_POSTURE) == nullptr && r.body.mode == KILO_MODE_GAIT);
+  CHECK(r.goal(KILO_MSG_SET_POSTURE) == nullptr && r.body.mode == KILO_MODE_STREAM);
   for (int i = 0; i < 1100 && r.measuring(); i++) r.run_ms(100);
   CHECKF(!r.measuring(), "still measuring after 110 s");
   // the body did what the model said: every sweep tipped where the model has its crossing, and ended early
@@ -273,15 +273,17 @@ void test_full_run() {
   std::printf("measure: a run on a body that does what the model says: %u ticks (%.1f s), 8 tips\n", ticks,
               ticks * 0.02);
   // the stream: every script tick sent once, in order, 50 Hz TELEMETRY asked for and put back
-  std::vector<Sent> feet = r.body.of(KILO_MSG_FEET);
+  std::vector<Sent> feet = r.body.of(KILO_MSG_POSE);
   CHECKF(feet.size() == ticks && r.mind.measure().ticks_sent() == ticks, "%zu FEET", feet.size());
   bool seq = true, ranges = true;
   for (size_t i = 1; i < feet.size(); i++) {
-    kilo_feet_t a, c;
+    kilo_pose_t a, c;
     std::memcpy(&a, feet[i - 1].payload.data(), sizeof a);
     std::memcpy(&c, feet[i].payload.data(), sizeof c);
-    seq = seq && (uint16_t)(a.tick + 1) == c.tick;
-    for (int k = 0; k < 4; k++) ranges = ranges && c.x_mm[k] >= -60 && c.x_mm[k] <= 60 && c.z_mm[k] >= 30 && c.z_mm[k] <= 95;
+    seq = seq && (uint16_t)(a.tick + 1) == c.tick && c.flags == 0;
+    for (int k = 0; k < 4; k++)
+      ranges = ranges && c.leg[2 * k] >= -240 && c.leg[2 * k] <= 240 && c.leg[2 * k + 1] >= 120 &&
+               c.leg[2 * k + 1] <= 380 && c.leg[2 * k] % 4 == 0 && c.leg[2 * k + 1] % 4 == 0;
   }
   CHECK(seq && ranges);
   std::vector<Sent> ss = r.body.of(KILO_MSG_SET_STREAM);
@@ -342,12 +344,12 @@ void test_stops() {
     r.measure_keys();
     r.run_ms(4000);
     CHECK(r.measuring());
-    size_t feet = r.body.count(KILO_MSG_FEET);
+    size_t feet = r.body.count(KILO_MSG_POSE);
     r.key(c.key, 60);
     CHECKF(r.ring_has(c.line), "key 0x%02x: no '%s'", c.key, c.line);
     r.run_ms(1600);
     CHECKF(!r.measuring(), "key 0x%02x: still measuring", c.key);
-    CHECK(r.body.count(KILO_MSG_FEET) <= feet + 8);  // at once: what was in flight at most
+    CHECK(r.body.count(KILO_MSG_POSE) <= feet + 8);  // at once: what was in flight at most
     CHECK(!r.mind.walker().active());
     const Goal* p = r.goal(KILO_MSG_SET_POSTURE);
     CHECKF(p != nullptr && p->payload[1] == c.posture, "key 0x%02x: posture %d", c.key, p ? p->payload[1] : -1);
@@ -426,14 +428,14 @@ void test_refusals() {
     if (!r.ring_has(c.why))
       for (const std::string& l : r.log.lines)
         if (l.find("remote B") != std::string::npos) std::printf("    %s\n", l.c_str());
-    CHECK(r.body.count(KILO_MSG_FEET) == 0 && r.mind.recorder().runs_total() == 0);
+    CHECK(r.body.count(KILO_MSG_POSE) == 0 && r.mind.recorder().runs_total() == 0);
   }
   {  // C5 once: the calibration posture, nothing measured
     Rig r(cfg());
     r.start();
     r.run_ms(1000);
     r.key(0x90, 3000);
-    CHECK(!r.measuring() && r.body.count(KILO_MSG_FEET) == 0);
+    CHECK(!r.measuring() && r.body.count(KILO_MSG_POSE) == 0);
     const Goal* p = r.goal(KILO_MSG_SET_POSTURE);
     CHECK(p != nullptr && p->payload[1] == KILO_POSTURE_CALIB);
   }

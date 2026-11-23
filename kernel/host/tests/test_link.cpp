@@ -123,7 +123,7 @@ void test_hello_good() {
   const BodyState& b = r.link.state();
   CHECK(b.has_hello && b.proto_ok == 1 && b.epoch == 3 && b.hello.fw_build == kCoreBuild);
   CHECK(r.hellos == 1 && r.solicited && r.reboots == 0);
-  CHECK(r.log.has("HELLO proto 2.0 build 45524f43 reset COLD config DEFAULTED caps 0x0 epoch 3"));
+  CHECK(r.log.has("HELLO proto 3.0 build 45524f43 reset COLD config DEFAULTED caps 0x0 epoch 3"));
   CHECK(r.link.contact());  // first HELLO on the first connection: heard
   CHECK(!b.alive(r.clock.t, KILO_BODY_LOST_MS * 1000u));
   r.telemetry(100, 3);
@@ -140,10 +140,10 @@ void test_hello_wrong_major() {
   r.hello(1);
   r.step();
   CHECK(r.link.state().proto_ok == 0);
-  CHECK(r.log.has("protocol major 1 != expected 2: refusing to drive; flash the body"));
+  CHECK(r.log.has("protocol major 1 != expected 3: refusing to drive; flash the body"));
   CHECK(!set_posture(r, KILO_POSTURE_STAND));
-  kilo_feet_t feet = {};
-  CHECK(!r.link.send_stream(KILO_MSG_FEET, (const uint8_t*)&feet, sizeof feet));
+  kilo_pose_t feet = {};
+  CHECK(!r.link.send_stream(KILO_MSG_POSE, (const uint8_t*)&feet, sizeof feet));
   // still fed: the body's watchdog must not see a dead mind
   r.serial.take_sent();
   r.step(150);
@@ -296,8 +296,8 @@ void test_contact_after_reconnect_needs_telemetry() {
   r.step();
   CHECK(r.link.contact() && r.reboots == 0);
   CHECK(find_sent(r.serial.take_sent(), KILO_MSG_SET_POSTURE) != nullptr);
-  kilo_feet_t feet = {};
-  CHECK(r.link.send_stream(KILO_MSG_FEET, (const uint8_t*)&feet, sizeof feet));
+  kilo_pose_t feet = {};
+  CHECK(r.link.send_stream(KILO_MSG_POSE, (const uint8_t*)&feet, sizeof feet));
 }
 
 void test_body_lost_and_polled() {
@@ -310,8 +310,8 @@ void test_body_lost_and_polled() {
   CHECK(r.log.has("body lost (no telemetry for 300 ms)") && !r.link.contact());
   size_t polls = count_type(r.serial.take_sent(), KILO_MSG_HELLO_REQ);
   CHECKF(polls == 2, "HELLO_REQ x%zu while lost 0.8 s", polls);  // 2 Hz
-  kilo_feet_t feet = {};
-  CHECK(!r.link.send_stream(KILO_MSG_FEET, (const uint8_t*)&feet, sizeof feet));
+  kilo_pose_t feet = {};
+  CHECK(!r.link.send_stream(KILO_MSG_POSE, (const uint8_t*)&feet, sizeof feet));
 }
 
 void test_goal_refused() {
@@ -404,12 +404,6 @@ void test_query_and_commands() {
   CHECK(!r.link.request(KILO_MSG_SET_STREAM, (const uint8_t*)&ss, 2));  // wrong length
 }
 
-void test_trick_play_needs_contact() {
-  Rig r;
-  r.link.connect();
-  kilo_trick_play_t tp = {};
-  CHECK(!r.link.request(KILO_MSG_TRICK_PLAY, (const uint8_t*)&tp, sizeof tp));
-}
 
 void test_serial_trouble() {
   Rig r;
@@ -485,7 +479,6 @@ int main() {
   test_body_lost_and_polled();
   test_goal_refused();
   test_query_and_commands();
-  test_trick_play_needs_contact();
   test_serial_trouble();
   test_tx_deferred();
   test_hello_lost_asked_again();

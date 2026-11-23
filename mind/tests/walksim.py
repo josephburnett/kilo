@@ -1,8 +1,8 @@
-"""Deterministic walking: the planner's Stream over the virtual body's FEET
+"""Deterministic walking: the planner's Stream over the virtual body's POSE
 player and physics, one 20 ms tick at a time, no threads and no wall time.
 
 ``WalkSim`` holds a VirtualBody (no transport) and a link stand-in whose
-``send_stream`` hands the FEET frame to the body at once and whose
+``send_stream`` hands the POSE frame to the body at once and whose
 BodyState is fed with the body's TELEMETRY and EVENTs as the real link's
 reader would (counts, history, epoch). Each ``step()``: the body ticks (its
 telemetry arrives 1 ms later), then the stream wakes 5 ms after the tick,
@@ -11,6 +11,7 @@ unless the test stalls it."""
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import Any
 
 from kilo.body.state import BodyState
@@ -24,6 +25,24 @@ from kilo.vbody.sim import VirtualBody
 TICK = P.TICK_MS / 1000
 
 
+@dataclass
+class Sent:
+    """A POSE the stream sent, its feet in mm (the walker's whole mm)."""
+    tick: int
+    epoch: int
+    x_mm: list
+    z_mm: list
+    pitch: int
+    roll: int
+    support: int
+
+
+def sent_of(payload: bytes) -> Sent:
+    m = P.Pose.unpack(payload)
+    return Sent(m.tick, m.epoch, [v // 4 for v in m.leg[0::2]], [v // 4 for v in m.leg[1::2]], m.pitch, m.roll,
+                m.support)
+
+
 class FakeLink:
     def __init__(self, sim: "WalkSim"):
         self.sim = sim
@@ -33,8 +52,8 @@ class FakeLink:
         self.sent: list[Any] = []
 
     def send_stream(self, name: str, payload: bytes) -> bool:
-        self.sent.append(P.Feet.unpack(payload))
-        self.sim.vb.process(C.build_frame(P.MsgId.FEET, 0, payload), self.sim.now)
+        self.sent.append(sent_of(payload))
+        self.sim.vb.process(C.build_frame(P.MsgId.POSE, 0, payload), self.sim.now)
         return True
 
     def mind_alive(self) -> bool:
@@ -103,10 +122,10 @@ class WalkSim:
 
     # ---- what happened -------------------------------------------------------------------
     def gait(self) -> list[Any]:
-        return [t for t in self.telemetry if t.mode == P.Mode.GAIT]
+        return [t for t in self.telemetry if t.mode == P.Mode.STREAM]
 
     def max_error(self, skip: int = 0) -> float:
-        """The largest |measured - predicted| (degrees) in GAIT (the stream's
+        """The largest |measured - predicted| (degrees) in STREAM (the stream's
         prediction for the tick: the body reports a reference only with its
         balance on)."""
         pred = self.pred()

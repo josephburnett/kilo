@@ -99,7 +99,7 @@ constexpr double kSensorHeightMm = KILO_MODEL_SENSOR_ULTRASONIC_HEIGHT_MM;  // t
 constexpr double kFloorShare = 0.75;      // ... readings from this share of the floor's distance on are the floor
 constexpr double kCloseHoldS = 1.0;       // no echo right after something very close: the range holds this long
 constexpr double kStopGapMm = 100;        // left between the sensor and the obstacle after the stop
-constexpr double kReactS = 0.40;          // reading (80 ms + the median's 80 ms), link, the re-planned FEET
+constexpr double kReactS = 0.40;          // reading (80 ms + the median's 80 ms), link, the re-planned POSE
                                           //   (40 ms), the servos (120 ms), and a margin
 constexpr double kDecelWalkMmS2 = 400;    // the quick stop's deceleration, by gait: its way (the support feet's
 constexpr double kDecelTrotMmS2 = 700;    //   travel from the halt; test_guard prints it: walk 72.5 mm/s 4 mm, trot

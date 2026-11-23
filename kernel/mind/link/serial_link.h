@@ -29,7 +29,7 @@
 // refused goal.
 //
 // Contact: after every connect and after the body was lost, no motion goal
-// is sent or refreshed and FEET and TRICK_PLAY are refused until the body
+// is sent or refreshed and POSE is refused until the body
 // has been heard on this connection: a HELLO that proves a reboot, or a
 // TELEMETRY (after a loss only TELEMETRY's tick can tell a quiet reboot
 // apart). A HELLO is a reboot when it is unsolicited, or when its identity
@@ -140,15 +140,22 @@ class SerialLink {
   bool set_goal(uint8_t type, const uint8_t* payload, uint8_t len);
   bool clear_goal(uint8_t type);
   const Goal* goal(uint8_t type);
+  // Hold one goal type back: set_goal() latches it as usual, but it is
+  // neither sent nor refreshed until released, then goes at once. The trick
+  // player holds SET_POSTURE while a trick's stream plays (a posture ends a
+  // stream on the body: one asked for meanwhile takes effect when the trick
+  // ends, as it did while the body played tricks itself). A SET_POSTURE
+  // LIMP, the emergency stop, is never held.
+  void hold_goal(uint8_t type, bool on);
+  bool goal_held(uint8_t type) const { return held_ == type && type != 0; }
 
-  // Write one Pi->body stream frame (FEET) now: no queue, ack, refresh or
+  // Write one Pi->body stream frame (POSE) now: no queue, ack, refresh or
   // retry. False when not written: not connected, the body not heard on
   // this connection yet, another protocol, or a write error.
   bool send_stream(uint8_t type, const uint8_t* payload, uint8_t len);
 
   // Send a command or query; poll() completes it (req().state). False
-  // if one is still waiting, not connected, not a command, a wrong length,
-  // or TRICK_PLAY before the body was heard on this connection.
+  // if one is still waiting, not connected, not a command or a wrong length.
   bool request(uint8_t type, const uint8_t* payload, uint8_t len);
   const Request& req() const { return req_; }
 
@@ -183,6 +190,7 @@ class SerialLink {
   LinkListener* listener_ = nullptr;
   FrameTap* tap_ = nullptr;
   Log* quiet_ = nullptr;
+  uint8_t held_ = 0;  // hold_goal()'s type, 0 = none
 
   BodyState state_;
   LinkStats stats_ = {};

@@ -163,17 +163,16 @@ void Recorder::poll(const tricks::TrickPlayer& p) {
     }
   }
   if (trick_ != 0) {
-    if (r.uploaded && !upload_marked_) {
-      upload_marked_ = true;
-      mark_line("uploaded", now);
-    }
     bool acked = p.playing() || (r.state == tricks::PlayState::Done);
     if (acked && !play_marked_) {
       play_marked_ = true;
       Line l("play");
       l.unum("speed", p.speed());
-      mark_line(l.text(), p.played_at_us() != 0 ? p.played_at_us() : now);
       Run* run_ = run(trick_);
+      // (the play may have begun in the pass that opened the run: never before the run's start)
+      uint64_t at = p.played_at_us() != 0 ? p.played_at_us() : now;
+      if (run_ != nullptr && at < run_->start_us) at = run_->start_us;
+      mark_line(l.text(), at);
       if (run_ != nullptr) run_->flags |= KILO_WALK_FLAGS_STREAMED;
     }
     if (r.state == tricks::PlayState::Done)
@@ -228,7 +227,7 @@ void Recorder::trick_header(const tricks::Trick& t, uint32_t id, uint8_t speed, 
 
 void Recorder::begin_trick(const tricks::TrickPlayer& p, uint64_t now) {
   trick_play_ = p.result().play;
-  play_marked_ = upload_marked_ = false;
+  play_marked_ = false;
   const tricks::Trick* t = p.trick();
   Run* r = begin_run(KILO_RUN_KIND_TRICK, now);
   trick_ = r->id;
@@ -421,7 +420,7 @@ void Recorder::on_frame(bool tx, uint8_t type, uint8_t seq, const uint8_t* paylo
   }
   uint8_t ts[2] = {type, seq};
   flight_.append(tx ? KILO_WALK_RECORD_TX : KILO_WALK_RECORD_RX, now, ts, 2, payload, len);
-  if (tx && type == KILO_MSG_FEET && walk_ != 0) {
+  if (tx && type == KILO_MSG_POSE && walk_ != 0) {
     Run* r = run(walk_);
     if (r != nullptr) r->feet++;
   }

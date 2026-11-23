@@ -2,7 +2,6 @@
 criterion the model is held to before a getting-up is designed in it (docs/righting.md)."""
 
 import math
-import re
 from pathlib import Path
 
 import numpy as np
@@ -16,15 +15,10 @@ REPO = Path(__file__).resolve().parents[2]
 
 
 # ---- the body's rc ----------------------------------------------------------------------------------
-def test_rc_ticks_are_the_bodys():
-    """RC_TICKS is the dur and hold of posture.cpp's three rc rows (their last two bytes)."""
-    src = (REPO / "body" / "src" / "core" / "posture.cpp").read_text()
-    rows = re.findall(r"\{\{([-0-9, ]+)\},\s*(-?\d+),\s*(-?\d+)\}", src)
-    assert len(rows) == 7                                  # rest, sit, stand, calib, rc 0-2
-    got = tuple((int(d), int(h)) for _, d, h in rows[4:])
-    assert got == R.RC_TICKS
-    for i, (angles, _, _) in enumerate(rows[4:]):
-        assert tuple(int(v) for v in angles.split(",")) == POSTURES[f"recovery {i + 1}"]
+def test_rc_ticks_are_the_old_bodys():
+    """RC_TICKS: the dur and hold of the three rc rows posture.cpp had until protocol 3.0 (the body's
+    get-up is gone; the recordings of its tries are what kilo.tricks.righting studies)."""
+    assert R.RC_TICKS == ((11, 30), (5, 25), (18, 0))
     assert R.RC_MOVES_S == pytest.approx(1.78)
 
 

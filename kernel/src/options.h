@@ -13,9 +13,9 @@
 //                       (mind/intent/intent.h, docs/intent.md; 0: postures
 //                       change as before, the estimate only logs)
 //   KILO_RIGHTING       the righting experiment: B1 rights him from a side
-//                       or his back by moves planned on the body model; the
-//                       body's rc off (FALL_RC 0; docs/righting.md; 0: the
-//                       body's fall reflex as before, B1 does nothing)
+//                       or his back by moves planned on the body model
+//                       (docs/righting.md; 0: B1 does nothing, he lies
+//                       still after a fall: the body has no get-up)
 //   KILO_RECORD_SAVE    the flight recorder's card saver from the start
 //                       (mind/record/saver.h; else off until `kilo record
 //                       save on --host`, remembered as kilorec/SAVE_ON)

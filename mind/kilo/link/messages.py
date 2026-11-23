@@ -12,8 +12,7 @@ Interface (structural; tests may substitute their own)::
     messages.name_of(type: int) -> str      "0x??" for unknown types
     messages.pack(name: str, **fields) -> bytes
         Payload bytes for message ``name``. Raises ValueError on a bad or
-        missing field. Count fields of variable arrays (BEEP ``n``,
-        TRICK_FRAMES ``count``) are implied by the list length; list elements
+        missing field. Count fields of variable arrays (BEEP ``n``) are implied by the list length; list elements
         may be dicts or the generated element dataclasses.
     messages.unpack(type: int, payload: bytes) -> dataclass instance
         Raises ValueError on an unknown type or a length mismatch.

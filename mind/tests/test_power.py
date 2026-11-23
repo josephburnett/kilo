@@ -43,7 +43,7 @@ def test_stretches() -> None:
         t += 0.04
         mv -= 0.04
     while t < 300:
-        samples.append((t, "GAIT", True, int(mv)))
+        samples.append((t, "STREAM", True, int(mv)))
         t += 0.04
         mv -= 0.05
     logs.append((t, "power: light sleep (30 s after A7 with nothing else): servos off (LIMP)"))

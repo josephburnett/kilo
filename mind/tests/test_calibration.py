@@ -39,8 +39,8 @@ def test_joint_table_matches_joints_cpp():
 def test_postures_match_posture_cpp():
     src = (BODY / "posture.cpp").read_text()
     rows = [tuple(int(x) for x in r.split(",")) for r in re.findall(r"\{\{([-\d, ]+)\}, -?\d+, -?\d+\}", src)]
-    assert rows == [C.POSTURES[n] for n in ("rest", "sit", "stand", "calib", "recovery 1", "recovery 2",
-                                           "recovery 3")]
+
+    assert rows == [C.POSTURES[n] for n in ("rest", "sit", "stand", "calib")]
 
 
 def test_reach_is_the_stance_models():
@@ -58,7 +58,7 @@ def test_the_right_hind_shoulder():
     offs = kilo_offsets_a16()
     assert offs[10] == -16 * 16 and offs[11] == 2 * 16
     assert C.reach(10, -16) == pytest.approx((-57.3, 100.0), abs=0.05)  # SIT and the rear-up ask -80
-    # what reaches the joint limit forward (-80) and the recovery's +100 at once: +6.7 .. +9.1
+    # what would reach the joint limit forward (-80) and +100 at once (the old rc asked that): +6.7 .. +9.1
     assert C.offsets_covering(10, -80, 100) == pytest.approx((6.69, 9.12), abs=0.01)
     assert C.offsets_covering(10, -80, 0) == pytest.approx((6.69, 25.0), abs=0.01)
     # offset 0 is not the servo's centre for this joint: 1696 us at angle 0; 1500 us is at +17.9
@@ -75,9 +75,9 @@ def test_show_flags_every_short_joint():
     text = "\n".join(C.range_lines(kilo_offsets_a16()))
     assert "joint 12 (left front lower leg): -45 (REST) stops at -32.3" in text
     assert "joint 10 (right hind upper leg): -80 (SIT) stops at -57.3" in text
-    assert "joint 10: an offset of +6.7 .. +9.1 reaches all the postures and gaits ask" in text
+    assert "joint 10: an offset of +6.7 .. +25.0 reaches all the postures and gaits ask" in text  # (rc's +100 went with it)
     flagged = {int(m) for m in re.findall(r"^ ?(\d+) \w+ .*SHORT$", text, re.M)}
-    assert flagged == {8, 9, 10, 11, 12, 14}
+    assert flagged == {8, 10, 11, 12, 14}  # (9: only the old rc asked it past its reach)
     ok = list(C.ranges([0] * 16))
     assert all(r.reach[0] <= r.reach[1] for r in ok)
 

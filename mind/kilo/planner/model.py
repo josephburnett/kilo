@@ -20,7 +20,7 @@ Frames and conventions:
 
 - Body frame: origin midway between the four shoulder axles, x forward,
   y LEFT, z UP, millimetres. Legs in the protocol order LF RF RB LB.
-- A foot is given as FEET gives it (protocol/spec.toml): ``x`` fore-aft
+- A foot is given as a POSE key in foot mode gives it (protocol/spec.toml): ``x`` fore-aft
   from under its shoulder (+ forward) and ``z`` its depth below the
   shoulder (the leg's length, the body height at that leg), to the centre
   of the foot disc; the ground is ``foot_r_mm`` lower.
@@ -194,7 +194,7 @@ class BodyModel:
         return h_256 / 256.0 * (self.l1_mm + self.l2_mm)
 
     def stance_z_mm(self, h_256: int = P.GAIT_STANCE_H_256) -> int:
-        """STANCE's leg length in the whole mm FEET carries (76: kilo.measure's HOME_Z)."""
+        """STANCE's leg length in the whole mm a walk's POSE carries (76: kilo.measure's HOME_Z)."""
         return int(round(self.stance_height(h_256)))
 
     def stance_com(self, h_256: int = P.GAIT_STANCE_H_256) -> tuple[float, float, float]:

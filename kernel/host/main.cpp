@@ -153,7 +153,7 @@ int usage() {
           "                 2 rear_up_2, 3 rear_up_3; off: A1 does nothing; KILO_REAR_UP on the Pi)\n"
           "  --intent       stand, sit and rest are intents: the state estimate and the moves planned from the\n"
           "                 body model (docs/intent.md; KILO_INTENT on the Pi)\n"
-          "  --righting     the righting experiment: B1 rights him from a side or his back, the body's rc off\n"
+          "  --righting     the righting experiment: B1 rights him from a side or his back\n"
           "                 (docs/righting.md; KILO_RIGHTING on the Pi)\n"
           "  --authorized-keys FILE  the laptops' public keys --listen accepts (default %s)\n"
           "  --card DIR  take kernel updates (kilo update --host) into DIR as if it were the SD card, and\n"

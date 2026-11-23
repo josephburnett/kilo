@@ -800,7 +800,7 @@ expect "$OUT/host_lt.log" "remote B7 \(0x62, faster\): speed 1\.25x \(trot 180\.
 expect "$OUT/host_lt.log" "remote B7 \(0x62, faster\): speed 1\.4x \(trot 201\.6 mm/s forward\)" "B7: +5"
 expect "$OUT/host_lt.log" "remote B5 \(0xA8, slower\): speed 1x \(trot 144\.0 mm/s forward\)" "B5: 1x"
 expect "$OUT/host_lt.log" "walk ended: stopped" "the quick stop"
-if grep -Eq "decode errors [1-9]|remote .*failed|no longer stamping|underruns [1-9]|refused FEET" "$OUT/host_lt.log"; then
+if grep -Eq "decode errors [1-9]|remote .*failed|no longer stamping|underruns [1-9]|refused POSE" "$OUT/host_lt.log"; then
     echo "FAILED: errors"; exit 1
 fi
 
@@ -891,7 +891,7 @@ KWALK="$(ls "$WALKS"/run-*-walk-1.krec)"
 KPY -m kilo.cli log walk "$KWALK" --csv "$OUT/walk1.csv" | tee "$OUT/walk1_summary.txt"
 KPY -m kilo.cli log walk "$KWALK" --json > "$OUT/walk1.json"
 KPY -m kilo.cli log summary "${KWALK%.krec}.kilolog" > "$OUT/walk1_kilolog.txt"
-expect "$OUT/walk1_kilolog.txt" "gait: walking [0-9.]+s, 1 GAIT_STOPPED" "kilo log summary reads the .kilolog"
+expect "$OUT/walk1_kilolog.txt" "gait: walking [0-9.]+s, 1 STREAM_STOPPED" "kilo log summary reads the .kilolog"
 expect "$OUT/walk1_kilolog.txt" "model error: offset pitch \+[0-9]+\.[0-9]" "kilo log summary: an offset (the scripted tilt less the mean prediction)"
 "$PYTHON" - "$OUT/walk1.json" "$OUT/walk1.csv" <<'EOF'
 import csv, json, sys
@@ -901,7 +901,7 @@ rows = list(csv.DictReader(open(sys.argv[2])))
 def check(cond, what):
     if not cond:
         print(f"FAILED: kilo log walk: {what}\n{json.dumps(s, indent=1)[:3000]}"); sys.exit(1)
-check(e["samples"] >= 250, f"{e['samples']} GAIT ticks with a prediction")
+check(e["samples"] >= 250, f"{e['samples']} STREAM ticks with a prediction")
 check(abs(e["meas_mean_pitch"] - 4.0) < 1e-6 and abs(e["meas_mean_roll"] + 3.0) < 1e-6, "measured = the scripted tilt")
 check(abs(e["offset_pitch"] - (4.0 - e["pred_mean_pitch"])) <= 0.011 and
       abs(e["offset_roll"] - (-3.0 - e["pred_mean_roll"])) <= 0.011, "offset = measured - predicted, on average")
@@ -915,9 +915,9 @@ check("none" in s["by_phase"] and len({"LF", "RF", "RB", "LB"} & set(s["by_phase
 check(s["margin"]["min_one_leg_up_mm"] is not None and
       abs(s["margin"]["min_one_leg_up_mm"] - s["margin"]["planner_min_mm"]) <= 0.11, "the margin: per tick = the planner's")
 check(s["balance_active_fraction"] > 0.9 and s["correction"]["max_pitch"] is not None, "the body's balance and its correction")
-check(40 <= s["lead_ms"]["min"] <= s["lead_ms"]["max"] <= 200, f"FEET ahead of their tick: {s['lead_ms']}")
+check(20 <= s["lead_ms"]["min"] <= s["lead_ms"]["max"] <= 200, f"POSE ahead of their tick: {s['lead_ms']}")
 check(s["config"]["margin_mm"] and s["masses"]["battery_g"] and s["stream"]["pattern"] == "walk", "the parameters in use")
-gait = [r for r in rows if r["mode"] == "GAIT" and r["err_pitch"]]
+gait = [r for r in rows if r["mode"] == "STREAM" and r["err_pitch"]]
 check(len(gait) == e["samples"] and all(abs(float(r["meas_pitch"]) - float(r["pred_pitch"]) - float(r["err_pitch"])) < 1e-3
                                         for r in gait), "the CSV: err = meas - pred on every row")
 print(f"   kilo log walk: {e['samples']} ticks, offset pitch {e['offset_pitch']:+.2f} roll {e['offset_roll']:+.2f} "
@@ -928,9 +928,9 @@ EOF
 grep "loop: " "$OUT/host_walks.log" | awk '{for(i=1;i<=NF;i++) if($i=="max") m=($(i+1)>m?$(i+1):m)} END {print "   mind.poll max over the run: " m " us"}'
 
 # ---- the flight recorder: a trick by the remote, every record, the card, the next boot ----------------
-# The rear-up key on (--rear-up): A1 plays rear_up on the virtual body (which plays it tick-exact but
-# does not tip: its IMU stays level), so the trick's first guard ("back", which wants 3.5..12.5 deg
-# nose up; the level IMU reads 0) stops it: TRICK_STOP, STOPPED, the guard in the log. Then the
+# The rear-up key on (--rear-up): A1 plays rear_up on the virtual body (its POSE stream, which the body
+# plays but does not tip: its IMU stays level), so the trick's first guard ("back", which wants
+# 3.5..12.5 deg nose up; the level IMU reads 0) stops it: its end posture, STOPPED, the guard in the log. Then the
 # recorder's status, a time range fetched and decoded, the metrics, the log's whole history, the card
 # saver on (kilo-mind-host's --card DIR stands for the SD card), and a second boot on the same card
 # that lists the first boot's run and shows its log (kilo log --previous).
@@ -949,10 +949,10 @@ sleep 1
 ctl ir 0x02                   # B6: stand
 sleep 1
 ctl ir 0x42                   # A1: rear_up (stage 1)
-for _ in $(seq 1 120); do grep -q "TRICK_DONE" "$OUT/host_flight.log" && break; sleep 0.25; done
+for _ in $(seq 1 120); do grep -q "trick rear_up: STOPPED after" "$OUT/host_flight.log" && break; sleep 0.25; done
 expect "$OUT/host_flight.log" "trick rear_up: guard back: nose up 0.0 deg outside 3.5..12.5: stopping" \
     "the mind's guard stopped the trick"
-expect "$OUT/host_flight.log" "trick rear_up: TRICK_DONE STOPPED" "the trick stopped"
+expect "$OUT/host_flight.log" "trick rear_up: STOPPED after" "the trick stopped"
 sleep 2.5                     # the run's post-roll
 KPY -m kilo.cli --host "$F" runs | tee "$OUT/flight_runs.txt"
 expect "$OUT/flight_runs.txt" "1 runs this boot \(0 walks, 1 tricks\)" "the list: one trick"
@@ -978,7 +978,7 @@ KPY -m kilo.cli --host "$F" metrics | tee "$OUT/flight_metrics.txt"
 expect "$OUT/flight_metrics.txt" "^[a-z_]+: " "kilo metrics: group lines"
 KPY -m kilo.cli log --host "$F" --no-follow --save "$REC/logs" > "$OUT/flight_log.txt"
 expect "$OUT/flight_log.txt" "I remote A1 \(0x42, rear up\)" "kilo log --host: the session's key in the history"
-expect "$OUT/flight_log.txt" "I trick rear_up: TRICK_DONE STOPPED" "kilo log --host: the trick's end in the history"
+expect "$OUT/flight_log.txt" "I trick rear_up: STOPPED after" "kilo log --host: the trick's end in the history"
 ls "$REC"/logs/kilo-*.log > /dev/null || { echo "FAILED: kilo log --save wrote nothing"; exit 1; }
 KPY -m kilo.cli --host "$F" record save on | tee "$OUT/flight_save.txt"
 KPY -m kilo.cli --host "$F" record save now > /dev/null
@@ -999,8 +999,7 @@ check(a["trick"] == "rear_up" and a["stage"] == "1" and a["played"] and a["end"]
 check(a["has_prediction"] and len(a["keyframes"]) == 9, "9 keyframes with a prediction")
 check(all(k["reached"] for k in a["keyframes"][:3]) and not any(k["reached"] for k in a["keyframes"][4:]),
       "the keyframes up to the guard at back seen in the telemetry, none after it")
-check(sum(1 for r in rows if r["mode"] == "TRICK") > 25, "TRICK telemetry in the CSV")  # stopped at back, 1.6 s in
-check(any(r["body_keyframe"] for r in rows), "the body's keyframe in the telemetry")
+check(sum(1 for r in rows if r["mode"] == "STREAM") > 25, "the trick's stream in the CSV")  # stopped at back, 1.6 s in
 check(any(r["trick"] == "rear_up" for r in rng) and any(r["key"] for r in rng), "the decoded range: the trick, the key")
 print(f"   kilo log trick: {len(a['keyframes'])} keyframes, {a['telemetry']} telemetry ticks, end {a['end']['reason']}, "
       f"error mean {a['error']['mean_deg']:+.1f} deg (the virtual body does not tip); range: {len(rng)} rows")
@@ -1101,10 +1100,10 @@ assert [(x["name"], x["address"], x["port"], x["build"]) for x in f] == [("kilo.
 print(f"   kilo find: {f[0]['name']} {f[0]['address']} port {f[0]['port']} build {f[0]['build']} ({f[0]['via']})")
 EOF
 
-echo "== intents: kilo-mind-host --intent against the virtual body (B6 from LIMP, A7, B6, a fall onto his left side, B6)"
+echo "== intents: kilo-mind-host --intent against the virtual body (B6 from LIMP, A7, B6, a fall onto his left side, B6, righted)"
 start_ctl_body "$OUT/vbody_intent.log"
 trap stop_body EXIT
-run_mind "$OUT/host_intent.log" --remote --intent --seed 3 --duration 31
+run_mind "$OUT/host_intent.log" --remote --intent --seed 3 --duration 34
 sleep 2
 ctl ir 0x02                   # B6 from LIMP: REST first (a move is refused in LIMP), then the model's move
 sleep 6
@@ -1114,9 +1113,9 @@ ctl ir 0x02                   # B6: be STANDING
 sleep 4.5
 ctl att 0 88                  # he falls onto his left side: the body's fall reflex takes the joints
 sleep 1.5
-ctl ir 0x02                   # B6 while he lies there: the intent waits for the reflex
+ctl ir 0x02                   # B6 while he lies there (the reflex has laid him down): the intent waits for a hand
 sleep 4
-ctl att 0 0                   # righted
+ctl att 0 0                   # righted by a hand: lying in REST, then REST first (limp) and up
 wait_mind "$OUT/host_intent.log"
 stop_body
 trap - EXIT
@@ -1126,24 +1125,25 @@ expect "$OUT/host_intent.log" "state: MOVING -> RESTING \(pitch \+0\.0 roll \+0\
 expect "$OUT/host_intent.log" "intent: be STANDING \(remote B6; he is RESTING\)" "B6 is an intent"
 expect "$OUT/host_intent.log" "intent: the servos are off: REST first" "REST before a move from LIMP"
 expect "$OUT/host_intent.log" "intent: step 1: RESTING -> STANDING by the move intent_rest_to_stand" "the model's move from REST"
-expect "$OUT/host_intent.log" "trick intent_rest_to_stand: TRICK_DONE DONE" "the body played it"
+expect "$OUT/host_intent.log" "trick intent_rest_to_stand: DONE after" "the body played it"
 # (the virtual body reads level; the model expects the 2.3 deg of Kilo's sensor: confidence 91, not 100)
 expect "$OUT/host_intent.log" "state: MOVING -> STANDING \(pitch \+0\.0 roll \+0\.0, asked stand, confidence (9[0-9]|100)\)" "the estimate saw him stand"
 expect "$OUT/host_intent.log" "intent: STANDING reached \(1 step" "STANDING reached"
 expect "$OUT/host_intent.log" "intent: step 1: STANDING -> RESTING by the move intent_stand_to_rest" "A7's move"
 expect "$OUT/host_intent.log" "intent: RESTING reached \(1 step" "RESTING reached"
 expect "$OUT/host_intent.log" "event FELL arg=1" "the body's fall reflex tripped"
-expect "$OUT/host_intent.log" "state: STANDING -> ON_LEFT_SIDE \(pitch \+0\.0 roll \+88\.0, asked none, confidence 90\)" "the estimate saw him on his side"
-expect "$OUT/host_intent.log" "intent: step 1: he is ON_LEFT_SIDE: waiting for the body's fall reflex to right him" "the intent waited for the reflex"
-expect "$OUT/host_intent.log" "event RECOVERED" "the reflex righted him"
-[ "$(grep -c "intent: STANDING reached" "$OUT/host_intent.log")" -eq 3 ] ||
+expect "$OUT/host_intent.log" "state: STANDING -> ON_LEFT_SIDE \(pitch \+0\.0 roll \+88\.0, asked rest, confidence 90\)" "the estimate saw him on his side (the reflex laid him down: REST asked)"
+expect "$OUT/host_intent.log" "intent: step 1: he is ON_LEFT_SIDE: waiting for a hand to right him" "the intent waited"
+expect "$OUT/host_intent.log" "event LYING arg=1" "the reflex laid him down (the body has no get-up of its own)"
+expect "$OUT/host_intent.log" "intent: step 1 meant to end STANDING; he is RESTING" "righted by hand: lying in REST, not standing"
+[ "$(grep -c "intent: STANDING reached" "$OUT/host_intent.log")" -ge 3 ] ||
     { echo "FAILED: STANDING was not reached three times (from LIMP, from REST, after the fall)"; cat "$OUT/host_intent.log"; exit 1; }
-if grep -Eq "intent: .*(given up|meant to end)" "$OUT/host_intent.log"; then
+if grep -E "intent: .*(given up|meant to end)" "$OUT/host_intent.log" | grep -vq "meant to end STANDING; he is RESTING"; then
     echo "FAILED: an intent failed a step or gave up"; cat "$OUT/host_intent.log"; exit 1
 fi
-echo "   intents: stood from LIMP and from REST by the model's moves, rested, waited out a fall on his side"
+echo "   intents: stood from LIMP and from REST by the model's moves, rested, a fall: laid down by the reflex, righted by hand, stood"
 
-echo "== righting: kilo-mind-host --righting against the virtual body (FALL_RC 0; B1 standing; a fall onto his right side, B1, righted; again, left down: three tries, limp)"
+echo "== righting: kilo-mind-host --righting against the virtual body (B1 standing; a fall onto his right side, B1, righted; again, left down: three tries, limp)"
 start_ctl_body "$OUT/vbody_righting.log"
 trap stop_body EXIT
 run_mind "$OUT/host_righting.log" --remote --righting --seed 3 --duration 44
@@ -1152,7 +1152,7 @@ ctl ir 0x02                   # B6: stand (the body's own change: no intents)
 sleep 2
 ctl ir 0x4A                   # B1 standing: refused
 sleep 1
-ctl att 0 -100                # he falls onto his right side: FELL, and with FALL_RC 0 no rc: REST, then LIMP
+ctl att 0 -100                # he falls onto his right side: FELL; still: LYING (REST, then LIMP)
 sleep 4
 ctl ir 0x4A                   # B1 limp on his side: REST first, the fall reflex holds him, then the righting move
 sleep 3.5
@@ -1164,23 +1164,19 @@ ctl ir 0x4A                   # B1: three tries, then limp
 wait_mind "$OUT/host_righting.log"
 stop_body
 trap - EXIT
-grep -E " righting| state: | intent: |FELL|RECOVER" "$OUT/host_righting.log"
+grep -E " righting| state: | intent: |FELL|LYING" "$OUT/host_righting.log"
 expect "$OUT/host_righting.log" "righting experiment ON" "righting on"
-expect "$OUT/host_righting.log" "righting: the body's fall reflex will not play rc \(FALL_RC 0\)" "FALL_RC 0 set"
 expect "$OUT/host_righting.log" "righting refused: he is STANDING: B1 rights him only from a side or his back" "B1 refused standing"
 expect "$OUT/host_righting.log" "event FELL arg=-1" "the fall tripped"
-expect "$OUT/host_righting.log" "event RECOVERY_FAILED" "the body gave up at once (no rc)"
+expect "$OUT/host_righting.log" "event LYING arg=-1" "the body laid him down (no get-up of its own)"
 expect "$OUT/host_righting.log" "intent: the servos are off: REST first" "from LIMP: REST first"
 expect "$OUT/host_righting.log" "intent: step [0-9]: ON_RIGHT_SIDE -> RESTING by the righting move intent_righting_side \(try 1 of 3" "the side move"
-expect "$OUT/host_righting.log" "trick intent_righting_side: TRICK_DONE DONE" "the body played it"
+expect "$OUT/host_righting.log" "trick intent_righting_side: DONE after" "the body played it"
 expect "$OUT/host_righting.log" "intent: step [0-9]: RESTING -> STANDING by the move intent_rest_to_stand" "then up by the model's move"
 expect "$OUT/host_righting.log" "intent: STANDING reached" "STANDING reached"
 expect "$OUT/host_righting.log" "intent: step [0-9]: ON_LEFT_SIDE -> RESTING by the righting move intent_righting_side mirrored \(try 3 of 3" "three mirrored tries"
 expect "$OUT/host_righting.log" "intent: righting gave up: he is left LIMP on the floor" "limp after three"
 expect "$OUT/host_righting.log" "sound play name=meow[0-9] asked=meow why=righting gave up" "a meow"
-if grep -Eq "RECOVERING|rc " "$OUT/vbody_righting.log"; then
-    echo "FAILED: the body played rc"; exit 1
-fi
-echo "   righting: FALL_RC 0, refused standing, righted from the right side and stood, gave up limp after three tries on the left"
+echo "   righting: refused standing, righted from the right side and stood, gave up limp after three tries on the left"
 
 echo "== all kernel host tests passed"

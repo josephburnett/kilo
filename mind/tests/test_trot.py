@@ -19,7 +19,7 @@ from kilo.planner.walker import stop_timeout
 from stridesim import joint_step_deg, walk
 
 M = BodyModel()
-BOUND = 9.7  # deg a tick (485 deg/s): the trot's bound, 0.1 over 9.6 for the FEET's 1 mm rounding at its
+BOUND = 9.7  # deg a tick (485 deg/s): the trot's bound, 0.1 over 9.6 for the feet's 1 mm rounding at its
 #  long strides; under the body's 10 deg/tick slew
 # The remote's trot levels (kernel/mind/remote/remote.cpp kTrotSpeedFactors x 144): +1 .. +5
 LEVELS = (57.6, 100.8, 144.0, 180.0, 201.6)

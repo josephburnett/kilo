@@ -39,12 +39,12 @@ All of them work over the network, through the mind on the Pi
 ## What `kilo cal show` says
 
     joint              offset          reaches       postures         gaits        tricks
-    10 rb_shoulder     -16.00   -57.3 .. +100.0     -80 .. +100    -79 ..   -8    -80 ..  +95  SHORT
-    12 lf_knee         -21.00   -32.3 .. +120.0     -45 ..  +81    -15 ..  +53    -60 ..  +85  SHORT
+    10 rb_shoulder     -16.00   -57.3 .. +100.0     -80 ..   +0    -80 ..   -5    -80 ..  +95  SHORT
+    12 lf_knee         -21.00   -32.3 .. +120.0     -45 ..  +60    -16 ..  +48    -60 ..  +85  SHORT
     ...
     short of what is asked (the servo stops at the end of its pulse range, 500 or 2500 us):
       joint 10 (right hind upper leg): -80 (SIT) stops at -57.3
-      joint 10: an offset of +6.7 .. +9.1 reaches all the postures and gaits ask
+      joint 10: an offset of +6.7 .. +25.0 reaches all the postures and gaits ask
       joint 12 (left front lower leg): -45 (REST) stops at -32.3
 
 - **reaches**: the angles the joint really goes to with its offset. Two
@@ -53,8 +53,7 @@ All of them work over the network, through the mind on the Pi
   The offset slides the pulse range: +1 degree of offset takes 1 degree off
   the + end and adds 1 degree to the - end.
 - **postures, gaits, tricks**: the lowest and highest angle that Kilo's
-  postures (REST, SIT, STAND, the calibration pose, and the three moves of
-  getting up after a fall, both ways round), its gaits (the walk, the trot
+  postures (REST, SIT, STAND, the calibration pose), its gaits (the walk, the trot
   and the crawl at every remote level, forward, backward, turning and
   steering) and its tricks ask of that joint. The list below the table
   names what asks each angle that is not reached, and for the postures and

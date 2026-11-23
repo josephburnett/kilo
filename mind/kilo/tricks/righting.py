@@ -64,7 +64,7 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
-from kilo.calibration import POSTURES, mirror
+from kilo.calibration import POSTURES
 from kilo.planner.model import LF, LB, RB, RF, BodyModel
 
 from . import dynamics as D
@@ -75,10 +75,21 @@ FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "falls_20
 JOINTS = D.JOINTS
 TICK_S = D.TICK_S
 
-# The body's rc: three rows of body/src/core/posture.cpp (kilo.calibration.POSTURES has the angles,
-# tied to the C table by mind/tests/test_calibration.py), each a cosine move over ``dur`` ticks and
-# a hold (the rows' last two bytes; tests/test_righting.py reads them from posture.cpp).
+# The body's old rc, deleted from the firmware with protocol 3 (2026-11-22) and kept here for the
+# recordings of the falls it played: three rows (canonical order: pan, tilt, tail, shoulders
+# LF RF RB LB, knees LF RF RB LB, whole degrees), each a cosine move over ``dur`` ticks and a hold.
+RC_ROWS = (
+    (30, -74, 34, 30, 30, -30, -30, 30, 30, -59, -31),
+    (62, 0, -20, -3, -99, 115, 0, 81, 9, -9, -71),
+    (0, 17, 0, 30, 30, -30, -30, 30, 30, -30, -30),
+)
 RC_TICKS = ((11, 30), (5, 25), (18, 0))
+
+
+def mirror(row: tuple) -> tuple:
+    """A canonical-order row with left and right swapped, pan and tail negated (rc's mirror)."""
+    pan, tilt, tail, lf, rf, rb, lb, klf, krf, krb, klb = row
+    return (-pan, tilt, -tail, rf, lf, lb, rb, krf, klf, klb, krb)
 RC_MOVES_S = sum(d + h for d, h in RC_TICKS) * TICK_S   # 1.78 s
 CHECK_S = 1.0             # then the body waits this long for upright (FALL_CHECK_TICKS)
 LEVEL_DEG = 20.0          # "upright": |pitch| and |roll| under this (FALL_LEVEL_DEG)...
@@ -282,7 +293,7 @@ def rc_frames(mirrored: bool) -> list[tuple[dict, int, int]]:
     """The body's rc as (joints, dur, hold) (cosine moves, as the body's reflex mover eases them)."""
     out = []
     for i, (dur, hold) in enumerate(RC_TICKS):
-        row = POSTURES[f"recovery {i + 1}"]
+        row = RC_ROWS[i]
         if mirrored:
             row = mirror(row)
         out.append((dict(zip(JOINTS, (float(v) for v in row))), dur, hold))
@@ -321,7 +332,7 @@ def start_joints(fall: dict, n: int) -> dict:
     before = fall.get("attitude_before") or [0.0, 0.0]
     if mode == "IDLE" and before[0] < -15.0:        # sitting reads about -27 (nose up)
         return dict(zip(JOINTS, (float(v) for v in POSTURES["sit"])))
-    if mode == "GAIT" or "crawl" in fall["doing"]:
+    if mode in ("GAIT", "STREAM") or "crawl" in fall["doing"]:
         return stance_joints()
     return dict(zip(JOINTS, (float(v) for v in POSTURES["stand"])))
 
@@ -400,16 +411,15 @@ def falls_in(path, date: str = "", doing: str = "", owner: str = "nothing report
     fixture's "falls" entries: the still attitude each try began in, whether rc was mirrored (the
     body's rule: for roll > 0, flipped on every other try), TELEMETRY through it, how it ended,
     and the picked-up lines of the mind's log around it ("floor": none)."""
-    from kilo.logs import flight
+    from kilo.logs import flight, proto2
     from kilo.protocol import kilo_protocol as P
 
-    s = flight.load(path)
-    mode = {int(m): m.name for m in P.Mode}
+    s = flight.load(path)  # (a protocol 2 recording: the body's rc tries, mode RECOVERING)
     ev = [(f.t_us, f.msg) for f in s.frames if f.direction == "rx" and isinstance(f.msg, P.Event)]
     tel = s.telemetry()
     fells = [(t, m.arg) for t, m in ev if m.code == P.EventCode.FELL]
-    ends = [(t, P.EventCode(m.code).name) for t, m in ev
-            if m.code in (P.EventCode.RECOVERED, P.EventCode.RECOVERY_FAILED)]
+    ends = [(t, "RECOVERED" if m.code == proto2.EVENT_RECOVERED else "RECOVERY_FAILED") for t, m in ev
+            if m.code in (proto2.EVENT_RECOVERED, P.EventCode.LYING)]  # (4: protocol 2's RECOVERY_FAILED)
     out = []
     for k, (tf, arg) in enumerate(fells):
         te, how = next(((t, h) for t, h in ends if t > tf), (None, None))
@@ -423,18 +433,18 @@ def falls_in(path, date: str = "", doing: str = "", owner: str = "nothing report
         fall = {"file": Path(path).name, "picked_up_lines": hand, "floor": not any("picked" in h for h in hand),
                 "date": date, "mind_build": s.meta.get("mind_build"), "uptime_s": round(s.uptime_s(tf), 2),
                 "fell_arg": arg, "doing": doing, "owner": owner,
-                "mode_before": mode.get(before[-1][1].mode, "?") if before else "?",
+                "mode_before": proto2.mode_name(before[-1][1].mode) if before else "?",
                 "attitude_before": [round(before[-1][1].pitch / 16, 1), round(before[-1][1].roll / 16, 1)]
                 if before else None,
                 "ended": how, "ended_after_s": round((te - tf) / 1e6, 2), "tries": []}
         seg = [(t, m) for t, m in tel if tf <= t <= te + 200_000]
         i = n = 0
         while i < len(seg):
-            if seg[i][1].mode != P.Mode.RECOVERING:
+            if seg[i][1].mode != proto2.MODE_RECOVERING:
                 i += 1
                 continue
             j = i
-            while j < len(seg) and seg[j][1].mode == P.Mode.RECOVERING:
+            while j < len(seg) and seg[j][1].mode == proto2.MODE_RECOVERING:
                 j += 1
             t0, m0 = seg[i]
             p0, r0 = m0.pitch / 16, m0.roll / 16

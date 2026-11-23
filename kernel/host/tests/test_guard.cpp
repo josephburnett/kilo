@@ -180,15 +180,17 @@ struct WallRig : MindRig {
   bool wall = true;
   double noise_mm = 0, outliers = 0, dropouts = 0;
   Lcg rng{12345};
-  // the body's position: cumulative travel by FEET tick
+  // the body's position: cumulative travel by POSE tick (a walk's four feet)
   std::map<uint32_t, double> pos;
   size_t seen = 0;
   bool have_prev = false;
-  kilo_feet_t prev = {};
+  kilo_pose_t prev = {};
   double travel = 0, max_travel = 0, back_travel = 0;
   double override_mm = -1;  // a reading forced (a hand), for one fresh reading
   double fixed_mm = -1;     // every reading this (the floor, which moves with him), when >= 0
-  std::vector<std::pair<uint64_t, uint8_t>> done_at;  // TRICK_DONE to send: (time, trick_id)
+  uint64_t trick_end_at = 0;          // a trick's stream: played to its end 1 s after its first key
+  uint32_t trick_play = 0;            // the player's play that started it
+  std::vector<uint8_t> trick_speeds;  // the player's speed at each trick's start
 
   explicit WallRig(const MindConfig& cfg, bool eyes = true) : MindRig(cfg) {
     body.eyes = eyes;
@@ -226,16 +228,26 @@ struct WallRig : MindRig {
     MindRig::pass();
     for (; seen < body.sent.size(); seen++) {
       const Sent& s = body.sent[seen];
-      if (s.type == KILO_MSG_TRICK_PLAY && s.payload.size() >= 2) done_at.push_back({body.clock.t + 1000000, s.payload[1]});
-      if (s.type != KILO_MSG_FEET || s.payload.size() != sizeof(kilo_feet_t)) continue;
-      kilo_feet_t f;
+      if (s.type != KILO_MSG_POSE || s.payload.size() != sizeof(kilo_pose_t)) continue;
+      kilo_pose_t f;
       std::memcpy(&f, s.payload.data(), sizeof f);
+      if (f.flags != 0) {  // joint angles: a trick
+        // (its TELEMETRY mode stays IDLE, as this rig's tricks always showed: the behaviour tree
+        // then sees him still, not moving)
+        if (body.mode == KILO_MODE_STREAM) body.mode = KILO_MODE_IDLE;
+        if (mind.player().result().play != trick_play) {
+          trick_play = mind.player().result().play;
+          trick_end_at = body.clock.t + 1000000;
+          trick_speeds.push_back(mind.player().speed());
+        }
+        continue;
+      }
       if (have_prev && f.tick != prev.tick) {
         double sum = 0;
         int n = 0;
         for (int i = 0; i < 4; i++)
           if ((prev.support & f.support) & (1 << i)) {
-            sum += prev.x_mm[i] - f.x_mm[i];
+            sum += (prev.leg[2 * i] - f.leg[2 * i]) / 4.0;
             n++;
           }
         double d = n ? sum / n : 0;
@@ -247,13 +259,11 @@ struct WallRig : MindRig {
       prev = f;
       have_prev = true;
     }
-    for (size_t i = 0; i < done_at.size();)
-      if (body.clock.t >= done_at[i].first) {
-        body.event(KILO_EVENT_TRICK_DONE, (int16_t)done_at[i].second);
-        done_at.erase(done_at.begin() + (long)i);
-      } else {
-        i++;
-      }
+    if (trick_end_at != 0 && !mind.player().busy()) trick_end_at = 0;  // ended (a posture, a stop)
+    if (trick_end_at != 0 && body.clock.t >= trick_end_at) {
+      body.skip_ticks(1000);  // the rest of the trick at once: the player sees its last key reached
+      trick_end_at = 0;
+    }
   }
   // Run until the guard holds (or ms pass); true if it held.
   bool run_until_hold(uint32_t ms) {
@@ -679,12 +689,12 @@ void test_hand_in_face_turning_backward_standing_sitting_lying() {
     const Goal* h = r.mind.link().goal(KILO_MSG_SET_HEAD);
     CHECK(h != nullptr && r.mind.sitting_variant() && r.log.has("guard: looks at it"));
     CHECK(r.posture_goal() == KILO_POSTURE_SIT || r.mind.alive().sitting());
-    size_t tricks_before = r.body.count(KILO_MSG_TRICK_PLAY);
+    size_t tricks_before = r.body.streams;
     r.fixed_mm = 60;
     t = run_until(r, 2000, [&] { return r.mind.guard().hisses() == 1; });
     r.run_ms(1500);
     CHECKF(t >= 0 && t < 0.4 && r.log.has("guard: leans back"), "sitting RED: %.2f s", t);
-    CHECK(r.body.count(KILO_MSG_TRICK_PLAY) > tricks_before && r.mind.alive().last_move() == behaviour::AliveMove::Flinch);
+    CHECK(r.body.streams > tricks_before && r.mind.alive().last_move() == behaviour::AliveMove::Flinch);
     std::printf("guard: standing, a hand (BLUE): looks and sits after %.2f s; sitting, closer (RED): leans back\n", t);
   }
   {  // standing, RED at once: a short back-off, then he sits
@@ -883,7 +893,7 @@ void test_sag_does_not_send_the_runner_to_rest() {
   uint64_t walked_until = 0;
   bool held = false;
   for (int i = 0; i < 20000 / 4 && !held; i++) {
-    bool loaded = r.mind.walker().active() || r.body.mode == KILO_MODE_GAIT;
+    bool loaded = r.mind.walker().active() || r.body.mode == KILO_MODE_STREAM;
     if (loaded) walked_until = r.body.clock.t;
     r.body.batt_mv = loaded || r.body.clock.t < walked_until + 1500000 ? 6900 : 7450;  // the sag, 1.5 s after too
     r.pass();
@@ -1065,7 +1075,7 @@ void test_alive_through_the_mind() {
     }
   }
   CHECKF(moves >= 6 && !repeat, "%u moves in 60 s, repeat %d", moves, repeat);
-  CHECK(r.body.count(KILO_MSG_TRICK_PLAY) >= 3 && r.log.has("alive: sitting"));
+  CHECK(r.body.streams >= 3 && r.log.has("alive: sitting"));
   // standing: put the tree's posture to STAND (as explore does) and let the layer take it
   CHECK(client_posture(r.mind.link(), nullptr, "stand"));
   r.run_ms(15000);
@@ -1077,9 +1087,9 @@ void test_alive_through_the_mind() {
   CHECK(!r.mind.behaviour_active() && r.posture_goal() == KILO_POSTURE_STAND);
   CHECK(g != nullptr && g->payload[1] == 0 && g->payload[2] == 0 && g->payload[3] == 0 && g->payload[4] == 0 &&
         g->payload[5] == 0 && g->payload[6] == 0);
-  size_t after = r.body.count(KILO_MSG_SET_BODY_POSE) + r.body.count(KILO_MSG_TRICK_PLAY);
+  size_t after = r.body.count(KILO_MSG_SET_BODY_POSE) + r.body.streams;
   r.run_ms(5000);
-  CHECK(r.body.count(KILO_MSG_SET_BODY_POSE) + r.body.count(KILO_MSG_TRICK_PLAY) <= after + 25);  // refreshes only
+  CHECK(r.body.count(KILO_MSG_SET_BODY_POSE) + r.body.streams <= after + 25);  // refreshes only
   CHECK(r.mind.alive().moves() == moves + (r.mind.alive().moves() - moves));
   // C7 during a sitting move: frozen, the move's trick stopped
   r.key(A5);
@@ -1117,10 +1127,9 @@ void test_alive_tricks_through_the_mind() {
                (unsigned)t->end_posture);
     }
   const uint8_t q6 = (uint8_t)(p.alive_trick_speed * 64 + 0.5);
-  auto plays_at = [](WallRig& r, uint8_t speed) -> uint32_t {  // TRICK_PLAYs at this speed (the small moves: 1x)
+  auto plays_at = [](WallRig& r, uint8_t speed) -> uint32_t {  // tricks played at this speed (the small moves: 1x)
     uint32_t k = 0;
-    for (const Sent& s : r.body.sent)
-      if (s.type == KILO_MSG_TRICK_PLAY && s.payload.size() >= 3 && s.payload[2] == speed) k++;
+    for (uint8_t s : r.trick_speeds) k += s == speed ? 1 : 0;
     return k;
   };
   // (a) five minutes in the random mode (sitting, and standing when the tree explores)
@@ -1168,16 +1177,15 @@ void test_alive_tricks_through_the_mind() {
   CHECK(r.mind.alive().trick_waiting() && r.log.has(" after the ") && r.mind.alive().tricks_played() == before + 1);
   r.key(A5);  // one waits already: refused
   CHECK(r.log.has("is already waiting") && r.mind.remote().last_failed() && r.mind.behaviour_active());
-  r.run_ms(1300);  // the first ends (the rig's TRICK_DONE 1 s after TRICK_PLAY): the queued one plays, another trick
+  r.run_ms(1300);  // the first ends (the rig plays a trick to its end 1 s after its first key): the queued one plays
   CHECKF(r.mind.alive().tricks_played() == before + 2 && !r.mind.alive().trick_waiting() &&
              first != r.mind.alive().last_trick(),
          "%u, %s then %s", r.mind.alive().tricks_played(), first.c_str(), r.mind.alive().last_trick());
-  // B6 while one plays: TRICK_STOP, the runner stopped, standing
+  // B6 while one plays: stopped (its end posture), the runner stopped, standing
   CHECK(r.mind.alive().trick_playing());
-  size_t stops = r.body.count(KILO_MSG_TRICK_STOP);
   r.key(B6, 300);
-  CHECK(r.body.count(KILO_MSG_TRICK_STOP) > stops && !r.mind.behaviour_active());
-  r.run_ms(1500);  // its TRICK_DONE
+  CHECK(r.mind.player().result().reason == tricks::kStopped && !r.mind.behaviour_active());
+  r.run_ms(1500);  // the stop's transition
   CHECK(!r.mind.alive().trick_playing() && r.posture_goal() == KILO_POSTURE_STAND);
   CHECK(r.log.has("remote B6 (0x02, stand): behaviour runner stopped"));
   // standing (the tree's explore): A5 plays the standing variant, then STANCE again

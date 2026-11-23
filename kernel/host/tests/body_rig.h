@@ -27,6 +27,7 @@ struct FakeBody {
   bool telemetry_on = true;
   bool eyes = false;  // HELLO caps EYES (the body firmware of 2026-11-17 on)
   bool posture_pitch = false;  // SET_POSTURE SIT tips the nose up (TELEMETRY pitch -26 deg), the others level
+  uint32_t streams = 0;        // POSE streams started (a walk, a trick: the first POSE from IDLE)
   int drop_hellos = 0;
   int16_t cal[16] = {};  // the calibration offsets (a16): CAL_SET changes, CAL_GET answers (CAL_VALUES)  // this many HELLO_REQ go unanswered (the answer lost in a stalled loop)
   uint64_t next_tel = 0;
@@ -36,7 +37,7 @@ struct FakeBody {
 
   void hello() {
     kilo_hello_t h = body_hello(epoch);
-    h.trick_capacity = KILO_TRICK_CAPACITY;
+    h.pose_depth = KILO_POSE_DEPTH;
     h.caps = eyes ? KILO_HELLO_CAPS_EYES : 0;
     serial.feed_hello(seq++, h);
   }
@@ -56,19 +57,21 @@ struct FakeBody {
   void event(uint8_t code, int16_t arg) {
     serial.feed_event(seq++, code, arg, epoch, tick);
   }
-  // Read what the mind wrote; ACK its commands. FEET enter GAIT; the
-  // STANCE posture ends it (EVENT GAIT_STOPPED), as the body does.
+  // Read what the mind wrote; ACK its commands. POSE starts a stream (mode
+  // STREAM); any posture ends it (EVENT STREAM_STOPPED 0), as the body does.
   void react() {
     for (const Sent& s : serial.take_sent()) {
       sent.push_back(s);
-      if (s.type == KILO_MSG_FEET && mode == KILO_MODE_IDLE) mode = KILO_MODE_GAIT;
-      if (s.type == KILO_MSG_FEET && posture_pitch) pitch = 0;
+      if (s.type == KILO_MSG_POSE && mode == KILO_MODE_IDLE) {
+        mode = KILO_MODE_STREAM;
+        streams++;
+      }
+      if (s.type == KILO_MSG_POSE && posture_pitch && s.payload.size() > 3 && s.payload[3] == 0) pitch = 0;  // a walk's four feet: level
       if (s.type == KILO_MSG_SET_POSTURE && s.payload.size() == 4 && posture_pitch)
         pitch = s.payload[1] == KILO_POSTURE_SIT ? (int16_t)(-26 * 16) : (int16_t)0;
-      if (s.type == KILO_MSG_SET_POSTURE && s.payload.size() == 4 && s.payload[1] == KILO_POSTURE_STANCE &&
-          mode == KILO_MODE_GAIT) {
+      if (s.type == KILO_MSG_SET_POSTURE && s.payload.size() == 4 && mode == KILO_MODE_STREAM) {
         mode = KILO_MODE_IDLE;
-        event(KILO_EVENT_GAIT_STOPPED, 0);
+        event(KILO_EVENT_STREAM_STOPPED, 0);
       }
       if (s.type == 0xFF || kilo_msg_kind(s.type) != KILO_KIND_COMMAND) continue;
       if (s.type == KILO_MSG_HELLO_REQ) {
@@ -95,6 +98,9 @@ struct FakeBody {
       serial.feed_frame(KILO_MSG_ACK, seq++, &a, sizeof a);
     }
   }
+  // Fast-forward the body's clock by n ticks (a trick's stream played to its end at once: the
+  // player sends the keys left and sees the last one reached).
+  void skip_ticks(uint16_t n) { tick = (uint16_t)(tick + n); }
   // Called once per 4 ms pass, before the mind polls.
   void step() {
     clock.advance_ms(4);

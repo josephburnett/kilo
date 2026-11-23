@@ -28,7 +28,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "mind"))
 
-from kilo.body.client import trick_id_for  # noqa: E402
+from kilo.tricks.model import trick_id_for  # noqa: E402
 from kilo.intent import estimate as E  # noqa: E402
 from kilo.intent import graph as G  # noqa: E402
 from kilo.intent import moves as M  # noqa: E402
@@ -73,8 +73,8 @@ def classify_lines() -> list[str]:
     return out
 
 
-IDLE, GAIT, TRICK, FALLEN, RECOVERING, LIMP = (int(P.Mode.IDLE), int(P.Mode.GAIT), int(P.Mode.TRICK),
-                                               int(P.Mode.FALLEN), int(P.Mode.RECOVERING), int(P.Mode.LIMP))
+IDLE, GAIT, TRICK, FALLEN, RECOVERING, LIMP = (int(P.Mode.IDLE), int(P.Mode.STREAM), int(P.Mode.STREAM),
+                                               int(P.Mode.FALLEN), int(P.Mode.FALLEN), int(P.Mode.LIMP))  # protocol 3: a walk and a trick are both a POSE stream; no RECOVERING
 
 
 def sequences() -> list[tuple[str, list[E.Sample]]]:

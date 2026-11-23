@@ -2,8 +2,9 @@
 "The flight recorder"): read, split into runs, write.
 
 From boot the mind records, in RAM, every body link frame both ways (all
-TELEMETRY, EVENTs, JOINTS; FEET, postures, trick commands; HEARTBEATs only
-counted), every log line, and during a walk or a trick what the planner or
+TELEMETRY, EVENTs, JOINTS; POSE, postures; HEARTBEATs only counted;
+recordings before protocol 3.0 hold FEET and trick commands instead,
+decoded by kilo.logs.proto2), every log line, and during a walk or a trick what the planner or
 the trick player did. It keeps this as BLOCKS of host.record_block_bytes
 (16 KiB): a 36-byte header (``P.RecordBlockHeader``: magic "KFR1", the
 boot's number, the block's number, its size, the mind's clock at its start,
@@ -43,7 +44,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kilo.logs import walkrec
+from kilo.logs import proto2, walkrec
 from kilo.protocol import kilo_protocol as P
 
 FILE_MAGIC = b"KILOREC\n"
@@ -197,8 +198,8 @@ def _parse_block_records(s: Stream, body: bytes, t0: int) -> None:
             if kind in (P.WalkRecord.RX, P.WalkRecord.TX):
                 typ, seq, data = payload[0], payload[1], bytes(payload[2:])
                 try:
-                    msg = P.decode_payload(typ, data)
-                except (KeyError, ValueError, P.PayloadError):
+                    msg = proto2.decode_payload(typ, data)
+                except (KeyError, ValueError, P.PayloadError, struct.error):
                     msg = None
                 s.frames.append(walkrec.Frame(ta, "rx" if kind == P.WalkRecord.RX else "tx", typ, seq, data, msg))
             elif kind == P.WalkRecord.PLAN:

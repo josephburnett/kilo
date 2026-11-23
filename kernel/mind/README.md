@@ -39,7 +39,7 @@ flash/crc32       the image's CRC-32, as zlib.crc32
 flash/flasher     the STK500v1 flasher: RESET, optiboot, pages, verify, the HELLO after
 update/updater    the mind's own kernel onto the SD card: receive, check (CRC, marker), write, read back, rename
 
-tricks/           the trick model, the compiled-in library (library.gen.cpp) and the player (upload, play)
+tricks/           the trick model, the compiled-in library (library.gen.cpp) and the player (its keyframes as POSE keys)
 perception/       ultrasonic and IMU detectors, the Percepts aggregator (kilo/perception)
 behaviour/        tree engine, drives, utility selector, library, 10 Hz runner, personality.gen.cpp (kilo/behaviour)
 behaviour/alive   small body moves while the runner idles or explores (no Python counterpart)
@@ -201,7 +201,7 @@ walker.halt();                        // the quick stop (feet down where they ar
 `poll()` drives the stream (Python's `kilo.planner.walker.Stream`, which the
 tests' walking simulations drive): SET_STREAM telem_div 1, the
 STANCE posture for 0.6 s, then every 20 ms (on a deadline grid) the
-TELEMETRY and EVENTs since the last wake, and FEET up to the body's tick + 5
+TELEMETRY and EVENTs since the last wake, and POSE (four feet) up to the body's tick + 3
 through `SerialLink::send_stream`; at the end STANCE, then the rates and
 balance put back.
 
@@ -386,9 +386,10 @@ What the stream holds (`record/recorder.h`):
   clock in microseconds (`SerialLink::set_frame_tap()`): TELEMETRY
   (measured pitch and roll and their rates, mode, flags, battery,
   distance, the body's reference `ref_*` and correction `corr_*`,
-  support, `feet_queued`, `tick_load`), EVENTs (IR keys, falls,
-  TRICK_DONE, the watchdog), JOINTS if they are streamed; FEET, goals,
-  commands (TRICK_PLAY, TRICK_STOP, postures); HEARTBEAT only counted;
+  support, `pose_queued`, `limited`, `tick_load`), EVENTs (IR keys,
+  falls, STREAM_STOPPED, the watchdog), JOINTS if they are streamed; POSE
+  (a walk's feet, a trick's keys), goals (postures among them) and
+  commands; HEARTBEAT only counted;
 - every log line (`LOG`: the LogRing's tap), the routine status lines
   included;
 - during a walk, each planned tick (`walk_plan`, through the Walker's
@@ -399,10 +400,10 @@ What the stream holds (`record/recorder.h`):
   `masses`, `change` / `timing` / `stop` / `queued`, and at the end
   `result`, `error` and `end` (ok, reason);
 - during a trick (any: the remote's, the behaviour runner's), `MARK`
-  lines: `trick` (id, the trick, its rear-up stage, its id and CRC on the
-  body, frames, speed, mirror, builds, battery, mode, whether a remote key
-  started it), `frames` (each keyframe's `dur` and `hold` in ticks at 1x,
-  and the loop), `uploaded`, `play` (at TRICK_PLAY's acknowledgement: the
+  lines: `trick` (id, the trick, its rear-up stage, its id and CRC (which
+  version of it), frames, speed, mirror, builds, battery, mode, whether a
+  remote key started it), `frames` (each keyframe's `dur` and `hold` in
+  ticks at 1x, and the loop), `play` (the trick's start on the body: the
   keyframes' times count from it), `key` (a remote key acted on while the
   run is open: which key stopped it), and `end` (`reason=DONE`,
   `STOPPED`, `PREEMPTED`, `FELL`, `FAILED` or `REFUSED`, the elapsed and
@@ -485,10 +486,11 @@ for (;;) mind.poll();                 // a few ms apart; never blocks
 One pass: stamp the link's liveness, serve the laptop, then, unless the
 raw bridge is open, the flasher has the UART or a kernel update is
 writing the SD card, poll the link, hand the command slot's answer to its
-owner (the trick player, the STATS poll) before anything may send
-another request, and run the walker, the trick player, the remote and the
-behaviour runner. Every TELEMETRY feeds perception; every EVENT goes to
-the walker, the player, the snapshot's last 8 and, for IR_KEY, the remote.
+owner (the STATS poll) before anything may send another request, and run
+the walker, the trick player, the remote and the behaviour runner. Every
+TELEMETRY feeds perception and the trick player's clock of the body; every
+EVENT goes to the walker, the player, the snapshot's last 8 and, for
+IR_KEY, the remote.
 
 **Liveness.** `Mind::poll()` stamps `link.mark_alive()` once per pass.
 Every part runs in this one cooperative loop, so a pass that returns
@@ -511,11 +513,12 @@ so without `--behaviour` the runner is off until A5.
 
 ## Tricks
 
-`tricks/` ports `kilo/tricks/model.py` and `player.py` and the trick part
-of `kilo/body/client.py`. The library is compiled in: the mind only ever
-uploads it, so a `Trick` is already in wire form (the TRICK_BEGIN fields and
-the 14 B keyframes exactly as Python's `Trick.begin()` and
-`Keyframe.to_wire()` make them). `tricks/gen_library.py` writes
+The body has no trick store or player any more (protocol 3, step 1 of
+docs/movement-engine.md): the mind plays every trick through the body's
+one stream of poses, POSE. The library is compiled in: a `Trick` is its
+header fields and the 14 B keyframes exactly as Python's design tools make
+them (`kilo.tricks.model`: `Trick.begin()`, `Keyframe.to_wire()`).
+`tricks/gen_library.py` writes
 `library.gen.{h,cpp}` from `mind/kilo/tricks/library/*.json` (26 tricks,
 202 frames, about 3.6 KB of tables), with Python's CRC, trick_id and duration
 for the tests:
@@ -525,19 +528,27 @@ for the tests:
 ~/OpenCat/.venv/bin/python kernel/mind/tricks/gen_library.py --check  # test.sh
 ```
 
-`TrickPlayer` is `upload_trick`/`start_trick`/`play`/`stop_trick` as a
-state machine over the link's one command slot: TRICK_COMMIT alone asks
-the body whether it holds the trick (cached by id, CRC and reboots), else
-TRICK_BEGIN, the TRICK_FRAMES chunks and TRICK_COMMIT; the posture goal is
-released; TRICK_PLAY (NO_TRICK: upload again once); done on TRICK_DONE for
-its id, or failed after the expected duration + 1 s (then TRICK_STOP).
-`KeyframeTimer` and `total_ticks` are the body's player timing
-(`player.py`).
-
-What differs: no float angles, JSON, `mirror()` or `speed()` in the mind
-(the body mirrors and changes speed from TRICK_PLAY); `start()` returns at
-once and `result()` reports the play; a second play while one runs is
-refused until it is stopped.
+`TrickPlayer` (`tricks/player.h`) is a state machine with no command at
+all. `KeySeq` turns a trick into keys in play order (per keyframe the end
+of its move, eased as the frame says, a step's jump one tick in, the end
+of its hold; the loop's repeats; mirror and speed applied here, `phase_ticks`
+as before). The player waits for the body to be heard and for its clock
+(TELEMETRY's tick, `planner::BodyClock`), clears the latched SET_POSTURE
+goal and holds that goal type back while the trick plays (`SerialLink::
+hold_goal`: a posture ends a stream on the body, so one asked for meanwhile
+goes out when the trick ends; LIMP never waits), then sends each key as a
+POSE with every leg as joint angles, the head joints the trick sets, the
+frame's balance flag with the trick's expected attitude as the reference,
+FALL_OK for a get-up. The first key is reached from wherever the joints
+are; each next one goes out once the one before it is within the look-ahead
+(3 ticks) of the body's tick, so the body's 5-deep queue always holds the
+next. When the body's TELEMETRY tick reaches the last key the trick's end
+posture goes out as the SET_POSTURE goal (over XFADE_TICKS; a stop over its
+`stop_ticks`), which ends the stream; once the body has left it the goal is
+cleared and the play is Done (DONE, STOPPED, or PREEMPTED / FELL when the
+body ended it). The guards (pitch and roll at guarded holds) read every
+TELEMETRY as before. `start()` returns at once and `result()` reports the
+play; a second play while one runs is refused until it is stopped.
 
 ## Perception
 
@@ -657,7 +668,7 @@ behaviour runner (`remote/remote.h` says what each key does):
 | B6 | stand and stop: the quick stop of a walk (the feet in the air put down where they are, the body stopped in about 0.2 s, the legs squared up under the shoulders; docs/walking-and-balance.md §14), then STAND |
 | A7 | sleep: the quick stop, then REST; 30 s later, if nothing else happened, light sleep (servos off, the Pi idles; any key or the laptop wakes him: `power/sleep.h`, docs/power.md) |
 | C5 | the quick stop, then the calibration posture (CALIB) |
-| C5 again (no other key between) | the self-measurement (`measure/`, docs/self-measurement.md): he stands (STAND), and once he is still the routine starts: small poses streamed as FEET with the balance off, recorded as a run of its own; any key stops it into STAND; refused (logged, he stands) if he is not still within 6 s, below 7400 mV at rest or on USB power |
+| C5 again (no other key between) | the self-measurement (`measure/`, docs/self-measurement.md): he stands (STAND), and once he is still the routine starts: small poses streamed as POSE (four feet) with the balance off, recorded as a run of its own; any key stops it into STAND; refused (logged, he stands) if he is not still within 6 s, below 7400 mV at rest or on USB power |
 | A4, B4, C4 | trot, crawl, walk: walk forward in that gait from standing; change the gait while walking; the gait in use: straight forward again |
 | B7, B5 | faster, slower by one speed level (the trot 0.4, 0.7, 1, 1.25, 1.4 × its speed: 58 to 202 mm/s, its swing 8 ticks up to +3, 10 and 11 at +4 and +5 (`planner/trot.h`, docs/walking-and-balance.md §15); the walk and the crawl 0.4, 0.7, 1, 1.15, 1.25); past the slowest B5 goes backward (the trot to -3 only, 144 mm/s); only while walking. Turning in place: stop turning and walk straight forward (B7) or backward (B5) at once |
 | A6, C6 | from standing: turn left, right in place; walking forward or backward: steer one level left or right (0.25, 0.5, 1 of the stride off the inner side, at most 3 each way; the trot at +4 and +5 one, a sharper steer eased to it), without stopping (docs/walking-and-balance.md §13) |
@@ -665,7 +676,7 @@ behaviour runner (`remote/remote.h` says what each key does):
 | A5 | start the behaviour runner (the random mode); while it runs: one of its tricks at random, at once or after the move playing ("The random mode's tricks") |
 | A1 | an experiment key (row 1: one experiment a key): off unless built with `KILO_REAR_UP=1`, `2` or `3` (the highest stage allowed): rear up (docs/rear-up-trick.md): up to stage 1 (28 degrees nose up) and hold; A1 again while he holds a stage (4 s) takes him on to the next (40, then 54 degrees), up to the build's; without it he comes down to SIT from there; the top stage holds 2 s and comes down. A1 at another moment, B6 or C7: down at once (1.5 to 2.5 s); refused below 7400 mV at rest (the highest reading of the last 20 s). A2 until 2026-11-22, B2 until 2026-11-17 |
 | B2 | a meow: one of the meow family, picked at random (`sound/`, docs/sound.md); it moves nothing, so it plays at once, also while a walk or the behaviour runs |
-| B1 | the righting experiment (docs/righting.md), only in a kernel built with `KILO_RIGHTING=1`: lying on a side or his back, he rights himself by the righting moves (`intent/`), then stands; otherwise refused with a log line; any other key stops it |
+| B1 | the righting experiment (docs/righting.md), only in a kernel built with `KILO_RIGHTING=1`: lying on a side or his back, he rights himself by the righting moves (`intent/`, played as POSE streams that take the joints from the body's fall reflex), then stands; otherwise refused with a log line; any other key stops it. The body has no get-up of its own: without this he lies where he fell |
 | C1 | an experiment key, free; nothing (logged as ignored) |
 | rows 1-3 but A1, B1 and B2 | nothing (logged as ignored) |
 

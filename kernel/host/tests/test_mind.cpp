@@ -30,7 +30,7 @@ void test_remote_through_the_mind() {
   r.body.event(KILO_EVENT_IR_KEY, 0x18);   // B3, row 3: nothing
   r.body.event(KILO_EVENT_IR_KEY, 0x10);   // A2, row 2: nothing
   r.run_ms(40);
-  CHECK(r.posture_goal() == KILO_POSTURE_STAND && r.body.count(KILO_MSG_TRICK_PLAY) == 0);
+  CHECK(r.posture_goal() == KILO_POSTURE_STAND && r.body.count(KILO_MSG_POSE) == 0);
   CHECK(r.log.has("remote A7 (0xA2, sleep) repeat: ignored") && r.log.has("remote ? (0x45): ignored"));
   CHECK(r.log.has("remote B3 (0x18, none): ignored (no action on this key)") &&
         r.log.has("remote A2 (0x10, none): ignored (no action on this key)"));
@@ -39,7 +39,7 @@ void test_remote_through_the_mind() {
   r.body.event(KILO_EVENT_IR_KEY, 0x42);
   r.body.event(KILO_EVENT_IR_KEY, 0x4A);
   r.run_ms(40);
-  CHECK(r.log.has("remote A1 (0x42, none): ignored (no action on this key)") && r.body.count(KILO_MSG_TRICK_BEGIN) == 0);
+  CHECK(r.log.has("remote A1 (0x42, none): ignored (no action on this key)") && r.body.count(KILO_MSG_POSE) == 0);
   CHECK(r.log.has("remote B1 (0x4A, right himself): righting refused: the righting experiment is not built in"));
   r.body.event(KILO_EVENT_IR_KEY, 0xA2);  // A7: rest
   r.run_ms(40);
@@ -142,7 +142,8 @@ void test_behaviour_from_the_remote() {
   r.body.event(KILO_EVENT_IR_KEY, 0xE2);  // C7
   r.run_ms(100);
   CHECK(!r.mind.behaviour_active() && r.mind.remote().frozen());
-  CHECK(r.body.count(KILO_MSG_TRICK_STOP) >= 1);  // (the scripted body sends no TRICK_DONE)
+  CHECK(r.body.count(KILO_MSG_POSE) >= 1 && !r.mind.player().busy() &&
+        r.mind.player().result().state == tricks::PlayState::Done && r.mind.player().result().reason == tricks::kStopped);
   CHECK(r.log.has("remote C7 (0xE2, freeze): frozen (behaviour runner stopped"));
   r.body.event(KILO_EVENT_IR_KEY, 0xE0);  // A5 while frozen: ignored
   r.run_ms(100);

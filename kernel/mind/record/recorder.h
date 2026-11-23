@@ -24,23 +24,22 @@
 //                    (the rear-up: S the stage allowed at the start, 1 from the remote, N when another
 //                    client plays it whole; N its stages)
 //   MARK "frames dur=a,b,.. hold=x,y,.. loop=start,end,repeats"   each keyframe's ticks at 1x
-//   MARK "uploaded"         when this play uploaded the trick
-//   MARK "play speed=.."    at TRICK_PLAY's ACK: the keyframes' times count from here
+//   MARK "play speed=.."    at the trick's start on the body: the keyframes' times count from here
 //   MARK "key ..."          a remote key while the run is open (which key stopped it)
 //   MARK "stage allowed=S reached=R of=N"   the rear-up from the remote: A2 allowed a higher stage, or a
 //                           stage's top was reached (R 0: none yet)
 //   MARK "end reason=DONE|STOPPED|PREEMPTED|FELL|FAILED|REFUSED elapsed_ms=.. expected_ticks=..
 //                    battery_mv=.. mode=.. [stage=S of=N [reached=R]] why=..", RUN END
-// The self-measurement (B1, measure/measure.h; docs/self-measurement.md): a run of kind TRICK (the
+// The self-measurement (C5 twice, measure/measure.h; docs/self-measurement.md): a run of kind TRICK (the
 // host protocol has walks and tricks; its label tells it apart), label "measure=self end=REASON":
 //   RUN BEGIN, MARK "measure id=N format=1 mind_build=.. body_build=.. script=1 tick0=.. ..."
 //   MARK "model ...", "step i=.. exp=.. phase=.. t=.. tick=..", "tip exp=.. seen=.. x=..", "key ..."
 //   MARK "end reason=DONE|STOPPED|FELL|ABORTED ticks=.. sent=.. ... why=..", RUN END
-// The FEET it sent (each tick's feet and the model's attitude) and the TELEMETRY are in the stream.
+// The POSE it sent (each tick's feet and the model's attitude) and the TELEMETRY are in the stream.
 // The run's label (WALK_INFO.text): "trick=NAME [stage=S of=N [reached=R]] end=REASON", S the
 // highest stage allowed in the run, reached=R only when the play did not get to S's top.
 // The frames themselves (TELEMETRY: the measured pitch and roll at every
-// tick; TRICK_PLAY, TRICK_STOP; EVENT TRICK_DONE) are in the stream anyway.
+// tick; the POSE keys and the end posture's SET_POSTURE) are in the stream anyway.
 // A run stays RECORDING for KILO_HOST_WALK_POSTROLL_MS after its end, so
 // its fetch (from KILO_HOST_WALK_PREROLL_MS before its start) has both rolls.
 //
@@ -69,7 +68,7 @@ struct Run {
   uint8_t flags;        // KILO_WALK_FLAGS_*
   uint8_t text_len;
   uint8_t reserved;
-  uint32_t feet;        // FEET frames sent (walks)
+  uint32_t feet;        // POSE frames sent (walks)
   uint64_t start_us;    // the mind's clock at its start (a walk's setup, a trick's start)
   uint64_t end_us;      // ... at its end; 0 until then
   char text[KILO_HOST_WALK_TEXT_MAX];  // WALK_INFO.text
@@ -172,7 +171,6 @@ class Recorder final : public FrameTap, public planner::WalkObserver, public Log
   uint32_t pending_play_ = 0;  // trick_stage() for a play whose run is not open yet
   int pending_allowed_ = 0, pending_reached_ = 0, pending_of_ = 0;
   bool play_marked_ = false;
-  bool upload_marked_ = false;
   planner::PlannerStats last_ = {};
 };
 

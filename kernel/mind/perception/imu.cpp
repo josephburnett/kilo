@@ -7,11 +7,10 @@ namespace perception {
 
 namespace {
 
-constexpr uint16_t kSelfMotionFlags = KILO_TELEMETRY_FLAGS_GAIT | KILO_TELEMETRY_FLAGS_TRICK;
+constexpr uint16_t kSelfMotionFlags = KILO_TELEMETRY_FLAGS_STREAM;
 
 bool self_motion_mode(int mode) {  // imu.py SELF_MOTION_MODES
-  return mode == KILO_MODE_GAIT || mode == KILO_MODE_TRICK || mode == KILO_MODE_RECOVERING ||
-         mode == KILO_MODE_CALIB || mode == KILO_MODE_BOOT;
+  return mode == KILO_MODE_STREAM || mode == KILO_MODE_CALIB || mode == KILO_MODE_BOOT;
 }
 
 TiltDirection direction(double dp, double dr) {

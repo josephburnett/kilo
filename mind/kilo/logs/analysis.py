@@ -24,9 +24,13 @@ FIELD_ALIASES: dict[str, str] = {
     "corr_roll": "corr_roll_deg",
 }
 NUMERIC = ("pitch_deg", "roll_deg", "rate_pitch_dps", "rate_roll_dps", "rate_yaw_dps", "dist_mm",
-           "batt_mv", "tick_load_ms", "rx_err", "trick_frame", "tick", "epoch", "ref_pitch_deg", "ref_roll_deg",
-           "corr_pitch_deg", "corr_roll_deg", "feet_queued", "support")
+           "batt_mv", "tick_load_ms", "rx_err", "limited", "tick", "epoch", "ref_pitch_deg", "ref_roll_deg",
+           "corr_pitch_deg", "corr_roll_deg", "pose_queued", "support")
 _MODE_CODES = {m.name: int(m) for m in P.Mode}
+# A stream of poses: mode STREAM (GAIT in protocol 2 monitor lines, which carry mode names).
+WALKING_MODES = ("STREAM", "GAIT")
+STOPPED_EVENTS = ("STREAM_STOPPED", "GAIT_STOPPED")    # (the second: protocol 2 JSONL event names)
+UNDERRUN_EVENTS = ("POSE_UNDERRUN", "FEET_UNDERRUN")
 
 
 def _stats(xs: list[float]) -> dict[str, float] | None:
@@ -93,20 +97,21 @@ def summary(data: LogData) -> dict[str, Any]:
 
 
 def _walking(s: TelemetrySample) -> bool:
-    return s.mode == "GAIT" or "gait" in (s.flags or ())
+    return s.mode in WALKING_MODES or "stream" in (s.flags or ())
 
 
 def gait_summary(ss: list[TelemetrySample], events: list[Any]) -> dict[str, Any] | None:
-    """Time walking (mode GAIT or the GAIT flag), GAIT_STOPPED (by arg: 0 a
-    posture or an epoch bump, 1 settled after an underrun), FEET_UNDERRUN,
-    FEET refusals, and the model's error over the walking samples
-    (kilo.planner.errors: offset, lag, spike); None if the log has no gait."""
+    """Time streaming (mode STREAM or the STREAM flag), STREAM_STOPPED (by
+    arg: 0 a posture or an epoch bump, 1 settled after an underrun),
+    POSE_UNDERRUN, POSE (FEET in protocol 2: the same type) refusals, and
+    the model's error over the streaming samples (kilo.planner.errors:
+    offset, lag, spike); None if the log has no stream."""
     from kilo.planner.errors import estimate
 
-    stops = [e.arg for e in events if e.name == "GAIT_STOPPED"]
-    underruns = sum(1 for e in events if e.name == "FEET_UNDERRUN")
+    stops = [e.arg for e in events if e.name in STOPPED_EVENTS]
+    underruns = sum(1 for e in events if e.name in UNDERRUN_EVENTS)
     refused = [goal_refused_text(e.arg) for e in events if e.name == "GOAL_REFUSED" and e.arg is not None
-               and (int(e.arg) & 0xFFFF) >> 8 == int(P.MsgId.FEET)]
+               and (int(e.arg) & 0xFFFF) >> 8 == int(P.MsgId.POSE)]
     walking_s = 0.0
     for a, b in zip(ss, ss[1:]):
         if _walking(a):
@@ -130,7 +135,7 @@ def gait_summary(ss: list[TelemetrySample], events: list[Any]) -> dict[str, Any]
 
 
 def goal_refused_text(arg: Any) -> str:
-    """EVENT GOAL_REFUSED arg -> 'FEET: STALE'."""
+    """EVENT GOAL_REFUSED arg -> 'POSE: STALE'."""
     from kilo.link import consts
 
     a = int(arg) & 0xFFFF
@@ -175,8 +180,8 @@ def format_summary(s: dict[str, Any]) -> str:
                  + ", ".join(f"{k} {v:.0%}" for k, v in s["flags_fraction"].items()))
     g = s.get("gait")
     if g:
-        L.append(f"  gait: walking {g['walking_s']:.1f}s, {g['stops']} GAIT_STOPPED "
-                 f"({g['stopped_underrun']} after an underrun), {g['underruns']} FEET_UNDERRUN"
+        L.append(f"  gait: walking {g['walking_s']:.1f}s, {g['stops']} STREAM_STOPPED "
+                 f"({g['stopped_underrun']} after an underrun), {g['underruns']} POSE_UNDERRUN"
                  + (f", refused {', '.join(sorted(set(g['refused'])))}" if g["refused"] else ""))
         e = g.get("error")
         if e:

@@ -22,7 +22,7 @@ bool client_posture(SerialLink& link, planner::Walker* walker, const char* name,
   if (code < 0 || link.state().proto_ok == 0) return false;
   bool flag = balance == 1;
   if (str_eq(name, "balance") && balance < 0) flag = true;
-  // a posture takes the legs from the stream: end it first, so no FEET re-enters GAIT under it
+  // a posture takes the legs from the stream: end it first, so no POSE restarts the stream under it
   if (walker != nullptr && walker->active()) walker->abort();
   kilo_set_posture_t g = {0, (uint8_t)code, transition_ticks, (uint8_t)(flag ? KILO_POSTURE_FLAGS_BALANCE : 0)};
   return link.set_goal(KILO_MSG_SET_POSTURE, (const uint8_t*)&g, sizeof g);

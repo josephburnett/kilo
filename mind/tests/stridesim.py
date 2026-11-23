@@ -29,12 +29,13 @@ from dataclasses import replace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from kilo.logs import proto2  # noqa: E402
 from kilo.planner import patterns as pat  # noqa: E402
 from kilo.planner.model import LEGS, BodyModel, Mass  # noqa: E402
 from kilo.planner.patterns import TROT, swing_for, trot_timing as timing  # noqa: E402
 from kilo.planner.plan import TROT_FIT, PlannerConfig  # noqa: E402
 from kilo.protocol import kilo_protocol as P  # noqa: E402
-from kilo.vbody import feet as vfeet  # noqa: E402
+from kilo.vbody import pose as vpose  # noqa: E402
 from kilo.vbody import physics as phys  # noqa: E402
 from kilo.vbody.rocking import RockingPhysics  # noqa: E402
 
@@ -48,9 +49,9 @@ TICK_S = phys.TICK_S
 
 
 def joint_step_deg(a, b, model=M) -> float:
-    """The fastest joint between two ticks (TickPlans or FEET), degrees."""
-    ax, az = (a.x, a.z) if hasattr(a, "x") else (a.x_mm, a.z_mm)
-    bx, bz = (b.x, b.z) if hasattr(b, "x") else (b.x_mm, b.z_mm)
+    """The fastest joint between two ticks (TickPlans or feet), degrees."""
+    ax, az = (a.x, a.z) if hasattr(a, "x") else (a.x_mm, a.z_mm) if hasattr(a, "x_mm") else proto2.feet_of(a)
+    bx, bz = (b.x, b.z) if hasattr(b, "x") else (b.x_mm, b.z_mm) if hasattr(b, "x_mm") else proto2.feet_of(b)
     worst = 0.0
     for leg in LEGS:
         t = model.ik(leg, ax[leg], az[leg])
@@ -60,22 +61,22 @@ def joint_step_deg(a, b, model=M) -> float:
 
 
 class physics_as:
-    """with physics_as("rocking"): new FEET players walk on RockingPhysics (ROCKING), or Physics."""
+    """with physics_as("rocking"): new POSE players walk on RockingPhysics (ROCKING), or Physics."""
 
     def __init__(self, which: str, **kw):
         self.which, self.kw = which, kw
 
     def __enter__(self):
-        self.old = vfeet.FeetPlayer.PHYSICS
+        self.old = vpose.PosePlayer.PHYSICS
         if self.which == "rocking":
             kw = {**ROCKING, **self.kw}
-            vfeet.FeetPlayer.PHYSICS = lambda model, **a: RockingPhysics(model, **kw, **a)
+            vpose.PosePlayer.PHYSICS = lambda model, **a: RockingPhysics(model, **kw, **a)
         else:
-            vfeet.FeetPlayer.PHYSICS = phys.Physics
+            vpose.PosePlayer.PHYSICS = phys.Physics
         return self
 
     def __exit__(self, *exc):
-        vfeet.FeetPlayer.PHYSICS = self.old
+        vpose.PosePlayer.PHYSICS = self.old
 
 
 def shifted(dx: float = 0.0, dy: float = 0.0, battery_g: float = 0.0) -> BodyModel:
@@ -99,12 +100,12 @@ def walk(speed: float, direction: str = "forward", physics: str = "rocking", pla
         sent0 = len(sim.link.sent)
         sim.run(ticks)
     pred = sim.pred()
-    g = [t for t in sim.telemetry[n0:] if t.mode == P.Mode.GAIT and t.tick in pred]
+    g = [t for t in sim.telemetry[n0:] if t.mode == P.Mode.STREAM and t.tick in pred]
     err = [abs(t.roll / 16 - pred[t.tick][1]) for t in g] + [abs(t.pitch / 16 - pred[t.tick][0]) for t in g]
     roll = [t.roll / 16 - pred[t.tick][1] for t in g]
     sent = sim.link.sent[sent0:]
     fastest = max((joint_step_deg(a, b) for a, b in zip(sent, sent[1:])), default=0.0) * 50
-    ph = sim.vb.feet.physics if sim.vb.feet is not None else None
+    ph = sim.vb.stream.physics if sim.vb.stream is not None else None
     clear = [c for c in getattr(ph, "clear_log", [])[-ticks:] if c != math.inf]
     st = sim.planner.stats
     return {"speed": speed, "w": sim.planner.swing_ticks, "stride": max(abs(v) for v in sim.planner.s_cur),
@@ -165,7 +166,7 @@ def limits() -> None:
 
 # ---- the fit --------------------------------------------------------------------------------------
 
-AIR_LFRB, AIR_RFLB = 0b1010, 0b0101  # FEET support: RF+LB down / LF+RB down
+AIR_LFRB, AIR_RFLB = 0b1010, 0b0101  # POSE support: RF+LB down / LF+RB down
 
 
 def _recordings(paths):
@@ -178,9 +179,9 @@ def _recordings(paths):
 
 
 def _replay(w, physics: str):
-    """(tick, measured roll, virtual roll, FEET) of a recorded walk replayed through a FEET player."""
+    """(tick, measured roll, virtual roll, POSE/FEET) of a recorded walk replayed through a POSE player."""
     from kilo.logs import walkrec as W
-    from walkreplay import BALANCE
+    from walkreplay import BALANCE, key_at
     if not w.plans:
         return []
     feet, tel = {}, {}
@@ -188,25 +189,25 @@ def _replay(w, physics: str):
     for f in w.frames:
         if f.msg is None:
             continue
-        if f.direction == "tx" and isinstance(f.msg, P.Feet):
+        if f.direction == "tx" and proto2.is_stream(f.msg):
             feet[W._unwrap(f.msg.tick, last)] = f.msg
         elif f.direction == "rx" and isinstance(f.msg, P.Telemetry):
             last = W._unwrap(f.msg.tick, last)
             tel[last] = f.msg
-    gt = [k for k, t in tel.items() if t.mode == P.Mode.GAIT]
+    gt = [k for k, t in tel.items() if t.mode == P.Mode.STREAM]
     if not feet or not gt:
         return []
     out = []
     with physics_as(physics):
-        g = vfeet.FeetPlayer(min(feet) - 1, M)
+        g = vpose.PosePlayer(min(feet) - 1, M)
     for k in range(min(feet), max(gt) + 1):
         if k in feet:
-            g.queue[k] = feet[k]
+            g.queue.append(key_at(feet[k], k))
         ph = g.physics
         g.tick(k, (ph.pitch, ph.roll), ph.rates, BALANCE, True)
         ph.step()
         t = tel.get(k)
-        if t is not None and t.mode == P.Mode.GAIT and k in feet:
+        if t is not None and t.mode == P.Mode.STREAM and k in feet:
             out.append((k, t.roll / 16.0, ph.roll, feet[k]))
     return out
 
@@ -359,12 +360,12 @@ def one_stop(speed: float, at: int, physics: str = "rocking", warm_s: float = 3.
             for _ in range(int(warm_s / TICK_S) + at):
                 sim.step()
             sim.planner.halt()
-            ph = sim.vb.feet.physics
+            ph = sim.vb.stream.physics
             d0, pos, ticks, on, tilt = ph.dist_mm, [], 0, True, 0.0
             while on and ticks < 600:
                 on = sim.step()
                 ticks += 1
-                p = sim.vb.feet.physics if sim.vb.feet is not None else None
+                p = sim.vb.stream.physics if sim.vb.stream is not None else None
                 pos.append(p.dist_mm - d0 if p is ph else (pos[-1] if pos else 0.0))
                 if sim.telemetry:
                     t = sim.telemetry[-1]

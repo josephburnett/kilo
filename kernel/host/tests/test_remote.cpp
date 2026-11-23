@@ -173,16 +173,34 @@ struct Rig : LinkListener {
     run_ms(80);
     body.sent.clear();
   }
-  void on_telemetry(const kilo_telemetry_t& t) override { walker.on_telemetry(t); }
+  void on_telemetry(const kilo_telemetry_t& t) override {
+    walker.on_telemetry(t);
+    player.on_telemetry(t);
+  }
   void on_event(const kilo_event_t& e) override {
     walker.on_event(e);
     player.on_event(e);
+  }
+  // A trick playing (the behaviour runner's, say): its keys going out.
+  void playing(const char* name = "hi") {
+    player.start(*tricks::find_trick(name));
+    run_ms(100);
+    body.sent.clear();
+  }
+  // The transition of the last SET_POSTURE that took `posture` (a trick's stop to its end posture).
+  uint8_t posture_ticks(uint8_t posture) const {
+    uint8_t t = 0xFF;
+    for (const Sent& s : body.of(KILO_MSG_SET_POSTURE))
+      if (s.payload[1] == posture) t = s.payload[2];
+    return t;
+  }
+  bool stopped() const {
+    return player.result().state == tricks::PlayState::Done && player.result().reason == tricks::kStopped;
   }
   void pass() {
     body.step();
     link.mark_alive();
     link.poll();
-    player.collect();
     walker.poll();
     player.poll();
     remote.poll();
@@ -221,7 +239,7 @@ void test_posture_keys() {
   {
     Rig r;
     CHECK(std::strcmp(r.key("B6"), "posture stand") == 0 && r.posture_goal() == KILO_POSTURE_STAND);
-    CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 0 && r.log.has("remote B6 (0x02, stand): posture stand"));
+    CHECK(r.body.count(KILO_MSG_POSE) == 0 && r.log.has("remote B6 (0x02, stand): posture stand"));
     CHECK(std::strcmp(r.key("A7"), "posture rest") == 0 && r.posture_goal() == KILO_POSTURE_REST);
     CHECK(r.log.has("remote A7 (0xA2, sleep): posture rest"));
     // C5: the body's calibration posture
@@ -272,9 +290,10 @@ void test_posture_keys() {
     CHECK(std::strcmp(r.key("A7"), "posture rest") == 0 && !r.remote.busy() && r.posture_goal() == KILO_POSTURE_REST);
     CHECK(r.log.has("remote C5 (0x90, calibration posture): measure cancelled (a key was pressed): standing"));
   }
-  {  // a playing trick is stopped first
-    Rig r(KILO_MODE_TRICK);
-    CHECK(std::strcmp(r.key("B6", 100), "posture stand") == 0 && r.body.count(KILO_MSG_TRICK_STOP) == 1);
+  {  // a playing trick is stopped first (its end posture), then the posture
+    Rig r;
+    r.playing("hi");
+    CHECK(std::strcmp(r.key("B6", 100), "posture stand") == 0 && r.stopped());
     CHECK(r.posture_goal() == KILO_POSTURE_STAND);
   }
   {  // a walk is stopped the planned way first, also by C5
@@ -298,9 +317,9 @@ void test_gait_keys() {
   CHECK(std::strcmp(r.walker.planner().pattern().name, "walk") == 0);
   CHECK(r.log.has("remote C4 (0xB0, walk): walk forward (walk) 58.0 mm/s"));
   // the same gait again: nothing (no restart, the speed kept)
-  size_t feet = r.body.count(KILO_MSG_FEET);
+  size_t feet = r.body.count(KILO_MSG_POSE);
   LAST_IS(r, "C4", "walk forward (walk) 58.0 mm/s: unchanged");
-  CHECK(r.walker.active() && r.body.count(KILO_MSG_FEET) > feet);
+  CHECK(r.walker.active() && r.body.count(KILO_MSG_POSE) > feet);
   // another gait while walking: changed, the level kept
   r.key("B7");  // +4
   LAST_IS(r, "A4", "walk forward (trot) 180.0 mm/s");  // the trot's 1.25x
@@ -329,7 +348,7 @@ void test_speed_ladder() {
   // not walking: ignored, never a walk
   LAST_IS(r, "B7", "ignored (not walking)");
   LAST_IS(r, "B5", "ignored (not walking)");
-  CHECK(!r.walker.active() && r.body.count(KILO_MSG_FEET) == 0);
+  CHECK(!r.walker.active() && r.body.count(KILO_MSG_POSE) == 0);
   CHECK(r.log.has("remote B7 (0x62, faster): ignored (not walking)"));
   r.key("A4", 800);
   CHECK(r.walker.active());
@@ -468,13 +487,13 @@ void test_freeze() {
   {  // walking: the quick stop (the feet down where they are, squared up, STANCE), then only B6 / A7 act
     Rig r;
     r.key("A4", 800);
-    CHECK(r.walker.active() && r.body.mode == KILO_MODE_GAIT);
+    CHECK(r.walker.active() && r.body.mode == KILO_MODE_STREAM);
     LAST_IS(r, "C7", "frozen (walk: the quick stop): only B6 or A7 act now");
     CHECK(r.walker.active() && r.walker.planner().halting() && r.remote.frozen());
     r.run_ms(2000);
     CHECKF(!r.walker.active() && r.walker.ended_ok() && std::strcmp(r.walker.ended(), "stopped") == 0, "ended %s",
            r.walker.ended() ? r.walker.ended() : "-");
-    CHECK(r.remote.frozen() && r.posture_goal() == -1 && r.body.count(KILO_MSG_FEET) > 0);
+    CHECK(r.remote.frozen() && r.posture_goal() == -1 && r.body.count(KILO_MSG_POSE) > 0);
     // every key but B6 and A7: ignored
     const char* others[] = {"B7", "B5", "A4", "B4", "C4", "A6", "C6", "C5", "A5", "C7"};
     for (const char* g : others) {
@@ -496,9 +515,11 @@ void test_freeze() {
     LAST_IS(r, "A7", "unfrozen, posture rest");
   }
   {  // a trick playing (the behaviour runner's): stopped
-    Rig r(KILO_MODE_TRICK);
+    Rig r;
+    r.playing("hi");
     LAST_IS(r, "C7", "frozen (trick stopped): only B6 or A7 act now");
-    CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1);
+    r.run_ms(100);
+    CHECK(r.stopped());
   }
   {  // ahead of a stop under way: that key is cancelled, the ones behind it dropped
     Rig r;
@@ -549,10 +570,7 @@ void test_behaviour_key() {
   CHECK(r.log.has("remote A5 (0xE0, behaviour): behaviour runner started"));
 }
 
-uint8_t stop_ticks_sent(const Rig& r) {
-  std::vector<Sent> s = r.body.of(KILO_MSG_TRICK_STOP);
-  return s.empty() ? 0xFF : s.back().payload[0];
-}
+uint8_t stop_ticks_sent(const Rig& r) { return r.posture_ticks(KILO_POSTURE_SIT); }  // the rear-up ends in SIT
 
 void test_rear_up_key_off() {
   // the default until the owner's staged trials: A1 is a row 1-3 key
@@ -562,7 +580,7 @@ void test_rear_up_key_off() {
   CHECK(k != nullptr && k->kind == Kind::Ignore);
   r.remote.perform(*k, k->command);
   r.run_ms(40);
-  CHECK(r.body.count(KILO_MSG_TRICK_BEGIN) == 0 && r.body.count(KILO_MSG_TRICK_PLAY) == 0 && !r.player.busy());
+  CHECK(r.body.count(KILO_MSG_POSE) == 0 && !r.player.busy());
 }
 
 void test_rear_up_key() {
@@ -572,24 +590,21 @@ void test_rear_up_key() {
   {
     Rig r;
     LAST_IS(r, "A1", "trick rear_up started (6 s; A1 again, B6 or C7 bring it down)");
-    CHECK(r.body.count(KILO_MSG_TRICK_PLAY) == 1 && r.player.busy());
+    CHECK(r.body.count(KILO_MSG_POSE) >= 1 && r.player.busy());
     CHECK(r.log.has("remote A1 (0x42, rear up): trick rear_up started"));
-    r.body.mode = KILO_MODE_TRICK;
     r.run_ms(40);
     // pressed again while it plays: down, over the trick's stop_ticks
     LAST_IS(r, "A1", "trick stopped: coming down");
-    CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1 && stop_ticks_sent(r) == 75);
+    r.run_ms(40);
+    CHECK(r.stopped() && stop_ticks_sent(r) == 75);
   }
-  {  // B6 while it plays: TRICK_STOP over 75 ticks, the crossfade (to SIT) waited for, then STAND
+  {  // B6 while it plays: the end posture over 75 ticks, the transition (to SIT) waited for, then STAND
     Rig r;
     r.key("A1");
-    r.body.mode = KILO_MODE_TRICK;
     r.run_ms(40);
     r.key("B6", 40);
-    CHECK(r.body.count(KILO_MSG_TRICK_STOP) == 1 && stop_ticks_sent(r) == 75 && r.remote.busy());
-    r.body.mode = KILO_MODE_IDLE;
-    r.body.event(KILO_EVENT_TRICK_DONE, (int16_t)((KILO_TRICK_DONE_REASON_STOPPED << 8) | r.player.result().trick_id));
-    r.run_ms(1400);  // the 1.5 s crossfade (+0.1 s) is not over yet
+    CHECK(stop_ticks_sent(r) == 75 && r.remote.busy());
+    r.run_ms(1400);  // the 1.5 s transition (+0.1 s) is not over yet
     CHECK(r.remote.busy() && r.posture_goal() != KILO_POSTURE_STAND);
     r.run_ms(400);
     CHECK(!r.remote.busy() && r.posture_goal() == KILO_POSTURE_STAND && std::strcmp(r.remote.last(), "posture stand") == 0);
@@ -597,7 +612,6 @@ void test_rear_up_key() {
   {  // C7 while it plays: stopped the same way (it comes down), frozen; A1 does not unfreeze
     Rig r;
     r.key("A1");
-    r.body.mode = KILO_MODE_TRICK;
     r.run_ms(40);
     LAST_IS(r, "C7", "frozen (trick stopped): only B6 or A7 act now");
     CHECK(stop_ticks_sent(r) == 75);
@@ -608,9 +622,9 @@ void test_rear_up_key() {
     r.key("A4", 800);
     CHECK(r.walker.active());
     CHECK(std::strncmp(r.key_done("A1"), "trick rear_up started", 21) == 0 && !r.walker.active());
-    r.run_ms(100);  // the player's TRICK_COMMIT, then TRICK_PLAY
-    CHECKF(r.body.count(KILO_MSG_TRICK_PLAY) == 1 && r.remote.level() == 3, "plays %zu level %d",
-           r.body.count(KILO_MSG_TRICK_PLAY), r.remote.level());
+    r.run_ms(100);  // the player's first keys
+    CHECKF(r.player.playing() && r.player.trick() == t && r.remote.level() == 3, "playing %d level %d",
+           (int)r.player.playing(), r.remote.level());
   }
   {  // a flat pack, USB power: refused, nothing moves
     Rig r;
@@ -621,7 +635,7 @@ void test_rear_up_key() {
     r.body.flags |= KILO_TELEMETRY_FLAGS_NO_BATTERY;
     r.run_ms(40);
     LAST_IS(r, "A1", "rear_up refused: on USB power (no battery)");
-    CHECK(r.body.count(KILO_MSG_TRICK_PLAY) == 0 && r.body.count(KILO_MSG_TRICK_COMMIT) == 0);
+    CHECK(r.body.count(KILO_MSG_POSE) == 0 && !r.player.busy());
   }
   // the higher stages (KILO_REAR_UP=2, 3): the same key, the stage's trick, its own slower stop
   for (uint8_t stage = 2; stage <= kRearUpStages; stage++) {
@@ -636,9 +650,9 @@ void test_rear_up_key() {
     CHECKF(std::strncmp(r.key_done("A1"), want, std::strlen(want)) == 0, "%s", r.remote.last());
     std::snprintf(want, sizeof want, "remote A1 (0x42, rear up %u): %s", (unsigned)stage, "trick");
     CHECKF(r.log.has(want), "%s", want);
-    r.body.mode = KILO_MODE_TRICK;
     r.run_ms(40);
     LAST_IS(r, "A1", "trick stopped: coming down");
+    r.run_ms(40);
     CHECK(stop_ticks_sent(r) == stop);
   }
   set_rear_up_key(0);

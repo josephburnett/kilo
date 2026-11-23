@@ -20,7 +20,7 @@ import time
 
 from kilo.measure import simulate
 from kilo.planner.model import BodyModel
-from kilo.vbody import feet as vfeet
+from kilo.vbody import pose as vpose
 from kilo.vbody.physics import Physics
 from kilo.vbody.sim import VirtualBody, open_pty
 
@@ -34,7 +34,7 @@ def main() -> int:
     ap.add_argument("--c5-at", type=float, default=1.5)
     ap.add_argument("--c5-again-at", type=float, default=3.5)
     a = ap.parse_args()
-    vfeet.FeetPlayer.PHYSICS = functools.partial(Physics, inset_mm=0.0)
+    vpose.PosePlayer.PHYSICS = functools.partial(Physics, inset_mm=0.0)
     model = simulate.moved_model(BodyModel(), *a.dcom)
     t, path, _slave = open_pty()
     vb = VirtualBody(t, model=model, imu_offset=tuple(a.imu), lag_ms=a.lag_ms, tau_ms=a.tau_ms).start()

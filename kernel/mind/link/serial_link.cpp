@@ -121,6 +121,10 @@ void SerialLink::housekeeping(uint64_t now) {
   for (Goal& g : goals_) {
     if (!g.used || !(g.dirty || refresh)) continue;
     if (!contact_ && goal_is_motion(g)) continue;  // stays dirty: sent once the body is heard
+    if (g.type == held_ && !(g.type == KILO_MSG_SET_POSTURE && g.payload[1] == KILO_POSTURE_LIMP)) {
+      g.dirty = true;  // held back (hold_goal): it goes when released; LIMP, the emergency stop, never waits
+      continue;
+    }
     bool epoch_goal = is_epoch_goal(g.type);
     if (epoch_goal && g.epoch == kNoEpoch) {
       if (state_.epoch == kNoEpoch) continue;  // wait for the first epoch from HELLO or TELEMETRY
@@ -211,6 +215,11 @@ bool SerialLink::set_goal(uint8_t type, const uint8_t* payload, uint8_t len) {
 
 bool SerialLink::clear_goal(uint8_t type) { return goals_.remove(type); }
 
+void SerialLink::hold_goal(uint8_t type, bool on) {
+  if (on) held_ = type;
+  else if (held_ == type) held_ = 0;
+}
+
 const Goal* SerialLink::goal(uint8_t type) { return goals_.find(type); }
 
 bool SerialLink::send_stream(uint8_t type, const uint8_t* payload, uint8_t len) {
@@ -273,7 +282,7 @@ bool SerialLink::request(uint8_t type, const uint8_t* payload, uint8_t len) {
   if (kilo_msg_kind(type) != KILO_KIND_COMMAND || kilo_payload_len_check(type, payload, len) != KILO_LEN_OK)
     return false;
   if (!state_.connected) return false;
-  if (type == KILO_MSG_TRICK_PLAY && !contact_) return false;  // the body has not been heard on this connection
+
   mem_zero(&req_, sizeof req_);
   req_.state = RequestState::Waiting;
   req_.type = type;

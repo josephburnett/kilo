@@ -59,9 +59,9 @@ OBJS := $(BUILD)/src/main.o $(BUILD)/src/kernel.o $(BUILD)/src/seams.o $(BUILD)/
 #                           until the first floor try of docs/intent.md is done; the state estimate itself
 #                           always runs and only logs)
 #   KILO_RIGHTING=0|1       the righting experiment (docs/righting.md): lying on a side or his back, the
-#                           remote's B1 rights him by moves planned on the body model, and the body's own
-#                           getting-up (rc) is off (default 0: the body's fall reflex as before, B1 does
-#                           nothing, until the first try of docs/righting.md is done)
+#                           remote's B1 rights him by moves planned on the body model (default 0: B1 does
+#                           nothing, until the first try of docs/righting.md is done; the body has no
+#                           get-up of its own since protocol 3: after a fall he lies still either way)
 #   KILO_RECORD_SAVE=0|1    save the flight recorder to the SD card from the start (default 0: off until
 #                           `kilo bench sd --host` has measured the card and `kilo record save on --host`)
 #   KILO_LIGHT_SLEEP=1|0    light sleep: the servos off 3 s after the remote's A7 (or 2 min lying idle in REST),

@@ -72,7 +72,7 @@ bool Flasher::start(const FlashImage& img, bool persist) {
   start_us_ = now;
   logf(log_, LogLevel::Info, "flash: build %08x, %u bytes, %u pages; the body ran %08x", (unsigned)status_.build,
        (unsigned)img.manifest().size, (unsigned)status_.pages, (unsigned)prev_build_);
-  // The link stops here (owns_uart()): no heartbeat, goal or FEET goes out,
+  // The link stops here (owns_uart()): no heartbeat, goal or POSE goes out,
   // and the body is about to be reset anyway, so no REST first.
   if (!serial_.set_baud(KILO_HOST_FLASH_BAUD)) {
     step_ = Step::BootWait;  // busy() and owns the UART, so fail() restores the link

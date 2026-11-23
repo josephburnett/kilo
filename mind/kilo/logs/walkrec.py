@@ -19,7 +19,7 @@ files per walk:
 ``kilo log walk FILE.kwalk [--csv OUT] [--plot OUT.png] [--json]`` is the
 analysis: per tick (``tick_table``) what the plan predicted and what the
 body measured, the difference, the body's correction, the support and held
-flags, the legs in the air, the stability margin and how early each FEET
+flags, the legs in the air, the stability margin and how early each POSE
 arrived; and a summary (``summarize``): RMS and largest error per axis, the
 constant offset (an IMU mounted off level, a mass misplaced), the servo lag
 (as the error tracker estimates it, and from the attitude without lag), the
@@ -27,7 +27,7 @@ error by gait phase (which legs are in the air), the time the corrections
 were held, the smallest margin, holds, catches and waits.
 
 Angles are degrees: pitch nose down +, roll right side up + (TELEMETRY's
-convention). error = measured - predicted, where predicted is what the FEET
+convention). error = measured - predicted, where predicted is what the POSE
 frame for that tick carried (the attitude the planner expects a servo lag
 after the feet move); the body's reference (``ref_*``) is that prediction
 while its balance is on.
@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kilo.logs import proto2
 from kilo.planner.model import LEG_NAMES
 from kilo.protocol import kilo_link_codec as C
 from kilo.protocol import kilo_protocol as P
@@ -116,10 +117,7 @@ class Frame:
 
     @property
     def name(self) -> str:
-        try:
-            return P.MsgId(self.type).name
-        except ValueError:
-            return f"0x{self.type:02X}"
+        return proto2.type_name(self.type, self.payload)
 
 
 @dataclass
@@ -201,8 +199,8 @@ def parse_records(data: bytes, meta: dict[str, Any] | None = None) -> Walk:
             if kind in (P.WalkRecord.RX, P.WalkRecord.TX):
                 typ, seq, payload = body[0], body[1], bytes(body[2:])
                 try:
-                    msg = P.decode_payload(typ, payload)
-                except (KeyError, ValueError, P.PayloadError):
+                    msg = proto2.decode_payload(typ, payload)
+                except (KeyError, ValueError, P.PayloadError, struct.error):
                     msg = None
                 w.frames.append(Frame(t, "rx" if kind == P.WalkRecord.RX else "tx", typ, seq, payload, msg))
             elif kind == P.WalkRecord.PLAN:
@@ -287,13 +285,13 @@ TABLE_FIELDS = (
     "tick", "t_ms", "mode", "lifting", "support_plan", "support_body", "held", "balance",
     "pred_pitch", "pred_roll", "meas_pitch", "meas_roll", "err_pitch", "err_roll",
     "plan_pitch", "plan_roll", "ref_pitch", "ref_roll", "corr_pitch", "corr_roll",
-    "margin_mm", "feet_sent_ms", "telem_ms", "lead_ms", "feet_queued", "rate_pitch", "rate_roll",
+    "margin_mm", "pose_sent_ms", "telem_ms", "lead_ms", "pose_queued", "rate_pitch", "rate_roll",
 )
 
 
 def tick_table(w: Walk) -> list[dict[str, Any]]:
     """One row per body tick from the first planned tick to the last
-    TELEMETRY: the plan (PLAN, FEET) joined with what the body reported for
+    TELEMETRY: the plan (PLAN, POSE; FEET in protocol 2) joined with what the body reported for
     that tick (TELEMETRY.tick). Missing parts are None (a tick planned but
     skipped, a TELEMETRY dropped)."""
     if not w.plans:
@@ -308,7 +306,7 @@ def tick_table(w: Walk) -> list[dict[str, Any]]:
     for f in w.frames:
         if f.msg is None:
             continue
-        if f.direction == "tx" and isinstance(f.msg, P.Feet):
+        if f.direction == "tx" and proto2.is_stream(f.msg):
             k = _unwrap(f.msg.tick, last)
             feet.setdefault(k, (f.t_us, f.msg))
         elif f.direction == "rx" and isinstance(f.msg, P.Telemetry):
@@ -338,11 +336,11 @@ def tick_table(w: Walk) -> list[dict[str, Any]]:
         if fm is not None:  # what the body was sent (clamped to the field's range)
             r["pred_pitch"], r["pred_roll"] = fm.pitch / A16, fm.roll / A16
             r["support_plan"] = fm.support
-            r["feet_sent_ms"] = round(ft[0] / 1000, 3)
+            r["pose_sent_ms"] = round(ft[0] / 1000, 3)
         if tm is not None:
             flags = P.TelemetryFlags(tm.flags)
             r["t_ms"] = r["telem_ms"] = round(tt[0] / 1000, 3)
-            r["mode"] = P.Mode(tm.mode).name if tm.mode in P.Mode._value2member_map_ else str(tm.mode)
+            r["mode"] = proto2.mode_name(tm.mode)
             r["meas_pitch"], r["meas_roll"] = tm.pitch / A16, tm.roll / A16
             r["ref_pitch"], r["ref_roll"] = tm.ref_pitch / A16, tm.ref_roll / A16
             r["corr_pitch"], r["corr_roll"] = tm.corr_pitch / A16, tm.corr_roll / A16
@@ -350,14 +348,14 @@ def tick_table(w: Walk) -> list[dict[str, Any]]:
             r["support_body"] = tm.support
             r["held"] = int(bool(flags & P.TelemetryFlags.BALANCE_HELD))
             r["balance"] = int(bool(flags & P.TelemetryFlags.BALANCE_ACTIVE))
-            r["feet_queued"] = tm.feet_queued
+            r["pose_queued"] = tm.pose_queued
             if r["pred_pitch"] is not None:
                 r["err_pitch"] = r["meas_pitch"] - r["pred_pitch"]
                 r["err_roll"] = r["meas_roll"] - r["pred_roll"]
-            if r["feet_sent_ms"] is not None:
-                r["lead_ms"] = round(r["telem_ms"] - r["feet_sent_ms"], 3)
-        elif r["feet_sent_ms"] is not None:
-            r["t_ms"] = r["feet_sent_ms"]
+            if r["pose_sent_ms"] is not None:
+                r["lead_ms"] = round(r["telem_ms"] - r["pose_sent_ms"], 3)
+        elif r["pose_sent_ms"] is not None:
+            r["t_ms"] = r["pose_sent_ms"]
         rows.append(r)
     return rows
 
@@ -416,7 +414,7 @@ def summarize(w: Walk, rows: list[dict[str, Any]] | None = None) -> dict[str, An
     rows = tick_table(w) if rows is None else rows
     walk_m, setup, stream, end = w.mark("walk"), w.mark("setup"), w.mark("stream"), w.mark("end")
     result, err_m, model = w.mark("result"), w.mark("error"), w.mark("model")
-    gait = [r for r in rows if r["mode"] == "GAIT" and r["err_pitch"] is not None]
+    gait = [r for r in rows if r["mode"] == "STREAM" and r["err_pitch"] is not None]
     out: dict[str, Any] = {
         "path": w.meta.get("path"), "walk": walk_m.fields if walk_m else {},
         "setup": setup.fields if setup else {}, "stream": stream.fields if stream else {},
@@ -528,11 +526,11 @@ def format_summary(s: dict[str, Any]) -> str:
     L.append(f"  end     {en.get('reason', '?')} (ok {en.get('ok', '?')}); sent {res.get('sent', '?')} skipped "
              f"{res.get('skipped', '?')} underruns {res.get('underruns', '?')}; holds {res.get('holds', '-')} catches "
              f"{res.get('catches', '-')} waits {res.get('waits', '-')}")
-    L.append(f"  ticks   {s['ticks_planned']} planned, {s['ticks_sent']} sent, {s['ticks_gait']} measured in GAIT"
+    L.append(f"  ticks   {s['ticks_planned']} planned, {s['ticks_sent']} sent, {s['ticks_gait']} measured in STREAM"
              + (f"; {s['duration_s']:.1f} s recorded" if "duration_s" in s else ""))
     e = s.get("error")
     if not e:
-        L.append("  error   no GAIT telemetry with a prediction")
+        L.append("  error   no STREAM telemetry with a prediction")
         return "\n".join(L)
     L.append(f"  error   (measured - predicted, deg, {e['samples']} ticks)")
     L.append(f"          pitch rms {e['rms_pitch']:.2f} max {e['max_pitch']:+.2f} offset {e['offset_pitch']:+.2f} "
@@ -557,7 +555,7 @@ def format_summary(s: dict[str, Any]) -> str:
         L.append(f"    {k:8s} {v['ticks']:5d}  {v['mean_pitch']:+6.2f} / {v['rms_pitch']:5.2f}  "
                  f"{v['mean_roll']:+6.2f} / {v['rms_roll']:5.2f}   corr {v['corr_pitch']:+6.2f} {v['corr_roll']:+6.2f}")
     h, c = s.get("held", {}), s.get("correction", {})
-    L.append(f"  held    {h.get('ticks')} ticks ({h.get('seconds')} s, {h.get('fraction', 0):.0%} of GAIT); balance "
+    L.append(f"  held    {h.get('ticks')} ticks ({h.get('seconds')} s, {h.get('fraction', 0):.0%} of STREAM); balance "
              f"active {s.get('balance_active_fraction', 0):.0%}")
     L.append(f"  correction mean pitch {c.get('mean_pitch')} roll {c.get('mean_roll')}, largest pitch "
              f"{c.get('max_pitch')} roll {c.get('max_roll')} deg")
@@ -565,7 +563,7 @@ def format_summary(s: dict[str, Any]) -> str:
     L.append(f"  margin  smallest with one leg up {m.get('min_one_leg_up_mm')} mm (the planner's {m.get('planner_min_mm')})")
     if "lead_ms" in s:
         ld = s["lead_ms"]
-        L.append(f"  lead    FEET sent to its tick reported: min {ld['min']} mean {ld['mean']} max {ld['max']} ms")
+        L.append(f"  lead    POSE sent to its tick reported: min {ld['min']} mean {ld['mean']} max {ld['max']} ms")
     return "\n".join(L)
 
 
@@ -587,7 +585,7 @@ def plot(rows: list[dict[str, Any]], out: str | Path, title: str = "") -> tuple[
         return [math.nan if r[k] is None else float(r[k]) for r in rows]
     fig, ax = plt.subplots(4, 1, sharex=True, figsize=(11, 9))
     for i, axis in enumerate(("pitch", "roll")):
-        ax[i].plot(t, col(f"pred_{axis}"), lw=1, label="predicted (FEET)")
+        ax[i].plot(t, col(f"pred_{axis}"), lw=1, label="predicted (POSE)")
         ax[i].plot(t, col(f"meas_{axis}"), lw=1, label="measured")
         ax[i].plot(t, col(f"plan_{axis}"), lw=0.8, ls=":", label="plan, no lag")
         ax[i].set_ylabel(f"{axis} °")

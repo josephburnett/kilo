@@ -14,16 +14,15 @@
 #define SAME(a, b) ((int16_t)(a) == (int16_t)(b))
 
 // The body's own lists must match the spec (protocol/spec.toml), not a copy.
-static_assert(SAME(EV_BOOT, KILO_EVENT_BOOT) && SAME(EV_FELL, KILO_EVENT_FELL) &&
-                  SAME(EV_RECOVERED, KILO_EVENT_RECOVERED) && SAME(EV_RECOVERY_FAILED, KILO_EVENT_RECOVERY_FAILED) &&
+static_assert(SAME(EV_BOOT, KILO_EVENT_BOOT) && SAME(EV_FELL, KILO_EVENT_FELL) && SAME(EV_LYING, KILO_EVENT_LYING) &&
                   SAME(EV_LOW_BATTERY, KILO_EVENT_LOW_BATTERY) && SAME(EV_BATTERY_OK, KILO_EVENT_BATTERY_OK) &&
                   SAME(EV_WATCHDOG, KILO_EVENT_WATCHDOG) && SAME(EV_LINK_RESTORED, KILO_EVENT_LINK_RESTORED) &&
                   SAME(EV_IMU_FAULT, KILO_EVENT_IMU_FAULT) && SAME(EV_IMU_OK, KILO_EVENT_IMU_OK) &&
-                  SAME(EV_TRICK_DONE, KILO_EVENT_TRICK_DONE) && SAME(EV_GAIT_STOPPED, KILO_EVENT_GAIT_STOPPED) &&
+                  SAME(EV_STREAM_STOPPED, KILO_EVENT_STREAM_STOPPED) &&
                   SAME(EV_GOAL_REFUSED, KILO_EVENT_GOAL_REFUSED) && SAME(EV_CONFIG_MIGRATED, KILO_EVENT_CONFIG_MIGRATED) &&
                   SAME(EV_CONFIG_DEFAULTED, KILO_EVENT_CONFIG_DEFAULTED) && SAME(EV_EEPROM_SAVED, KILO_EVENT_EEPROM_SAVED) &&
                   SAME(EV_TX_DROPPED, KILO_EVENT_TX_DROPPED) && SAME(EV_IR_KEY, KILO_EVENT_IR_KEY) &&
-                  SAME(EV_FEET_UNDERRUN, KILO_EVENT_FEET_UNDERRUN),
+                  SAME(EV_POSE_UNDERRUN, KILO_EVENT_POSE_UNDERRUN),
               "core/events.h codes != spec");
 static_assert(SAME(GOAL_BAD_ARG, KILO_GOAL_REFUSED_REASON_BAD_ARG) && SAME(GOAL_LOW_BATT, KILO_GOAL_REFUSED_REASON_LOW_BATT) &&
                   SAME(GOAL_STALE, KILO_GOAL_REFUSED_REASON_STALE) &&
@@ -32,13 +31,16 @@ static_assert(SAME(GOAL_BAD_ARG, KILO_GOAL_REFUSED_REASON_BAD_ARG) && SAME(GOAL_
                   SAME(GOAL_UNCALIBRATED, KILO_GOAL_REFUSED_REASON_UNCALIBRATED) &&
                   SAME(KILO_GOAL_REFUSED_REASON_UNCALIBRATED, KILO_ACK_STATUS_UNCALIBRATED),
               "GoalResult != GOAL_REFUSED reasons");
-static_assert(SAME(KILO_FEET_LEN, 16) && offsetof(kilo_feet_t, tick) == 1 && offsetof(kilo_feet_t, x_mm) == 3 &&
-                  offsetof(kilo_feet_t, z_mm) == 7 && offsetof(kilo_feet_t, pitch) == 11 &&
-                  offsetof(kilo_feet_t, roll) == 13 && offsetof(kilo_feet_t, support) == 15 &&
+static_assert(SAME(KILO_POSE_LEN, 31) && offsetof(kilo_pose_t, tick) == 1 && offsetof(kilo_pose_t, flags) == 3 &&
+                  offsetof(kilo_pose_t, leg) == 4 && offsetof(kilo_pose_t, head) == 20 &&
+                  offsetof(kilo_pose_t, pitch) == 26 && offsetof(kilo_pose_t, roll) == 28 &&
+                  offsetof(kilo_pose_t, support) == 30 &&
                   SAME(KILO_SUPPORT_FLAGS_LF, 1u << LEG_LF) && SAME(KILO_SUPPORT_FLAGS_RF, 1u << LEG_RF) &&
                   SAME(KILO_SUPPORT_FLAGS_RB, 1u << LEG_RB) && SAME(KILO_SUPPORT_FLAGS_LB, 1u << LEG_LB) &&
-                  SAME(KILO_SET_BODY_POSE_LEN, 7),
-              "core/feet.cpp's payload offsets and leg bits != spec");
+                  SAME(KILO_POSE_FLAGS_JOINT_LF, 1u << LEG_LF) && SAME(KILO_POSE_FLAGS_JOINT_LB, 1u << LEG_LB) &&
+                  SAME(KILO_LIMITED_FLAGS_LF, 1u << LEG_LF) && SAME(KILO_LIMITED_FLAGS_LB, 1u << LEG_LB) &&
+                  SAME(KILO_LIMITED_FLAGS_HEAD, 0x10) && SAME(KILO_SET_BODY_POSE_LEN, 7),
+              "core/stream.cpp's payload offsets and leg bits != spec");
 static_assert(SAME(POSTURE_LIMP, KILO_POSTURE_LIMP) && SAME(POSTURE_REST, KILO_POSTURE_REST) &&
                   SAME(POSTURE_SIT, KILO_POSTURE_SIT) && SAME(POSTURE_STAND, KILO_POSTURE_STAND) &&
                   SAME(POSTURE_STANCE, KILO_POSTURE_STANCE) && SAME(POSTURE_CALIB, KILO_POSTURE_CALIB) &&
@@ -51,20 +53,13 @@ static_assert(SAME(RESET_COLD, KILO_RESET_CAUSE_COLD) && SAME(RESET_FLASHED, KIL
 static_assert(SAME(CFG_OK, KILO_CONFIG_STATE_OK) && SAME(CFG_MIGRATED, KILO_CONFIG_STATE_MIGRATED) &&
                   SAME(CFG_DEFAULTED, KILO_CONFIG_STATE_DEFAULTED),
               "config states != spec");
-static_assert(SAME(OWN_IDLE, KILO_OWNER_IDLE) && SAME(OWN_GAIT, KILO_OWNER_GAIT) && SAME(OWN_TRICK, KILO_OWNER_TRICK) &&
+static_assert(SAME(OWN_IDLE, KILO_OWNER_IDLE) && SAME(OWN_STREAM, KILO_OWNER_STREAM) &&
                   SAME(OWN_REFLEX, KILO_OWNER_REFLEX) && SAME(OWN_PI_HOLD, KILO_OWNER_PI_HOLD),
               "owners != spec");
 static_assert(SAME(JOINT_OFF, KILO_HEAD_NOT_HELD), "SET_HEAD not-held value != JOINT_OFF");
-static_assert(SAME(GOAL_BUSY, KILO_ACK_STATUS_BUSY) && SAME(GOAL_NO_TRICK, KILO_ACK_STATUS_NO_TRICK) &&
+static_assert(SAME(GOAL_BUSY, KILO_ACK_STATUS_BUSY) && SAME(GOAL_BUSY, KILO_GOAL_REFUSED_REASON_BUSY) &&
                   SAME(GOAL_STALE, KILO_ACK_STATUS_STALE) && SAME(GOAL_LOW_BATT, KILO_ACK_STATUS_REFUSED_LOW_BATT),
-              "TRICK_PLAY results != ACK statuses");
-static_assert(SAME(KF_END_DONE, KILO_TRICK_DONE_REASON_DONE) && SAME(KF_END_STOPPED, KILO_TRICK_DONE_REASON_STOPPED) &&
-                  SAME(KF_END_PREEMPTED, KILO_TRICK_DONE_REASON_PREEMPTED) &&
-                  SAME(KF_END_FELL, KILO_TRICK_DONE_REASON_FELL),
-              "TRICK_DONE reasons != spec");
-static_assert(SAME(KF_LINEAR, KILO_EASING_LINEAR) && SAME(KF_COSINE, KILO_EASING_COSINE) &&
-                  SAME(KF_STEP, KILO_EASING_STEP) && SAME(KF_BALANCE_BIT, KILO_KEYFRAME_FLAGS_BALANCE),
-              "keyframe easing/flags != spec");
+              "GoalResult != ACK statuses");
 
 #define DEDUP_TICKS (KILO_DEDUP_WINDOW_MS / KILO_TICK_MS)  // 25 ticks
 
@@ -144,14 +139,14 @@ static void send_hello(void) {
   h.last_alive_tick = L.last_alive;
   h.caps = L.caps;
   h.max_payload = KILO_MAX_PAYLOAD;
-  h.trick_capacity = KF_CAPACITY;
+  h.pose_depth = POSE_DEPTH;
   h.joint_count = DRIVEN_COUNT;
   h.config_state = B->cfg->state;
   h.epoch = B->epoch;
   emit(KILO_MSG_HELLO, &h, sizeof h, true);
 }
 
-// One bit per goal type (and FEET) for the 1/s GOAL_REFUSED rate limit.
+// One bit per goal type (and POSE) for the 1/s GOAL_REFUSED rate limit.
 static uint8_t goal_bit(uint8_t t) {
   if (t >= KILO_MSG_SET_EYES) return (uint8_t)(0x20u << (t & 1u));  // SET_EYES, BEEP
   if (t == KILO_MSG_HEARTBEAT) return 0x80u;
@@ -227,8 +222,8 @@ static uint8_t query(uint8_t t, const uint8_t* p) {
       u.st.rx_overflow = (uint16_t)(u.st.rx_overflow + L.cnt.rx_overflow);
       u.st.imu_stale = B->imu_stale_total;
       u.st.dmp_rate_hz = L.dmp_rate;
-      u.st.feet_late = B->feet.late;
-      u.st.feet_underruns = B->feet.underruns;
+      u.st.pose_dropped = B->stream.dropped;
+      u.st.pose_underruns = B->stream.underruns;
       rt = KILO_MSG_STATS;
       len = sizeof u.st;
       break;
@@ -315,17 +310,6 @@ static uint8_t command(uint8_t t, const uint8_t* p) {
       g_param[p[0]] = v;
       return KILO_ACK_STATUS_OK;
     }
-    case KILO_MSG_TRICK_BEGIN:
-      return kf_begin(B->kf, p);
-    case KILO_MSG_TRICK_FRAMES:
-      return kf_frames(B->kf, p);
-    case KILO_MSG_TRICK_COMMIT:
-      return kf_commit(B->kf, p[0], rd16(p + 1));
-    case KILO_MSG_TRICK_PLAY:
-      return body_trick_play(*B, p);
-    case KILO_MSG_TRICK_STOP:
-      body_trick_stop(*B, p[0]);
-      return KILO_ACK_STATUS_OK;
     default:  // KILO_MSG_REBOOT (the only other command)
       return rd16(p) == KILO_REBOOT_MAGIC ? KILO_ACK_STATUS_OK : KILO_ACK_STATUS_BAD_ARG;
   }
@@ -340,9 +324,9 @@ static void on_frame(uint8_t st, const kilo_frame_t& f) {
     return;
   }
   if (t & 0x80u) return;  // a known body->Pi type: an echo, or a confused peer
-  // FEET, the one Pi->body stream, is handled like a goal: never acked,
+  // POSE, the one Pi->body stream, is handled like a goal: never acked,
   // refused with EVENT GOAL_REFUSED (rate-limited), never de-duplicated.
-  bool is_goal = kilo_msg_is_goal(t) || t == KILO_MSG_FEET;
+  bool is_goal = kilo_msg_is_goal(t) || t == KILO_MSG_POSE;
   if (st != KILO_FRAME_OK) {  // KILO_FRAME_BAD_PAYLOAD_LEN
     if (is_goal)
       refuse(t, KILO_GOAL_REFUSED_REASON_BAD_LEN);
@@ -350,8 +334,8 @@ static void on_frame(uint8_t st, const kilo_frame_t& f) {
       ack(f.seq, t, KILO_ACK_STATUS_BAD_LEN);
     return;
   }
-  if (t == KILO_MSG_FEET) {
-    uint8_t r = body_feet(*B, f.payload);
+  if (t == KILO_MSG_POSE) {
+    uint8_t r = body_pose(*B, f.payload);
     if (r != GOAL_OK) refuse(t, r);
     return;
   }
@@ -434,10 +418,10 @@ static void telemetry(const Body& b) {
   m.dist_mm = s.dist_mm;
   m.batt_mv = battery_mv(b.batt);
   m.mode = body_mode(b);
-  // A leg, the head (PI_HOLD when held). The FEET stream reports itself
-  // from the first FEET accepted (the legs stay IDLE's until its tick).
+  // A leg, the head (PI_HOLD when held). The stream reports itself from
+  // the first POSE accepted (it takes the joints on the next tick).
   uint8_t leg = b.arb.owner[3], head = b.arb.owner[0];
-  if (body_gait_active(b) && leg == OWN_IDLE) leg = OWN_GAIT;
+  if (body_stream_on(b) && leg == OWN_IDLE) leg = OWN_STREAM;
   m.owners = (uint8_t)(leg | (head << 4));
   uint16_t fl = 0;
   for (uint8_t k = 0; k < DRIVEN_COUNT; k++)
@@ -451,12 +435,11 @@ static void telemetry(const Body& b) {
   if (b.batt.no_battery) fl |= KILO_TELEMETRY_FLAGS_NO_BATTERY;
   if (config_busy(*b.cfg)) fl |= KILO_TELEMETRY_FLAGS_EEPROM_PENDING;
   if (s.dist_fresh) fl |= KILO_TELEMETRY_FLAGS_DIST_FRESH;
-  if (b.kf.run) fl |= KILO_TELEMETRY_FLAGS_TRICK;
-  if (body_gait_active(b)) fl |= KILO_TELEMETRY_FLAGS_GAIT;
+  if (body_stream_on(b)) fl |= KILO_TELEMETRY_FLAGS_STREAM;
   if (arbiter_head_held(b.arb)) fl |= KILO_TELEMETRY_FLAGS_HEAD_HELD;
   m.flags = fl;
   m.last_rx_seq = L.last_rx_seq;
-  m.trick_frame = kf_frame(b.kf);
+  m.limited = b.arb.limited;
   m.ref_pitch = b.bal.ref[BAL_PITCH];
   m.ref_roll = b.bal.ref[BAL_ROLL];
   // The correction the legs carry this tick: the IK's (geometric) or the
@@ -464,7 +447,7 @@ static void telemetry(const Body& b) {
   // the balance is turned off.
   m.corr_pitch = b.bal.ax[BAL_PITCH].corr;
   m.corr_roll = b.bal.ax[BAL_ROLL].corr;
-  m.feet_queued = body_gait_active(b) ? feet_queued(b.feet) : 0;
+  m.pose_queued = stream_queued(b.stream);
   m.support = body_support(b);
   m.tick_load = s.tick_load;
   m.rx_err = (uint8_t)(L.cnt.rx_crc_err + L.cnt.rx_overflow);

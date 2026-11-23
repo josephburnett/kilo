@@ -596,18 +596,22 @@ void test_the_stance_time_is_slewed() {
   CHECK(near(p.stance_ticks(), p.stance_target(), 1e-4));
 }
 
-void test_the_sent_attitude_stays_inside_feet_range() {
-  // The planner clamps to +-30 deg (plan.py); pack_feet to the field's +-480.
+void test_the_sent_attitude_stays_inside_pose_range() {
+  // The planner clamps to +-30 deg (plan.py); pack_pose to the field's +-480.
   TickPlan t = {};
   t.pitch = 45;
   t.roll = -45;
+  t.x[1] = -12;
   t.z[0] = t.z[1] = t.z[2] = t.z[3] = 76;
-  kilo_feet_t f;
-  pack_feet(1, t, &f);
+  kilo_pose_t f;
+  pack_pose(1, t, &f);
   CHECK(f.pitch == 480 && f.roll == -480 && f.epoch == 1);
+  // four feet in whole mm as q2, the head left to the body
+  CHECK(f.flags == 0 && f.leg[1] == 76 * 4 && f.leg[2] == -12 * 4 && f.head[0] == KILO_HEAD_NOT_HELD &&
+        f.head[2] == KILO_HEAD_NOT_HELD);
   t.tick = 0x12345;
   t.pitch = 1.53125;  // 24.5 / 16: Python's round() to even gives 24
-  pack_feet(1, t, &f);
+  pack_pose(1, t, &f);
   CHECK(f.tick == 0x2345 && f.pitch == 24);
 }
 
@@ -799,7 +803,7 @@ int main() {
   test_pattern_changes_one_after_another_stay_in_reach();
   test_the_gate_pauses_the_feet();
   test_the_stance_time_is_slewed();
-  test_the_sent_attitude_stays_inside_feet_range();
+  test_the_sent_attitude_stays_inside_pose_range();
   test_the_lean_is_solved_during_the_swing_before();
   test_the_stop_comes_home_level();
   test_gate_holds_the_lift_and_catch_lands_the_foot();

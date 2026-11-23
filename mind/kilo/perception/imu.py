@@ -10,9 +10,9 @@ What telemetry offers, and so what these detectors assume:
 - DMP attitude (pitch, roll) and raw gyro rates. **No accelerometer**: a lift
   straight up, or being held still in the air, does not change the attitude
   and is invisible. Everything below is attitude-shape heuristics.
-- ``servos_powered`` flag and ``mode``/``gait``/``trick`` flags tell whether the
-  body could have moved itself. While it does (GAIT, TRICK, RECOVERING,
-  CALIB, BOOT, the gait/trick flags), and for ``settle_s`` after any mode
+- ``servos_powered`` flag and ``mode``/``stream`` flags tell whether the
+  body could have moved itself. While it does (STREAM: a walk, a trick, a
+  get-up; CALIB, BOOT, the stream flag), and for ``settle_s`` after any mode
   change (posture moves are IDLE and invisible, so a mode change is the best
   hint), tap/pet/startle/pickup are suppressed. The behaviour layer can call
   ``notify_self_motion(t, seconds)`` when it starts a posture move.
@@ -58,8 +58,8 @@ from typing import Any, Iterable
 
 from kilo.perception.events import PerceptEvent
 
-SELF_MOTION_MODES = frozenset({"GAIT", "TRICK", "RECOVERING", "CALIB", "BOOT"})
-SELF_MOTION_FLAGS = frozenset({"gait", "trick"})
+SELF_MOTION_MODES = frozenset({"STREAM", "CALIB", "BOOT"})  # (a POSE stream: a walk, a trick, a get-up)
+SELF_MOTION_FLAGS = frozenset({"stream"})
 
 
 @dataclass

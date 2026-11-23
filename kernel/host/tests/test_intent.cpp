@@ -149,7 +149,7 @@ void test_table_righting() {
         const Edge& e = kEdges[idx];
         CHECK(e.from == st);
         if (fallen(st)) {
-          CHECK(e.kind == EdgeKind::Right && e.move != nullptr && (e.move->flags & KILO_TRICK_FLAGS_FALL_OK) &&
+          CHECK(e.kind == EdgeKind::Right && e.move != nullptr && (e.move->flags & tricks::kTrickFallOk) &&
                 e.move->end_posture == KILO_POSTURE_REST && e.move->roll_max_a16 == 0);
           CHECK(e.mirror == (st == State::OnLeftSide));
         }
@@ -161,15 +161,14 @@ void test_table_righting() {
   }
 }
 
-// ---- the Mind against a scripted body that plays tricks ------------------------------------------
+// ---- the Mind against a scripted body that plays the tricks' POSE streams ------------------------
 constexpr int16_t kDeg = 16;
 
 struct Rig : MindRig {
   size_t seen = 0;          // body.sent read so far
-  bool playing = false;
-  uint64_t done_at = 0;
-  uint8_t playing_id = 0;
-  uint8_t end_posture = KILO_POSTURE_STAND;  // of the trick the body holds
+  bool playing = false;     // a POSE stream is on (the first key started it; a SET_POSTURE ends it)
+  int stops = 0;            // streams ended by a SET_POSTURE before their last key's tick
+  uint16_t last_key = 0;    // the tick of the last POSE key seen
   bool obey = true;         // the body ends a move, and takes a posture, at the attitude the model predicts
   int16_t stuck_pitch = 0, stuck_roll = 0;   // ...else here
   int plays = 0;
@@ -198,20 +197,27 @@ struct Rig : MindRig {
     MindRig::pass();
     for (; seen < body.sent.size(); seen++) {
       const Sent& s = body.sent[seen];
-      if (s.type == KILO_MSG_TRICK_BEGIN && s.payload.size() >= sizeof(kilo_trick_begin_t)) {
-        kilo_trick_begin_t b;
-        std::memcpy(&b, s.payload.data(), sizeof b);
-        end_posture = b.end_posture;
+      if (s.type == KILO_MSG_POSE && s.payload.size() == sizeof(kilo_pose_t)) {
+        kilo_pose_t k;
+        std::memcpy(&k, s.payload.data(), sizeof k);
+        last_key = k.tick;
+        if (!playing) {
+          playing = true;
+          plays++;
+          body.mode = KILO_MODE_STREAM;  // (from FALLEN too: a FALL_OK stream takes the joints)
+          last_posture = -1;
+        }
+        continue;
       }
-      if (s.type == KILO_MSG_TRICK_PLAY && s.payload.size() >= 2) {
-        playing = true;
-        plays++;
-        playing_id = s.payload[1];
-        body.mode = KILO_MODE_TRICK;
-        last_posture = -1;
-        done_at = body.clock.t + 1200000;  // (the player only waits for TRICK_DONE)
+      if (s.type == KILO_MSG_SET_POSTURE && s.payload.size() == 4 && playing) {
+        // the trick's end posture ends the stream: the body takes it
+        playing = false;
+        if ((int16_t)(last_key - body.tick) > 0) stops++;
+        body.mode = KILO_MODE_IDLE;
+        last_posture = s.payload[1];
+        attitude_of(s.payload[1]);
+        continue;
       }
-      if (s.type == KILO_MSG_TRICK_STOP && playing) done(KILO_TRICK_DONE_REASON_STOPPED);
       if (s.type == KILO_MSG_SET_POSTURE && s.payload.size() == 4 && !playing && body.mode != KILO_MODE_FALLEN &&
           s.payload[1] != last_posture) {
         last_posture = s.payload[1];
@@ -223,13 +229,6 @@ struct Rig : MindRig {
         }
       }
     }
-    if (playing && body.clock.t >= done_at) done(KILO_TRICK_DONE_REASON_DONE);
-  }
-  void done(uint8_t reason) {
-    playing = false;
-    body.mode = KILO_MODE_IDLE;
-    attitude_of(end_posture);
-    body.event(KILO_EVENT_TRICK_DONE, (int16_t)((reason << 8) | playing_id));
   }
   State state() { return mind.estimator().state(); }
   // The body put into a posture without the mind's doing (the start of a test).
@@ -279,7 +278,7 @@ void test_off_is_as_before() {
   r.put(KILO_POSTURE_REST, "rest");
   CHECK(r.state() == State::Resting);
   r.key(0x02, 400);  // B6
-  CHECK(r.posture_goal() == KILO_POSTURE_STAND && r.plays == 0 && r.body.count(KILO_MSG_TRICK_BEGIN) == 0);
+  CHECK(r.posture_goal() == KILO_POSTURE_STAND && r.plays == 0 && r.body.count(KILO_MSG_POSE) == 0);
   CHECK(r.log.has("remote B6 (0x02, stand): posture stand"));
   r.run_ms(1500);
   r.key(0xA2, 400);  // A7
@@ -357,29 +356,28 @@ void test_on_his_side() {
   r.run_ms(1500);
   CHECK(r.state() == State::OnRightSide);
   r.key(0x02, 300);
-  CHECK(r.log.has("he is ON_RIGHT_SIDE: waiting for the body's fall reflex to right him"));
+  CHECK(r.log.has("he is ON_RIGHT_SIDE: waiting for a hand to right him (the body has no get-up)"));
   CHECK(r.mind.intent().phase() == Phase::Reflex && r.plays == 0);
-  // the reflex rights him
-  r.body.mode = KILO_MODE_RECOVERING;
+  // a hand rights him while the reflex holds him (the body has no get-up of its own): he stands
   r.run_ms(800);
   r.body.roll = 0;
   r.body.mode = KILO_MODE_IDLE;
-  r.body.event(KILO_EVENT_RECOVERED, 0);
+  r.body.support = 0xF;
   r.run_ms(2500);
   CHECKF(!r.mind.intent().active() && r.mind.intent().reached() && r.state() == State::Standing && r.plays == 0,
          "phase %d state %s", (int)r.mind.intent().phase(), state_name(r.state()));
   CHECK(r.posture_goal() == KILO_POSTURE_STAND);
-  // again, and the reflex fails: given up, nothing sent to a fallen body
+  // again, and the reflex lays him down: given up, nothing sent to a fallen body
   r.body.roll = 91 * kDeg;
   r.body.mode = KILO_MODE_FALLEN;
   r.body.event(KILO_EVENT_FELL, 1);
   r.run_ms(1500);
   CHECK(r.state() == State::OnLeftSide);
   r.key(0x02, 300);
-  r.body.event(KILO_EVENT_RECOVERY_FAILED, 0);
+  r.body.event(KILO_EVENT_LYING, 0);
   r.run_ms(300);
   CHECK(!r.mind.intent().active() && !r.mind.intent().reached());
-  CHECK(r.log.has("the body's fall reflex could not right him: he needs a hand"));
+  CHECK(r.log.has("the body's fall reflex laid him down (no get-up without the righting experiment): he needs a hand"));
   CHECK(r.plays == 0);
 }
 
@@ -409,7 +407,7 @@ void test_cancelled_by_a_walk() {
   CHECK(r.plays == 1 && r.mind.intent().active());
   r.mind.intent().cancel("test");
   r.run_ms(600);
-  CHECK(!r.mind.intent().active() && r.body.count(KILO_MSG_TRICK_STOP) == 1);
+  CHECK(!r.mind.intent().active() && r.stops == 1 && !r.playing);
   CHECK(r.mind.intent().counters().cancelled == 1);
   // another posture (CALIB, C5) is the body's own change and drops a pending intent
   r.mind.posture("stand", -1, "test");

@@ -217,7 +217,7 @@ class BodyState:
 
     @property
     def fallen(self) -> bool:
-        return self.mode in ("FALLEN", "RECOVERING")
+        return self.mode == "FALLEN"
 
     @property
     def upright(self) -> bool | None:
@@ -228,7 +228,7 @@ class BodyState:
 
     @property
     def moving(self) -> bool:
-        return bool(self.flags & {"gait", "trick"}) or self.mode in ("GAIT", "TRICK", "RECOVERING")
+        return "stream" in self.flags or self.mode == "STREAM"
 
     @property
     def distance_mm(self) -> float | None:
@@ -278,9 +278,9 @@ class BodyState:
                 "tick_load_ms": None if tel is None else tel.tick_load / 10.0,
                 "ref_deg": None if tel is None else (tel.ref_pitch / A16, tel.ref_roll / A16),
                 "corr_deg": None if tel is None else (tel.corr_pitch / A16, tel.corr_roll / A16),
-                "err_deg": None if tel is None or self.mode != "GAIT" else (
+                "err_deg": None if tel is None or self.mode != "STREAM" else (
                     (tel.pitch - tel.ref_pitch) / A16, (tel.roll - tel.ref_roll) / A16),
-                "feet_queued": None if tel is None else tel.feet_queued,
+                "pose_queued": None if tel is None else tel.pose_queued,
                 "support": None if tel is None else tel.support,
                 "rx_err": None if tel is None else tel.rx_err,
                 "last_rx_seq": None if tel is None else tel.last_rx_seq,

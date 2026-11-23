@@ -19,7 +19,7 @@ const double* speed_factors(const planner::Pattern& p) {
 }
 
 namespace {
-constexpr uint64_t kTrickStopWaitUs = 2000000;  // TRICK_STOP's ACK and the TRICK_DONE it brings
+constexpr uint64_t kTrickStopWaitUs = 2000000;  // a stopped trick's end (the body leaving the stream)
 constexpr uint64_t kStepLeadUs = 300000;  // a lower stage's hold: down this long before it ends without A1
 const char* const kStageTop[] = {"up", "mid", "top"};  // rear_up.py: each stage's top frame (its last guard)
 
@@ -115,8 +115,8 @@ int RemoteControl::mode() const {
   return s.has_telemetry ? s.telemetry.mode : -1;
 }
 
-// Anything on the legs to stop first: the walker, or the body still in GAIT.
-bool RemoteControl::body_walking() const { return walker_.active() || mode() == KILO_MODE_GAIT; }
+// Anything on the legs to stop first: the walker, or the body still in mode STREAM.
+bool RemoteControl::body_walking() const { return walker_.active() || mode() == KILO_MODE_STREAM; }
 
 // The remote's own walk is going on; when it has ended (by a key or by
 // itself), the level and heading go back to the start.
@@ -202,7 +202,7 @@ void RemoteControl::freeze(const Key& key, uint16_t arg) {
     done("ignored (frozen: B6 or A7 to go on)", false);
     return;
   }
-  bool trick = mode() == KILO_MODE_TRICK || player_.busy();
+  bool trick = player_.busy();
   char what[96] = "frozen (";
   uint32_t n = 8;
   auto part = [&](const char* s) {
@@ -284,7 +284,7 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
       stop_then_act(now);
       return;
     case Kind::Trick:
-      if (mode() == KILO_MODE_TRICK || player_.busy()) {
+      if (player_.busy()) {
         uint64_t end = 0;
         int k = step_at(&end);
         if (k != 0 && k == step_allowed_ && k < step_max_) {  // the rear-up: on to the next stage
@@ -405,7 +405,7 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
       return;
   }
   // A walk from standing: a playing trick is stopped first
-  if (mode() == KILO_MODE_TRICK) {
+  if (player_.busy()) {
     stop_trick();
     phase_ = Phase::StopTrick;
     deadline_ = now + kTrickStopWaitUs;
@@ -438,7 +438,7 @@ void RemoteControl::step() {
     case Phase::StopWalk: {
       if (walker_.active() && now < deadline_) return;
       if (walker_.active()) walker_.abort();  // client.posture() takes the legs anyway
-      if (mode() == KILO_MODE_TRICK) {
+      if (player_.busy()) {
         stop_trick();
         phase_ = Phase::StopTrick;
         deadline_ = now + kTrickStopWaitUs;
@@ -449,7 +449,7 @@ void RemoteControl::step() {
     }
     case Phase::StopTrick:
       if (player_.busy() && now < deadline_) return;
-      if (settle_us_ != 0) {  // TRICK_DONE comes as the crossfade starts: wait for its end
+      if (settle_us_ != 0) {  // the play ends as the transition starts: wait for its end
         phase_ = Phase::Settle;
         deadline_ = now + settle_us_;
         settle_us_ = 0;
@@ -574,7 +574,7 @@ int RemoteControl::step_at(uint64_t* hold_end_us) const {
   return 0;
 }
 
-// Every pass: a lower stage's hold about to end without A1: down (TRICK_STOP); a stage's top reached
+// Every pass: a lower stage's hold about to end without A1: down (stopped); a stage's top reached
 // or the play over: a line and a mark.
 void RemoteControl::step_gate() {
   if (step_trick_ == nullptr) return;

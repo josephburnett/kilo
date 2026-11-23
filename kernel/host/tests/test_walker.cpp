@@ -1,6 +1,6 @@
 // The walker (planner/walker) on the real link over a fake Serial and a
 // stepped clock: the body clock, the setup (SET_STREAM, STANCE), the stream
-// five ticks ahead and its catch-up, every way a stream ends, the planned
+// three ticks ahead and its catch-up, every way a stream ends, the planned
 // stop's handover and the teardown. Cases follow mind/tests/test_walker.py.
 #include <cmath>
 #include <cstdio>
@@ -60,10 +60,10 @@ struct Rig : LinkListener {
   uint16_t tick = 50;
   uint8_t epoch = 3;
   uint8_t mode = KILO_MODE_IDLE;
-  bool enter_gait = true;  // the body enters GAIT on the first FEET
+  bool enter_gait = true;  // the body starts the stream on the first POSE
   bool alive = true;       // the mind's loop stamps its liveness
   uint64_t body_t0 = 0;    // the clock at body tick 0
-  std::vector<kilo_feet_t> feet;
+  std::vector<kilo_pose_t> feet;
   std::vector<Sent> other;
 
   Rig() { link.set_listener(this); }
@@ -72,11 +72,11 @@ struct Rig : LinkListener {
 
   void collect() {
     for (const Sent& s : serial.take_sent()) {
-      if (s.type == KILO_MSG_FEET && s.payload.size() == sizeof(kilo_feet_t)) {
-        kilo_feet_t f;
+      if (s.type == KILO_MSG_POSE && s.payload.size() == sizeof(kilo_pose_t)) {
+        kilo_pose_t f;
         std::memcpy(&f, s.payload.data(), sizeof f);
         feet.push_back(f);
-        if (enter_gait && mode == KILO_MODE_IDLE) mode = KILO_MODE_GAIT;
+        if (enter_gait && mode == KILO_MODE_IDLE) mode = KILO_MODE_STREAM;
       } else {
         other.push_back(s);
       }
@@ -132,26 +132,27 @@ struct Rig : LinkListener {
   double body_now() const { return ((double)clock.t - (double)body_t0 - 1000.0) / 20000.0; }
 };
 
-void test_stream_sends_five_ticks_ahead_and_catches_up() {
+void test_stream_sends_three_ticks_ahead_and_catches_up() {
   Rig r;
   r.up();
   r.walk();
   CHECK(!r.feet.empty() && r.feet[0].epoch == 3);
-  CHECK(r.feet[0].z_mm[0] == 76 && r.feet[0].z_mm[1] == 76 && r.feet[0].z_mm[2] == 76 && r.feet[0].z_mm[3] == 76);
+  CHECK(r.feet[0].leg[1] == 76 * 4 && r.feet[0].leg[3] == 76 * 4 && r.feet[0].leg[5] == 76 * 4 && r.feet[0].leg[7] == 76 * 4);
   r.run_ms(400);
-  CHECK(r.mode == KILO_MODE_GAIT && r.walker.active());
-  // consecutive ticks, each sent before its time and at most five ahead of the body
+  CHECK(r.mode == KILO_MODE_STREAM && r.walker.active());
+  // consecutive ticks, each sent before its time and at most three ahead of the body
   bool consecutive = true;
   for (size_t i = 1; i < r.feet.size(); i++) consecutive = consecutive && r.feet[i].tick == r.feet[i - 1].tick + 1;
   CHECK(consecutive);
   int ahead = (int)r.feet.back().tick - (int)r.body_now();
-  CHECKF(ahead >= 4 && ahead <= 5, "last FEET %u, body at %.2f", r.feet.back().tick, r.body_now());
-  // four wakes missed (the mind's loop busy, the link polled): the next one catches up
+  CHECKF(ahead >= 2 && ahead <= 3, "last POSE %u, body at %.2f", r.feet.back().tick, r.body_now());
+  // three wakes missed (the mind's loop busy, the link polled): the next one catches up (a longer
+  // gap than the look-ahead loses ticks: they are past when planned, below)
   size_t n = r.feet.size();
-  r.run_ms(80, false);
+  r.run_ms(60, false);
   CHECK(r.feet.size() == n);
   r.run_ms(4);
-  CHECKF(r.feet.size() >= n + 4 && r.walker.stream_stats().max_behind >= 4, "%zu sent, max behind %u",
+  CHECKF(r.feet.size() >= n + 3 && r.walker.stream_stats().max_behind >= 3, "%zu sent, max behind %u",
          r.feet.size() - n, r.walker.stream_stats().max_behind);
   consecutive = true;
   for (size_t i = 1; i < r.feet.size(); i++) consecutive = consecutive && r.feet[i].tick == r.feet[i - 1].tick + 1;
@@ -161,7 +162,7 @@ void test_stream_sends_five_ticks_ahead_and_catches_up() {
   r.run_ms(4);
   CHECK(r.walker.stream_stats().skipped > 0);
   ahead = (int)r.feet.back().tick - (int)r.body_now();
-  CHECKF(ahead >= 4 && ahead <= 5, "after the catch-up %d ahead", ahead);
+  CHECKF(ahead >= 2 && ahead <= 3, "after the catch-up %d ahead", ahead);
   CHECK(r.walker.active());
 }
 
@@ -172,9 +173,9 @@ void test_stream_ends(int what, const char* why) {
   r.run_ms(100);
   r.other.clear();
   switch (what) {
-    case 0: r.event(KILO_EVENT_GAIT_STOPPED, 1); break;
-    case 1: r.event(KILO_EVENT_GAIT_STOPPED, 0); break;
-    case 2: r.event(KILO_EVENT_GOAL_REFUSED, (int16_t)(KILO_MSG_FEET << 8 | KILO_GOAL_REFUSED_REASON_FALLEN)); break;
+    case 0: r.event(KILO_EVENT_STREAM_STOPPED, 1); break;
+    case 1: r.event(KILO_EVENT_STREAM_STOPPED, 0); break;
+    case 2: r.event(KILO_EVENT_GOAL_REFUSED, (int16_t)(KILO_MSG_POSE << 8 | KILO_GOAL_REFUSED_REASON_FALLEN)); break;
     case 3: r.event(KILO_EVENT_FELL, 1); break;
     case 4: r.epoch = 9; break;
   }
@@ -196,16 +197,16 @@ void test_stream_ends_when_gait_never_comes_or_goes_away() {
   r.up();
   r.walk();
   r.run_ms(800);
-  CHECKF(!r.walker.active() && r.walker.ended() && std::strstr(r.walker.ended(), "did not enter GAIT"), "%s",
+  CHECKF(!r.walker.active() && r.walker.ended() && std::strstr(r.walker.ended(), "did not start the stream"), "%s",
          r.walker.ended() ? r.walker.ended() : "(null)");
   Rig q;
   q.up();
   q.walk();
   q.run_ms(100);
-  CHECK(q.mode == KILO_MODE_GAIT);
+  CHECK(q.mode == KILO_MODE_STREAM);
   q.mode = KILO_MODE_IDLE;
   q.run_ms(60);
-  CHECKF(!q.walker.active() && q.walker.ended() && std::strstr(q.walker.ended(), "left GAIT (mode IDLE)"), "%s",
+  CHECKF(!q.walker.active() && q.walker.ended() && std::strstr(q.walker.ended(), "left the stream (mode IDLE)"), "%s",
          q.walker.ended() ? q.walker.ended() : "(null)");
 }
 
@@ -234,10 +235,10 @@ void test_stream_handover_on_the_planned_stop() {
   CHECK(r.walker.planner().done());
   r.run_ms(8);
   const Goal* g = r.link.goal(KILO_MSG_SET_POSTURE);
-  CHECK(g != nullptr && g->payload[1] == KILO_POSTURE_STANCE);  // the posture ends GAIT
+  CHECK(g != nullptr && g->payload[1] == KILO_POSTURE_STANCE);  // the posture ends the stream
   size_t n = r.feet.size();
-  r.mode = KILO_MODE_IDLE;  // the body left GAIT for the posture
-  r.event(KILO_EVENT_GAIT_STOPPED, 0);
+  r.mode = KILO_MODE_IDLE;  // the body left the stream for the posture
+  r.event(KILO_EVENT_STREAM_STOPPED, 0);
   r.run_ms(60);
   CHECKF(!r.walker.active() && r.walker.ended() && std::strcmp(r.walker.ended(), "stopped") == 0 &&
              r.walker.ended_ok(),
@@ -327,10 +328,10 @@ void test_refusals() {
 int main() {
   test_body_clock_takes_the_least_delayed_frame();
   test_body_clock_follows_a_body_stall();
-  test_stream_sends_five_ticks_ahead_and_catches_up();
-  test_stream_ends(0, "settled after a FEET underrun");
+  test_stream_sends_three_ticks_ahead_and_catches_up();
+  test_stream_ends(0, "settled after a POSE underrun");
   test_stream_ends(1, "a posture or an epoch bump");
-  test_stream_ends(2, "refused FEET: REFUSED_FALLEN");
+  test_stream_ends(2, "refused POSE: REFUSED_FALLEN");
   test_stream_ends(3, "Kilo fell");
   test_stream_ends(4, "epoch changed");
   test_stream_ends_when_gait_never_comes_or_goes_away();

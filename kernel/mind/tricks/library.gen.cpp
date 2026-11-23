@@ -9,27 +9,27 @@ namespace tricks {
 namespace {
 
 // sit (legacy sit): 1 frame, loop 0..0 x0, end SIT
-const kilo_keyframe_t kSit[] = {
+const Keyframe kSit[] = {
     {25, 0, 0x05, {10, -20, -60, 30, 30, -80, -80, 60, 60, 45, 45}},
 };
 // rest (legacy rest): 1 frame, loop 0..0 x0, end REST
-const kilo_keyframe_t kRest[] = {
+const Keyframe kRest[] = {
     {25, 0, 0x05, {-30, -80, -45, 60, 60, -60, -60, -45, -45, 45, 45}},
 };
 // stand (legacy up): 1 frame, loop 0..0 x0, end STAND
-const kilo_keyframe_t kStand[] = {
+const Keyframe kStand[] = {
     {25, 0, 0x05, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
 };
 // stretch (legacy str): 1 frame, loop 0..0 x0, end STAND
-const kilo_keyframe_t kStretch[] = {
+const Keyframe kStretch[] = {
     {25, 100, 0x05, {10, 45, -30, -75, -75, -45, -45, 60, 60, -45, -45}},
 };
 // balance (legacy balance): 1 frame, loop 0..0 x0, end STAND
-const kilo_keyframe_t kBalance[] = {
+const Keyframe kBalance[] = {
     {25, 0, 0x05, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
 };
 // hi (legacy hi): 10 frames, loop 0..0 x0, end STAND
-const kilo_keyframe_t kHi[] = {
+const Keyframe kHi[] = {
     {14, 3, 0x01, {0, -20, -65, 30, 30, -80, -80, 60, 60, 45, 45}},
     {8, 5, 0x01, {0, -20, -65, 30, 50, -80, -74, 60, 43, 45, 5}},
     {20, 0, 0x01, {35, -15, -86, -75, 43, -80, -72, 40, 53, 60, 6}},
@@ -42,7 +42,7 @@ const kilo_keyframe_t kHi[] = {
     {10, 0, 0x01, {0, 0, 0, 30, 41, -30, -30, 30, 30, -30, -30}},
 };
 // wash_face (legacy wsf): 10 frames, loop 0..0 x0, end SIT
-const kilo_keyframe_t kWashFace[] = {
+const Keyframe kWashFace[] = {
     {12, 5, 0x01, {95, -30, -82, 30, 30, -80, -80, 60, 60, 45, 45}},
     {9, 0, 0x01, {95, -30, -82, 30, 43, -80, -71, 85, 44, 45, 0}},
     {22, 0, 0x01, {37, -67, -52, -87, 43, -80, -70, 22, 44, 45, 0}},
@@ -55,7 +55,7 @@ const kilo_keyframe_t kWashFace[] = {
     {21, 0, 0x01, {64, -39, -60, 30, 30, -63, -63, 82, 82, 45, 45}},
 };
 // check_around (legacy ck): 5 frames, loop 0..0 x0, end STAND
-const kilo_keyframe_t kCheckAround[] = {
+const Keyframe kCheckAround[] = {
     {9, 3, 0x01, {25, 7, -70, 27, 19, -21, -35, 5, 21, -33, -5}},
     {26, 0, 0x01, {-25, 7, 70, 19, 27, -35, -21, 21, 5, -5, -33}},
     {18, 3, 0x01, {25, 7, -70, 27, 19, -21, -35, 5, 21, -33, -5}},
@@ -63,7 +63,7 @@ const kilo_keyframe_t kCheckAround[] = {
     {14, 0, 0x01, {23, 26, -38, 15, 15, -33, -33, 80, 80, 4, 4}},
 };
 // sniff (legacy snf): 9 frames, loop 0..0 x0, end STAND
-const kilo_keyframe_t kSniff[] = {
+const Keyframe kSniff[] = {
     {7, 0, 0x01, {-8, -50, -40, 16, 16, -28, -31, 34, 34, -27, -19}},
     {10, 0, 0x01, {-1, -31, -21, 25, 33, -37, -37, -15, -20, -55, -55}},
     {10, 0, 0x01, {-5, -45, -7, 51, 59, -20, -20, -27, -32, -56, -56}},
@@ -75,7 +75,7 @@ const kilo_keyframe_t kSniff[] = {
     {12, 0, 0x01, {-17, 5, 23, 30, 30, -30, -30, 30, 30, -30, -30}},
 };
 // scratch (legacy scrh): 14 frames, loop 0..0 x0, end STAND
-const kilo_keyframe_t kScratch[] = {
+const Keyframe kScratch[] = {
     {1, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
     {14, 0, 0x01, {10, -20, -60, 30, 30, -80, -80, 60, 60, 45, 45}},
     {16, 0, 0x01, {92, -63, -60, 32, 49, -69, -80, 85, 24, 57, 12}},
@@ -92,7 +92,7 @@ const kilo_keyframe_t kScratch[] = {
     {17, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
 };
 // pee (legacy pee): 7 frames, loop 0..0 x0, end STAND
-const kilo_keyframe_t kPee[] = {
+const Keyframe kPee[] = {
     {29, 0, 0x01, {30, 20, 0, 40, 40, 85, -45, 10, 60, 15, -45}},
     {34, 25, 0x01, {45, 20, -45, 60, 53, 75, -60, -30, 40, 0, -21}},
     {8, 0, 0x01, {30, 20, -55, 40, 40, 85, -45, 10, 50, 0, -45}},
@@ -102,7 +102,7 @@ const kilo_keyframe_t kPee[] = {
     {19, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
 };
 // push_up (legacy pu): 10 frames, loop 0..0 x0, end STAND
-const kilo_keyframe_t kPushUp[] = {
+const Keyframe kPushUp[] = {
     {25, 0, 0x01, {30, 30, 0, 60, 60, 70, 70, 15, 15, -70, -70}},
     {18, 3, 0x01, {0, -40, 0, 30, 30, 95, 95, 60, 60, -70, -70}},
     {21, 0, 0x01, {5, 5, 0, 75, 75, 55, 55, -50, -50, -75, -75}},
@@ -115,11 +115,11 @@ const kilo_keyframe_t kPushUp[] = {
     {19, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
 };
 // butt_up (legacy buttUp): 1 frame, loop 0..0 x0, end STAND
-const kilo_keyframe_t kButtUp[] = {
+const Keyframe kButtUp[] = {
     {25, 100, 0x05, {20, 40, 0, 80, 80, -45, -45, -60, -60, -5, -5}},
 };
 // rear_up (authored): 9 frames, loop 0..0 x0, end SIT, stop over 75 ticks
-const kilo_keyframe_t kRearUp[] = {
+const Keyframe kRearUp[] = {
     {15, 0, 0x01, {0, 15, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
     {18, 8, 0x01, {0, 10, 0, -25, -25, -73, -73, 47, 47, -36, -36}},
     {18, 20, 0x01, {0, 0, 0, -29, -29, -76, -76, 45, 45, -63, -63}},
@@ -136,7 +136,7 @@ const TrickGuard kRearUpGuards[] = {
     {5, 312, 432, 96, "up", 56},
 };
 // rear_up_2 (authored): 13 frames, loop 0..0 x0, end SIT, stop over 100 ticks
-const kilo_keyframe_t kRearUp2[] = {
+const Keyframe kRearUp2[] = {
     {15, 0, 0x01, {0, 15, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
     {18, 8, 0x01, {0, 10, 0, -25, -25, -73, -73, 47, 47, -36, -36}},
     {18, 20, 0x01, {0, 0, 0, -29, -29, -76, -76, 45, 45, -63, -63}},
@@ -158,7 +158,7 @@ const TrickGuard kRearUp2Guards[] = {
     {7, 528, 656, 96, "mid"},
 };
 // rear_up_3 (authored): 17 frames, loop 0..0 x0, end SIT, stop over 125 ticks
-const kilo_keyframe_t kRearUp3[] = {
+const Keyframe kRearUp3[] = {
     {15, 0, 0x01, {0, 15, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
     {18, 8, 0x01, {0, 10, 0, -25, -25, -73, -73, 47, 47, -36, -36}},
     {18, 20, 0x01, {0, 0, 0, -29, -29, -76, -76, 45, 45, -63, -63}},
@@ -185,7 +185,7 @@ const TrickGuard kRearUp3Guards[] = {
     {9, 736, 880, 96, "top"},
 };
 // alive_stretch_sit (authored): 10 frames, loop 0..0 x0, end SIT, stop over 25 ticks
-const kilo_keyframe_t kAliveStretchSit[] = {
+const Keyframe kAliveStretchSit[] = {
     {25, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
     {20, 69, 0x01, {10, 45, -30, -75, -75, -45, -45, 60, 60, -45, -45}},
     {3, 0, 0x01, {10, 45, -10, -75, -75, -45, -45, 60, 60, -50, -50}},
@@ -198,7 +198,7 @@ const kilo_keyframe_t kAliveStretchSit[] = {
     {25, 0, 0x01, {10, -20, -60, 30, 30, -80, -80, 60, 60, 45, 45}},
 };
 // alive_stretch_stand (authored): 9 frames, loop 0..0 x0, end STAND, stop over 25 ticks
-const kilo_keyframe_t kAliveStretchStand[] = {
+const Keyframe kAliveStretchStand[] = {
     {20, 69, 0x01, {10, 45, -30, -75, -75, -45, -45, 60, 60, -45, -45}},
     {3, 0, 0x01, {10, 45, -10, -75, -75, -45, -45, 60, 60, -50, -50}},
     {5, 0, 0x01, {10, 45, -50, -75, -75, -45, -45, 60, 60, -41, -41}},
@@ -210,7 +210,7 @@ const kilo_keyframe_t kAliveStretchStand[] = {
     {25, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
 };
 // alive_wash_face_sit (authored): 11 frames, loop 0..0 x0, end SIT, stop over 25 ticks
-const kilo_keyframe_t kAliveWashFaceSit[] = {
+const Keyframe kAliveWashFaceSit[] = {
     {11, 5, 0x01, {95, -30, -82, 30, 30, -80, -80, 60, 60, 45, 45}},
     {9, 0, 0x01, {95, -30, -82, 30, 43, -80, -71, 85, 44, 45, 0}},
     {22, 0, 0x01, {0, 10, -52, -87, 43, -80, -70, 22, 44, 45, 0}},
@@ -224,7 +224,7 @@ const kilo_keyframe_t kAliveWashFaceSit[] = {
     {25, 0, 0x01, {10, -20, -60, 30, 30, -80, -80, 60, 60, 45, 45}},
 };
 // alive_wash_face_stand (authored): 11 frames, loop 0..0 x0, end STAND, stop over 25 ticks
-const kilo_keyframe_t kAliveWashFaceStand[] = {
+const Keyframe kAliveWashFaceStand[] = {
     {12, 5, 0x01, {95, -30, -82, 30, 30, -80, -80, 60, 60, 45, 45}},
     {9, 0, 0x01, {95, -30, -82, 30, 43, -80, -71, 85, 44, 45, 0}},
     {22, 0, 0x01, {0, 10, -52, -87, 43, -80, -70, 22, 44, 45, 0}},
@@ -238,7 +238,7 @@ const kilo_keyframe_t kAliveWashFaceStand[] = {
     {25, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
 };
 // alive_pee_sit (authored): 9 frames, loop 0..0 x0, end SIT, stop over 25 ticks
-const kilo_keyframe_t kAlivePeeSit[] = {
+const Keyframe kAlivePeeSit[] = {
     {25, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
     {29, 0, 0x01, {30, 20, 0, 40, 40, 85, -45, 10, 60, 15, -45}},
     {34, 25, 0x01, {45, 20, -45, 60, 53, 75, -60, -30, 40, 0, -21}},
@@ -250,7 +250,7 @@ const kilo_keyframe_t kAlivePeeSit[] = {
     {25, 0, 0x01, {10, -20, -60, 30, 30, -80, -80, 60, 60, 45, 45}},
 };
 // alive_pee_stand (authored): 8 frames, loop 0..0 x0, end STAND, stop over 25 ticks
-const kilo_keyframe_t kAlivePeeStand[] = {
+const Keyframe kAlivePeeStand[] = {
     {29, 0, 0x01, {30, 20, 0, 40, 40, 85, -45, 10, 60, 15, -45}},
     {34, 25, 0x01, {45, 20, -45, 60, 53, 75, -60, -30, 40, 0, -21}},
     {8, 0, 0x01, {30, 20, -55, 40, 40, 85, -45, 10, 50, 0, -45}},
@@ -261,7 +261,7 @@ const kilo_keyframe_t kAlivePeeStand[] = {
     {25, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
 };
 // alive_sniff_sit (authored): 11 frames, loop 0..0 x0, end SIT, stop over 25 ticks
-const kilo_keyframe_t kAliveSniffSit[] = {
+const Keyframe kAliveSniffSit[] = {
     {25, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
     {7, 0, 0x01, {-8, -50, -40, 16, 16, -28, -31, 34, 34, -27, -19}},
     {10, 0, 0x01, {-1, -31, -21, 25, 33, -37, -37, -15, -20, -55, -55}},
@@ -275,7 +275,7 @@ const kilo_keyframe_t kAliveSniffSit[] = {
     {25, 0, 0x01, {10, -20, -60, 30, 30, -80, -80, 60, 60, 45, 45}},
 };
 // alive_sniff_stand (authored): 10 frames, loop 0..0 x0, end STAND, stop over 25 ticks
-const kilo_keyframe_t kAliveSniffStand[] = {
+const Keyframe kAliveSniffStand[] = {
     {7, 0, 0x01, {-8, -50, -40, 16, 16, -28, -31, 34, 34, -27, -19}},
     {10, 0, 0x01, {-1, -31, -21, 25, 33, -37, -37, -15, -20, -55, -55}},
     {10, 0, 0x01, {-5, -45, -7, 51, 59, -20, -20, -27, -32, -56, -56}},
@@ -288,7 +288,7 @@ const kilo_keyframe_t kAliveSniffStand[] = {
     {25, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
 };
 // alive_check_around_sit (authored): 7 frames, loop 0..0 x0, end SIT, stop over 25 ticks
-const kilo_keyframe_t kAliveCheckAroundSit[] = {
+const Keyframe kAliveCheckAroundSit[] = {
     {25, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
     {9, 3, 0x01, {25, 7, -70, 27, 19, -21, -35, 5, 21, -33, -5}},
     {26, 0, 0x01, {-25, 7, 70, 19, 27, -35, -21, 21, 5, -5, -33}},
@@ -298,7 +298,7 @@ const kilo_keyframe_t kAliveCheckAroundSit[] = {
     {25, 0, 0x01, {10, -20, -60, 30, 30, -80, -80, 60, 60, 45, 45}},
 };
 // alive_check_around_stand (authored): 6 frames, loop 0..0 x0, end STAND, stop over 25 ticks
-const kilo_keyframe_t kAliveCheckAroundStand[] = {
+const Keyframe kAliveCheckAroundStand[] = {
     {9, 3, 0x01, {25, 7, -70, 27, 19, -21, -35, 5, 21, -33, -5}},
     {26, 0, 0x01, {-25, 7, 70, 19, 27, -35, -21, 21, 5, -5, -33}},
     {18, 3, 0x01, {25, 7, -70, 27, 19, -21, -35, 5, 21, -33, -5}},

@@ -54,7 +54,7 @@ plays the one before it unchanged and then goes on: 1 rear_up holds at "up",
 2 rear_up_2 at "mid", 3 rear_up_3 at "top". In a higher stage the lower
 stages' tops hold STEP_HOLD (4 s): the mind's remote goes on to the next
 stage only when A1 is pressed again in that time, else it stops the trick
-there (TRICK_STOP: the straight line to SIT that every stop takes, checked
+there (a stop: the straight line to SIT that every stop takes, checked
 from every frame); kernel/mind/remote/remote.h. The remote finds the stage
 tops by their guards' names ("up", "mid", "top").
 
@@ -299,7 +299,7 @@ class Stage:
     number: int
     name: str
     top: int            # index into UP of the held frame
-    stop_ticks: int     # TRICK_STOP's straight line to SIT, ticks
+    stop_ticks: int     # a stop's straight line to SIT, ticks
     may_stop: bool = True
 
 

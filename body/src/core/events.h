@@ -15,23 +15,21 @@
 enum EventCode : uint8_t {
   EV_BOOT = 1,
   EV_FELL = 2,
-  EV_RECOVERED = 3,
-  EV_RECOVERY_FAILED = 4,
+  EV_LYING = 4,  // after a fall he is still: REST, then LIMP; arg = the FELL arg
   EV_LOW_BATTERY = 5,
   EV_BATTERY_OK = 6,
   EV_WATCHDOG = 7,
   EV_LINK_RESTORED = 8,
   EV_IMU_FAULT = 9,
   EV_IMU_OK = 10,
-  EV_TRICK_DONE = 11,
-  EV_GAIT_STOPPED = 12,
+  EV_STREAM_STOPPED = 12,
   EV_GOAL_REFUSED = 13,
   EV_CONFIG_MIGRATED = 14,
   EV_CONFIG_DEFAULTED = 15,
   EV_EEPROM_SAVED = 16,
   EV_TX_DROPPED = 17,
   EV_IR_KEY = 18,  // arg = NEC command | 0x100 for a held-key repeat
-  EV_FEET_UNDERRUN = 19,  // arg = ticks since the last FEET arrived
+  EV_POSE_UNDERRUN = 19,  // arg = ticks since the last POSE arrived
 };
 
 #define EVENT_QUEUE_LEN KILO_EVENT_QUEUE_DEPTH

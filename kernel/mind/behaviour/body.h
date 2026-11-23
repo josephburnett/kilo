@@ -25,7 +25,7 @@ class BodyIface {
   virtual bool look(double /*pan_deg*/, double /*tilt_deg*/) { return false; }
   // Start a library trick: a handle > 0, or 0 when it cannot start.
   virtual uint32_t play(const char* /*trick*/) { return 0; }
-  // Running until the trick is done: Success on TRICK_DONE DONE, Failure otherwise.
+  // Running until the trick is done: Success when it played to its end, Failure otherwise.
   virtual Status play_status(uint32_t /*handle*/) { return Status::Failure; }
   // Abandon it: stopped on the body if still playing (play() cancelled).
   virtual void play_cancel(uint32_t /*handle*/) {}

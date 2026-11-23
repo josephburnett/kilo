@@ -8,7 +8,7 @@ at each step's first tick, for each sweep (script 2) "base ..." with the
 settle hold's and the lifted hold's tilt, "tip ..." at each tip it saw and
 "end reason=..". ``script`` says which of kilo.measure.script.SCRIPTS the
 run played (its step and experiment indices are that script's). The
-FEET it sent (the feet and the rigid model's attitude for each body tick)
+POSE keys it sent (FEET in protocol 2; the feet and the rigid model's attitude for each body tick)
 and the TELEMETRY (the measured pitch, roll, rates and battery) are in the
 stream around it. Script tick t is body tick tick0 + t.
 
@@ -25,7 +25,7 @@ from typing import Any
 
 import numpy as np
 
-from kilo.logs import flight, walkrec
+from kilo.logs import flight, proto2, walkrec
 from kilo.measure import fit as F
 from kilo.measure import script as SC
 from kilo.protocol import kilo_protocol as P
@@ -51,7 +51,7 @@ def measure_runs(s: flight.Stream) -> list[flight.RunSpan]:
 
 
 def run_of(s: flight.Stream, span: flight.RunSpan, name: str = "") -> F.Run:
-    """One recorded run as a fit.Run: every script tick from 0 to the last FEET."""
+    """One recorded run as a fit.Run: every script tick from 0 to the last POSE."""
     lo, hi = flight.span_of(s, span)
     end = span.end_us if span.end_us is not None else hi
     marks = [m for m in s.marks if span.begin_us <= m.t_us <= end]
@@ -68,13 +68,13 @@ def run_of(s: flight.Stream, span: flight.RunSpan, name: str = "") -> F.Run:
     feet: dict[int, Any] = {}
     tel: dict[int, Any] = {}
     for f in frames:
-        if f.direction == "tx" and isinstance(f.msg, P.Feet):
+        if f.direction == "tx" and proto2.is_stream(f.msg):  # POSE (FEET in protocol 2 recordings)
             feet[t_of(f.msg.tick)] = f.msg
-        elif f.direction == "rx" and isinstance(f.msg, P.Telemetry) and f.msg.mode == P.Mode.GAIT:
+        elif f.direction == "rx" and isinstance(f.msg, P.Telemetry) and f.msg.mode == P.Mode.STREAM:
             tel[t_of(f.msg.tick)] = f.msg
     ts = [t for t in feet if t >= 0]
     if not ts:
-        raise RecordError(f"run {span.id}: no FEET")
+        raise RecordError(f"run {span.id}: no POSE (or FEET)")
     n = max(ts) + 1
     x = np.zeros((n, 4))
     z = np.full((n, 4), float(SC.HOME_Z))
@@ -89,8 +89,7 @@ def run_of(s: flight.Stream, span: flight.RunSpan, name: str = "") -> F.Run:
             last = m
             pred[t] = (m.pitch / A16, m.roll / A16)
         if last is not None:  # a tick not sent (late): the body held the pose before
-            x[t] = last.x_mm
-            z[t] = last.z_mm
+            x[t], z[t] = proto2.feet_of(last)
         tm = tel.get(t)
         if tm is not None:
             meas[t] = (tm.pitch / A16, tm.roll / A16)
@@ -135,8 +134,8 @@ def script_of(fields: dict, run_id: Any = "?") -> SC.ScriptDef:
 
 
 def walks_of(s: flight.Stream, name: str = "") -> list[F.Walk]:
-    """The stream's walks as error streams (fit.Walk): u = the FEET
-    prediction plus the body's correction, ticks in GAIT with three or four
+    """The stream's walks as error streams (fit.Walk): u = the POSE
+    prediction plus the body's correction, ticks in STREAM with three or four
     feet in the plan's support."""
     out = []
     for r in s.runs:
@@ -160,7 +159,7 @@ def walks_of(s: flight.Stream, name: str = "") -> list[F.Walk]:
                 u[i] = (row["pred_pitch"] + cp, row["pred_roll"] + cr)
             # a tick the servos alone answer: three or four feet down, and the body's balance not
             # correcting from what it measures just then (off, or holding its correction: a foot is up)
-            if row.get("meas_pitch") is not None and row.get("mode") == "GAIT":
+            if row.get("meas_pitch") is not None and row.get("mode") == "STREAM":
                 sup = row.get("support_plan")
                 open_loop = not row.get("balance") or row.get("held")
                 if sup is not None and bin(int(sup)).count("1") >= 3 and open_loop:
@@ -243,7 +242,7 @@ def summary(run: F.Run) -> str:
     secs = len(run) * SC.TICK_MS / 1000.0
     got = int(np.isfinite(run.meas).all(1).sum())
     b = run.batt_mv[np.isfinite(run.batt_mv)]
-    L = [f"  self-measurement: {len(run)} ticks ({secs:.1f} s), {got} with TELEMETRY in GAIT, "
+    L = [f"  self-measurement: {len(run)} ticks ({secs:.1f} s), {got} with TELEMETRY in STREAM, "
          f"{len(m.get('tips', []))} tips; end {end.get('reason', '?')}: {end.get('why', '?')}"]
     if len(b):
         L.append(f"  battery {b.min():.0f}-{b.max():.0f} mV")

@@ -72,8 +72,7 @@ bool Sleep::moving_mode() const {
   const BodyState& b = link_.state();
   if (!b.has_telemetry) return false;
   uint8_t m = b.telemetry.mode;
-  return m == KILO_MODE_GAIT || m == KILO_MODE_TRICK || m == KILO_MODE_FALLEN || m == KILO_MODE_RECOVERING ||
-         m == KILO_MODE_CALIB || m == KILO_MODE_BOOT;
+  return m == KILO_MODE_STREAM || m == KILO_MODE_FALLEN || m == KILO_MODE_CALIB || m == KILO_MODE_BOOT;
 }
 
 void Sleep::on_telemetry(const kilo_telemetry_t& t) {
@@ -121,7 +120,7 @@ void Sleep::key(uint16_t arg, bool acts) {
   if (moves) {
     if (state_ == State::Awake) return;
     if (limp_ && k->kind != remote::Kind::Posture) {
-      // a walk, a trick or the runner from LIMP: the servos take REST first (TRICK_PLAY is BUSY in LIMP)
+      // a walk, a trick or the runner from LIMP: the servos take REST first (POSE is refused BUSY in LIMP)
       client_posture(link_, &walker_, "rest");
     }
     limp_ = false;
@@ -208,8 +207,8 @@ void Sleep::poll(const Activity& a) {
       }
       // A7's LIMP: once the remote's stop and REST are done and nothing has moved for kLimpSettleUs,
       // whether or not a laptop is connected. Never from anything but REST: turned over in the
-      // meantime, the body's fall reflex rights him and leaves him standing (its RECOVERED takes
-      // STAND), and a LIMP then would drop him: the sleep is called off instead.
+      // meantime, he may be lying on his side (the body's fall reflex laid him down), and a LIMP then
+      // would leave him there: the sleep is called off instead.
       if (limp_pending_) {
         if (!still) still_since_us_ = now;
         else if (now - still_since_us_ >= kLimpSettleUs) {

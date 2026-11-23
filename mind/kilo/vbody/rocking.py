@@ -32,7 +32,7 @@ how the rock changes with the speed):
   ground (``clear_log``).
 
 The rest is Physics': the servo dead time and first-order response, the
-body's slew (in the FEET player), falls, no foot slip, no yaw.
+body's slew (in the POSE player), falls, no foot slip, no yaw.
 """
 
 from __future__ import annotations

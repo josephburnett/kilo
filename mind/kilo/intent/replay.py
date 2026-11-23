@@ -6,7 +6,8 @@ have said, against what Kilo had been told to hold.
 
 The prior is rebuilt as the mind builds it (kernel/mind/mind.cpp
 Mind::intent_cmd): the SET_POSTURE last sent, or the end posture of the
-trick last played, or nothing while FEET stream.
+trick last played (protocol 2 recordings), or nothing while a POSE (FEET)
+stream plays.
 
 The confusion table counts TELEMETRY, by what was asked (rows) and what
 the estimate says (columns), over the stretches where the answer can be
@@ -22,7 +23,7 @@ import sys
 from collections import Counter
 
 from kilo.intent import estimate as E
-from kilo.logs import flight
+from kilo.logs import flight, proto2
 from kilo.protocol import kilo_protocol as P
 
 ASKED_S = 3.0   # a posture counts as held once it has been the one asked for this long
@@ -39,29 +40,30 @@ def samples(s: flight.Stream):
                 c = E.cmd_of_posture(m.posture)
                 if c != cmd:
                     cmd, since = c, f.t_us
-            elif isinstance(m, P.TrickBegin):
+            elif isinstance(m, proto2.TrickBegin):
                 trick_end = m.end_posture
-            elif isinstance(m, (P.TrickPlay, P.Feet)):
+            elif isinstance(m, proto2.TrickPlay) or proto2.is_stream(m):
                 if cmd != E.Cmd.NONE:
                     cmd, since = E.Cmd.NONE, f.t_us
             continue
         if isinstance(m, P.Event):
             c = None
-            if m.code == P.EventCode.TRICK_DONE and trick_end is not None:
+            if m.code == proto2.EVENT_TRICK_DONE and trick_end is not None:
                 # DONE or STOPPED: he is in the trick's end posture; FELL or PREEMPTED: nobody knows
-                ok = ((m.arg & 0xFFFF) >> 8) in (int(P.TrickDoneReason.DONE), int(P.TrickDoneReason.STOPPED))
+                ok = ((m.arg & 0xFFFF) >> 8) in (0, 1)
                 c = E.cmd_of_posture(trick_end) if ok else E.Cmd.NONE
-            elif m.code == P.EventCode.RECOVERED:
-                c = E.Cmd.STAND      # the body's fall reflex ends in STAND
-            elif m.code == P.EventCode.RECOVERY_FAILED:
-                c = E.Cmd.REST       # ...or in REST, then LIMP
+            elif m.code == proto2.EVENT_RECOVERED:
+                c = E.Cmd.STAND      # protocol 2: the body's get-up ended in STAND
+            elif m.code == P.EventCode.LYING:
+                c = E.Cmd.REST       # the fall ended lying: REST, then LIMP (protocol 2: RECOVERY_FAILED)
             elif m.code == P.EventCode.FELL:
                 c = E.Cmd.NONE
             if c is not None and c != cmd:
                 cmd, since = c, f.t_us
             continue
         if isinstance(m, P.Telemetry):
-            yield E.Sample(f.t_us, m.pitch, m.roll, m.rate_pitch, m.rate_roll, m.rate_yaw, m.mode, cmd), since
+            mode = int(P.Mode.STREAM) if m.mode == proto2.MODE_TRICK else m.mode  # protocol 2: a trick played
+            yield E.Sample(f.t_us, m.pitch, m.roll, m.rate_pitch, m.rate_roll, m.rate_yaw, mode, cmd), since
 
 
 def replay(path: str, changes: bool = False):

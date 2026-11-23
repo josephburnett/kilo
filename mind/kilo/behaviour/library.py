@@ -6,8 +6,9 @@ The body interface (``ctx.body``) the behaviours call:
   balance); BodyClient has it.
 - ``set_balance(enable)``: BodyClient has it.
 - ``look(pan_deg, tilt_deg)``: head target. Not in the body yet (P2).
-- ``play(trick, mirror=False)``: returns an awaitable that resolves on
-  TRICK_DONE (SUCCESS if the trick ended DONE, else FAILURE). Not in the body yet (P2).
+- ``play(trick, mirror=False)``: returns an awaitable that resolves when
+  the trick ends (SUCCESS if it ended DONE, else FAILURE). The C++ mind
+  plays it as a stream of POSE keys; BodyClient has no play.
 - ``beep(notes)``: ``[(midi_note, ms), ...]``. Not in the body yet.
 
 The C++ mind implements it (kernel/mind/behaviour/body.h).

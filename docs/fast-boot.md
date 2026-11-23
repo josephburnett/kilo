@@ -18,7 +18,7 @@ line at 26.6 s after power, of which ~4.6 s is Python starting `kilo run`.
 Whole boot 38.6 s.
 
 The mind's job on the robot is narrow: one UART to the body, a planner that
-streams `FEET` at 50 Hz, a behaviour tree at 10 Hz, and percepts from what the
+streams poses (`POSE`) at 50 Hz, a behaviour tree at 10 Hz, and percepts from what the
 body reports. The Python mind's only runtime dependency was `pyserial`.
 Nothing in it needs an operating system.
 
@@ -57,7 +57,7 @@ kilo CLI --host  ── TCP / Ethernet ──>  net task (background)
                                                           v                      
                                          mind core (foreground)                  
                                            link (COBS/CRC) ── PL011 UART ──────>  body firmware
-                                           planner (FEET @ 50 Hz, 5 ahead)        (unchanged)
+                                           planner (POSE @ 50 Hz, 3 ahead)        (unchanged)
                                            behaviour tree @ 10 Hz                
                                            perception (IMU, ultrasonic, IR)      
                                            STK500v1 flasher ── GPIO4 reset ────>  optiboot
@@ -119,8 +119,8 @@ Port in dependency order, each against the existing Python tests' cases where
 they exist:
 
 1. `body/` (client, state)
-2. `planner/` (model, patterns, plan, walker): the 50 Hz `FEET` stream, 5 ticks
-   ahead of the body's 8-deep queue
+2. `planner/` (model, patterns, plan, walker): the 50 Hz `POSE` stream, 3 ticks
+   ahead of the body's 5-key queue
 3. `tricks/` (model, player); the trick library ships as data on SD or
    compiled in
 4. `perception/` (imu, ultrasonic, events, ring)
@@ -162,7 +162,7 @@ Done when: `kilo flash --host` and `kilo flash --sd` both end with a matching
 ### P6. Measure
 
 - Toggle a spare GPIO as the first instruction of `kernel7.img` and again
-  when the first `FEET` frame goes out; scope both against the 5 V rail.
+  when the first `POSE` frame goes out; scope both against the 5 V rail.
 - Record in a `docs/p*-hardware-test-results.md`, against today's 26.6 s.
 
 ## 5. Laptop interface

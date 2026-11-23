@@ -18,7 +18,7 @@ void fixed2(char* buf, uint32_t cap, real v) { format_fixed(buf, cap, planner::f
 
 int16_t a16(real d) {
   int v = planner::round_i(to_a16(d));
-  return (int16_t)(v < -480 ? -480 : v > 480 ? 480 : v);  // FEET's +-30 deg
+  return (int16_t)(v < -480 ? -480 : v > 480 ? 480 : v);  // POSE's +-30 deg
 }
 
 }  // namespace
@@ -36,15 +36,15 @@ void Measure::on_telemetry(const kilo_telemetry_t& t) {
   else seen_head_ = (seen_head_ + 1) % kSeen;
   int64_t tick = clock_est_.add(t.tick, rx);
   if (phase_ != Phase::Streaming && phase_ != Phase::Finish) return;
-  if (t.mode == KILO_MODE_GAIT) {
+  if (t.mode == KILO_MODE_STREAM) {
     gait_seen_ = true;
   } else if (gait_seen_ && abort_why_ == nullptr) {
-    format(abort_buf_, sizeof abort_buf_, "the body left GAIT (mode %s)", mode_name(t.mode));
+    format(abort_buf_, sizeof abort_buf_, "the body left the stream (mode %s)", mode_name(t.mode));
     abort_why_ = abort_buf_;
-    abort_reason_ = t.mode == KILO_MODE_FALLEN || t.mode == KILO_MODE_RECOVERING ? "FELL" : "ABORTED";
+    abort_reason_ = t.mode == KILO_MODE_FALLEN ? "FELL" : "ABORTED";
     return;
   }
-  if (t.mode == KILO_MODE_GAIT) watch(t, tick);
+  if (t.mode == KILO_MODE_STREAM) watch(t, tick);
 }
 
 void Measure::on_event(const kilo_event_t& e) {
@@ -53,18 +53,18 @@ void Measure::on_event(const kilo_event_t& e) {
   if (e.code == KILO_EVENT_FELL) {
     abort_why_ = "Kilo fell (the body's fall reflex)";
     abort_reason_ = "FELL";
-  } else if (e.code == KILO_EVENT_GAIT_STOPPED && gait_seen_) {
-    abort_why_ = e.arg == 1 ? "the body settled after a FEET underrun (the stream was late)"
-                            : "the body stopped the gait (a posture or an epoch bump took the legs)";
+  } else if (e.code == KILO_EVENT_STREAM_STOPPED && gait_seen_) {
+    abort_why_ = e.arg == 1 ? "the body settled after a POSE underrun (the stream was late)"
+                            : "the body stopped the stream (a posture or an epoch bump took the legs)";
     abort_reason_ = "ABORTED";
-  } else if (e.code == KILO_EVENT_GOAL_REFUSED && ((uint16_t)e.arg >> 8) == KILO_MSG_FEET) {
-    format(abort_buf_, sizeof abort_buf_, "the body refused FEET: %s", ack_status_name((uint8_t)(e.arg & 0xFF)));
+  } else if (e.code == KILO_EVENT_GOAL_REFUSED && ((uint16_t)e.arg >> 8) == KILO_MSG_POSE) {
+    format(abort_buf_, sizeof abort_buf_, "the body refused POSE: %s", ack_status_name((uint8_t)(e.arg & 0xFF)));
     abort_why_ = abort_buf_;
     abort_reason_ = "ABORTED";
   }
 }
 
-// One TELEMETRY in GAIT at body tick `tick`: the safety limits, the settle hold's average, the tip.
+// One TELEMETRY in mode STREAM at body tick `tick`: the safety limits, the settle hold's average, the tip.
 void Measure::watch(const kilo_telemetry_t& t, int64_t tick) {
   int64_t ts = tick - tick0_;
   if (ts < 0 || abort_why_ != nullptr) return;
@@ -341,7 +341,7 @@ void Measure::wake(uint64_t now) {
   }
   stalled_ = false;
   if (!gait_seen_ && now - stream_at_ > kEnterTimeoutUs) {
-    abort("the body did not enter GAIT", "ABORTED");
+    abort("the body did not start the stream", "ABORTED");
     return;
   }
   double body;
@@ -384,24 +384,26 @@ void Measure::wake(uint64_t now) {
     if (planned_ <= cur) {  // already past: not sent
       late_++;
     } else {
-      kilo_feet_t f = {};
+      kilo_pose_t f = {};
       f.epoch = (uint8_t)epoch_;
       f.tick = (uint16_t)(planned_ & 0xFFFF);
+      f.flags = 0;  // four feet
       for (int k = 0; k < 4; k++) {
-        f.x_mm[k] = pose.x[k];
-        f.z_mm[k] = pose.z[k];
+        f.leg[2 * k] = (int16_t)(pose.x[k] * 4);  // whole mm, in q2
+        f.leg[2 * k + 1] = (int16_t)(pose.z[k] * 4);
       }
+      for (int k = 0; k < 3; k++) f.head[k] = KILO_HEAD_NOT_HELD;  // the posture's (STANCE: STAND's)
       f.pitch = pl.pitch_a16;
       f.roll = pl.roll_a16;
       f.support = sup;
-      if (link_.send_stream(KILO_MSG_FEET, (const uint8_t*)&f, sizeof f)) sent_++;
+      if (link_.send_stream(KILO_MSG_POSE, (const uint8_t*)&f, sizeof f)) sent_++;
     }
     last_tick_ = planned_;
     planned_++;
   }
 }
 
-// The run's end, whatever ended it: STAND, the goals put back, then Ending until the body has left GAIT.
+// The run's end, whatever ended it: STAND, the goals put back, then Ending until the body has left mode STREAM.
 void Measure::finish(const char* reason, const char* why, bool ok) {
   if (phase_ == Phase::Idle || phase_ == Phase::Ending) return;
   bool streamed = phase_ == Phase::Streaming || phase_ == Phase::Finish;
@@ -441,7 +443,7 @@ void Measure::ending(uint64_t now) {
       restore_divs_ = false;
   }
   const BodyState& st = link_.state();
-  bool left = !st.has_telemetry || st.telemetry.mode != KILO_MODE_GAIT;
+  bool left = !st.has_telemetry || st.telemetry.mode != KILO_MODE_STREAM;
   if ((left && !restore_divs_) || now - phase_at_ > kEndWaitUs) phase_ = Phase::Idle;
 }
 
@@ -484,7 +486,7 @@ void Measure::poll() {
     }
     case Phase::Stance:
       if (now - phase_at_ < kStanceWaitUs) return;
-      link_.clear_goal(KILO_MSG_SET_POSTURE);  // a refresh would end GAIT
+      link_.clear_goal(KILO_MSG_SET_POSTURE);  // a refresh would end the stream
       begin_stream(now);
       return;
     case Phase::Streaming:

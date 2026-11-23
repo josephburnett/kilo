@@ -38,19 +38,19 @@ operations notes and test tables. The main body links to them.
 | Ultrasonic | Echo timed by a pin-change ISR on D6. 80 ms cadence, 25 ms cap. | 3a |
 | Reset cause | RAM record at a fixed address (top of RAM): magic plus a tick-alive canary, because optiboot clears `MCUSR`. | 3a |
 | Calibration | Imported from the legacy EEPROM's per-robot values. New A/B 128 B slots at 704..959. The legacy layout is never written. | 3b |
-| Arbitration | Owners REFLEX > TRICK > GAIT > IDLE per joint, a 200 ms crossfade, then head and balance layers, then limits and slew. | 3c |
+| Arbitration | Owners REFLEX > STREAM > IDLE per joint, a 200 ms crossfade out of STREAM and REFLEX, then head and balance layers, then limits and slew. | 3c |
 | Stale goals | A goal epoch byte. Reflex takeovers and watchdog trips bump it, and goals carrying an old epoch are refused. | 3c, 4 |
-| Gait | The mind plans every step and streams one `FEET` per 20 ms tick (where each foot is, the attitude it predicts, which feet are on the ground), 5 ticks ahead; the body queues 8, plays each on its tick through a per-leg planar 2-link IK (fixed point) and the safety slew, holds then settles if the stream stops. Protocol 2.0 (2026-10-14); the body's own gait generator is gone. | 3d |
-| Tricks | 24 × 14 B keyframes in RAM (32 until the P1 RAM shrink, 3h), int8 degrees, cosine, linear or step easing, uploaded by the Pi (CRC-checked, cached by `(trick_id, crc)`), played with speed and mirror by the body; the TRICK owner hands back with a 200 ms crossfade into the trick's end posture. Implemented in P1. | 3e |
-| Balance | `corr = −(Kp·e + Kd·rate)` at 50 Hz. Geometric (through IK) for the FEET stream and STANCE, legacy joint gains for joint-space owners (P1: implemented for IDLE SIT and STAND). Under a FEET stream the reference is the mind's predicted attitude, the corrections go through the feet on the ground, and they are held while any foot is up. | 3f |
+| Movement | The mind moves the joints through one stream of poses, `POSE`: each key is the pose to reach by a given body tick (a foot or two joint angles per leg, the head, the attitude the mind predicts, which feet are on the ground). The body queues 5 keys and moves from where it is toward the next one, reaching it exactly on its tick (in a straight line or along a cosine), through a per-leg planar 2-link IK (fixed point) and the safety slew; it holds, then settles, if the stream stops. A walk sends a key every tick, 3 ticks (60 ms) ahead; a trick one key per keyframe. Protocol 3.0 (2026-11-22). | 3d |
+| Tricks | Keyframes on the mind (compiled into the kernel), turned by the mind into `POSE` keys with speed and mirror applied; the trick ends with its end posture as a `SET_POSTURE`. The body stores no tricks. | 3e, 5 |
+| Balance | `corr = −(Kp·e + Kd·rate)` at 50 Hz. Geometric (through IK) for a stream of feet and STANCE, legacy joint gains for joint-space owners (IDLE SIT and STAND, and a stream of joint angles while its next key asks for balance). Under a stream the reference is the mind's predicted attitude; under a stream of feet the corrections go through the feet on the ground and are held while any foot is up. | 3f |
 | Attitude | Integer pitch/roll from the DMP quaternion, keeping the legacy pitch reflection. The DMP is dropped in P5. | 3f |
-| Fall | 75° on 6 consecutive samples (120 ms) trips it: epoch bump, REFLEX holds, `FELL`; once still, the legacy `rc` (PROGMEM, mirrored by roll sign), up to 3 tries, then STAND and `RECOVERED`, or REST, `RECOVERY_FAILED` and LIMP. Implemented in P1. | 3g |
-| Head | `SET_HEAD` holds pan/tilt/tail slew-limited over IDLE/GAIT, without balance corrections; released by mode 0, 2 s without a refresh or an epoch bump. Implemented in P1. | 3c |
+| Fall | 75° on 6 consecutive samples (120 ms) trips it: epoch bump, REFLEX holds the pose, `FELL`; once still, REST, `LYING`, LIMP 2 s later. The body does not get up by itself: getting up is the mind's, a `POSE` stream with `FALL_OK` (owner's decision 2026-11-22). | 3g |
+| Head | `SET_HEAD` holds pan/tilt/tail slew-limited while IDLE owns them (a stream whose keys set a head joint wins), without balance corrections; released by mode 0, 2 s without a refresh or an epoch bump. | 3c |
 | Watchdog | Armed by the first valid frame from the Pi. Two stages: stop motion at 0.5 s, REST at 1.5 s, LIMP 10 s later. | 3g |
 | Protocol | COBS + CRC-16/CCITT-FALSE at 250000 baud. Goals unacked and refreshed at 5 Hz; queries answered by their data reply; other commands acked and de-duplicated. | 4 |
 | IR remote | **Relayed** (owner's request, 2026-10-11; was dropped). Received on the body: NEC decoded on D4 from a pin-change interrupt shared with the ultrasonic, no library (≈450 B flash, 17 B RAM); relayed as `EVENT IR_KEY`; mapped to actions on the mind (kernel/mind/remote). | 3a, 4, 5 |
 | Buzzer | **Kept, Pi-driven.** A `BEEP` note queue plus built-in reflex chirps. ISR-toggled on D5. | 3a, 4 |
-| First tricks | Basics: sit, rest, stand, stretch, balance. Social: hi, wash face, check around, sniff, scratch, pee, push-up, butt-up. Athletic tricks (backflip, roll, jump) are not ported. Fall recovery stays a body reflex. | 5 |
+| First tricks | Basics: sit, rest, stand, stretch, balance. Social: hi, wash face, check around, sniff, scratch, pee, push-up, butt-up. Athletic tricks (backflip, roll, jump) are not ported. | 5 |
 | Behaviour | An in-house behaviour tree under a utility selector over drives, ticked at 10 Hz. | 5 |
 | Testing | Host g++ tests with sanitizers, a virtual body (Python, cross-checked against the C dispatch) and one built from the C core, a size/symbol harness, and a HIL checklist. Planned, not done: the same tests under simavr. | 6 |
 
@@ -77,8 +77,8 @@ operations notes and test tables. The main body links to them.
 
 - Compatibility with Petoi's token protocol, the mobile app, `serialMaster`, or
   the setup sketch.
-- Skill storage in EEPROM. Tricks live on the Pi and are sent into RAM on
-  demand.
+- Skill storage on the body. Tricks live on the Pi and reach the body as
+  poses to assume (3d, 3e).
 - Behaviour on the body. No random mind, task queue, ultrasonic reactions or
   eye effects.
 - Gaits on the body (legacy tables or a generator). The mind plans the steps and streams them (3d).
@@ -96,12 +96,12 @@ operations notes and test tables. The main body links to them.
              |  flight recorder   host channel to the laptop (`kilo --host`)   body flasher (STK500v1) |
              |                         link/serial_link  (PL011 on GPIO14/15, 250000 8N1)              |
              +---------------------------------------|---------------------------------------------+
-                  goals (+epoch): posture, head, body  | pose, eyes, beeps; FEET 50 Hz; trick upload/play; params
+                  goals (+epoch): posture, head, body  | pose, eyes, beeps; POSE keys (50 Hz walking); params
                   telemetry 25-50 Hz, events, acks     |                           GPIO4 -> RESET (flashing only)
              +---------------------------------------|---------------------------------------------+
              |                        NyBoard V1_2, ATmega328P @ 16 MHz ("BODY", C++)                 |
              |  UART/COBS/CRC  ->  goal registers  ->  50 Hz tick:                                   |
-             |   IMU (DMP) -> reflexes -> owners {REFLEX > TRICK > GAIT > IDLE} -> crossfade          |
+             |   IMU (DMP) -> reflexes -> owners {REFLEX > STREAM > IDLE} -> crossfade                |
              |   -> head layer -> balance layer -> limits + slew -> angle->counts -> PCA9685 (I2C)    |
              |  side work: ultrasonic (pin-change ISR), battery ADC, eyes (WS2812), buzzer, EEPROM     |
              +-----------------------------------------------------------------------------------------+
@@ -113,7 +113,7 @@ operations notes and test tables. The main body links to them.
 | Function | Where | Why |
 |---|---|---|
 | Servo PWM | PCA9685 | Autonomous. It holds the last pose while the AVR resets. |
-| 50 Hz loop, interpolation, arbitration, FEET playback + IK, balance | Body | Needs deterministic timing and a few ms from IMU to servo. Linux on a Pi 2 gives neither. |
+| 50 Hz loop, the POSE stream's interpolation + IK, arbitration, balance | Body | Needs deterministic timing and a few ms from IMU to servo. Linux on a Pi 2 gives neither. |
 | Reflexes (fall, battery, limits, link watchdog) | Body | Must work while the Pi hangs, reboots or is absent. |
 | Ultrasonic ranging | Body | Needs µs echo timing. Only the range goes to the Pi. |
 | Eyes, buzzer | Body executes, Pi decides | Simple actuators. The body adds its own reflex chirps. |
@@ -189,19 +189,19 @@ loop():
 | 2 | Quaternion → pitch/roll/rates (integer) | 0.15 ms |
 | 3 | `uart_poll()` | <0.1 ms |
 | 4 | Reflexes, owner selection, epoch bookkeeping | 0.05 ms |
-| 5 | Owner outputs (IK for 4 legs: a FEET pose or STANCE / trick / posture) | 0.6 ms with the IK, 0.1 ms otherwise |
+| 5 | Owner outputs (IK for 4 legs: a pose of feet or STANCE / joint angles / posture) | 0.6 ms with the IK, 0.1 ms otherwise |
 | 6 | Crossfade, head and balance layers, limits, slew, angle → counts | 0.3 ms |
 | 7 | `uart_poll()` | <0.1 ms |
 | 8 | PCA9685 burst write of all 16 channels | 1.6 ms |
 | 9 | Ultrasonic trigger if due (20 µs), battery ADC if due (104 µs) | 0.13 ms |
-| 10 | Telemetry into the TX ring (every tick while FEET streams: `SET_STREAM telem_div 1`), `wdt_reset()`, tick-alive canary, timing stats | 0.15 ms |
+| 10 | Telemetry into the TX ring (every tick while the mind streams a walk or the self-measurement: `SET_STREAM telem_div 1`), `wdt_reset()`, tick-alive canary, timing stats | 0.15 ms |
 | | **Total** | **≈4.5-5 ms of 20 ms** |
 
 The measured value is reported as `tick_load` in TELEMETRY and `max_tick_us`
 in STATS. Acceptance: under 12 ms over a 10-minute trot.
 
-*Step 5, counted on the host* (`test_feet.cpp` "cost", host-only counters
-in `core/fx`): one tick playing a FEET pose with the balance on costs 12
+*Step 5, counted on the host* (`test_stream.cpp` "cost", host-only counters
+in `core/fx`): one tick playing a pose of four feet with the balance on costs 12
 `fx_atan2` (each with one int32 division and a shared-shift loop), 4
 `fx_isqrt32`, 4 `fx_sin`/`fx_cos` (the pose and the correction terms) and
 4 int32 divisions in the IK; STANCE the same with 2 `fx_sin`. At ≈40 µs per
@@ -210,10 +210,10 @@ int32 division and ≈30 µs per `isqrt` on the 328P that is ≈0.6 ms
 divisions for the trajectory). `max_tick_us` is the measurement: 7.7-7.9 ms
 cumulative maximum on Kilo with the 1.x gait (measured 2026-10-11).
 
-*FEET and TELEMETRY at 50 Hz* (protocol 2.0). The link carries, per 20 ms
-tick, one FEET Pi → body (16 B payload, 22 B on the wire) and one TELEMETRY
+*POSE and TELEMETRY at 50 Hz* (a walk). The link carries, per 20 ms
+tick, one POSE Pi → body (31 B payload, 37 B on the wire) and one TELEMETRY
 body → Pi (35 B, 41 B on the wire), against 500 B per tick each way at
-250000 baud: 4 % and 8 % of the line, measured in `test_feet.cpp` "budget"
+250000 baud: 7 % and 8 % of the line, measured in `test_stream.cpp` "budget"
 (200 ticks with the TX ring drained at the UART's pace: no `TX_DROPPED`).
 On the CPU a tick does at most one TELEMETRY whatever the rate (COBS and CRC
 over 37 B, ≈0.15 ms) and decodes one more frame (≈0.1 ms), so the worst
@@ -420,47 +420,52 @@ slot, never to stale legacy data. If both slots are invalid, migration runs.
 
 ### 3c. Arbitration
 
-| Priority | Owner | Mask | Active when |
+An *owner* is the part of the firmware that supplies a joint's angle this
+tick. There are three, in priority order:
+
+| Priority | Owner | Joints | Active when |
 |---|---|---|---|
-| 3 | REFLEX | all driven | Fall response and recovery, low-battery REST, watchdog stop and REST, warm-boot hold |
-| 2 | TRICK | from `TRICK_BEGIN` (default all 11) | A trick is playing |
-| 1 | GAIT | legs 8-15 | A FEET stream plays (and holds and settles after an underrun; 3d) |
+| 3 | REFLEX | all driven | Fall reflex, low-battery REST, watchdog stop and REST, warm-boot hold |
+| 1 | STREAM | every leg joint, and each head joint the stream's key sets | A `POSE` stream plays (and holds and settles after an underrun; 3d) |
 | 0 | IDLE | all driven | Always. Holds the current posture: LIMP, REST, SIT, STAND, STANCE (IK), CALIB or ZERO. |
 
-Per tick and per joint, the highest-priority active owner whose mask contains
-the joint supplies the base angle. When the owner of a joint changes, the
-crossfade starts from a snapshot of that joint's previous output:
+Per tick and per joint, the highest-priority active owner that holds the
+joint supplies the base angle (`core/arbiter.cpp`). When the owner of a
+joint changes, a *crossfade* (a cosine blend over a few ticks) starts from
+a snapshot of that joint's previous output:
 
 ```
 if owner(j) changed: src[j] = last_out[j]; n[j] = xfade(prev, new); i[j] = 0
 if i[j] < n[j]:     base[j] = src[j] + (base[j] − src[j]) · ease_cos(++i[j] / n[j])
 ```
 
-The snapshot is the last **output** (after balance, limits and slew; as
-implemented in P1, `core/arbiter.cpp`), so a hand-over never jumps even when
-the previous owner asked for an angle beyond a limit or carried a balance
-correction. The same snapshot is the TRICK owner's start pose (frame 0 moves
-from it).
+The snapshot is the last **output** (after balance, limits and slew), so a
+hand-over never jumps even when the previous owner asked for an angle beyond
+a limit or carried a balance correction.
 
 Crossfade lengths:
-- 0 ticks into TRICK or REFLEX, because their first frame interpolates from the
-  current pose;
-- 10 ticks (`XFADE_TICKS`) out of REFLEX, and out of TRICK when it ends or
-  is preempted; `TRICK_STOP transition_ticks` when the Pi stops it;
+- 0 ticks into STREAM or REFLEX, because they start from the current output
+  themselves (a stream's first key is reached from a snapshot of the
+  outputs when it arrived; a reflex's mover starts from them);
+- 10 ticks (`XFADE_TICKS`, 200 ms) out of REFLEX and out of STREAM;
+- a posture (`SET_POSTURE`) that ends a stream whose legs are joint
+  angles (a trick) instead restarts IDLE's move from where the stream left
+  the joints, over that posture's transition ticks, even when it is the
+  posture IDLE already had; after a stream of feet (a walk, whose IDLE
+  posture is STANCE) the hand-over is the usual `XFADE_TICKS` crossfade;
 - the posture's transition time between IDLE postures (default 25 ticks).
 
 Layers on top of the base pose:
 
-1. **Head layer** (joints 0-2, only when the head owner is IDLE; GAIT owns
-   legs only):
+1. **Head layer** (joints 0-2, only while their owner is IDLE):
    - If the Pi holds a target (`SET_HEAD mode=1`), the head follows it,
      slew-limited.
-   - Otherwise the head uses the posture's head (STANCE's under a FEET
-     stream: STAND's head and tail). The 1.x gait's head bob and tail wag
-     are gone with it; the mind can move the head with `SET_HEAD`.
+   - Otherwise the head uses the posture's head (STANCE's, under a stream of
+     feet: STAND's head and tail). A stream's key may set head joints
+     itself; a head value of −32768 in a key leaves that joint to IDLE.
    - The hold is released by `mode=0`, by `HEAD_HOLD_MS` (2 s) without a
      refresh, or by any epoch bump.
-   - As implemented in P1 (`core/arbiter.cpp`, `body_goal_head`): a held
+   - As implemented (`core/arbiter.cpp`, `body_goal_head`): a held
      joint steps from its last output toward the target by at most
      `max_speed_dps` (as a16 per tick, rounded up; 0 or > 2500 °/s = only
      the safety slew), and the safety stage then clamps the target to the
@@ -471,73 +476,76 @@ Layers on top of the base pose:
      is recorded as owner `PI_HOLD` (TELEMETRY head nibble 4, flags bit 5
      `HEAD_HELD`), so taking and releasing the hold are hand-overs: the
      release crossfades back to the owner's angle over `XFADE_TICKS`.
-     Precedence: a trick that owns a head joint wins over the hold (and the
-     hold resumes from the trick's output when it ends, if still refreshed);
-     a trick that does not own the head leaves it to the hold; REFLEX wins
-     over everything and its epoch bump drops the hold. `SET_HEAD`: BAD_ARG
-     for mode > 1; mode 0 is never stale; mode 1 is refused STALE, FALLEN,
-     LOW_BATT in that order. The hold lasts `HEAD_HOLD_MS / 20` = 100 ticks
-     from the last refresh (the 5 Hz goal refresh keeps it).
+     Precedence: a stream whose key sets a head joint wins over the hold
+     (and the hold resumes from the stream's output when it ends, if still
+     refreshed); a key that leaves the head to IDLE leaves it to the hold;
+     REFLEX wins over everything and its epoch bump drops the hold.
+     `SET_HEAD`: BAD_ARG for mode > 1; mode 0 is never stale; mode 1 is
+     refused STALE, FALLEN, LOW_BATT in that order. The hold lasts
+     `HEAD_HOLD_MS / 20` = 100 ticks from the last refresh (the 5 Hz goal
+     refresh keeps it).
 2. **Balance layer** (3f, `core/balance.*`):
-   - For GAIT and STANCE, corrections enter the IK as body pitch/roll
-     (`body_tick`, `core/feet`): the geometric balance runs while a FEET
-     stream owns the legs and in IDLE STANCE once settled, gated in both by
-     the posture flag or `SET_BALANCE enable` (a FEET stream keeps the
-     STANCE posture's flag); its corrections reach no joint directly (the
-     arbiter gets no joint-space corrections then, head included), and
-     leaving it for a joint-space owner zeroes them. See 3f.
-   - For joint-space owners (built-in postures, tricks with `BALANCE`), they
-     pass through the per-joint gain table and are added to the joint's base
-     angle after the crossfade, before the safety stage.
+   - For a stream of feet and for STANCE, corrections enter the IK as body
+     pitch/roll (`body_tick`, `core/stream`): the geometric balance runs
+     while a stream whose legs are all feet plays and in IDLE STANCE once
+     settled, gated in both by the posture flag or `SET_BALANCE enable` (a
+     stream of feet keeps the STANCE posture's flag); its corrections reach
+     no joint directly (the arbiter gets no joint-space corrections then,
+     head included), and leaving it for a joint-space owner zeroes them.
+     See 3f.
+   - For joint-space owners (the built-in postures, and a stream whose legs
+     are joint angles), they pass through the per-joint gain table and are
+     added to the joint's base angle after the crossfade, before the safety
+     stage.
    - Requested by `SET_POSTURE` flags bit 0 (cleared by an epoch bump, so
      the mind re-asserts it) or by `SET_BALANCE enable=1`.
-   - As implemented in P1 (`body_tick`): runs only for the IDLE owner in SIT
-     or STAND, once the posture move has settled. Off for REFLEX (fall,
-     battery, watchdog, warm-boot hold), LIMP, CALIB, ZERO and REST (lying
-     on the belly there is nothing to balance) and during an IDLE posture
-     move: there the corrections are zeroed at once, which never jumps
-     because the reflex or the new mover starts from the corrected output.
-     A request turned off or `IMU_FAULT` lets them decay through the
-     low-pass and the 1°/tick slew instead.
-   - As implemented for tricks (P1): while a trick plays, the controller
-     runs only during frames with the balance bit, against the trick's
-     expected attitude from `TRICK_BEGIN` (`exp_roll`, `exp_pitch`; roll
-     negated when mirrored), whatever the IDLE request; between balanced
-     frames the corrections decay through the low-pass and slew. They are
-     zeroed when a trick starts and when it ends: the trick's first frame
-     and the crossfade out both start from the corrected output. The
-     corrections are added to TRICK-owned joints and to the IDLE-owned rest.
+   - For IDLE (`body_tick`): runs only in SIT or STAND, once the posture
+     move has settled. Off for REFLEX (fall, battery, watchdog, warm-boot
+     hold), LIMP, CALIB, ZERO and REST (lying on the belly there is nothing
+     to balance) and during an IDLE posture move: there the corrections are
+     zeroed at once, which never jumps because the reflex or the new mover
+     starts from the corrected output. A request turned off or `IMU_FAULT`
+     lets them decay through the low-pass and the 1°/tick slew instead.
+   - For a stream of joint angles: the controller runs while the next key
+     has the `BALANCE` flag, against that key's predicted pitch and roll,
+     whatever the IDLE request; without the flag the corrections decay
+     through the low-pass and slew. They are zeroed when a stream starts
+     and when it ends: its first key and the crossfade out both start from
+     the corrected output.
    - TELEMETRY flags bit 0 (`BALANCE_ACTIVE`) reports that it ran this tick.
 3. **Safety stage** (always applied):
    - Clamp to joint limits.
    - Slew-limit to `SLEW_MAX` (10°/tick ≈ 500°/s, about G41 no-load speed
      **(est.)**).
    - Convert angle → counts.
+   - TELEMETRY `limited` says which legs (bits LF RF RB LB) and whether the
+     head (bit 4) had their angle cut this tick by a joint limit, the slew,
+     or (a foot) the leg's reach in the IK: what the body could not do as
+     asked.
 
-**Goals and the goal epoch.** The Pi never sends joint angles except as trick
-keyframes. Goals are latched registers that the Pi overwrites:
+**Goals and the goal epoch.** The Pi sends joint angles only as keys of
+the `POSE` stream. Goals are latched registers that the Pi overwrites:
 - `SET_POSTURE`, `SET_HEAD`, `SET_BODY_POSE`;
 - `SET_BALANCE`, `SET_EYES`, `BEEP`;
-- `TRICK_PLAY`;
-- and the `FEET` stream (3d), one per tick, which is checked like a goal
-  (epoch, FALLEN, LOW_BATT, UNCALIBRATED) but queued rather than latched.
+- and the `POSE` stream (3d), which is checked like a goal (epoch, FALLEN,
+  LOW_BATT, UNCALIBRATED, BUSY) but queued rather than latched.
 
 Without an epoch, a goal re-sent at 5 Hz from before a fall would restart
 motion after recovery. So:
 
 - The body keeps `epoch` (u8, wraps), increments it on every REFLEX takeover
   (fall, low battery) and watchdog trip, and reports it in every TELEMETRY and
-  EVENT. Each bump also clears the latched motion goals (a FEET stream ends,
-  head released, pose zeroed, trick stopped).
-- `SET_POSTURE`, `FEET`, `SET_HEAD`, `SET_BODY_POSE` and `TRICK_PLAY` carry
-  `epoch` as their first byte. A mismatch is refused with
-  `EVENT GOAL_REFUSED(type, STALE)` (`ACK STALE` for `TRICK_PLAY`), except
-  `SET_POSTURE` LIMP or REST, which is never stale.
+  EVENT. Each bump also clears the latched motion goals (a `POSE` stream
+  ends, head released, pose zeroed).
+- `SET_POSTURE`, `POSE`, `SET_HEAD` and `SET_BODY_POSE` carry `epoch` as
+  their first byte. A mismatch is refused with
+  `EVENT GOAL_REFUSED(type, STALE)`, except `SET_POSTURE` LIMP or REST,
+  which is never stale.
 - An EVENT carries the epoch after any bump it reports.
-- A bump ends a FEET stream at once (`GAIT_STOPPED` arg 0, carrying the new
-  epoch; its queue is dropped, IDLE takes the legs where they are) and any
-  FEET still in flight with the old epoch is refused STALE. The body pose
-  goes back to neutral (slewed).
+- A bump ends a `POSE` stream at once (`STREAM_STOPPED` arg 0, carrying the
+  new epoch; its queue is dropped, IDLE takes the joints where they are)
+  and any key still in flight with the old epoch is refused STALE. The
+  body pose goes back to neutral (slewed).
 - `BALANCE` is not a posture: it is `SET_POSTURE STAND` with flags bit 0.
 - Each goal carries the epoch that was current on the mind when the goal was
   set; it is never re-stamped. Any epoch change the mind sees, in TELEMETRY,
@@ -562,124 +570,143 @@ motion after recovery. So:
   second layer. The virtual body does the same (`boot_epoch` in
   `kilo.vbody.sim`; its first power-on is epoch 0, as the link harness).
 
-### 3d. Gait: the FEET player
+### 3d. The stream of poses (`POSE`)
 
-**Why the body no longer makes its own gait.** Until protocol 1.5 the body
-ran a gait generator (`SET_GAIT`: patterns, a phase oscillator, sway, early
-touchdown, forward placement; git history before 2026-10-14 has it). On the
-floor on 2026-10-14 (`docs/walking-and-balance.md` §8-9) its walk fell every time with the
-balance on and stayed up with it off: on three feet the body tips about the
-far diagonal in under 0.1 s, the balance answers about 0.25 s later and
-makes the swing grow. Keeping the body over its feet needs a plan for the
-whole body (where the mass is, which feet are down, how fast the servos
-follow), and that is the mind's job now: it plans every step and streams
-the poses; the body plays them, corrects what the plan did not foresee (3f)
-and keeps its own safety limits (3c, 3g).
+**Why the mind moves the joints.** Until protocol 1.5 the body ran its own
+gait generator, and until protocol 3.0 it also stored and played tricks
+and had a built-in get-up after a fall. On the floor on 2026-10-14
+(`docs/walking-and-balance.md` §8-9) the body's own walk fell every time
+with the balance on: on three feet the body tips about the far diagonal in
+under 0.1 s, the balance answers about 0.25 s later and makes the swing
+grow. Keeping the body over its feet needs a plan for the whole body (where
+the mass is, which feet are down, how fast the servos follow), and that is
+the mind's job: it plans every movement and streams it as poses; the body
+assumes them, corrects what the plan did not foresee (3f), keeps its own
+safety limits (3c, 3g) and reports what it did (TELEMETRY). In the owner's
+words, the body is "not a puppet": it is given poses to reach, gets there
+by itself, and says what it could not do. `docs/movement-engine.md` has
+the design.
 
-**The FEET message** (0x11, a Pi → body stream, 16 B; one per 20 ms tick):
+**The POSE message** (0x11, a Pi → body stream, 31 B). One *key*: the pose
+the body is to reach by a given body tick.
 
 | Field | Meaning |
 |---|---|
 | `epoch` | the goal epoch (3c): an old one is refused STALE |
-| `tick` | the body tick this pose is for (TELEMETRY `tick`'s clock) |
-| `x_mm[4]` | each foot fore-aft from under its hip, + forward, −60..60 mm (legs LF RF RB LB) |
-| `z_mm[4]` | each foot's depth below its hip, 30..95 mm: the body height at that leg |
-| `pitch`, `roll` | the attitude the plan predicts at `tick` (TELEMETRY conventions, 1/16°), ±30°: the balance's reference |
-| `support` | bits LF RF RB LB: the feet the plan has on the ground at `tick` |
+| `tick` | the body tick by which the pose is reached (TELEMETRY `tick`'s clock) |
+| `flags` | bits 0-3 `JOINT_LF` … `JOINT_LB`: that leg's two values are joint angles, else a foot; bit 4 `BALANCE`: joint-space balance toward this key's pitch/roll (joint-angle legs only); bit 5 `FALL_OK`: accepted while the fall reflex holds the joints, and no fall detection while the stream plays (the mind's get-up); bit 6 `EASE`: reach this key along a cosine ease, else in a straight line |
+| `leg[8]` | per leg LF RF RB LB two values: a foot's x (+ forward of the hip, −480..480) and z (below the hip, 60..440), in q2 = 1/4 mm; or, with the leg's JOINT flag, the shoulder and knee angles in a16 |
+| `head[3]` | pan, tilt, tail (a16); −32768 leaves that joint to IDLE (the posture, or a `SET_HEAD` hold) |
+| `pitch`, `roll` | the attitude the mind predicts at `tick` (TELEMETRY conventions, a16), ±30°: the balance's reference |
+| `support` | bits LF RF RB LB: the feet the mind has on the ground at `tick`; the balance corrects through these only |
 
-The mind sends the pose for tick N + 1 + 5 before the body plays tick N + 1
-(`link.feet_lookahead_ticks` = 5, 100 ms ahead: room for a garbage-collector
-pause or an SD stall on the Pi). FEET is a stream: never acked, never
-refreshed, never retried, never de-duplicated; a lost one is a hole in the
-queue.
+POSE is a stream: never acked, never refreshed, never retried, never
+de-duplicated. A walk sends a key for every tick, each one
+`link.pose_lookahead_ticks` = 3 ticks (60 ms) ahead of the body's tick (the
+recordings never needed more than 23 ms; `docs/movement-engine-results.md`
+section 1). A slow move or a trick sends keys far apart: one key may be up
+to `link.pose_max_ahead_ticks` = 250 ticks (5 s) ahead.
 
-**The queue** (`core/feet`): `link.feet_depth` = 8 slots, slot = tick mod
-8. After tick N has been played a FEET for tick T is queued when
-1 ≤ T − N ≤ 8 (the eight slots then hold eight different ticks); T ≤ N (its
-tick is already played) or T > N + 8 (further ahead than the queue) is
-dropped and counted (STATS `feet_late`). A second FEET for a queued tick
-replaces it. Entries are only taken on their own tick, so none goes stale.
-A FEET is refused like a goal, with `EVENT GOAL_REFUSED` at most once per
-second: BAD_ARG for a field outside its range (pitch and roll included: the
-reference adds `SET_BODY_POSE`'s ±30° and the balance's residual subtracts
-it from the attitude, all in int16) or a support bit above bit 3,
-then STALE, FALLEN, LOW_BATT and UNCALIBRATED (as `SET_POSTURE STAND`). It
-also releases the warm-boot hold, as a goal does.
+**The queue** (`core/stream`): up to `link.pose_depth` = 5 keys, in tick
+order. After tick N has been played a key for tick T is queued when
+1 ≤ T − N ≤ 250. A second key for a queued tick replaces it. A key already
+past, too far ahead, or later than every queued key with the queue full is
+dropped and counted (STATS `pose_dropped`); with the queue full and T
+earlier, the latest queued key makes room. A key is refused like a goal,
+with `EVENT GOAL_REFUSED` at most once per second: BAD_ARG for a field
+outside its range (a foot outside the ranges above, a joint angle of
+−32768, a pitch or roll beyond ±30°, a support bit above bit 3, an unknown
+flag), then STALE, FALLEN (unless `FALL_OK`), LOW_BATT, UNCALIBRATED (as
+`SET_POSTURE STAND`), and BUSY (another reflex holds the joints, or IDLE is
+LIMP or CALIB). It also releases the warm-boot hold, as a goal does.
 
-**Playing.** Each tick (`feet_step`, then `feet_legs` in `body_tick`):
-- the entry for this tick, if any, becomes the pose played; each leg's
-  (x, z), plus `SET_BODY_POSE` and the balance correction (below), goes
-  through the planar IK and then the arbiter's safety stage (joint limits
-  and the 10°/tick slew), so the legs always move from where they are: a
-  late, missing or wild pose never snaps a joint (`test_feet.cpp`: every
-  foot 60 mm forward at once is paced at exactly 10°/tick);
-- a tick with no entry while later ticks are queued (a lost frame) holds
-  the pose;
-- the queue empty on a tick with no entry is an **underrun**: `EVENT
-  FEET_UNDERRUN` (arg = ticks since the last FEET arrived, STATS
-  `feet_underruns`), the pose is held for `link.feet_hold_ticks` = 5 ticks
-  (100 ms), then the body **settles**: every foot whose support bit is
-  clear goes down (or up) 2 mm per tick at its x to the ground (below),
-  its bit set when it is there; with all four down IDLE takes the legs in
-  STANCE at the default height (a 200 ms crossfade) and `EVENT
-  GAIT_STOPPED` arg 1 is sent. A FEET that arrives during the hold or the
-  settle is played on its tick and the stream goes on.
+**Playing.** Each tick (`stream_step`, then `stream_joints` in `body_tick`)
+every value moves the fraction of what is left that makes it arrive
+exactly on the next key's tick: 1 / (ticks left) in a straight line, or the
+step of a cosine ease (`EASE`). On that tick the key becomes the pose
+played, and the move toward the next key starts from it. So keys may come
+every tick (a walk) or far apart (a slow move, a hold: two keys with the
+same pose). The first key of a stream is reached from a snapshot of the
+joints' outputs when it arrived, in joint space: the stream takes the
+joints from where they are. A leg that is a foot in both keys stays a foot
+(x and z interpolate, and it gets the IK, `SET_BODY_POSE` and the geometric
+balance); a leg that is, or becomes, joint angles moves in joint space (a
+foot is converted by the IK) and is a foot again once its key is reached.
+Every value then goes through the arbiter's safety stage (joint limits and
+the 10°/tick slew), so a late, missing or wild key never snaps a joint
+(`test_stream.cpp`: every foot 60 mm forward at once is paced at exactly
+10°/tick). A lost key in a walk is simply a longer move toward the next
+one.
+
+**The underrun.** The last key reached with none queued: `EVENT
+POSE_UNDERRUN` (arg = ticks since the last POSE arrived, STATS
+`pose_underruns`), the pose is held for `link.pose_hold_ticks` = 5 ticks
+(100 ms), then the body **settles**: every foot whose support bit is clear
+goes down (or up) 2 mm per tick at its x to the ground (below), its bit
+set when it is there. A stream whose legs are all feet then ends: IDLE
+takes the legs in STANCE at the default height (a 200 ms crossfade) and
+`EVENT STREAM_STOPPED` arg 1 is sent. A stream with a joint-angle leg keeps
+holding its pose until a `SET_POSTURE`, an epoch bump or a reflex. A key
+that arrives during the hold or the settle is moved toward from the held
+pose and the stream goes on.
 
 **The settle's ground.** The walk leans the body on its support feet (up to
 about 14° of roll and 6° of pitch), so their depths differ by up to about
 16 mm, and a foot set at their mean depth would land several mm above or
 into the floor and the handover to STANCE would jolt and tilt the body. On
 three support feet the ground is the plane through them, at the lifted
-foot's x (`feet.cpp` `ground_plane`; the mind's planner fits the same
+foot's x (`stream.cpp` `ground_plane`; the mind's planner fits the same
 plane, `fit_attitude`): each foot at X = ±Lb/2 + x (front +), Y = ±W/2
 (right +), its depth z, and the lifted foot P gets
 z_A + s (z_B − z_A) + t (z_C − z_A) with s = (P−A)×(C−A)/D,
 t = (B−A)×(P−A)/D, D = (B−A)×(C−A). Fixed point: coordinates in doubled mm
-(|X| ≤ 320, |Y| ≤ 150 at the parameters' limits) so Lb/2 stays whole;
-each cross product int16 × int16 → int32, ≤ 384000; the numerator
-≤ 2 × 65 × 384000 ≈ 50 M (int32); one int32 division rounded to the
+(|X| ≤ 440, |Y| ≤ 150 at the parameters' limits) so Lb/2 stays whole;
+each cross product int16 × int16 → int32, ≤ 528000; the numerator
+≤ 2 × 95 × 528000 ≈ 100 M (int32); one int32 division rounded to the
 nearest mm, the quotient capped at 127 mm before it returns to int16 (a
-thin triangle extrapolates steeply) and the depth kept in FEET's 30..95.
+thin triangle extrapolates steeply) and the depth kept in 30..95 mm.
 On fewer than three support feet, or three whose (X, Y) are on one line
 (D = 0), the ground is their mean depth; with none down, STANCE's default
-height. Host tests (`test_feet.cpp` `test_settle_plane`): each leg lifted
+height. Host tests (`test_stream.cpp` `test_settle_plane`): each leg lifted
 in turn under that lean lands within 0.5 mm of the plane (the mean is
 23 mm off for LF), two feet give their mean, D = 0 the mean, a thin
 triangle the clamp.
 
-**Entering and leaving GAIT.** The first FEET accepted makes the mode GAIT
-(TELEMETRY mode 3, flag `GAIT`, leg-owner nibble GAIT) and IDLE's posture
-STANCE (STAND's head and tail; STANCE's default height for the end), while
-the legs stay IDLE's until the first queued tick plays; then the GAIT owner
-takes them with the usual 200 ms crossfade from their output. The stream
-owns the legs until:
-- a `SET_POSTURE` is accepted (any posture: the mind gave the legs back):
-  `GAIT_STOPPED` arg 0, IDLE moves to that posture from where the legs are;
-- an epoch bump (a fall, the watchdog, low battery): `GAIT_STOPPED` arg 0
-  with the new epoch, IDLE (STANCE) takes the legs where they are;
+**Entering and leaving the stream.** The first key accepted makes the mode
+STREAM (TELEMETRY mode 3, flag `STREAM`, leg-owner nibble STREAM), and the
+STREAM owner takes the joints at once from their outputs (no crossfade:
+the first key is reached from there). A stream whose first key's legs are
+all feet also makes IDLE's posture STANCE (STAND's head and tail now,
+STANCE's default height for the end). The stream holds the joints until:
+- a `SET_POSTURE` is accepted (any posture: the mind gave the joints
+  back): `STREAM_STOPPED` arg 0. After a stream of joint angles (a trick)
+  IDLE's move to that posture restarts from where the joints are, over its
+  ticks; after a stream of feet the hand-over is the usual crossfade;
+- an epoch bump (a fall, the watchdog, low battery): `STREAM_STOPPED` arg 0
+  with the new epoch, IDLE takes the joints where they are;
 - a reflex takes the joints: the same;
-- the settle after an underrun: `GAIT_STOPPED` arg 1.
-The queue is dropped each time. A trick that owns legs wins over GAIT like
-any lower owner (3c), and the stream plays on underneath. So the mind must
-not refresh `SET_POSTURE` while it streams.
+- the settle after an underrun, all legs feet: `STREAM_STOPPED` arg 1.
+The queue is dropped each time. So the mind must not refresh
+`SET_POSTURE` while it streams: the C++ mind's link holds the latched
+posture goal back while a trick plays (§5 "Tricks").
 
 **Body pose and STANCE.** `SET_BODY_POSE` (pitch, roll, height delta,
 x-shift; slewed per tick by 0.5°, 0.5°, 1 mm and 1 mm, pitch and roll
 clamped to ±30°; STALE, FALLEN, LOW_BATT; zeroed by an epoch bump) applies
-on top of every FEET pose and to STANCE. STANCE is IDLE's IK posture: all
-four feet under the hips at `stance_h_256` = 205/256 of (L1 + L2) (76 mm on
-Kilo), the posture a stream starts from and settles back to. Signs follow
-the measured attitude convention (3f, "Sign conventions"): a positive
-pitch lowers the nose (raises the back) and a positive roll raises the
-right side; in both the legs on the raised end or side get longer (larger
-z, since z points down):
+on top of every foot of a stream and to STANCE. STANCE is IDLE's IK posture:
+all four feet under the hips at `stance_h_256` = 205/256 of (L1 + L2)
+(76 mm on Kilo), the posture a walk starts from and settles back to. Signs
+follow the measured attitude convention (3f, "Sign conventions"): a
+positive pitch lowers the nose (raises the back) and a positive roll raises
+the right side; in both the legs on the raised end or side get longer
+(larger z, since z points down):
 
 ```
-z_i = z_FEET,i (or STANCE's height) + dheight
+z_i = z_key,i (or STANCE's height) + dheight
       + end_i·(Lb/2)·sin(pose_pitch) + side_i·(W/2)·sin(pose_roll)
       + share_i·[end_i·(Lb/2)·sin(corr_pitch) + side_i·(W/2)·sin(corr_roll)]      (3f)
   end_i = −1 front, +1 back;  side_i = −1 left, +1 right
-x_i = x_FEET,i + xshift
+x_i = x_key,i + xshift
 ```
 
 In STANCE every leg has its whole share; under a stream `share_i` follows
@@ -725,145 +752,52 @@ IK:  d² = x² + z²   (clamp d to [d_min, 0.95(L1+L2)])
   reference.
 - Cost **(est.)**: 0.8 ms per tick and ≈2 KB of flash.
 
-**As implemented** (`body/src/core/ik.*`, `feet.*`; host tests
-`body/test/test_ik.cpp`, `test_feet.cpp`):
+**As implemented** (`body/src/core/ik.*`, `stream.*`; host tests
+`body/test/test_ik.cpp`, `test_stream.cpp`):
 - **IK.** `θ1_0 = LEG_SH_ZERO_DEG` applies to every leg as written (a
   physical "foot forward" angle), `θ2_0 = σ_i·LEG_KN_ZERO_DEG`. `d_min` keeps
   the knee bend ≤ 150°. The clamp works on `d²` before the division, so a
   target outside the workspace gives the nearest foot on the same ray, and
-  `ik_leg` reports it. Round trip on the default 50/50 mm legs over a 1 mm
-  grid: 0.11 mm, 0.07°; the 0.25 mm target holds for L1 + L2 ≤ 160 mm (the
-  a16 output step alone is (L1+L2)·1.1e-3 mm).
-- **Memory.** 8 × 12 B queue (a foot's support bit rides in bit 7 of its
-  `z`, which needs 7 bits), the 12 B pose played, 11 B of player state
-  (slots, state, hold count, the last arrival's tick, the shares, the two
-  STATS counters) and 15 B of STANCE height, pose goal and slewed pose: 134
-  B (`struct Feet`). The 8 leg angles of the tick are on the stack. 3h has
-  the totals.
+  `ik_leg` reports it (TELEMETRY `limited`). Round trip on the default
+  50/50 mm legs over a 1 mm grid: 0.11 mm, 0.07°; the 0.25 mm target holds
+  for L1 + L2 ≤ 160 mm (the a16 output step alone is (L1+L2)·1.1e-3 mm).
+- **Memory.** 5 × 30 B queue, the 30 B pose played, about 30 B of player
+  state (count, state, hold count, the last arrival's tick, the support
+  bits and shares, the two STATS counters) and STANCE's height, the pose
+  goal and the slewed pose: about 210 B (`struct Stream`). The tick's leg
+  angles are on the stack. 3h has the totals.
 - **Cost**: 3a.
-- **Host tests** (`test_feet.cpp`, every FEET through the real link path at
-  50 Hz): STANCE's legs, the pose terms and the foot nudge; the geometric
-  balance in STANCE closed through a four-foot plant; the queue (the window,
-  late and too-far ticks counted, a repeat replacing its tick, no ACK); the
-  refusals and their rate limit; entering from SIT; the IK of the pose
-  played, a lost tick held, a wild pose slew-paced; the underrun (event and
-  its arg, the hold exact, the settle at the foot's x, `GAIT_STOPPED` 1, a
-  FEET during the hold resuming); the end by a posture, a fall, the
-  watchdog and a reflex; the correction's shares; TELEMETRY at 50 Hz with
-  FEET at 50 Hz on the 250 kbaud budget; the tipping plant (3f); the cost
-  per tick.
+- **Host tests** (`test_stream.cpp`, every POSE through the real link path
+  at 50 Hz): STANCE's legs, the pose terms and the foot nudge; the
+  geometric balance in STANCE closed through a four-foot plant; the queue
+  (tick order, past, too-far and no-room keys counted, a repeat replacing
+  its tick, no ACK); the refusals and their rate limit; the IK of the pose
+  played, a lost key, a wild pose slew-paced; keys far apart reached on
+  their tick in a straight line or along a cosine; joint-angle legs, the
+  head, a leg changing between a foot and angles, the joint-space balance,
+  TELEMETRY `limited`; the underrun (event and its arg, the hold exact, the
+  settle at the foot's x, `STREAM_STOPPED` 1, a POSE during the hold
+  resuming, joint-angle legs holding); the end by a posture, a fall and a
+  reflex; the correction's shares; TELEMETRY at 50 Hz with POSE at 50 Hz
+  on the 250 kbaud budget; the tipping plant (3f); the cost per tick.
 
-### 3e. Keyframe interpolator for tricks
+### 3e. Tricks
 
-Implemented in P1 as `body/src/core/keyframe.{h,cpp}` (store, upload,
-player), wired into `core/body.cpp` (gating, end, balance) and
-`core/arbiter.cpp` (the TRICK owner). Fixed point only.
+The body stores and plays no tricks. A trick is a list of keyframes on the
+mind (`kernel/mind/tricks/`, compiled in from
+`mind/kilo/tricks/library/*.json`; §5 "Tricks"), and the mind's trick
+player turns them into `POSE` keys with every leg as joint angles: one key
+at the end of each keyframe's move (cosine moves with `EASE`), one at the
+end of its hold, the head joints the trick sets (the others left to the
+body's posture), `BALANCE` on frames that ask for it with the trick's
+expected attitude as the reference, and `FALL_OK` for a get-up. Mirror and
+speed are applied on the mind. The body moves toward each key and reaches
+it on its tick (3d); the trick ends when the mind sends its end posture as
+a `SET_POSTURE`, which ends the stream (3c, 3d).
 
-**Frame (14 B):**
-
-| Byte | Field | Meaning |
-|---|---|---|
-| 0 | `dur` u8 | Ticks from the previous frame (1..255 = 20 ms..5.1 s); 0 is refused |
-| 1 | `hold` u8 | Ticks to hold after arriving |
-| 2 | `flags` u8 | Bits 0-1 easing: 0 linear, 1 cosine (default), 2 step, 3 reserved (spline, refused). Bit 2: balance on in this frame. |
-| 3..13 | `ang[11]` i8 | Degrees, in canonical joint order. **−128 = unchanged.** |
-
-"Unchanged" is resolved as each frame arrives: it becomes the previous
-frame's angle (by index). A −128 that survives (never set since frame 0)
-means the joint's pose when the trick started. (Inside a loop that differs
-from "unchanged" only when `loop_start` leaves a joint unset that the loop
-sets; the importer never does.)
-
-**Header (`TRICK_BEGIN`, 11 B):**
-- `trick_id`: a Pi tag used for caching (the mind derives it from the
-  header and frames, 1..254).
-- `n_frames` 1..24 (more is `BAD_ARG`: the store holds `trick_capacity` =
-  24 frames since the P1 RAM shrink, 3h; HELLO reports it).
-- `loop_start` ≤ `loop_end` < `n_frames`, `repeats`: total plays of
-  `loop_start..loop_end`; 0 and 1 = once, 255 = until stopped (legacy
-  `loopCycle[2]`, §5).
-- `joint_mask` (u16 over the joint ids): joints the trick owns, only the 11
-  driven ones and at least one. Unowned joints stay with GAIT/IDLE and the
-  head layer.
-- `flags`: `BALANCE` (informational: balance is per frame, bit 2), and
-  `FALL_OK`, which suppresses fall detection while the trick plays
-  (`body_fall_suppressed()`, for the fall reflex).
-- `end_posture`: REST, SIT, STAND, CALIB or ZERO (a posture with angles).
-- `exp_roll`, `exp_pitch` i8 degrees: the balance reference for balanced
-  frames (legacy header bytes; `sit` −30, `str` +15).
-
-**RAM:** 24 × 14 = 336 B for the store (448 B with 32 frames before the
-P1 shrink), plus 24 B of header, upload and
-player state. There is no `from[11]` array: a segment's start is the
-previous frame's (resolved) target, read from the store, and frame 0's is
-the arbiter's crossfade snapshot (the output when TRICK took the joint). The
-largest Nybble behaviour (`cmh`) has 22 frames, so 24 still holds every
-legacy behaviour; the first-version library's largest has 6.
-
-**Timing.**
-- Each frame is a MOVE of `dur` ticks, then a HOLD of `hold` ticks at its
-  targets. Frame 0 starts from the current output; each later frame from
-  the previous frame's targets; the first frame of a repeat from
-  `loop_end`'s targets.
-- Each tick: `q = from + (to − from)·e(pos/len)` in Q14, `e` per the frame:
-  linear `pos/len`; cosine `(1 − cos πs)/2 = sin²(πs/2)` (`fx_ease_cos`,
-  the sine table; matches today's `transform()`); step `1` from the first
-  tick (the slew limit paces the jump, then it waits). The last tick of
-  every MOVE is exactly the target, so consecutive moves meet without a
-  jump, and every move is monotone.
-- `TRICK_PLAY` takes a speed (Q6, 64 = 1×, 16..255) and a mirror flag; the
-  body applies both, so one upload serves every variant. Speed advances
-  `pos` by `speed/64` tick per tick: a phase of `n` ticks takes
-  `ceil(n·64/speed)` ticks. Mirror swaps the L/R pairs (LF↔RF, RB↔LB,
-  shoulders and knees), negates pan and tail, mirrors the joint mask and
-  negates the expected roll.
-- The trick ends on the tick after its last phase: `EVENT TRICK_DONE`
-  (`arg = reason << 8 | trick_id`, reason 0 DONE), and the joints crossfade
-  over `XFADE_TICKS` (200 ms) into `end_posture`, which IDLE adopts (joints
-  the trick did not own move there over the same time). The mind computes
-  the same timing (`mind/kilo/tricks/player.py`).
-
-**Upload** (all acked, de-duplicated like any command):
-- `TRICK_BEGIN` empties the store and takes the header.
-- `TRICK_FRAMES`, up to 4 frames, strictly in order: `first` must equal the
-  number received since `TRICK_BEGIN` (`BAD_ARG` for a gap, a repeat or an
-  overrun past `n_frames`; a chunk with a `dur` 0 or easing 3 frame is
-  refused whole). Without a header: `NO_TRICK`. The body folds each frame,
-  as sent, into a running CRC-16.
-- `TRICK_COMMIT` with the CRC-16 of the frame array: `NO_TRICK` (no header,
-  other id), `BAD_ARG` (frames missing), `CRC_MISMATCH`, else the store is
-  ready. It is idempotent, and that is the cache check: the mind sends
-  `TRICK_COMMIT` alone first and uploads only if the answer is not OK (each
-  `kilo` command is a new process, so a mind-side cache alone is not enough).
-- `TRICK_BEGIN` and `TRICK_FRAMES` while a trick plays are refused with
-  `BUSY`.
-- A 22-frame trick needs 6 chunks plus a commit, ≈100 ms **(est.)**.
-
-**Play, stop and gating.**
-- `TRICK_PLAY` (`E`): `STALE` on an epoch mismatch; `NO_TRICK` if that
-  `trick_id` is not committed; `BAD_ARG` for speed < 16 or unknown flags;
-  `BUSY` while a trick plays, while a reflex holds the joints (watchdog REST,
-  low battery, warm-boot hold) or when the IDLE posture is LIMP or CALIB;
-  `REFUSED_LOW_BATT`; `UNCALIBRATED` (config DEFAULTED).
-- `TRICK_STOP transition_ticks`: crossfade to the end posture over that
-  many ticks (0 = `XFADE_TICKS`), `TRICK_DONE(STOPPED)`. OK also when
-  nothing plays. `SET_POSTURE LIMP` stops it at once (STOPPED); other
-  postures only move the joints the trick does not own, and the trick's end
-  posture replaces them when it ends.
-- A reflex taking the joints, or any epoch bump (watchdog stage 1, low
-  battery), ends it with `TRICK_DONE(PREEMPTED)` carrying the new epoch; the
-  fall reflex calls `body_epoch_bump(b, KF_END_FELL)` for
-  `TRICK_DONE(FELL)` (implemented in P1, 3g), unless the trick has
-  `FALL_OK`, which keeps fall detection off while it plays.
-- TELEMETRY while it plays: mode TRICK (4), flags bit 4, `trick_frame` = the
-  frame playing, owner nibbles TRICK for owned joints.
-
-**Built-in sequences** (PROGMEM, ≈100 B): postures `rest`, `sit`, `up`
-(stand), `calib`/`zero`, and the recovery trick `rc`. As implemented in P1,
-`rc` is three PROGMEM rows in `core/posture.cpp` (39 B) that the REFLEX
-mover plays as internal pseudo-postures (`POSTURE_RC + i`, `|
-POSTURE_RC_MIRROR`), not through the keyframe store, so a fall never
-disturbs the uploaded trick (3g).
+**Built-in postures** (PROGMEM, `core/posture.cpp`): `rest`, `sit`, `up`
+(STAND), `calib` and `zero`, plus STANCE from the IK. The body has no other
+built-in movement.
 
 ### 3f. Balance
 
@@ -882,16 +816,17 @@ corr  = −u                                      negative feedback: nose too hi
 corr  = clamp(slew(lowpass(corr, α=1/4), 1°/tick), ±15°)
 ```
 
-- `ref`, the attitude the body should have: under a FEET stream the
-  mind's prediction for the tick being played plus `SET_BODY_POSE`; in
-  STANCE the pose; otherwise the posture's or trick's expected pitch/roll
-  (table below; `sit` expects −30°, nose up). TELEMETRY `ref_pitch` /
+- `ref`, the attitude the body should have: under a stream of feet the
+  mind's prediction for the tick being played plus `SET_BODY_POSE`; under
+  a stream of joint angles the prediction alone; in STANCE the pose;
+  otherwise the posture's expected pitch/roll (table below; `sit` expects
+  −30°, nose up). TELEMETRY `ref_pitch` /
   `ref_roll` report it every tick while the controller runs (0 when it is
   off), `corr_pitch` / `corr_roll` the correction the legs carry (frozen
   while held, decaying to 0 after the balance is turned off) and `support`
-  the feet it acts through: the FEET support bits under a stream, all four
+  the feet it acts through: the keys' support bits under a stream, all four
   in IDLE SIT, STAND and STANCE, none otherwise (LIMP, REST, CALIB, ZERO, a
-  trick, a reflex: there is no foot model there).
+  reflex: there is no foot model there).
 - Defaults **(est.)**: Kp = 0.5 (`kp_q8` 128), Kd = 0.03 s (`kd_ms` 30),
   DB 2°, clamp 15°. Kp is Q8, so 255/256 is the largest; Kd·rate is computed
   as `rate·kd_ms·131 >> 17`.
@@ -930,7 +865,7 @@ defer body levelling to P2, where the IK gives a proper leg-length solution
 for a target body attitude** (open question 8 below moves to P2).
 
 *Implemented in P2* (geometric balance for STANCE, and since protocol 2.0
-for a FEET stream; `body_tick`): the same controller, but fed the
+for a stream of feet; `body_tick`): the same controller, but fed the
 **residual** instead of the body's tilt: `res = measured − corr − ref`, the
 attitude the body would read with no correction, less the one the legs are
 told to give it, controlled to 0. So `corr = −Kp·deadband(res)` and on a
@@ -940,8 +875,8 @@ integrator (the correction is bounded by the clamp, nothing accumulates).
 If the legs move the body by `k`× what the model says, the loop gain on
 `corr` is `(k − 1)·Kp`, stable for `0 < k < 2`; the result holds as long as
 the clamp allows (`slope/k ≤ 15°`). A commanded `SET_BODY_POSE` or a
-predicted FEET attitude is therefore the target, not something the balance
-fights. Host test (`test_feet.cpp`, a plant that reads the body's tilt off
+predicted attitude in a key is therefore the target, not something the balance
+fights. Host test (`test_stream.cpp`, a plant that reads the body's tilt off
 the four commanded feet with a 0.15 s servo lag): 10° of pitch and roll
 slope, Kp 0.99 → within 2.5° after 1 s and settled at the 2° dead band for
 leg responses 0.7×, 1× and 1.6×; a flipped sensor runs away to the clamp; a
@@ -949,10 +884,10 @@ leg responses 0.7×, 1× and 1.6×; a flipped sensor runs away to the clamp; a
 slope remains: H13 on Kilo was run with `kp_q8` 253 (2026-10-11: within
 2.1° of level on a 13° board, nose up and sideways).
 
-*Under a FEET stream* (protocol 2.0, 2026-10-14; the agreed direction of
+*Under a stream of feet* (since protocol 2.0, 2026-10-14; the agreed direction of
 `docs/walking-and-balance.md` §9: the mind plans, the body corrects the
 residual):
-- **The reference is the plan.** `ref` is the FEET pose's predicted pitch
+- **The reference is the plan.** `ref` is the key's predicted pitch
   and roll for the tick being played (plus the body pose), so the loop sees
   only what the plan did not foresee: a slope, a bump, a mass or servo lag
   the mind's model has wrong. TELEMETRY's `ref_*`, `corr_*` and the
@@ -961,7 +896,7 @@ residual):
   or shortens only the legs whose support bit is set; a foot in the air
   cannot move the body. Each leg's share ramps a quarter per tick toward
   all of it while its bit is set and toward none while it is clear
-  (`Feet::share`, 4 bits per leg), so a lifting foot lets go of the
+  (`Stream::share`, 4 bits per leg), so a lifting foot lets go of the
   correction and a landing foot takes it back without a step (host test:
   four equal steps of a quarter, the other legs unmoved).
 - **Held while any foot is up** (`BALANCE_HELD`, TELEMETRY flags bit 12).
@@ -980,7 +915,7 @@ residual):
   off). This matches the floor (2026-10-14: the loop on three feet turned
   a wobble into a fall).
 
-**The tipping plant** (`body/test/tip_plant.h`, used by `test_feet.cpp`).
+**The tipping plant** (`body/test/tip_plant.h`, used by `test_stream.cpp`).
 The 1.x host plant treated three feet as safe, which is why the sway passed
 there and fell on the floor. This one:
 - the body is one point mass at the hips (`com_up`, `com_x`, `com_y`
@@ -1001,8 +936,9 @@ there and fell on the floor. This one:
 - not modelled: foot slip, compliance beyond the 1 mm, the servo's torque
   limit, the head and tail, yaw.
 
-What it showed (`test_feet.cpp`, the FEET streamed through the link at
-50 Hz, 5 ticks ahead):
+What it showed (`test_stream.cpp`, the poses streamed through the link at
+50 Hz as the mind streams a walk; measured 2026-10-14, when the stream ran
+5 ticks ahead):
 - **(a)** a static walk the way the mind is to plan it (legs one at a time
   LB, LF, RB, RF, 0.38 s swings, a 2.4 s cycle, stride 20 mm, step 15 mm;
   the body rolled 10° away from the side about to lift, which puts the
@@ -1068,7 +1004,7 @@ pitch, angle ratio), used verbatim (Kilo's attitude is the legacy `ypr`):
 | `rest` | 0, 0 | 0°, 0° | off (lying down) |
 | `sit` | 0, −30 | 0°, **−30°** (nose up) | on |
 | `up` (STAND, and `balance`) | 0, 0 | 0°, 0° | on |
-| `str` (stretch, a P1 trick) | 0, 15 | 0°, **+15°** (nose down) | with the trick's `BALANCE` flag |
+| `str` (stretch, a trick) | 0, 15 | 0°, **+15°** (nose down) | on the keys with `BALANCE` (the trick's frames that ask for it) |
 | `calib`, `zero` | 0, 0 | 0°, 0° | off |
 
 **Sign test.** Host closed-loop tests (`body/test/test_balance.cpp`) run a
@@ -1156,17 +1092,20 @@ Reflexes are pure state machines in `core/reflex.*`, with full host tests.
 
 | State | Transition / action |
 |---|---|
-| UPRIGHT → TIPPING | \|roll\| > 75° or \|pitch\| > 75° (`FALL_DEG`) |
-| TIPPING → FALLEN | Held for 6 ticks (120 ms). Epoch bump. REFLEX holds the pose. `EVENT FELL(axis, sign)`. Wait until \|gyro\| < 20°/s for 10 ticks. |
-| FALLEN → RECOVERING | Roll fall: play `rc`, mirrored by roll sign, up to 3 tries 1 s apart. Pitch fall: REST, then the fall reflex's LIMP timer (2 s), then `RECOVERY_FAILED`. |
-| RECOVERING → UPRIGHT | \|roll\|, \|pitch\| < 20° for 25 ticks. IDLE STAND, then `RECOVERED`. |
+| UPRIGHT → FALLEN | \|roll\| > 75° or \|pitch\| > 75° (`FALL_DEG`) on 6 consecutive fresh samples (120 ms). Epoch bump (a stream ends). REFLEX holds the pose. `EVENT FELL(axis, sign)`. Wait until every body rate < 20°/s on 10 samples. |
+| FALLEN → LYING | Still: REST over 1 s, `EVENT LYING`, LIMP 2 s after the REST move, then the reflex lets go. |
 
-Fall detection is disabled in CALIB and LIMP, under `IMU_FAULT`, and during
-`FALL_OK` tricks.
+The body does not get up by itself (owner's decision 2026-11-22,
+`docs/movement-engine.md` decision 1): getting up is the mind's, a `POSE`
+stream with `FALL_OK`, which takes the joints from the fall reflex
+(`docs/righting.md`, the B1 righting experiment). Without it he lies still
+after a fall until someone rights him.
 
-As implemented in P1 (`core/reflex.{h,cpp}` for the detector,
-`fall_step()` in `core/body.cpp` for the state machine, `rc` in
-`core/posture.cpp`; host test `body/test/test_reflex.cpp`):
+Fall detection is disabled in CALIB and LIMP, under `IMU_FAULT`, while a
+stream with `FALL_OK` plays, and while another reflex holds the joints.
+
+As implemented (`core/reflex.{h,cpp}` for the detector, `fall_step()` in
+`core/body.cpp` for the state machine; host test `body/test/test_reflex.cpp`):
 
 - **Trip.** Every fresh IMU sample with |roll| or |pitch| > 75° counts; one
   under it restarts the count; a tick without a fresh sample neither counts
@@ -1175,43 +1114,27 @@ As implemented in P1 (`core/reflex.{h,cpp}` for the detector,
   long axis within 15° of vertical (75° < |pitch| < 105°, folding the
   legacy pitch reflection); anything else over the threshold (a side, the
   back) is a roll fall. `EVENT FELL` arg ±1 (roll, sign of roll) or ±2
-  (pitch, sign of pitch), after the epoch bump, so it carries the new epoch;
-  a playing trick ends first with `TRICK_DONE(FELL)`. A short chirp (note
-  20) as legacy beeped. REFLEX holds the current output (`POSTURE_HOLD`).
+  (pitch, sign of pitch), after the epoch bump, so it carries the new
+  epoch; a stream playing ends first (`STREAM_STOPPED` 0). A short chirp
+  (note 20) as legacy beeped. REFLEX holds the current output
+  (`POSTURE_HOLD`).
 - **Still.** Every body rate < 20°/s on 10 consecutive samples. Until then
   it holds, however long it is handled.
-- **rc.** The legacy behaviour (`legacy/InstinctNybble.h` `rc`, 3 frames)
-  converted like the trick importer converts behaviours: dur 11, 5, 18
-  ticks (cosine), hold 30, 25, 0 ticks, 89 ticks (1.8 s) in all, played by
-  the REFLEX mover from the current output. Legacy `reaction.h` played it
-  on |roll| > 90° from a single sample, mirrored **at random**
-  (`loadFrame`: `random() % 2` for a name not ending in L/R). Kilo mirrors
-  it by the roll sign instead: unmirrored for roll < 0 (right side down;
-  the unmirrored frame 1 swings the right legs, which then push on the
-  ground), mirrored for roll > 0, and flipped on every other try in case
-  that guess is wrong or the body rolled over (**to be verified on Kilo**).
-- **Check, retry.** After rc's last frame REFLEX holds it for up to 1 s;
-  25 consecutive samples with |roll|, |pitch| < 20° are RECOVERED: IDLE
-  takes STAND (REST if the config is DEFAULTED, where STAND would be
-  refused), REFLEX hands back with the usual `XFADE_TICKS` crossfade,
-  `EVENT RECOVERED`, detection re-arms. Otherwise the next try (after the
-  still wait again, so tries are ≥ 1 s apart), at most 3.
-- **Failure.** A pitch fall once still, the third failed try, or an
-  `IMU_FAULT` after the trip: REST over 1 s, `EVENT RECOVERY_FAILED` at
-  once, LIMP 2 s after the REST move (the fall reflex's own timer), then
-  the reflex lets go (detection stays off in LIMP).
+- **Lying.** Once still (or at once on an `IMU_FAULT`, where nothing can be
+  judged): REST over 1 s, `EVENT LYING` (arg = the `FELL` arg), LIMP 2 s
+  after the REST move (the fall reflex's own timer), then the reflex lets
+  go (detection stays off in LIMP).
 - **Owner and goals.** The fall reflex ranks above the warm-boot hold and
   below the watchdog and low-battery reflexes (`RH_FALL`): it does not
   trip while they hold the joints, and if one takes them during a fall the
   fall reflex ends silently (it re-arms when they let go). While it holds
-  the joints (TELEMETRY mode FALLEN, or RECOVERING during rc and the
-  check): goals from older epochs are refused STALE as usual; current
-  `SET_POSTURE` (REST included), `SET_HEAD` mode 1 are refused `FALLEN`,
-  `TRICK_PLAY` `REFUSED_FALLEN`; `SET_POSTURE LIMP` (the Pi's emergency
-  stop) ends the reflex and goes limp. After RECOVERED the mind's goals
-  with the new epoch work again.
-- **Cost.** 10 B of RAM (`Fall`); with the head layer, +1268 B of flash
-  including the 39 B `rc` table (3h).
+  the joints (TELEMETRY mode FALLEN): goals from older epochs are refused
+  STALE as usual; current `SET_POSTURE` (REST included), `SET_HEAD` mode 1,
+  `SET_BODY_POSE` and `POSE` without `FALL_OK` are refused `FALLEN`;
+  `SET_POSTURE LIMP` (the Pi's emergency stop) ends the reflex and goes
+  limp; a `POSE` with `FALL_OK` and the new epoch ends the reflex and
+  starts the mind's get-up.
+- **Cost.** 6 B of RAM (`Fall`).
 
 **Battery.** A7 reads through a ≈1:2 divider against a 5 V reference, and the
 legacy scale is 99 counts per volt, so `LOW_VOLTAGE 650` ≈ 6.57 V (3.28 V per
@@ -1235,7 +1158,7 @@ boot: a body nobody has talked to has nothing to stop.
 
 | Since the last valid frame | Action |
 |---|---|
-| ≥ 0.5 s (`WD_STOP_MS`) | Stage 1. Epoch bump. Stop: a FEET stream ends (it had already run dry, held 100 ms and settled, 3d), trick stopped, head released. `EVENT WATCHDOG`. |
+| ≥ 0.5 s (`WD_STOP_MS`) | Stage 1. Epoch bump. Stop: a `POSE` stream ends (it had already run dry, held 100 ms and settled, 3d), head released. `EVENT WATCHDOG`. |
 | ≥ 1.5 s (`WD_REST_MS`) | Stage 2. REFLEX → REST over 1 s, balance on. |
 | REST + 10 s | The watchdog reflex's LIMP timer fires: LIMP. |
 | Next valid frame | `EVENT LINK_RESTORED`. The body stays in its current state until the Pi sends a goal with the new epoch. |
@@ -1372,13 +1295,16 @@ only held while used), stack 365 B (`main` 128 → `link_poll` 111 →
 the settle on the support plane and the FEET pitch/roll check**
 (2026-10-14): 27368 B flash (+694 B, the plane fit's int32 arithmetic),
 globals, stack and margin unchanged (the settle's path, `main` 128 →
-`ground_plane` 44 → `cross` 6, is not the deepest). RAM is
-the tight resource. If needed, shrink in this order:
-1. keyframe store 32 → 24 frames (−112 B; the first-version library's
-   largest trick has 6 frames, HELLO reports the capacity to the mind).
-   **Done** with the fall reflex and head layer (above);
-2. RX ring 192 → 128 B;
-3. TX ring 96 → 64 B.
+`ground_plane` 44 → `cross` 6, is not the deepest). **With the POSE
+stream** (protocol 3.0, 2026-11-22: the trick store and player, the FEET
+player and the built-in get-up `rc` removed, the POSE player in;
+`size_check.sh` on this tree): **27106 B flash** of 30720, **1249 B
+globals** (−290 B from 1539: the 360 B trick store and its state and the
+134 B `Feet` out, the ≈210 B `Stream` in), stack 365 B (the same deepest
+path), **margin 434 B**. RAM is no longer the tight resource; if it
+becomes so again, shrink in this order:
+1. RX ring 192 → 128 B;
+2. TX ring 96 → 64 B.
 
 ---
 
@@ -1402,7 +1328,7 @@ Appendix E has every byte layout.
   with UBRR = 3 (`body/src/hal/uart.cpp`), and on the PL011 with a 48 MHz
   UARTCLK and divisor 12.000. 115200 has a 2.1% error
   on the 328P. 500000 would halve the main-loop slack for no need.
-- Worst-case load is 21% upstream and 38% downstream (Appendix B; walking: FEET and TELEMETRY at 50 Hz are 4% and 8% of the line).
+- Worst-case load is 21% upstream and 23% downstream (Appendix B; walking: POSE and TELEMETRY at 50 Hz are 7% and 8% of the line).
 - The Petoi CH343 USB adapter (retired) drives the same RX line: **keep it
   unplugged from Kilo while the Pi drives the UART**.
 
@@ -1443,8 +1369,6 @@ data reply (queries) or an `ACK(seq, type, status)`. Status values:
 | 2 | BAD_ARG |
 | 3 | BUSY |
 | 4 | UNKNOWN_TYPE |
-| 5 | CRC_MISMATCH (trick) |
-| 6 | NO_TRICK |
 | 7 | REFUSED_LOW_BATT |
 | 8 | REFUSED_FALLEN |
 | 9 | EEPROM_BUSY |
@@ -1457,16 +1381,19 @@ data reply (queries) or an `ACK(seq, type, status)`. Status values:
   5 Hz and immediately on change. Rejections are reported as
   `EVENT GOAL_REFUSED(type << 8 | reason)`, at most one per goal type per
   second. The reason is an ACK status code: STALE 10, BAD_LEN 1, BAD_ARG 2,
-  LOW_BATT 7, FALLEN 8, UNCALIBRATED 11 (STAND while the config is
+  BUSY 3 (a `POSE` while another reflex holds the joints, or in LIMP or
+  CALIB), LOW_BATT 7, FALLEN 8, UNCALIBRATED 11 (STAND while the config is
   DEFAULTED), or UNKNOWN_TYPE 4 for a goal this firmware does not implement
   (`SET_EYES` today; in P0 also `SET_HEAD`, `SET_BODY_POSE`, `SET_BALANCE`
   and the 1.x `SET_GAIT`).
-- **FEET** (0x11, protocol 2.0) is a Pi → body stream: one pose per tick,
-  never acked, refreshed, retried or de-duplicated, queued by tick (3d).
-  It is refused like a goal (`GOAL_REFUSED(0x11 << 8 | reason)`, at most once
-  per second: BAD_LEN, BAD_ARG, STALE, FALLEN, LOW_BATT, UNCALIBRATED); a
-  tick that is already past or more than `feet_depth` (8) ahead is dropped
-  without a refusal and counted in STATS `feet_late`.
+- **POSE** (0x11, protocol 3.0) is a Pi → body stream: one key, the pose
+  to reach by a body tick, never acked, refreshed, retried or
+  de-duplicated, queued in tick order (3d). It is refused like a goal
+  (`GOAL_REFUSED(0x11 << 8 | reason)`, at most once per second: BAD_LEN,
+  BAD_ARG, STALE, FALLEN, LOW_BATT, UNCALIBRATED, BUSY); a key that is
+  already past, more than `pose_max_ahead_ticks` (250) ahead, or with no
+  room in the 5-key queue is dropped without a refusal and counted in
+  STATS `pose_dropped`.
   Telemetry confirms what took effect: `mode`, owners, `epoch`, `last_rx_seq`.
 - **Queries** (`HELLO_REQ`, `PING`, `STATS_REQ`, `PCA_READ`, `CAL_GET`,
   `PARAM_GET`, `EEPROM_READ`; `query = true` in the spec) are answered by their
@@ -1475,10 +1402,9 @@ data reply (queries) or an `ACK(seq, type, status)`. Status values:
   `PARAM_GET` of an unknown id is `ACK BAD_ARG`, a `PCA_READ` I2C error is
   `ACK BUSY`). They are never de-duplicated, and the Pi retries a query with a
   fresh `seq` after 50 ms, up to 3 times.
-- **Other commands** (trick upload/play/stop, calibration writes, params,
-  stream settings, IMU offsets, reboot) get exactly one ACK each. The Pi
-  retries after 50 ms, up to 3 times, with the same `seq`. (In P0 the trick
-  commands were `ACK UNKNOWN_TYPE`; P1 implements them, §3e.)
+- **Other commands** (calibration writes, params, stream settings, IMU
+  offsets, reboot) get exactly one ACK each. The Pi retries after 50 ms, up
+  to 3 times, with the same `seq`.
 - A frame with a bad CRC is never acked, because its `seq` and `type` cannot be
   trusted. A CRC-valid frame with an unknown type is acked `UNKNOWN_TYPE`; a
   known Pi → body type with a wrong payload length is acked `BAD_LEN` (a
@@ -1505,15 +1431,10 @@ marks a payload that starts with an epoch byte.
 | 0x05 | STATS_REQ | cmd | → STATS |
 | 0x06 | PCA_READ | cmd | → PCA_COUNTS (debug and calibration checks) |
 | 0x10 | SET_POSTURE | goal E | LIMP, REST, SIT, STAND, STANCE, CALIB, ZERO + transition |
-| 0x11 | FEET | stream E | One tick of the mind's plan: 4 feet (x, z), predicted pitch and roll, support feet (3d) |
+| 0x11 | POSE | stream E | One key of the mind's stream: the pose to reach by a tick (per leg a foot or two joint angles, the head, predicted pitch and roll, support feet; 3d) |
 | 0x12 | SET_HEAD | goal E | Hold/release pan, tilt, tail + speed |
 | 0x13 | SET_BODY_POSE | goal E | Pitch, roll, height, x-shift |
 | 0x14 | SET_BALANCE | goal | Enable, Kp, Kd, dead band, clamp |
-| 0x20 | TRICK_BEGIN | cmd | Header |
-| 0x21 | TRICK_FRAMES | cmd | Up to 4 frames |
-| 0x22 | TRICK_COMMIT | cmd | CRC check |
-| 0x23 | TRICK_PLAY | cmd E | Play with speed and mirror |
-| 0x24 | TRICK_STOP | cmd | Stop |
 | 0x30 | SET_EYES | goal | LED mask + RGB |
 | 0x31 | BEEP | goal | Append up to 8 notes to the buzzer queue |
 | 0x38 | CAL_GET | cmd | → CAL_VALUES |
@@ -1535,12 +1456,12 @@ marks a payload that starts with an epoch byte.
 | 0x87 | PARAM_VALUE | | id, value, min, max, default |
 | 0x88 | EEPROM_DATA | | addr + bytes |
 | 0x89 | PONG | | token, tick |
-| 0x8A | STATS | | 23 B of counters (with `feet_late`, `feet_underruns`) |
+| 0x8A | STATS | | 23 B of counters (with `pose_dropped`, `pose_underruns`) |
 | 0x8B | PCA_COUNTS | | 16 × u16 OFF counts |
 | 0x8F | LOG | | Debug builds only |
 
 **TELEMETRY (0x81), 35 B, 25 Hz by default, 50 Hz while the mind streams
-FEET (`SET_STREAM telem_div 1`):**
+a walk or the self-measurement (`SET_STREAM telem_div 1`):**
 
 | Off | Field | Type | Meaning |
 |---|---|---|---|
@@ -1550,15 +1471,15 @@ FEET (`SET_STREAM telem_div 1`):**
 | 6 | rate_pitch / rate_roll / rate_yaw | 3 × i16 a16/s | |
 | 12 | dist_mm | u16 | 0 = no echo |
 | 14 | batt_mv | u16 | Filtered |
-| 16 | mode | u8 | 0 BOOT, 1 LIMP, 2 IDLE, 3 GAIT, 4 TRICK, 5 FALLEN, 6 RECOVERING, 7 LOW_BATT, 8 CALIB, 9 LINK_LOST |
-| 17 | owners | u8 | Low nibble: leg owner. High nibble: head owner (4 = Pi hold). |
-| 18 | flags | u16 | bit 0 balance active, 1 IMU_FAULT, 2 servos powered, 3 gait (a FEET stream), 4 trick, 5 head held, 6 batt warn, 7 link ok, 8 overrun, 9 NO_BATTERY, 10 EEPROM pending, 11 dist fresh, 12 balance held (the geometric balance holds its corrections while a FEET support bit is clear and just after, §3f) |
+| 16 | mode | u8 | 0 BOOT, 1 LIMP, 2 IDLE, 3 STREAM (a `POSE` stream holds the joints), 5 FALLEN, 7 LOW_BATT, 8 CALIB, 9 LINK_LOST |
+| 17 | owners | u8 | Low nibble: leg owner. High nibble: head owner. 0 IDLE, 1 STREAM, 3 REFLEX, 4 Pi hold (head only). |
+| 18 | flags | u16 | bit 0 balance active, 1 IMU_FAULT, 2 servos powered, 3 stream (a `POSE` stream is on), 5 head held, 6 batt warn, 7 link ok, 8 overrun, 9 NO_BATTERY, 10 EEPROM pending, 11 dist fresh, 12 balance held (the geometric balance holds its corrections while a support bit is clear and just after, §3f) |
 | 20 | last_rx_seq | u8 | |
-| 21 | trick_frame | u8 | 0xFF = none |
-| 22 | ref_pitch / ref_roll | 2 × i16 a16 | The balance reference in use, 0 while the balance is off: the FEET prediction plus the body pose under a stream, the pose in STANCE, the posture's or trick's otherwise (§3f) |
+| 21 | limited | u8 | What the body could not do as asked this tick: bits 0-3 the legs LF RF RB LB whose pose a joint limit, the slew limit or the leg's reach cut; bit 4 the head (pan, tilt or tail cut by a limit or the slew) |
+| 22 | ref_pitch / ref_roll | 2 × i16 a16 | The balance reference in use, 0 while the balance is off: the key's prediction plus the body pose under a stream of feet, the key's prediction under joint-angle legs, the pose in STANCE, the posture's otherwise (§3f) |
 | 26 | corr_pitch / corr_roll | 2 × i16 a16 | The correction the legs carry this tick (frozen while held; decays to 0 when the balance is off) |
-| 30 | feet_queued | u8 | FEET ticks waiting (0 outside GAIT) |
-| 31 | support | u8 | Bits LF RF RB LB: the feet the balance corrects through (the FEET support bits under a stream; all four in IDLE SIT, STAND, STANCE; none otherwise) |
+| 30 | pose_queued | u8 | POSE keys waiting in the queue (0 outside a stream) |
+| 31 | support | u8 | Bits LF RF RB LB: the feet the balance corrects through (the keys' support bits under a stream; all four in IDLE SIT, STAND, STANCE; none otherwise) |
 | 32 | tick_load | u8 | Max tick time since the last telemetry, in 100 µs units |
 | 33 | rx_err | u8 | Cumulative, mod 256 |
 | 34 | epoch | u8 | Current goal epoch |
@@ -1594,8 +1515,7 @@ motion goals before anything else can be sent; §5 "Contact"). It then:
 1. logs the cause;
 2. checks `proto_major`, and refuses to drive and offers to flash on a mismatch;
 3. re-sends stream settings and non-default params;
-4. invalidates its trick cache;
-5. adopts the epoch and re-plans its goals.
+4. adopts the epoch and re-plans its goals.
 
 Flashing over this same UART (GPIO4 reset, optiboot at 115200, verification by
 HELLO build hash) is in Appendix F.
@@ -1649,7 +1569,7 @@ afresh. Nothing from before the change is replayed.
 **Contact.** A body that may just have rebooted must not get the old goals
 (a reboot restarts the epoch at 0, §3c). After every (re)connect, and once
 telemetry has been missing for 300 ms, the link sends and refreshes no
-motion goal and refuses `FEET` and `TRICK_PLAY` until the body is heard on
+motion goal and refuses to send `POSE` until the body is heard on
 this connection: a HELLO that proves a reboot (the goals are cleared
 first), or a TELEMETRY whose tick has been checked for a restart. What is
 left (refreshes sent in the first 300 ms of a reboot on a live connection)
@@ -1687,14 +1607,15 @@ percentage from a resting 2S curve.
 
 **Tricks.**
 - Tricks are JSON keyframes named by joint, with a model, validation, mirror
-  and time-scaling, and are uploaded with caching by `(trick_id, crc)`.
+  and time-scaling. The mind plays them as `POSE` keys (§3e); the body
+  stores none.
 - The first-version library is imported from `legacy/InstinctNybble.h`:
   - basics: `sit`, `rest`, `up`, `str` (stretch), `balance`;
   - social: `hi`, `wsf` (wash face), `ck` (check around), `snf` (sniff),
     `scrh` (scratch), `pee`, `pu` (push-up), `buttUp`.
 
-  Athletic tricks (backflip, roll, jump) are not ported. `rc` stays a PROGMEM
-  reflex on the body.
+  Athletic tricks (backflip, roll, jump) are not ported, nor is the legacy
+  get-up `rc`: getting up after a fall is the mind's (§3g).
 - Import rules:
   - `dur = round((round(maxΔ / (speed/4)) + 1) · LEGACY_STEP_MS / 20)`, maxΔ
     over all 16 slots from the row played before, finite loops unrolled, where
@@ -1711,8 +1632,8 @@ percentage from a resting 2S curve.
   - `loopCycle[2]` counts **total** plays of `loop_start..loop_end`: 0 and 1
     both play it once, N plays it N times, and ≥ 129 wraps the legacy `int8`
     counter negative and loops forever. A `loop_end` of 0 never loops. The
-    importer copies the count into `TRICK_BEGIN.repeats` (255 = forever), so
-    the body must read `repeats` as total plays, not extra ones.
+    importer copies the count into the trick's `repeats` (255 = forever),
+    which the player reads as total plays, not extra ones.
   - Legacy `perform()` never balances during a behaviour; only postures and
     gaits get `adjust()`. Imported behaviours have `BALANCE` off.
   - Six of the thirteen tricks ask for angles beyond the joint limits (`sit`,
@@ -1727,14 +1648,27 @@ percentage from a resting 2S curve.
     pitch (`expectedRollPitch[0]` pairs with `ypr[2]`, roll). Mirroring is
     selected by a trailing `R` on the skill name (or at random for `X`);
     there is no mirror token (`m` is the indexed joint move).
-- Uploader and player (`kernel/mind/tricks/player`, from
-  `kilo/tricks/player.py` and the trick part of `kilo/body/client.py`; the
-  library is compiled in from `mind/kilo/tricks/library/*.json`): cached
-  uploads (a local record, then `TRICK_COMMIT` alone as the body-side
-  check), a play that ends on `TRICK_DONE` with its reason (timeout = the
-  expected duration + 1 s), and stop. A play releases the latched posture
-  goal: the trick's end posture replaces it. The IR remote's keys start the
-  tricks (`kernel/mind/remote/`).
+- The player (`kernel/mind/tricks/player`; the library is compiled in
+  from `mind/kilo/tricks/library/*.json` by `gen_library.py`):
+  1. It waits for the body to be heard, its epoch and its clock (from
+     TELEMETRY), clears the latched `SET_POSTURE` goal and holds any new
+     one back while the trick plays (`SerialLink::hold_goal`; a refresh
+     would end the stream on the body; LIMP is never held), so a posture
+     asked for meanwhile takes effect when the trick ends.
+  2. It turns the keyframes into keys (one per keyframe move, a step's
+     jump, a hold's end; mirror and speed applied), every leg as joint
+     angles, the first key reached from wherever the joints are. Each key
+     goes out once the one before it is within the look-ahead (3 ticks) of
+     the body's tick, so the body always has the next one.
+  3. When the body's tick reaches the last key it sends the trick's end
+     posture as a `SET_POSTURE` goal, which ends the stream, and the play
+     is done.
+
+  Done reasons are the mind's own (`tricks::DoneReason`): DONE (played to
+  its last key), STOPPED (`stop()` or a guard: the mind's per-trick tilt
+  guards read every TELEMETRY), PREEMPTED (an epoch bump, a reflex or
+  another goal ended the stream), FELL (`EVENT FELL`). The IR remote's
+  keys start the tricks (`kernel/mind/remote/`).
 - Authoring: new tricks are designed in Python against a model of the body
   (`kilo/tricks/rear_up.py`, `docs/rear-up-trick.md`). A live keyframe
   editor that jogs joints was planned and not built. G41 servos have no
@@ -1826,8 +1760,10 @@ estimate all read the model itself.
 Deleting a view's table makes its user read the model.
 
 **What is not on the model yet.** The postures (stand, sit, rest), the 13
-stock tricks, the sitting fidgets and getting up after a fall are still
-tables of joint angles (`body/src/core/posture.cpp`, the trick library).
+stock tricks and the sitting fidgets are still tables of joint angles
+(`body/src/core/posture.cpp`, the trick library). The body no longer gets
+up after a fall; the mind's righting move (the B1 experiment,
+`docs/righting.md`) is the only get-up.
 The way from one posture to another is on it since 2026-11-21, behind a
 switch (below).
 
@@ -1858,10 +1794,12 @@ generated into the mind (`kernel/mind/intent/gen_intent.py`):
   fall, no stop, ends in the target state), played by the trick player; or
   the body's own posture change where no checked move leads (today only
   from UNKNOWN; REST to SIT goes through STANDING by two checked moves); or,
-  from a fallen state, waiting for the body's fall reflex: a placeholder
-  that the mind's own righting move replaces in one table entry
-  (`RIGHTING` in `mind/kilo/intent/graph.py`). The end postures are still
-  the body's tables, and nothing was removed from the body.
+  from a fallen state, waiting for the body's fall reflex to lay him down
+  (`EVENT LYING`: the intent gives up, he needs a hand), or, with the
+  righting experiment (`KILO_RIGHTING`), the mind's righting move, a
+  `FALL_OK` stream that takes the joints from the fall reflex (`RIGHTING`
+  in `mind/kilo/intent/graph.py`). The end postures are still the body's
+  tables.
 
 **How a measurement gets in.** Remote key C5 pressed twice (Kilo measures himself,
 `docs/self-measurement.md`) → `kilo measure fetch` or `kilo measure fit`
@@ -1891,9 +1829,9 @@ fails. It covers:
 - the per-robot legacy transfer function vs a transcription of the legacy float
   code, fed the dumped EEPROM;
 - IK round trips;
-- the FEET player (the queue, a lost tick, the underrun's hold and settle,
-  the hand-overs) and the balance against a plant that tips (3d, 3f);
-- keyframe timing;
+- the POSE player (the queue, keys reached on their tick, a lost key, the
+  underrun's hold and settle, the hand-overs) and the balance against a
+  plant that tips (3d, 3f);
 - arbitration and crossfades;
 - the balance closed-loop sign test;
 - reflex timelines, including epoch bumps;
@@ -1918,9 +1856,11 @@ an in-process transport in lockstep with a `SerialLink` on a simulated clock
 the real `SerialLink`/`BodyClient`:
 - HELLO, contact, telemetry rate, reboot detection (warm boot hold);
 - the watchdog stages, to the tick, and STALE refusals after the bump;
-- trick upload, play, BUSY, pre-emption (PREEMPTED) and LIMP (STOPPED);
-- the gait's start through STANCE, ramp, stop, landing and one GAIT_STOPPED;
-- the fall reflex from the IMU (FELL, rc, RECOVERED; RECOVERY_FAILED);
+- a POSE stream: mode STREAM, the reference and support feet in
+  TELEMETRY, a stale epoch refused, the underrun, hold, settle and one
+  STREAM_STOPPED;
+- the fall reflex from the IMU (FELL, the hold, LYING, LIMP) and a
+  `FALL_OK` POSE taking the joints from it;
 - SET_BALANCE's enable cleared by an epoch bump and restored by the 5 Hz
   refresh.
 
@@ -1969,7 +1909,7 @@ and the results go in the merge commit message. Highlights:
 - H2: PCA counts match legacy;
 - H5: the watchdog timeline;
 - H6: a hang gives `WARM_UNEXPECTED` with no limb jump;
-- H7: fall recovery;
+- H7: the fall reflex;
 - H9: tick timing.
 
 ---
@@ -2027,9 +1967,10 @@ C++ kernel (docs/fast-boot.md) and those commands were removed on
 - **Deliverables:**
   - the full tick;
   - owners, crossfade, head layer, safety stage, goal epoch;
-  - keyframe store, player and upload, with mirror and speed;
+  - keyframe store, player and upload, with mirror and speed (removed in
+    protocol 3.0: the mind plays tricks as POSE keys, §3e);
   - joint-space balance;
-  - the fall reflex with `rc`;
+  - the fall reflex with `rc` (`rc` removed in protocol 3.0, §3g);
   - ultrasonic via PCINT, eyes;
   - the buzzer (`BEEP` queue + reflex chirps);
   - mind: trick model, importer, the first-version library, uploader, editor,
@@ -2049,7 +1990,7 @@ C++ kernel (docs/fast-boot.md) and those commands were removed on
   - Attitude A/B: the host half passes (0.038° max over 5000 orientations
     within ±60°, against the legacy float path); on Kilo (2026-10-11,
     against a phone level) the new firmware read the board's tilt right.
-  - Trick player: done on the host (§3e): store, upload with CRC and
+  - Trick player (on the body until protocol 3.0): done on the host: store, upload with CRC and
     cache check, player with easing, holds, loops, speed and mirror, the
     TRICK owner and its crossfades, end posture, TRICK_DONE reasons,
     gating, per-frame balance, FALL_OK; the mind's uploader and `play()`,
@@ -2076,7 +2017,8 @@ C++ kernel (docs/fast-boot.md) and those commands were removed on
 - **Since 2026-10-14 (protocol 2.0):** the gait generator, its flags (sway,
   early touchdown, forward placement, bob, wag) and `SET_GAIT` left the
   body after the P3 floor runs (3d); the mind plans the steps and streams
-  `FEET`, played by `core/feet` (`test_feet.cpp`).
+  them. Since 2026-11-22 (protocol 3.0) that stream is `POSE`, played by
+  `core/stream` (`test_stream.cpp`).
 
 **P3: mind v1 (ultrasonic + IMU personality).**
 - **Deliverables:** the behaviour-tree engine, drives, personality YAML, and
@@ -2220,13 +2162,13 @@ be lost, which is one frame, caught by the CRC.
 | Up | IMU_RAW | 20 | 50 Hz max | 1000 |
 | Up | ACK/EVENT/LOG | | bursty | ≤ 600 |
 | Up | **Worst** | | | **≈5.2 kB/s = 21% of 25 kB/s** |
-| Down | FEET | 22 | 50 Hz while walking | 1100 |
+| Down | POSE | 37 | 50 Hz while walking | 1850 |
 | Down | HEAD 16 + POSE 13 + EYES 10 | | 5 Hz (worst 50 Hz) | 195 (1950) |
 | Down | HEARTBEAT | 6 | 10 Hz | 60 |
-| Down | Trick upload, stop-and-wait | 64 | ≤ 1 per 10 ms | ≤ 6400 |
-| Down | **Worst** | | | **≈9.5 kB/s = 38%** |
+| Down | Commands (calibration, params), stop-and-wait | ≤ 19 | ≤ 1 per 10 ms | ≤ 1900 |
+| Down | **Worst** | | | **≈5.8 kB/s = 23%** |
 
-At 115200 the downstream worst case would be ≈80%.
+At 115200 the downstream worst case would be ≈50%.
 
 **B6. Fixed-point plan (IK and attitude).**
 - **Lengths** are `q2`: a 50 mm link = 200. `d² ≤ 2·400² = 320 000` (int32).
@@ -2386,12 +2328,11 @@ Serial/Print ≈1.4 KB, float library ≈1.6 KB.
 | DMP image / DMP init + FIFO | 3.06 KB / 0.9 KB S | 44 B |
 | Attitude (integer) | 0.3 KB | 12 B |
 | fx (atan2, sin, isqrt, tables) | 0.7 KB | 0 |
-| IK / gait (2.0: the FEET player, 134 B, 3d) | 0.4 KB / 1.0 KB S | 40 B |
-| Keyframe store + player (P1 measured: +1.7 KB flash incl. dispatch; no `from[11]`) | 0.6 KB | 448 + 24 B |
+| IK / the POSE player (3.0: ≈210 B, 3d) | 0.4 KB / 1.0 KB S | 40 B |
 | Arbiter, layers, safety, goal registers + epoch | 0.9 KB S | 120 B |
 | Balance | 0.4 KB | 16 B |
 | Reflexes | 0.7 KB S | 24 B |
-| PROGMEM postures + `rc` | 0.15 KB | 0 |
+| PROGMEM postures | 0.15 KB | 0 |
 | Config slots, migration, writer (RAM image) | 0.7 KB | 108 B |
 | Params | 0.3 KB | 40 B |
 | Ultrasonic / eyes / battery | 0.25 / 0.25 / 0.1 KB | 10 / 18 / 6 B |
@@ -2422,15 +2363,10 @@ this table. Offsets are within the payload. `E` = epoch u8.
 | 0x03 PING | `token u16` | 2 |
 | 0x04 SET_STREAM | `telem_div u8` (0 off, default 2 → 25 Hz), `joints_div u8`, `imu_raw_div u8` | 3 |
 | 0x10 SET_POSTURE | `E`, `posture u8` (0 LIMP, 1 REST, 2 SIT, 3 STAND, 4 STANCE, 5 CALIB, 6 ZERO), `transition_ticks u8` (0 = param `POSTURE_TICKS`, 25), `flags u8` (bit 0 balance; BALANCE = STAND + this bit) | 4 |
-| 0x11 FEET (stream) | `E`, `tick u16`, `x_mm` 4 × `i8` (−60..60, + forward of the hip), `z_mm` 4 × `u8` (30..95, below the hip), `pitch i16`, `roll i16` (a16, predicted), `support u8` (bits LF RF RB LB); legs LF RF RB LB | 16 |
+| 0x11 POSE (stream) | `E`, `tick u16` (reach the pose by this body tick), `flags u8` (bits 0-3 `JOINT_LF`..`JOINT_LB`: that leg is joint angles; 4 `BALANCE`; 5 `FALL_OK`; 6 `EASE`), `leg` 8 × `i16` (per leg LF RF RB LB: foot x −480..480 and z 60..440 in q2, + forward of / below the hip; or with its JOINT flag shoulder and knee in a16), `head` 3 × `i16` (pan, tilt, tail a16; −32768 = left to IDLE), `pitch i16`, `roll i16` (a16, predicted, ±480), `support u8` (bits LF RF RB LB) | 31 |
 | 0x12 SET_HEAD | `E`, `mode u8` (0 release, 1 hold), `pan i16`, `tilt i16`, `tail i16` (a16; −32768 = not held), `max_speed_dps u16` (0 = safety slew only) | 10 |
 | 0x13 SET_BODY_POSE | `E`, `pitch i16`, `roll i16` (a16), `dheight_mm i8`, `xshift_mm i8` | 7 |
 | 0x14 SET_BALANCE | `enable u8`, `kp_q8 u8`, `kd_ms u8`, `deadband_deg u8`, `max_corr_deg u8` | 5 |
-| 0x20 TRICK_BEGIN | `trick_id u8`, `n_frames u8` (1..24), `loop_start u8`, `loop_end u8`, `repeats u8` (total plays; 0/1 once, 255 forever), `joint_mask u16`, `flags u8` (bit 0 balance, 1 fall_ok), `end_posture u8`, `exp_roll i8`, `exp_pitch i8` (deg, balance reference) | 11 |
-| 0x21 TRICK_FRAMES | `first u8`, `count u8` (1..4), `count × 14 B` | 2+14n |
-| 0x22 TRICK_COMMIT | `trick_id u8`, `crc16 u16` | 3 |
-| 0x23 TRICK_PLAY | `E`, `trick_id u8`, `speed_q6 u8`, `flags u8` (bit 0 mirror) | 4 |
-| 0x24 TRICK_STOP | `transition_ticks u8` | 1 |
 | 0x30 SET_EYES | `led_mask u8` (0x07 right, 0x38 left, 0x3F all), `r u8`, `g u8`, `b u8` | 4 |
 | 0x31 BEEP | `n u8` (1..8), n × (`note i8`, `dur_10ms u8`) | 1+2n |
 | 0x39 CAL_SET | `joint u8`, `offset_a16 i16` (absolute, ±25°) | 3 |
@@ -2444,7 +2380,7 @@ this table. Offsets are within the payload. `E` = epoch u8.
 
 | Type | Payload | B |
 |---|---|---|
-| 0x80 HELLO | `proto_major u8`, `proto_minor u8` (2.0 since 2026-10-14: FEET replaced SET_GAIT), `fw_build u32`, `reset_cause u8` (0 COLD, 1 FLASHED, 2 REQUESTED, 3 WARM_UNEXPECTED), `last_alive_tick u16`, `caps u16` (bit 0 buzzer, 1 IR receiver, 2 DMP, 3 ultrasonic, 4 eyes), `max_payload u8`, `trick_capacity u8` (0 in P0: no store; 32 from P1), `joint_count u8` (11), `config_state u8` (0 ok, 1 migrated, 2 defaulted), `epoch u8` | 16 |
+| 0x80 HELLO | `proto_major u8`, `proto_minor u8` (3.0 since 2026-11-22: POSE replaced FEET and the trick messages), `fw_build u32`, `reset_cause u8` (0 COLD, 1 FLASHED, 2 REQUESTED, 3 WARM_UNEXPECTED), `last_alive_tick u16`, `caps u16` (bit 0 buzzer, 1 IR receiver, 2 DMP, 3 ultrasonic, 4 eyes), `max_payload u8`, `pose_depth u8` (POSE keys the body queues: 5), `joint_count u8` (11), `config_state u8` (0 ok, 1 migrated, 2 defaulted), `epoch u8` | 16 |
 | 0x81 TELEMETRY | §4 | 35 |
 | 0x82 JOINTS | `tick u16`, 11 × `i16` a16 (−32768 = limp) | 24 |
 | 0x83 IMU_RAW | `tick u16`, 6 × `i16` | 14 |
@@ -2454,7 +2390,7 @@ this table. Offsets are within the payload. `E` = epoch u8.
 | 0x87 PARAM_VALUE | `id u8`, `value`, `min`, `max`, `default` (i16) | 9 |
 | 0x88 EEPROM_DATA | `addr u16`, bytes | 2+len |
 | 0x89 PONG | `token u16`, `tick u16` | 4 |
-| 0x8A STATS | `uptime_s u32`, `overruns u16`, `max_tick_us u16`, `stack_free_min u16`, `rx_crc_err u16`, `rx_overflow u16`, `i2c_err u16`, `imu_stale u16`, `dmp_rate_hz u8`, `feet_late u16`, `feet_underruns u16` | 23 |
+| 0x8A STATS | `uptime_s u32`, `overruns u16`, `max_tick_us u16`, `stack_free_min u16`, `rx_crc_err u16`, `rx_overflow u16`, `i2c_err u16`, `imu_stale u16`, `dmp_rate_hz u8`, `pose_dropped u16` (keys dropped: past, too far ahead, no room), `pose_underruns u16` | 23 |
 | 0x8B PCA_COUNTS | 16 × `u16` OFF counts (bit 12 = full-off) | 32 |
 | 0x8F LOG | ASCII ≤ 60 | var |
 
@@ -2464,23 +2400,21 @@ this table. Offsets are within the payload. `E` = epoch u8.
 |---|---|
 | 1 | BOOT (arg = reset cause) |
 | 2 | FELL (±1 roll, ±2 pitch) |
-| 3 | RECOVERED |
-| 4 | RECOVERY_FAILED |
+| 4 | LYING (after a fall he is still: REST, LIMP 2 s later; arg = the FELL arg) |
 | 5 | LOW_BATTERY (level) |
 | 6 | BATTERY_OK |
 | 7 | WATCHDOG |
 | 8 | LINK_RESTORED |
 | 9 | IMU_FAULT |
 | 10 | IMU_OK |
-| 11 | TRICK_DONE (id \| reason << 8; reason 0 DONE, 1 STOPPED, 2 PREEMPTED, 3 FELL) |
-| 12 | GAIT_STOPPED (arg 0: a posture, an epoch bump or a reflex ended the FEET stream; 1: settled after an underrun) |
+| 12 | STREAM_STOPPED (arg 0: a posture, an epoch bump or a reflex ended the POSE stream; 1: its feet settled after an underrun) |
 | 13 | GOAL_REFUSED (type << 8 \| reason) |
 | 14 | CONFIG_MIGRATED |
 | 15 | CONFIG_DEFAULTED (reason) |
 | 16 | EEPROM_SAVED |
 | 17 | TX_DROPPED (rate-limited) |
 | 18 | IR_KEY (NEC command byte \| 0x100 for a held-key repeat; proto 1.3) |
-| 19 | FEET_UNDERRUN (ticks since the last FEET arrived; the hold starts, then the settle and GAIT_STOPPED 1; proto 2.0) |
+| 19 | POSE_UNDERRUN (the last key reached with none queued; arg = ticks since the last POSE arrived; the hold starts, then the settle) |
 
 **Params** (`[[params]]` in spec.toml; stable ids, appended, never
 renumbered; each id below `link.param_slots` (20) has a persisted slot in
@@ -2492,7 +2426,7 @@ the config block, 0x7FFF = default). The P0 body implements:
 | 0 | `WD_STOP_MS` | 500 | 100..5000 | ms | Watchdog stage 1 (stop, epoch bump) |
 | 1 | `WD_REST_MS` | 1500 | 200..10000 | ms | Watchdog stage 2 (REST) |
 | 2 | `WD_LIMP_S` | 10 | 1..600 | s | Watchdog REST → LIMP |
-| 3 | `XFADE_TICKS` | 10 | 0..100 | tick | Crossfade out of TRICK or REFLEX |
+| 3 | `XFADE_TICKS` | 10 | 0..100 | tick | Crossfade out of a stream or REFLEX |
 | 4 | `POSTURE_TICKS` | 25 | 1..255 | tick | Default IDLE posture transition |
 | 5 | `SLEW_MAX_A16` | 160 | 16..800 | a16/tick | Safety-stage slew limit |
 | 6 | `BATT_WARN_MV` | 6500 | 5000..8400 | mV | WARN trip |
@@ -2508,7 +2442,6 @@ the config block, 0x7FFF = default). The P0 body implements:
 | 16 | `LEG_W_MM` | 70 | 30..150 | mm | Left-right foot track (Kilo's, measured and fitted) |
 | 17 | `LEG_SH_ZERO_DEG` | 0 | -45..45 | deg | Upper link angle at joint angle 0 (θ1_0) |
 | 18 | `LEG_KN_ZERO_DEG` | 90 | 30..150 | deg | Knee bend at joint angle 0 (θ2_0) |
-| 19 | `FALL_RC` | 1 | 0..1 | bool | Fall reflex plays rc (0: the mind rights him) |
 <!-- end of the generated params table -->
 
 The two clear levels replace the earlier single `BATT_HYST_MV`, because the
@@ -2593,7 +2526,7 @@ body/                     the NyBoard firmware (arduino-cli sketch)
                           fx  joints  posture  arbiter  attitude  battery  body (tick + reflexes)
                           config (slots, legacy import)  params  events  notes  reset  sched
                           link (dispatch, ACK/de-dup, HELLO, streams, events)  pgm.h
-                          ik  feet (FEET player, STANCE)  keyframe  balance  reflex (fall)  ir_nec (IR remote decoder)
+                          ik  stream (the POSE player, STANCE)  balance  reflex (fall)  ir_nec (IR remote decoder)
   src/hal/                register-level drivers: uart  i2c  pca9685  mpu6050 (+ dmp_image.h)
                           adc  buzzer  clock  eeprom  eyes (WS2812)  gpio.h  sys (reset record, WDT, stack paint)
                           ultrasonic  ir  pcint2 (shared PCINT2 vector)
@@ -2601,14 +2534,14 @@ body/                     the NyBoard firmware (arduino-cli sketch)
   src/proto/              VENDORED by protocol/vendor.py: kilo_protocol.h, cobs/crc16/kilo_frame.[ch]
   test/                   host unit tests of core/ (test_*.cpp), check.h, slurp.h (read a repo file),
                           body_fixture.h (the shared config, body and tick input setup),
-                          fakes (fake_eeprom, fake_link_hal), trick_library.h (generated by
-                          tools/gen_trick_library.py), tip_plant.h (the tipping plant of test_feet.cpp, 3f),
+                          fakes (fake_eeprom, fake_link_hal), tip_plant.h (the tipping plant of
+                          test_stream.cpp, 3f),
                           link_harness.cpp and core_harness.cpp (stdin-driven harnesses for mind/tests)
   test/hal/               the real hal/ sources on fake AVR registers: fake_avr.h/.cpp, avr/ and
                           util/ header shims, fake_i2c_devices.h, test_*.cpp
   tools/                  host_tests.sh  size_check.sh  stack_check.sh/.py  build_link_harness.sh
                           build_flags.sh (the size flags, shared with kilo flash)
-                          common.sh (shared by the scripts)  gen_trick_library.py
+                          common.sh (shared by the scripts)
 protocol/                 spec.toml (the single source)  gen.py  vendor.py  vector_cases.py  doc_check.py
                           test.sh  README.md (its own file list)
   gen/                    kilo_protocol.h  kilo_names.h  kilo_protocol.py   (generated, committed)
@@ -2630,15 +2563,16 @@ mind/                     the Python side (pip install -e mind): the laptop's `k
                           consts.py (type codes, statuses, events, params)  transport.py (raw fd,
                           loopback)  serial_link.py (reader/writer threads, goals, commands)
     body/                 state.py (BodyState)  client.py (BodyClient: postures, balance, head,
-                          tricks, calibration, params, stats; drives the virtual bodies in the tests)
+                          POSE streams, calibration, params, stats; drives the virtual bodies in the tests)
     planner/              walking: body model, patterns and speed, the step planner, error
-                          estimates, the FEET stream
-    tricks/               trick model, legacy importer, library/*.json (generated), player timing, rear_up
+                          estimates, the POSE stream
+    tricks/               trick model and timing, legacy importer, library/*.json (generated), the body
+                          models (sagittal, stance, dynamics), rear_up, righting
     behaviour/            behaviour tree, drives, utility selector, personality.yaml, runner
     perception/           ultrasonic + IMU detectors, Percepts aggregator, ring buffer
     logs/                 log reader (JSONL, .kilolog, .krec, .kwalk), summary/replay/plot/walk/trick/run
                           (python -m kilo.logs, kilo log), the flight-recorder format and decode
-    vbody/                virtual bodies: sim.py (a Python model; feet.py plays FEET, physics.py walks),
+    vbody/                virtual bodies: sim.py (a Python model; pose.py plays POSE, physics.py walks),
                           core.py (the body's real C core, body/test/core_harness.cpp, in-process or
                           on a pty for kilo-mind-host)
     tools/                flash.py (build, flash through the mind)  body_image.py
@@ -2692,11 +2626,10 @@ reference; this table is the overview.
 | joints | Transfer function vs a transcription of legacy float `writeAngle`, using the dumped EEPROM: all 16 joints × every whole degree in limits; exact or ±1 count (listed). Limits, slew. |
 | config | Migration accept/reject paths; torn write at every byte offset recovers to the other slot; sequence wrap |
 | ik | Round trip on a 1 mm grid ≤ 0.25 mm; ≤ 0.25° vs double; reach clamp; legacy postures plausible. P2: `body/test/test_ik.cpp` (0.11 mm / 0.07° at 50/50 mm; 7 geometries incl. the params' extremes under the sanitizers; clamp on the ray; `up`/`sit`/`rest` FK; STANCE within the joint limits) |
-| feet | The FEET player and STANCE (3d). `body/test/test_feet.cpp`, every FEET through the real link path at 50 Hz: STANCE legs, pose terms and foot nudge; the STANCE balance through a four-foot plant (slopes at 0.7×, 1×, 1.6× leg response, a flipped sensor, a pose as the target); the queue window, late and too-far ticks counted, a repeat replacing its tick, never acked; refusals and their 1 s rate limit; entry from SIT; the IK of the pose, a lost tick held, a 60 mm jump paced by the 10°/tick slew; the underrun (event arg, a 5-tick hold exact, the settle at the foot's x, `GAIT_STOPPED` 1, a FEET during the hold resuming); the end by a posture, a fall, the watchdog and a reflex (`GAIT_STOPPED` 0 with the new epoch); the correction's shares; TELEMETRY and FEET at 50 Hz on the 250 kbaud budget; the tipping plant (`tip_plant.h`): its time constant, a walk plan with the body shift (stays up, corrections ≤ 2°), the same steps without it (> 5° off the plan), a three-foot shove (the balance never worse than off); fx cost per tick. (The 1.x gait generator's tests left with it.) |
-| keyframe | Tick-exact dur/hold; easing endpoints; −128; loops; mirror (incl. roll ref); speed. P1: `body/test/test_keyframe.cpp` (also upload edge cases, crossfades, end posture, TRICK_DONE reasons, gating, per-frame balance, and every library trick within the joint limits with the JSON's timing) |
-| arbiter | Per-joint priority; crossfade length/monotonicity; head and balance gating; epoch refusal and LIMP/REST exemption. P1 head layer in `body/test/test_reflex.cpp`: slew, timeout, release crossfade, epoch release, no balance on held joints, precedence with TRICK and REFLEX, TELEMETRY |
+| stream | The POSE player and STANCE (3d). `body/test/test_stream.cpp`, every POSE through the real link path at 50 Hz: STANCE legs, pose terms and foot nudge; the STANCE balance through a four-foot plant (slopes at 0.7×, 1×, 1.6× leg response, a flipped sensor, a pose as the target); the queue in tick order, past, too-far and no-room keys counted, a repeat replacing its tick, never acked; refusals and their 1 s rate limit; the IK of the pose, a lost key, a 60 mm jump paced by the 10°/tick slew; keys far apart reached exactly on their tick, straight or eased; joint-angle legs, the head, a leg changing between a foot and angles, the joint-space balance, TELEMETRY `limited`; the underrun (event arg, a 5-tick hold exact, the settle at the foot's x, `STREAM_STOPPED` 1, a POSE during the hold resuming, joint-angle legs holding); the end by a posture, a fall and a reflex (`STREAM_STOPPED` 0 with the new epoch); the correction's shares; TELEMETRY and POSE at 50 Hz on the 250 kbaud budget; the tipping plant (`tip_plant.h`): its time constant, a walk plan with the body shift (stays up, small corrections), the same steps without it (off the plan), a three-foot shove (the balance never worse than off); fx cost per tick. |
+| arbiter | Per-joint priority; crossfade length/monotonicity; head and balance gating; epoch refusal and LIMP/REST exemption. P1 head layer in `body/test/test_reflex.cpp`: slew, timeout, release crossfade, epoch release, no balance on held joints, precedence with STREAM and REFLEX, TELEMETRY |
 | balance | Toy-plant closed loop converges; every sign flip diverges; dead band; saturation; slew. Gain table = legacy `adaptiveParameterArray` = Kilo's EEPROM; mapping vs legacy `adjust()` ≤ 0.07° (grid), controller vs legacy ≤ 1° (0.16°); physical direction vs the posture tables; gating by owner, posture, request, epoch bump, IMU_FAULT |
-| reflex | Fall 6-tick timing, hysteresis, retries, mirror by roll sign, per-reflex LIMP timers; battery sag spikes don't trip, hysteresis clears; watchdog 0.5 / 1.5 s stages; epoch bump on each. P1 fall: `body/test/test_reflex.cpp` (6 consecutive samples, a dip restarts, single samples never trip, both sides, back, pitch falls, still wait, rc frames tick by tick and mirrored, 3 tries, RECOVERED/RECOVERY_FAILED, FALL_OK, gating, TRICK_DONE(FELL), STALE/FALLEN refusals, LIMP ends it, watchdog takes over) |
+| reflex | Fall 6-tick timing, hysteresis, per-reflex LIMP timers; battery sag spikes don't trip, hysteresis clears; watchdog 0.5 / 1.5 s stages; epoch bump on each. Fall: `body/test/test_reflex.cpp` (6 consecutive samples, a dip restarts, single samples never trip, both sides, back, pitch falls, the hold until still, LYING: REST, LIMP, the reflex lets go; FALL_OK suppression and a FALL_OK POSE taking the joints from the reflex; LIMP/CALIB/IMU_FAULT gating, a stream ended by the fall, STALE/FALLEN refusals, LIMP ends it, a more important reflex takes over) |
 | attitude | vs float reference incl. the gz<0 reflection (≤ 0.1°); A/B vs the legacy float32 `ypr` path within ±60° (≤ 1°; 0.038°); gyro rates = d/dt of pitch/roll (sign, ≤ 10%) |
 | codec | protocol/vectors both ways; 10⁶-iteration fuzz under ASan; resync on next 0x00; ACK de-dup |
 
@@ -2710,13 +2643,13 @@ reference; this table is the overview.
 | H4 | Command beyond a limit | JOINTS shows the clamp |
 | H5 | Stall the mind (then: `kill -STOP` the Python daemon) while walking / standing | Motion stops ≤ 0.5 s + one period; lying down ≤ 3.5 s / 2.5 s; LIMP 10 s later; LINK_RESTORED and epoch refusal on resume |
 | H6 | Debug param that hangs the loop | HELLO `WARM_UNEXPECTED` with `last_alive_tick` near the hang; pose held with no jump, then REST |
-| H7 | Tip onto each side | FELL, `rc` mirrored correctly, RECOVERED ≥ 4/5; old goals refused as STALE until the mind re-plans |
+| H7 | Tip onto each side | FELL, the pose held until still, then LYING (REST, LIMP 2 s later); old goals refused as STALE until the mind re-plans |
 | H8 | Bench supply 8.4 → 6.0 V in 0.1 V / 10 s steps, then back up | Trips and clears within ±0.1 V of the meter; no sag trips while trotting at 7.2 V |
 | H9 | 10 min trot, 50 Hz telemetry + JOINTS | `max_tick_us` < 12000, 0 overruns, `stack_free_min` > 150 B |
 | H10 | 30 min soak, max streams + 5 Hz goals | `rx_crc_err` ≈ 0 (eye updates explain any); seq gaps < 0.1% |
 | H11 | Ultrasonic at 10 / 30 / 100 cm | ±1 / ±2 / ±4 cm |
 | H12 | Eyes R/G/B/W per side; BEEP scale | Correct LEDs; clean tones; no ultrasonic degradation while beeping |
-| H13 | Board tilted 0 → 10° pitch and roll | Body within 3° of level after 1 s. **Not met by the P1 joint-space layer (measured 2026-10-11: ≈0.17° body per degree of correction); deferred to P2 IK levelling by the owner.** P2: geometric levelling in STANCE/GAIT on the slope estimate (3f); host plant within 2.5° after 1 s at `kp_q8` 253; on Kilo 2026-10-11: within 2.1° on a 13° board. |
+| H13 | Board tilted 0 → 10° pitch and roll | Body within 3° of level after 1 s. **Not met by the P1 joint-space layer (measured 2026-10-11: ≈0.17° body per degree of correction); deferred to P2 IK levelling by the owner.** P2: geometric levelling in STANCE and a stream of feet on the slope estimate (3f); host plant within 2.5° after 1 s at `kp_q8` 253; on Kilo 2026-10-11: within 2.1° on a 13° board. |
 | H14 | Walk 2 m (P2) | Drift < 20 cm **(target)**; 360° turn in place < 20 s; 30 s trot without a fall |
 | H15 | Flash the original firmware's image (on 2026-10-10 with `kilo flash --legacy`; the command and the image have since been deleted) | Old `kup`, `kwkF` work with the old calibration |
 

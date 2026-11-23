@@ -10,12 +10,12 @@ recorder"): RUN begin/end around it, the MARK lines ``trick`` (which trick,
 its id and CRC, the stage for rear_up, the battery and the body's mode at
 the start, who started it), ``stage`` (the rear-up from the remote: A1
 allowed a higher stage, or a stage's top was reached), ``frames`` (each keyframe's move and hold in
-ticks of 20 ms at 1x), ``play`` (the moment the body acknowledged
-TRICK_PLAY: keyframe 0 starts there), ``key`` (each remote key that came
+ticks of 20 ms at 1x), ``play`` (the moment keyframe 0 starts: in
+protocol 2 recordings the body's ACK of TRICK_PLAY), ``key`` (each remote key that came
 while it ran, with what the remote did), ``end`` (DONE, STOPPED,
 PREEMPTED, FELL, FAILED or REFUSED, the time from the play, the battery,
-why); and every TELEMETRY (pitch, roll, their rates, the keyframe the body
-says it plays, the battery, the mode) and every other frame and log line,
+why); and every TELEMETRY (pitch, roll, their rates, the battery, the
+mode; in protocol 2 recordings the keyframe the body said it played) and every other frame and log line,
 from 2 s before to 2 s after.
 
 The prediction: the trick's design exports the model's pitch at the end of
@@ -44,9 +44,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kilo.logs import flight
+from kilo.logs import flight, proto2
 from kilo.protocol import kilo_protocol as P
-from kilo.tricks.player import FOREVER, phase_ticks, play_order
+from kilo.tricks.model import REPEAT_FOREVER as FOREVER, phase_ticks, play_order
 
 TICK_US = P.TICK_MS * 1000
 A16 = 16.0
@@ -176,9 +176,9 @@ def library_source(name: str, crc: str | None = None) -> dict[str, Any]:
 
 
 def keyframes(tr: TrickRun, source: dict[str, Any] | None = None) -> list[Keyframe]:
-    """The keyframes in play order with their times from the play (the body's
-    keyframe player: a move of phase_ticks(dur) then a hold of
-    phase_ticks(hold), at the run's speed)."""
+    """The keyframes in play order with their times from the play (a move
+    of phase_ticks(dur) then a hold of phase_ticks(hold), at the run's
+    speed)."""
     src = library_source(tr.name, tr.start.get("crc")) if source is None else source
     durs, holds = _ints(tr.frames_mark.get("dur")), _ints(tr.frames_mark.get("hold"))
     if not durs:
@@ -223,6 +223,7 @@ def predicted_at(kfs: list[Keyframe], since_play_s: float, start: float = 0.0) -
 def rows(tr: TrickRun, source: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """One row per TELEMETRY in the run's span (CSV_FIELDS)."""
     kfs = keyframes(tr, source)
+    old = proto2.is_proto2(tr.stream.frames)
     out = []
     for t, m in tr.telemetry:
         since = None if tr.play_us is None else (t - tr.play_us) / 1e6
@@ -233,10 +234,10 @@ def rows(tr: TrickRun, source: dict[str, Any] | None = None) -> list[dict[str, A
         r = {
             "t_s": round((t - tr.lo_us) / 1e6, 3), "uptime_s": round(tr.stream.uptime_s(t), 3),
             "since_play_s": None if since is None else round(since, 3),
-            "mode": P.Mode(m.mode).name if m.mode in P.Mode._value2member_map_ else str(m.mode),
+            "mode": proto2.mode_name(m.mode),
             "flags": m.flags, "keyframe": None if ki is None else kfs[ki].index,
             "keyframe_name": None if ki is None else kfs[ki].name,
-            "body_keyframe": None if m.trick_frame == 0xFF else m.trick_frame,
+            "body_keyframe": proto2.body_keyframe(m, old),
             "nose_up_deg": round(nose, 3), "pred_nose_up_deg": None if pred is None else round(pred, 3),
             "err_deg": None if pred is None else round(nose - pred, 3),
             "pitch_deg": m.pitch / A16, "roll_deg": m.roll / A16,
@@ -358,7 +359,7 @@ def format_analysis(a: dict[str, Any]) -> str:
     for k in a.get("keys", []):
         L.append(f"  key     {k['t_s']:7.2f}s {k['text']}")
     if not a.get("played"):
-        L.append("  not played (no TRICK_PLAY acknowledged)")
+        L.append("  not played (no play mark)")
         return "\n".join(L)
     if a.get("start_note"):
         L.append(f"  note    {a['start_note']}")

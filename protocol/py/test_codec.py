@@ -35,7 +35,7 @@ def test_spec_constants():
     assert P.MAX_WIRE == 66
     assert P.TELEMETRY_DEFAULT_HZ == 25
     assert P.PARAMS_BY_NAME["WD_STOP_MS"].default == 500 and P.PARAMS_BY_NAME["WD_REST_MS"].default == 1500
-    assert P.Telemetry.MIN_LEN == 35 and P.Stats.MIN_LEN == 23 and P.Hello.MIN_LEN == 16 and P.Feet.MIN_LEN == 16
+    assert P.Telemetry.MIN_LEN == 35 and P.Stats.MIN_LEN == 23 and P.Hello.MIN_LEN == 16 and P.Pose.MIN_LEN == 31
 
 
 # --- CRC and COBS ------------------------------------------------------------
@@ -172,7 +172,7 @@ def test_pack_rejects_bad_values():
     with pytest.raises(P.PayloadError):
         P.Beep(notes=[]).pack()
     with pytest.raises(P.PayloadError):
-        P.TrickFrames(first=0, frames=[P.Keyframe()] * 5).pack()
+        P.Beep(notes=[P.Note()] * 9).pack()
     with pytest.raises(P.PayloadError):
         P.Joints(angle=[0] * 10).pack()
     with pytest.raises(P.PayloadError):
@@ -219,12 +219,11 @@ def test_random_roundtrip_every_message(msg_id):
     cls = P.MESSAGES[msg_id]
     rng = random.Random(msg_id)
     for _ in range(200):
-        if cls in (P.TrickFrames, P.Beep):
+        if cls is P.Beep:
             # count field is derived; build the variable tail explicitly
-            ec = P.Keyframe if cls is P.TrickFrames else P.Note
-            items = [ec.unpack(bytes(rng.randrange(256) for _ in range(ec.SIZE)))
-                     for _ in range(rng.randint(1, 4 if cls is P.TrickFrames else 8))]
-            obj = cls(**({"first": rng.randrange(256), "frames": items} if cls is P.TrickFrames else {"notes": items}))
+            items = [P.Note.unpack(bytes(rng.randrange(256) for _ in range(P.Note.SIZE)))
+                     for _ in range(rng.randint(1, 8))]
+            obj = cls(notes=items)
         else:
             obj = _random_value(rng, cls)
         payload = obj.pack()
@@ -272,11 +271,10 @@ def test_python_encodes_c_decodes(tmp_path):
         cls = P.MESSAGES[rng.choice(ids)]
         lo, hi = cls.MIN_LEN, cls.MAX_LEN
         payload = bytearray(0 if rng.random() < 0.3 else rng.randrange(256) for _ in range(hi))
-        if cls in (P.TrickFrames, P.Beep):
-            k = rng.randint(1, 4 if cls is P.TrickFrames else 8)
-            n = (2 if cls is P.TrickFrames else 1) + k * (14 if cls is P.TrickFrames else 2)
-            payload = payload[:n]
-            payload[1 if cls is P.TrickFrames else 0] = k
+        if cls is P.Beep:
+            k = rng.randint(1, 8)
+            payload = payload[:1 + 2 * k]
+            payload[0] = k
         else:
             payload = payload[:rng.randint(lo, hi)]
         payload = bytes(payload)

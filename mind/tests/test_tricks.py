@@ -10,11 +10,11 @@ import pytest
 from kilo.protocol import kilo_link_codec as C
 from kilo.protocol import kilo_protocol as P
 from kilo.tricks import import_legacy, legacy, library
-from kilo.tricks.model import (CANONICAL, JOINT_LIMITS, JOINT_NAMES, UNUSED, Easing, Keyframe, Posture, Trick,
-                               TrickError, Trigger, pose)
+from kilo.tricks.model import (CANONICAL, JOINT_LIMITS, JOINT_NAMES, KEYFRAME_SIZE, MAX_FRAMES, UNUSED, Easing,
+                               Keyframe, Posture, Trick, TrickError, TrickFlags, TrickHeader, Trigger, WireKeyframe,
+                               pose, trick_id_for)
 
 REPO = Path(__file__).resolve().parents[2]
-FRAMES_JSON = REPO / "protocol" / "vectors" / "frames.json"
 
 UP = (0, 0, 0, 0, 0, 0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30)
 
@@ -271,10 +271,10 @@ def test_speed(lib):
 
 
 def test_validation():
-    good = Trick("ok", [kf()] * P.TRICK_CAPACITY)  # 24 (the body's store, docs §3h)
+    good = Trick("ok", [kf()] * MAX_FRAMES)  # 24 (the body's old store, docs §3h)
     good.validate()
-    with pytest.raises(TrickError, match=f"{P.TRICK_CAPACITY + 1} frames"):
-        Trick("big", [kf()] * (P.TRICK_CAPACITY + 1)).validate()
+    with pytest.raises(TrickError, match=f"{MAX_FRAMES + 1} frames"):
+        Trick("big", [kf()] * (MAX_FRAMES + 1)).validate()
     with pytest.raises(TrickError, match="lf_knee 121"):
         Trick("lim", [Keyframe.from_joints({"lf_knee": 121})]).validate()
     with pytest.raises(TrickError, match="head_tilt -81"):
@@ -311,38 +311,26 @@ def test_frame_encode_decode():
 
 
 def test_trick_encode_decode(lib):
+    """The packed header and frames the kernel's tables are generated from
+    (kernel/mind/tricks/gen_library.py) round-trip, with their identity."""
     for t in lib.values():
         begin = t.begin(9)
         data = t.encode_frames()
-        assert len(data) == 14 * len(t.frames)
-        back = Trick.from_wire(P.TrickBegin.unpack(begin.pack()), data, name=t.name,
+        assert len(data) == KEYFRAME_SIZE * len(t.frames) and len(begin.pack()) == TrickHeader.SIZE
+        back = Trick.from_wire(TrickHeader.unpack(begin.pack()), data, name=t.name,
                                expected_roll=t.expected_roll, expected_pitch=t.expected_pitch)
         assert back == t
-        msgs = t.upload_messages(9)
-        assert isinstance(msgs[0], P.TrickBegin) and isinstance(msgs[-1], P.TrickCommit)
-        chunks = msgs[1:-1]
-        assert [m.first for m in chunks] == list(range(0, len(t.frames), 4))
-        assert b"".join(k.pack() for m in chunks for k in m.frames) == data
-        assert msgs[-1].crc16 == C.crc16(data)
-        for m in msgs:
-            type(m).unpack(m.pack())                 # the generated codec accepts them
-        frames = [k for m in chunks for k in P.TrickFrames.unpack(m.pack()).frames]
+        frames = [WireKeyframe.unpack(data[i:i + KEYFRAME_SIZE]) for i in range(0, len(data), KEYFRAME_SIZE)]
         assert Trick.from_wire(begin, frames, name=t.name, expected_roll=t.expected_roll,
                                expected_pitch=t.expected_pitch) == t
+        assert t.crc16() == C.crc16(data) and 1 <= trick_id_for(t) <= 254
 
 
-def test_wire_matches_vectors():
-    vec = {v["name"]: v for v in json.loads(FRAMES_JSON.read_text())["frames"]}
-    v = vec["trick_frames_1"]
-    w = v["fields"]["frames"][0]
-    f = Keyframe.from_wire(P.Keyframe(**w))
-    assert f.dur == 25 and f.easing == Easing.COSINE
-    payload = bytes([v["fields"]["first"], 1]) + f.encode()
-    assert payload.hex() == v["payload"]
-    vb = vec["trick_begin"]
-    fb = vb["fields"]
-    t = Trick("v", [Keyframe.from_joints(dict.fromkeys(CANONICAL, 0), dur=1)] * fb["n_frames"],
-              loop_start=fb["loop_start"], loop_end=fb["loop_end"], repeats=fb["repeats"],
-              balance=bool(fb["flags"] & 1), end_posture=Posture(fb["end_posture"]))
-    assert t.joint_mask == fb["joint_mask"]
-    assert t.begin(fb["trick_id"]).pack().hex() == vb["payload"]
+def test_packed_header_layout():
+    """The 11 B header (the body's TRICK_BEGIN of protocol 2, kept as the
+    kernel's table layout): trick_id, n_frames, loop_start, loop_end,
+    repeats, joint_mask u16, flags, end_posture, exp_roll, exp_pitch."""
+    t = Trick("v", [Keyframe.from_joints(dict.fromkeys(CANONICAL, 0), dur=1)] * 3, loop_start=1, loop_end=2,
+              repeats=4, balance=True, fall_ok=True, end_posture=Posture.SIT, expected_roll=-3, expected_pitch=5)
+    assert t.begin(7).pack() == bytes([7, 3, 1, 2, 4, 0x07, 0xFF, 3, int(Posture.SIT), 0xFD, 5])
+    assert TrickFlags.BALANCE | TrickFlags.FALL_OK == t.flags == 3

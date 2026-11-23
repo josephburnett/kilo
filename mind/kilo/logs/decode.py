@@ -15,8 +15,9 @@ while it walks):
 
     t_s             seconds since the file's first record
     uptime_s        the mind's clock in seconds (about its uptime)
-    mode            the body's mode (IDLE, GAIT, TRICK, FALLEN, LIMP, ...)
-    flags           TELEMETRY flags by name, "+" between (SERVOS_POWERED+TRICK+...)
+    mode            the body's mode (IDLE, STREAM, FALLEN, LIMP, ...; protocol 2 recordings: GAIT is STREAM,
+                    and TRICK, RECOVERING)
+    flags           TELEMETRY flags by name, "+" between (SERVOS_POWERED+STREAM+...)
     pitch_deg       pitch, nose DOWN + (as the body reports it)
     nose_up_deg     the same, nose UP + (the trick designs' convention)
     roll_deg        roll, right side up +
@@ -24,15 +25,16 @@ while it walks):
     rate_roll_dps   the IMU's roll rate, deg/s
     batt_mv         the battery, mV (filtered by the body)
     dist_mm         the ultrasonic distance, mm (0: no echo)
-    body_keyframe   the keyframe the body says it plays (empty: none)
-    command         the last command the mind sent the body (FEET tick, SET_POSTURE name, TRICK_PLAY, TRICK_STOP ...)
+    body_keyframe   the keyframe the body said it played (protocol 2 recordings only; empty: none)
+    command         the last command the mind sent the body (POSE tick, SET_POSTURE name, ...; protocol 2: FEET tick,
+                    TRICK_PLAY, TRICK_STOP)
     run             the run in progress ("walk 3", "trick 4"), empty between runs
     trick           the trick's name during a trick run
     keyframe        the keyframe the trick should be at by the clock (from the play and the keyframes' timing)
     pred_nose_up_deg  the design's predicted pitch then, nose up + (empty: no prediction)
     err_deg         nose_up_deg - pred_nose_up_deg
     key             a remote key that arrived since the last row: "IR_KEY 0x0002" and what the remote did with it
-    event           a body EVENT since the last row (FELL, TRICK_DONE, GAIT_STOPPED, WATCHDOG, ...)
+    event           a body EVENT since the last row (FELL, LYING, STREAM_STOPPED, WATCHDOG, ...)
 
 --json rows have "type": "telemetry" (the fields above), "log" (t_s,
 level, text), "key" (t_s, code, outcome), "event" (t_s, name, arg),
@@ -48,7 +50,7 @@ import math
 from pathlib import Path
 from typing import Any, Iterator
 
-from kilo.logs import flight, trickrec
+from kilo.logs import flight, proto2, trickrec
 from kilo.protocol import kilo_protocol as P
 
 CSV_FIELDS = ("t_s", "uptime_s", "mode", "flags", "pitch_deg", "nose_up_deg", "roll_deg", "rate_pitch_dps",
@@ -63,7 +65,7 @@ def _flags(v: int) -> str:
 
 
 def _mode(v: int) -> str:
-    return P.Mode(v).name if v in P.Mode._value2member_map_ else str(v)
+    return proto2.mode_name(v)
 
 
 def _command(f: Any) -> str:
@@ -75,9 +77,9 @@ def _command(f: Any) -> str:
             return f"SET_POSTURE {P.Posture(m.posture).name}"
         except ValueError:
             return f"SET_POSTURE {m.posture}"
-    if isinstance(m, P.Feet):
-        return f"FEET tick {m.tick}"
-    if isinstance(m, P.TrickPlay):
+    if isinstance(m, (P.Pose, proto2.Feet)):
+        return f"{f.name} tick {m.tick}"
+    if isinstance(m, proto2.TrickPlay):
         return f"TRICK_PLAY id {m.trick_id} speed {m.speed_q6}"
     return f.name
 
@@ -108,6 +110,7 @@ def rows(s: flight.Stream) -> Iterator[dict[str, Any]]:
                 tr = None
         spans.append((lo, hi, r, tr, trickrec.keyframes(tr) if tr is not None else []))
     key_list = keys(s)
+    old = proto2.is_proto2(s.frames)
     ki = 0
     command = ""
     pending_events: list[str] = []
@@ -116,8 +119,7 @@ def rows(s: flight.Stream) -> Iterator[dict[str, Any]]:
             command = _command(f)
             continue
         if isinstance(f.msg, P.Event) and f.msg.code != P.EventCode.IR_KEY:
-            name = P.EventCode(f.msg.code).name if f.msg.code in P.EventCode._value2member_map_ else str(f.msg.code)
-            pending_events.append(name)
+            pending_events.append(proto2.event_name(f.msg.code))
             continue
         if not isinstance(f.msg, P.Telemetry):
             continue
@@ -144,7 +146,7 @@ def rows(s: flight.Stream) -> Iterator[dict[str, Any]]:
         yield {"t_s": round((t - t0) / 1e6, 3), "uptime_s": round(s.uptime_s(t), 3), "mode": _mode(m.mode),
                "flags": _flags(m.flags), "pitch_deg": m.pitch / A16, "nose_up_deg": nose, "roll_deg": m.roll / A16,
                "rate_pitch_dps": m.rate_pitch / A16, "rate_roll_dps": m.rate_roll / A16, "batt_mv": m.batt_mv,
-               "dist_mm": m.dist_mm, "body_keyframe": None if m.trick_frame == 0xFF else m.trick_frame,
+               "dist_mm": m.dist_mm, "body_keyframe": proto2.body_keyframe(m, old),
                "command": command, "run": run, "trick": trick, "keyframe": kf, "pred_nose_up_deg": pred,
                "err_deg": err, "key": "; ".join(key_txt) or None, "event": "+".join(pending_events) or None}
         pending_events = []
@@ -163,8 +165,8 @@ def json_rows(s: flight.Stream) -> Iterator[dict[str, Any]]:
     for f in s.frames:
         t_s = round((f.t_us - t0) / 1e6, 3)
         if f.direction == "rx" and isinstance(f.msg, P.Event) and f.msg.code != P.EventCode.IR_KEY:
-            name = P.EventCode(f.msg.code).name if f.msg.code in P.EventCode._value2member_map_ else str(f.msg.code)
-            out.append((f.t_us, {"type": "event", "t_s": t_s, "name": name, "arg": f.msg.arg}))
+            out.append((f.t_us, {"type": "event", "t_s": t_s, "name": proto2.event_name(f.msg.code),
+                                 "arg": f.msg.arg}))
         elif f.direction == "tx":
             fields = P.to_dict(f.msg) if f.msg is not None else {"payload": f.payload.hex()}
             out.append((f.t_us, {"type": "command", "t_s": t_s, "name": f.name, "fields": fields}))

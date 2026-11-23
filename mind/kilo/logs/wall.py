@@ -6,14 +6,14 @@ runs --fetch``): every new reading of the ultrasonic sensor (TELEMETRY
 ``dist_mm`` with the DIST_FRESH flag, every 80 ms, stamped with the body's
 tick), the head's hold (SET_HEAD: the mind holds it straight ahead while it
 walks), the body's pitch, the gyro's yaw rate, the walk's gait and speed
-(the ``stream`` / ``timing`` marks) and every foot of the plan (FEET, one a
+(the ``stream`` / ``timing`` marks) and every foot of the plan (POSE, one a
 tick: the step clock). From that this reports, per walk:
 
 - the distance travelled: the wall's distance standing still before the
   walk less the one standing still after it (or, where he did not stand
   still long enough to measure, the straight-line fit's at that moment);
 - what the plan commanded: how far the feet on the floor pushed the body
-  (FEET: the support feet's travel under the hips, tick by tick);
+  (POSE: the support feet's travel under the hips, tick by tick);
 - the share of that he really went (``ground_frac``; the slip is 1 less
   it), from the two still ends and, as a check, fitted over every reading;
 - per stretch at one speed: the measured speed against the commanded one,
@@ -48,12 +48,12 @@ import statistics
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from kilo.logs import flight, walkrec
+from kilo.logs import flight, proto2, walkrec
 from kilo.planner.model import BodyModel
 from kilo.protocol import kilo_protocol as P
 
 A16 = 16.0
-TICK_S = 0.02                # the body's tick (TELEMETRY.tick, FEET.tick)
+TICK_S = 0.02                # the body's tick (TELEMETRY.tick, POSE.tick)
 MAX_RANGE_MM = 2500          # the distance guard's: farther is not a wall in a room
 JUMP_MM = 40.0               # a reading this far off its neighbours' median is a stray echo
 HEAD_SETTLE_S = 0.3          # the head reaches straight ahead this long after the hold (120 deg/s, a 28 deg look)
@@ -92,7 +92,7 @@ class Stretch:
     n: int = 0
     speed_mm_s: float | None = None      # measured against the wall
     speed_se: float | None = None
-    feet_mm_s: float | None = None       # what the FEET pushed in the same time
+    feet_mm_s: float | None = None       # what the plan's feet pushed in the same time
     per_cycle_mm: float | None = None    # measured, per step cycle
     feet_per_cycle_mm: float | None = None
 
@@ -120,7 +120,7 @@ class WallWalk:
     travel_mm: float | None = None
     travel_err_mm: float | None = None
     err_terms: dict[str, float] = field(default_factory=dict)
-    commanded_mm: float = 0.0             # FEET: the support feet's push, first step to last
+    commanded_mm: float = 0.0             # the support feet's push, first step to last
     commanded_speed_mm: float = 0.0       # the set speed x the time walked (the stretches' sum)
     ground_frac: float | None = None      # travel / commanded (1 = no slip)
     ground_frac_err: float | None = None
@@ -186,6 +186,12 @@ def local_noise(xs: list[float]) -> float:
     return 1.4826 * statistics.median([abs(d) for d in d2]) / math.sqrt(6)
 
 
+def _walk_feet(msg: Any) -> bool:
+    """A walk's tick of the plan: a FEET (protocol 2 recordings) or a POSE with four feet."""
+    f = proto2.feet_of(msg)
+    return f is not None and None not in f[0]
+
+
 def commanded_push(feet: dict[int, Any]) -> dict[int, float]:
     """tick -> how far the plan had pushed the body forward by then (mm): each tick, the mean
     backward travel under the hips of the feet that are on the floor at both ends of it."""
@@ -198,7 +204,8 @@ def commanded_push(feet: dict[int, Any]) -> dict[int, float]:
             pm = prev[1]
             legs = [i for i in range(4) if (m.support >> i) & 1 and (pm.support >> i) & 1]
             if legs:
-                x += sum(pm.x_mm[i] - m.x_mm[i] for i in legs) / len(legs)
+                px, mx = proto2.feet_of(pm)[0], proto2.feet_of(m)[0]
+                x += sum(px[i] - mx[i] for i in legs) / len(legs)
         out[k] = x
         prev = (k, m)
     return out
@@ -247,7 +254,7 @@ def analyse_walk(w: walkrec.Walk, run_id: int, model: BodyModel | None = None,
     ref = tel[0][1]
     feet: dict[int, Any] = {}
     for f in w.frames:
-        if f.direction == "tx" and isinstance(f.msg, P.Feet):
+        if f.direction == "tx" and _walk_feet(f.msg):
             feet[walkrec._unwrap(f.msg.tick, ref)] = f.msg   # a replanned tick: the last sent wins
     if len(feet) < 5:
         return None
@@ -356,7 +363,7 @@ def analyse_walk(w: walkrec.Walk, run_id: int, model: BodyModel | None = None,
     # the posture before the walk: STAND reached (its 0.5 s move and a settle); STANCE as the walk
     # starts is fine (STAND's feet stand 2.5 mm ahead of and behind the hips alike: the body does
     # not move forward going to STANCE, only 6 mm down)
-    t_first_feet = min(f.t_us for f in w.frames if f.direction == "tx" and isinstance(f.msg, P.Feet))
+    t_first_feet = min(f.t_us for f in w.frames if f.direction == "tx" and _walk_feet(f.msg))
     posture_ok_from = None
     last_p = None
     for f in w.frames:
@@ -370,7 +377,7 @@ def analyse_walk(w: walkrec.Walk, run_id: int, model: BodyModel | None = None,
                 posture_ok_from = None
 
     # the posture after the walk: readings end when another posture than STANCE / STAND starts
-    t_last_feet = max(f.t_us for f in w.frames if f.direction == "tx" and isinstance(f.msg, P.Feet))
+    t_last_feet = max(f.t_us for f in w.frames if f.direction == "tx" and _walk_feet(f.msg))
     t_cut = None
     for f in w.frames:
         if f.direction == "tx" and isinstance(f.msg, P.SetPosture) and f.t_us > t_last_feet \

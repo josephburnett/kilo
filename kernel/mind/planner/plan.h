@@ -20,7 +20,7 @@
 //   units of work a tick (LeanJob), so no tick carries a whole solve.
 // - Prediction: the attitude for tick t is the plane through the support
 //   feet planned, delayed by the servos' dead time and passed through their
-//   first-order response; it goes in FEET as the balance's reference.
+//   first-order response; it goes in POSE as the balance's reference.
 // - From the measured state (observe): no lift while the body is off the
 //   plan by more than gate_deg (the plan waits, up to hold_max ticks); a
 //   swinging leg lands at once when the body tips toward it by catch_deg.
@@ -57,9 +57,9 @@
 namespace kilo {
 namespace planner {
 
-constexpr int kXMin = -60, kXMax = 60;  // FEET x_mm (spec range)
-constexpr int kZMin = 30, kZMax = 95;   // FEET z_mm
-constexpr real kAttMaxDeg = 30;         // FEET pitch / roll: the body refuses a FEET beyond it
+constexpr int kXMin = -60, kXMax = 60;  // the walk's foot range, mm (FEET's, kept: POSE allows more)
+constexpr int kZMin = 30, kZMax = 95;   // (z, mm)
+constexpr real kAttMaxDeg = 30;         // POSE pitch / roll: the body refuses a POSE beyond it
 constexpr real kHeightSlewMm = (real)0.5;
 constexpr real kRecentredMm = (real)1.5;  // a stopping leg this close to its target does not step again
 constexpr real kCentreSlewMm = (real)0.5;  // the strides' centre (Pattern::centre_com) moves at most this a tick

@@ -4,9 +4,9 @@
 // full; kernel/host/tests/intent_vectors.txt checks the two agree sample
 // for sample. In short:
 //
-// 1. MOVING while the body's mode is a moving one (GAIT, TRICK, BOOT) or it
+// 1. MOVING while the body's mode is a moving one (STREAM, BOOT) or it
 //    has not been still (every rate under kStillA16) for kStillUs. Under
-//    the fall reflex (FALLEN, RECOVERING) he is judged like any other time.
+//    the fall reflex (FALLEN) he is judged like any other time.
 // 2. A fallen state from the attitude alone: ON_END (|pitch| folded about 90
 //    deg at least kEndA16), ON_BACK (|roll| over kBackA16), ON_LEFT_SIDE or
 //    ON_RIGHT_SIDE (|roll| from kSideA16; roll + is the right side up: he

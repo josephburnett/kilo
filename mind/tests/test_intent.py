@@ -110,12 +110,10 @@ def test_estimator_settles_confirms_and_logs_each_change_once():
     ch = _feed(est, 5, 2, 0, C.SIT) + _feed(est, 10, -25.7, 2.1, C.SIT)
     assert not any(ch) and est.est.state == S.SITTING
     # walking, a trick: MOVING whatever the attitude
-    _feed(est, 20, 0, 0, C.NONE, mode=int(P.Mode.GAIT))
+    _feed(est, 20, 0, 0, C.NONE, mode=int(P.Mode.STREAM))
     assert est.est.state == S.MOVING
     # the fall reflex at work, lying still on his side: the side, not MOVING
     _feed(est, 30, 2, -89, C.NONE, mode=int(P.Mode.FALLEN))
-    assert est.est.state == S.ON_RIGHT_SIDE
-    _feed(est, 30, 2, -89, C.NONE, mode=int(P.Mode.RECOVERING))
     assert est.est.state == S.ON_RIGHT_SIDE
     # limp and level with nothing asked (power-on): RESTING, he cannot be standing
     est2 = E.Estimator()

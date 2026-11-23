@@ -35,8 +35,8 @@
 #   * epoch = true: the payload begins with the goal epoch byte.
 
 [meta]
-proto_major = 2                # 2.0 (2026-10-14): the mind plans the steps and streams FEET; SET_GAIT, the gait tables and the gait flags are gone; TELEMETRY carries the balance reference, the correction and the support feet
-proto_minor = 1                # 2.1 (2026-11-22): param FALL_RC; TRICK_PLAY takes a FALL_OK trick under the fall reflex when it is 0
+proto_major = 3                # 3.0 (2026-11-22): one stream of poses (POSE) replaces FEET and the five TRICK messages; the body's trick player, its built-in get-up (rc) and param FALL_RC are gone; TELEMETRY reports which legs a limit cut
+proto_minor = 0
 
 # ---------------------------------------------------------------------------
 [link]
@@ -57,9 +57,10 @@ tick_ms = 20
 telemetry_default_div = 2      # SET_STREAM telem_div default: 50 Hz / 2 (= param TELEM_DIV's default; gen.py checks)
 telemetry_default_hz = 25      # tick_hz / telemetry_default_div
 goal_refresh_hz = 5            # mind re-sends active goals at this rate (and on change)
-feet_depth = 8                 # FEET ticks the body queues (160 ms); a FEET further ahead than this is dropped (STATS feet_late counts both)
-feet_lookahead_ticks = 5       # how far ahead of the body's tick the mind streams (100 ms): covers a GC pause or an SD stall on the Pi
-feet_hold_ticks = 5            # queue dry in GAIT: hold the last pose this long before settling (100 ms)
+pose_depth = 5                 # POSE keys the body queues; one already past, more than pose_max_ahead_ticks ahead, or later than every queued key with the queue full is dropped (STATS pose_dropped)
+pose_lookahead_ticks = 3       # how far ahead of the body's tick the mind streams a pose it sends every tick (60 ms: the recordings never used more than 23 ms of the old 100, docs/movement-engine-results.md section 1)
+pose_hold_ticks = 5            # the last key reached and none queued: hold this long before the swing feet settle (100 ms)
+pose_max_ahead_ticks = 250     # a key at most this far ahead of the body's tick (5 s): a slow move may be one key
 heartbeat_idle_ms = 100        # mind sends HEARTBEAT after this long with nothing sent
 mind_alive_ms = 1000           # ...but only while its asyncio loop proved alive within this
 cmd_retry_ms = 50              # command retry timeout
@@ -75,12 +76,9 @@ eeprom_read_max = 56
 reboot_magic = 0x4B49          # "KI"
 reset_pulse_ms = 100           # GPIO4 low time for the flash reset (Appendix F)
 param_slots = 20               # persisted param slots in the config block; param ids < this (16 until proto 1.4: the slot's reserved bytes became params 16..19)
-trick_capacity = 24            # keyframes in the body's store (32 until the P1 fall/head RAM shrink, doc §3h)
-trick_frames_per_msg = 4
 beep_max_notes = 8
-joint_count = 11               # driven joints, canonical order (JOINTS, keyframe ang[])
+joint_count = 11               # driven joints, canonical order (JOINTS; POSE legs and head)
 channel_count = 16             # PCA9685 channels / calibration slots
-trick_speed_unity_q6 = 64      # TRICK_PLAY speed_q6 = 64 is 1x
 pca_full_off_bit = 0x1000      # PCA_COUNTS: bit 12 = channel full-off
 
 # ---------------------------------------------------------------------------
@@ -90,8 +88,6 @@ BAD_LEN = 1
 BAD_ARG = 2
 BUSY = 3
 UNKNOWN_TYPE = 4
-CRC_MISMATCH = 5        # TRICK_COMMIT CRC does not match the uploaded frames
-NO_TRICK = 6
 REFUSED_LOW_BATT = 7
 REFUSED_FALLEN = 8
 EEPROM_BUSY = 9
@@ -102,6 +98,7 @@ UNCALIBRATED = 11       # STAND refused while config_state is DEFAULTED (no cali
 [enums.goal_refused_reason]
 BAD_LEN = 1
 BAD_ARG = 2
+BUSY = 3                # POSE: another reflex holds the joints, or IDLE is LIMP or CALIB
 UNKNOWN_TYPE = 4        # a goal this firmware does not implement
 LOW_BATT = 7
 FALLEN = 8
@@ -111,40 +108,35 @@ UNCALIBRATED = 11
 [enums.event]
 BOOT = 1                # arg = reset_cause
 FELL = 2                # arg = +-1 roll fall (sign = roll sign), +-2 pitch fall
-RECOVERED = 3
-RECOVERY_FAILED = 4
+LYING = 4               # after a fall he is still: the body lays him down (REST) and goes limp 2 s later; arg = the FELL arg
 LOW_BATTERY = 5         # arg = level: 1 WARN, 2 LOW, 3 CRITICAL
 BATTERY_OK = 6
 WATCHDOG = 7
 LINK_RESTORED = 8
 IMU_FAULT = 9
 IMU_OK = 10
-TRICK_DONE = 11         # arg = trick_id | (trick_done_reason << 8)
-GAIT_STOPPED = 12       # arg = 0 a posture / the mind took the legs, 1 settled after a FEET underrun
+STREAM_STOPPED = 12     # the POSE stream ended: arg 0 a posture, an epoch bump or a reflex took the joints, 1 its feet settled after an underrun
 GOAL_REFUSED = 13       # arg = (type << 8) | goal_refused_reason
 CONFIG_MIGRATED = 14
 CONFIG_DEFAULTED = 15   # arg = reason
 EEPROM_SAVED = 16
 TX_DROPPED = 17         # rate-limited
 IR_KEY = 18             # arg = NEC command byte | 0x100 for a held-key repeat
-FEET_UNDERRUN = 19      # the FEET queue ran dry while in GAIT: arg = ticks since the last FEET; the hold starts (link.feet_hold_ticks), then GAIT_STOPPED arg 1
+POSE_UNDERRUN = 19      # the stream reached its last key with none queued: arg = ticks since the last POSE arrived; the hold starts (link.pose_hold_ticks), then the swing feet settle
 
 [enums.mode]            # TELEMETRY.mode
 BOOT = 0
 LIMP = 1
 IDLE = 2
-GAIT = 3
-TRICK = 4
+STREAM = 3              # a POSE stream holds the joints (waiting for its first key, moving, holding or settling)
 FALLEN = 5
-RECOVERING = 6
 LOW_BATT = 7
 CALIB = 8
 LINK_LOST = 9
 
 [enums.owner]           # TELEMETRY.owners nibbles; priority order (higher wins)
 IDLE = 0
-GAIT = 1
-TRICK = 2
+STREAM = 1              # the POSE stream
 REFLEX = 3
 PI_HOLD = 4             # head nibble only: the Pi holds the head (SET_HEAD mode=1)
 
@@ -177,26 +169,13 @@ WARN = 1
 LOW = 2
 CRITICAL = 3
 
-[enums.trick_done_reason]   # EVENT TRICK_DONE arg bits 8-15
-DONE = 0                # played to the end
-STOPPED = 1             # TRICK_STOP, or SET_POSTURE LIMP
-PREEMPTED = 2           # a reflex or an epoch bump (watchdog, low battery) took over
-FELL = 3                # the fall reflex took over
-
-[enums.easing]          # keyframe flags bits 0-1
-LINEAR = 0
-COSINE = 1
-STEP = 2
-SPLINE_RESERVED = 3
-
 # ---------------------------------------------------------------------------
 # Bit flags: name = bit number.
 [flags.telemetry_flags]
 BALANCE_ACTIVE = 0
 IMU_FAULT = 1
 SERVOS_POWERED = 2
-GAIT = 3
-TRICK = 4
+STREAM = 3                     # a POSE stream is on (TELEMETRY mode STREAM)
 HEAD_HELD = 5
 BATT_WARN = 6
 LINK_OK = 7
@@ -204,7 +183,7 @@ OVERRUN = 8
 NO_BATTERY = 9
 EEPROM_PENDING = 10
 DIST_FRESH = 11
-BALANCE_HELD = 12              # the geometric balance holds its corrections (a FEET support bit clear, and just after; doc §3f)
+BALANCE_HELD = 12              # the geometric balance holds its corrections (a support bit clear, and just after; doc §3f)
 
 [flags.hello_caps]
 BUZZER = 0
@@ -216,21 +195,27 @@ EYES = 4
 [flags.posture_flags]
 BALANCE = 0
 
-[flags.support_flags]         # FEET.support, TELEMETRY.support: the feet on the ground
+[flags.support_flags]         # POSE.support, TELEMETRY.support: the feet on the ground
 LF = 0
 RF = 1
 RB = 2
 LB = 3
 
-[flags.trick_flags]
-BALANCE = 0
-FALL_OK = 1
+[flags.pose_flags]            # POSE.flags
+JOINT_LF = 0                   # this leg's two values are joint angles (shoulder, knee; a16), else a foot (x, z; q2)
+JOINT_RF = 1
+JOINT_RB = 2
+JOINT_LB = 3
+BALANCE = 4                    # joint-mode legs: the balance correction in joint space toward pitch/roll while this is the next key (a stream of feet always balances through the feet)
+FALL_OK = 5                    # accepted while the fall reflex holds the joints (it lets go), no fall detection while the stream plays: the mind's get-up
+EASE = 6                       # reach this key along a cosine ease from the last key (else in a straight line)
 
-[flags.trick_play_flags]
-MIRROR = 0
-
-[flags.keyframe_flags]  # bits 0-1 are the easing enum
-BALANCE = 2
+[flags.limited_flags]         # TELEMETRY.limited: what the body could not do as asked this tick
+LF = 0                         # a joint limit, the slew limit or the leg's reach cut this leg's pose
+RF = 1
+RB = 2
+LB = 3
+HEAD = 4                       # a joint limit or the slew limit cut pan, tilt or tail
 
 [flags.eyes_mask]       # SET_EYES led_mask: 0x07 right, 0x38 left, 0x3F all
 R0 = 0
@@ -241,14 +226,6 @@ L1 = 4
 L2 = 5
 
 # ---------------------------------------------------------------------------
-[structs.keyframe]      # 14 B, §3e
-fields = [
-  { name = "dur", type = "u8", unit = "tick", range = [1, 255], note = "ticks from the previous frame" },
-  { name = "hold", type = "u8", unit = "tick", note = "ticks to hold after arriving" },
-  { name = "flags", type = "u8", flags = "keyframe_flags", note = "bits 0-1 easing (enum easing), bit 2 balance" },
-  { name = "ang", type = "i8", count = 11, unit = "deg", note = "canonical joint order; -128 = unchanged (the previous frame's angle by index; in frame 0 the pose at the start)" },
-]
-
 [structs.note]          # 2 B
 fields = [
   { name = "note", type = "i8", unit = "note", note = "pitch index; mapping fixed by the body buzzer (P1)" },
@@ -331,18 +308,19 @@ fields = [
 ]
 
 [[messages]]
-name = "FEET"
+name = "POSE"
 id = 0x11
 dir = "pi_to_body"
 kind = "stream"
 epoch = true
-doc = "One tick of the mind's plan (doc §3d): where each foot is at `tick` and the attitude the plan predicts there. Sent every tick, about link.feet_lookahead_ticks ahead; not acked, not refreshed, not retried. The body queues up to link.feet_depth ticks and plays each at its tick, slew-limited from where the feet are (a late or missing tick never snaps). A field outside its range (x_mm, z_mm, pitch, roll) or a support bit above bit 3 is refused BAD_ARG. The first FEET accepted enters GAIT (gated: BAD_ARG, STALE, FALLEN, LOW_BATT, UNCALIBRATED -> EVENT GOAL_REFUSED, rate-limited) and the stream owns the legs until a SET_POSTURE or an epoch bump (GAIT_STOPPED arg 0). A tick already past is dropped (STATS feet_late). When the queue runs dry the body holds the last pose for link.feet_hold_ticks (EVENT FEET_UNDERRUN), then settles: swing feet down at their x to the ground (the plane through the support feet when three are down, else their mean depth), IDLE in STANCE (GAIT_STOPPED arg 1). In GAIT the balance loop's reference is this pitch/roll, it corrects through the support feet only, and it holds its corrections while any support bit is clear (TELEMETRY flag BALANCE_HELD; doc §3f)."
+doc = "One key of the mind's stream of poses (docs/movement-engine.md): the pose the body is to reach by `tick`. The body queues up to link.pose_depth keys in tick order (a second key for a queued tick replaces it) and moves from where it is toward the next one, reaching it exactly on its tick: in a straight line, or along a cosine ease (flag EASE), from the last key reached (for the first key of a stream, from the joints' outputs when it arrived). So keys may come every tick (a walk) or far apart (a slow move, a hold). Every value passes the joint limits and the safety slew (TELEMETRY.limited says what they cut). Each leg is a foot (x, z in q2 = 1/4 mm, through the body's IK, SET_BODY_POSE on top) or, with its JOINT flag, two joint angles (a16); a leg changing between the two moves in joint space. -32768 in a head value leaves that joint to IDLE; the legs are always the stream's. Not acked, not refreshed, not retried. Refused (EVENT GOAL_REFUSED, rate-limited like a goal) BAD_ARG (a foot outside x -480..480, z 60..440 q2, a joint angle of -32768, a pitch or roll beyond +-30 deg, a support bit above 3, an unknown flag), STALE, FALLEN (unless FALL_OK), LOW_BATT, UNCALIBRATED (as STAND), BUSY (another reflex holds the joints, or IDLE is LIMP or CALIB). A key already past, too far ahead or with no room is dropped (STATS pose_dropped). The first key accepted starts the stream (mode STREAM); a stream whose legs are all feet makes IDLE's posture STANCE, as a walk needs. The stream holds the joints until a SET_POSTURE, an epoch bump or a reflex (STREAM_STOPPED arg 0). Reaching its last key with none queued, the body holds it (EVENT POSE_UNDERRUN), and after link.pose_hold_ticks the feet whose support bit is clear settle at their x to the ground (the plane through the support feet when three are down, else their mean depth); a stream of feet then ends in STANCE (STREAM_STOPPED arg 1), one with joint-mode legs keeps holding. Balance: with every leg a foot it corrects through the support feet toward this pitch/roll and holds its corrections while any support bit is clear (TELEMETRY flag BALANCE_HELD; doc §3f); with joint-mode legs it corrects in joint space while the next key has flag BALANCE."
 fields = [
   { name = "epoch", type = "u8" },
-  { name = "tick", type = "u16", unit = "tick", note = "the body tick this pose is for (TELEMETRY.tick's clock)" },
-  { name = "x_mm", type = "i8", count = 4, unit = "mm", range = [-60, 60], note = "foot fore-aft from under the hip, + forward; legs LF RF RB LB" },
-  { name = "z_mm", type = "u8", count = 4, unit = "mm", range = [30, 95], note = "foot depth below the hip, i.e. the body height at that leg; legs LF RF RB LB" },
-  { name = "pitch", type = "i16", unit = "deg", scale = 0.0625, range = [-480, 480], note = "the attitude the plan predicts at tick: the balance reference (TELEMETRY conventions), +-30 deg" },
+  { name = "tick", type = "u16", unit = "tick", note = "the body tick by which the pose is reached (TELEMETRY.tick's clock)" },
+  { name = "flags", type = "u8", flags = "pose_flags" },
+  { name = "leg", type = "i16", count = 8, note = "per leg LF RF RB LB two values: foot x (+ forward of the hip) and z (below the hip) in q2 (1/4 mm), or with the leg's JOINT flag the shoulder and knee angles in a16 (1/16 deg, OpenCat convention)" },
+  { name = "head", type = "i16", count = 3, unit = "deg", scale = 0.0625, note = "pan, tilt, tail; -32768 = left to IDLE (the posture, or a SET_HEAD hold)" },
+  { name = "pitch", type = "i16", unit = "deg", scale = 0.0625, range = [-480, 480], note = "the attitude the mind predicts at tick: the balance reference (TELEMETRY conventions), +-30 deg" },
   { name = "roll", type = "i16", unit = "deg", scale = 0.0625, range = [-480, 480], note = "+-30 deg" },
   { name = "support", type = "u8", flags = "support_flags", note = "the feet on the ground at tick; the balance corrects through these only" },
 ]
@@ -353,7 +331,7 @@ id = 0x12
 dir = "pi_to_body"
 kind = "goal"
 epoch = true
-doc = "Hold (mode 1) or release (mode 0) pan, tilt, tail. Held joints follow the targets slew-limited at max_speed_dps (0 = only the safety slew) while the head joints' owner is IDLE or GAIT, without balance corrections; released by mode 0, head_hold_ms without a refresh, or an epoch bump. BAD_ARG for mode > 1; mode 0 is never stale; mode 1: STALE, FALLEN, LOW_BATT. TELEMETRY flags HEAD_HELD, head owner nibble PI_HOLD."
+doc = "Hold (mode 1) or release (mode 0) pan, tilt, tail. Held joints follow the targets slew-limited at max_speed_dps (0 = only the safety slew) while the head joints' owner is IDLE (not a stream whose pose drives them), without balance corrections; released by mode 0, head_hold_ms without a refresh, or an epoch bump. BAD_ARG for mode > 1; mode 0 is never stale; mode 1: STALE, FALLEN, LOW_BATT. TELEMETRY flags HEAD_HELD, head owner nibble PI_HOLD."
 fields = [
   { name = "epoch", type = "u8" },
   { name = "mode", type = "u8", enum = "head_mode" },
@@ -369,7 +347,7 @@ id = 0x13
 dir = "pi_to_body"
 kind = "goal"
 epoch = true
-doc = "Body pitch, roll, height delta, x-shift (on top of gait / STANCE)."
+doc = "Body pitch, roll, height delta, x-shift (on top of STANCE and of a POSE stream's feet)."
 fields = [
   { name = "epoch", type = "u8" },
   { name = "pitch", type = "i16", unit = "deg", scale = 0.0625 },
@@ -390,72 +368,6 @@ fields = [
   { name = "kd_ms", type = "u8", unit = "ms", note = "default 30" },
   { name = "deadband_deg", type = "u8", unit = "deg", range = [0, 30], note = "default 2" },
   { name = "max_corr_deg", type = "u8", unit = "deg", range = [0, 30], note = "default 15" },
-]
-
-[[messages]]
-name = "TRICK_BEGIN"
-id = 0x20
-dir = "pi_to_body"
-kind = "command"
-doc = "Trick header; empties the store. BUSY while a trick plays; BAD_ARG for n_frames outside 1..trick_capacity (24), loop_end >= n_frames, loop_start > loop_end, a joint_mask bit outside the 11 driven joints (or none), unknown flags, or an end_posture without angles (LIMP, STANCE)."
-fields = [
-  { name = "trick_id", type = "u8" },
-  { name = "n_frames", type = "u8", range = [1, 24] },
-  { name = "loop_start", type = "u8" },
-  { name = "loop_end", type = "u8" },
-  { name = "repeats", type = "u8", note = "total plays of loop_start..loop_end: 0 and 1 = once, 255 = until stopped" },
-  { name = "joint_mask", type = "u16" },
-  { name = "flags", type = "u8", flags = "trick_flags" },
-  { name = "end_posture", type = "u8", enum = "posture" },
-  { name = "exp_roll", type = "i8", unit = "deg", note = "balance reference for frames with the balance bit (right side up +)" },
-  { name = "exp_pitch", type = "i8", unit = "deg", note = "balance reference (nose down +; legacy header byte)" },
-]
-
-[[messages]]
-name = "TRICK_FRAMES"
-id = 0x21
-dir = "pi_to_body"
-kind = "command"
-doc = "Up to 4 keyframes starting at index `first`, in order: first must equal the number of frames received since TRICK_BEGIN (else BAD_ARG), first + count <= n_frames, dur >= 1, easing != 3. NO_TRICK without a header; BUSY while a trick plays."
-fields = [
-  { name = "first", type = "u8" },
-  { name = "count", type = "u8" },
-  { name = "frames", type = "keyframe", count_field = "count", min = 1, max = 4 },
-]
-
-[[messages]]
-name = "TRICK_COMMIT"
-id = 0x22
-dir = "pi_to_body"
-kind = "command"
-doc = "crc16 = CRC-16/CCITT-FALSE over the n_frames x 14 B frame array as sent; mismatch -> CRC_MISMATCH. NO_TRICK if no header or another trick_id, BAD_ARG if frames are missing. Idempotent: on a committed store it is the cache check (OK = the body holds exactly this trick)."
-fields = [
-  { name = "trick_id", type = "u8" },
-  { name = "crc16", type = "u16" },
-]
-
-[[messages]]
-name = "TRICK_PLAY"
-id = 0x23
-dir = "pi_to_body"
-kind = "command"
-epoch = true
-doc = "Play the committed trick with speed (64 = 1x; scales dur and hold) and mirror (L/R swap, pan, tail and expected roll negated). STALE on an epoch mismatch, NO_TRICK if trick_id is not committed, BAD_ARG for speed < 16 or unknown flags, BUSY while a trick plays, under a reflex, or in LIMP or CALIB, REFUSED_FALLEN while the fall reflex holds the joints (but with param FALL_RC 0 a FALL_OK trick takes them from it), REFUSED_LOW_BATT, UNCALIBRATED. Ends with EVENT TRICK_DONE."
-fields = [
-  { name = "epoch", type = "u8" },
-  { name = "trick_id", type = "u8" },
-  { name = "speed_q6", type = "u8", unit = "x", scale = 0.015625, range = [16, 255] },
-  { name = "flags", type = "u8", flags = "trick_play_flags" },
-]
-
-[[messages]]
-name = "TRICK_STOP"
-id = 0x24
-dir = "pi_to_body"
-kind = "command"
-doc = "Stop the playing trick: crossfade over transition_ticks (0 = XFADE_TICKS) to its end posture, EVENT TRICK_DONE(STOPPED). OK also when nothing plays."
-fields = [
-  { name = "transition_ticks", type = "u8", unit = "tick" },
 ]
 
 [[messages]]
@@ -597,7 +509,7 @@ fields = [
   { name = "last_alive_tick", type = "u16", unit = "tick" },
   { name = "caps", type = "u16", flags = "hello_caps" },
   { name = "max_payload", type = "u8" },
-  { name = "trick_capacity", type = "u8", note = "keyframes; 0 = no trick store (P0)" },
+  { name = "pose_depth", type = "u8", note = "POSE keys the body queues (link.pose_depth)" },
   { name = "joint_count", type = "u8", note = "driven joints (11)" },
   { name = "config_state", type = "u8", enum = "config_state" },
   { name = "epoch", type = "u8" },
@@ -609,7 +521,7 @@ id = 0x81
 dir = "body_to_pi"
 kind = "stream"
 drop_order = 3
-doc = "Body state, 25 Hz by default (50 Hz while the mind streams FEET: SET_STREAM telem_div 1)."
+doc = "Body state, 25 Hz by default (50 Hz while the mind streams POSE: SET_STREAM telem_div 1)."
 fields = [
   { name = "tick", type = "u16", unit = "tick", note = "wraps every 21.8 min" },
   { name = "pitch", type = "i16", unit = "deg", scale = 0.0625, note = "nose down + (legacy ypr), legacy reflection" },
@@ -623,12 +535,12 @@ fields = [
   { name = "owners", type = "u8", note = "low nibble leg owner, high nibble head owner (enum owner)" },
   { name = "flags", type = "u16", flags = "telemetry_flags" },
   { name = "last_rx_seq", type = "u8" },
-  { name = "trick_frame", type = "u8", note = "0xFF = none" },
-  { name = "ref_pitch", type = "i16", unit = "deg", scale = 0.0625, note = "the balance reference in use, 0 while the balance is off: in GAIT the FEET prediction plus SET_BODY_POSE, in STANCE the pose, else the posture's or the trick's" },
+  { name = "limited", type = "u8", flags = "limited_flags", note = "the legs (and the head) whose pose a joint limit, the slew limit or the leg's reach cut this tick" },
+  { name = "ref_pitch", type = "i16", unit = "deg", scale = 0.0625, note = "the balance reference in use, 0 while the balance is off: in a stream of feet the POSE prediction plus SET_BODY_POSE, in STANCE the pose, with joint-mode legs the POSE prediction, else the posture's" },
   { name = "ref_roll", type = "i16", unit = "deg", scale = 0.0625 },
   { name = "corr_pitch", type = "i16", unit = "deg", scale = 0.0625, note = "the balance correction the legs carry this tick (frozen while BALANCE_HELD; decays to 0 when the balance is off)" },
   { name = "corr_roll", type = "i16", unit = "deg", scale = 0.0625 },
-  { name = "feet_queued", type = "u8", unit = "tick", note = "FEET ticks waiting in the queue (0 outside GAIT)" },
+  { name = "pose_queued", type = "u8", note = "POSE keys waiting in the queue (0 outside a stream)" },
   { name = "support", type = "u8", flags = "support_flags", note = "the feet the balance corrects through this tick" },
   { name = "tick_load", type = "u8", unit = "us", scale = 100, note = "max tick time since the last telemetry" },
   { name = "rx_err", type = "u8", note = "cumulative, mod 256" },
@@ -756,8 +668,8 @@ fields = [
   { name = "i2c_err", type = "u16" },
   { name = "imu_stale", type = "u16" },
   { name = "dmp_rate_hz", type = "u8", unit = "Hz" },
-  { name = "feet_late", type = "u16", note = "FEET dropped because their tick had passed" },
-  { name = "feet_underruns", type = "u16", note = "times the FEET queue ran dry in GAIT" },
+  { name = "pose_dropped", type = "u16", note = "POSE keys dropped: already past, too far ahead, or no room" },
+  { name = "pose_underruns", type = "u16", note = "times a stream reached its last key with none queued" },
 ]
 
 [[messages]]
@@ -828,8 +740,8 @@ default = 10
 min = 0
 max = 100
 unit = "tick"
-doc = "Crossfade length out of TRICK or REFLEX."
-brief = "Crossfade out of TRICK or REFLEX"
+doc = "Crossfade length out of a POSE stream or REFLEX."
+brief = "Crossfade out of a stream or REFLEX"
 
 [[params]]
 name = "POSTURE_TICKS"
@@ -987,16 +899,6 @@ unit = "deg"
 doc = "Knee bend relative to the upper link at joint angle 0 (the calibration posture). Petoi: lower leg at 90 deg; verify on Kilo."
 brief = "Knee bend at joint angle 0 (θ2_0)"
 
-[[params]]
-name = "FALL_RC"
-id = 19
-default = 1
-min = 0
-max = 1
-unit = "bool"
-doc = "1: after a roll fall the fall reflex plays rc (up to three tries). 0: it never does: once he is still, FAILED at once (REST, EVENT RECOVERY_FAILED, LIMP), and while the reflex holds the joints TRICK_PLAY of a FALL_OK trick is accepted and ends the reflex (the mind's righting, docs/righting.md). Set live, never persisted, by a mind built with KILO_RIGHTING=1."
-brief = "Fall reflex plays rc (0: the mind rights him)"
-
 # ---------------------------------------------------------------------------
 # Shared defaults and limits. Not wire layout: numbers that the body, the mind
 # (kilo.body.client, kilo.tricks.model), the virtual body (kilo.vbody.sim) and
@@ -1005,10 +907,10 @@ brief = "Fall reflex plays rc (0: the mind rights him)"
 # no RAM) and as plain data (Python); protocol/doc_check.py fails when the
 # docs' tables disagree. Changing one here changes the body's binary: reflash.
 
-# Gait (doc §3d). The steps themselves are the mind's (mind/kilo/planner): the
-# body plays FEET. What the body still needs:
+# Gait (doc §3d). The steps themselves are the mind's: the body plays its
+# POSE stream. What the body still needs:
 [gait]
-stance_h_256 = 205             # STANCE's body height when IDLE enters it from another posture, and the settle height after a FEET underrun: /256 of (L1 + L2), 0.80
+stance_h_256 = 205             # STANCE's body height when IDLE enters it from another posture, and the settle height after an underrun with no foot down: /256 of (L1 + L2), 0.80
 
 # Joint limits (doc §3b), whole degrees in the joint (OpenCat) convention, by
 # legacy joint id 0..15 (every id, in order; from the legacy src/OpenCat.h angleLimit[], git history).
@@ -1526,7 +1428,7 @@ servo_tau_ms = ["...and then closes 63 % of the gap in this time", "ms", "fitted
 # The flight recorder (kernel/mind/record/, kernel/README.md "The flight
 # recorder"): from boot the mind records, in a RAM ring of
 # host.record_block_bytes blocks, every body link frame both ways (TELEMETRY,
-# EVENT, JOINTS in; FEET, goals, commands out; HEARTBEAT only counted, in
+# EVENT, JOINTS in; POSE, goals, commands out; HEARTBEAT only counted, in
 # record_block_header.skipped), every log line (LOG, the status lines
 # included), and during a walk each planned tick (walk_plan), the planner's
 # counters when they move (walk_planner) and MARK lines (the walk's
@@ -1704,9 +1606,9 @@ FORCE = 0                      # skip the host.update_marker check: install any 
 
 [flags.walk_flags]             # WALK_INFO.flags
 RECORDING = 0                  # still being recorded (the run, or its host.walk_postroll_ms): not fetchable yet
-ENDED_OK = 1                   # the run ended as asked (a walk's planned stop or the remote's freeze; a trick's TRICK_DONE DONE)
+ENDED_OK = 1                   # the run ended as asked (a walk's planned stop or the remote's freeze; a trick played to its last key)
 TRUNCATED = 2                  # its start is no longer in RAM (the ring overwrote it) nor on the card
-STREAMED = 3                   # FEET went out (else it ended in its setup); a trick: TRICK_PLAY was acknowledged
+STREAMED = 3                   # POSE went out (else it ended in its setup)
 TRICK = 4                      # a trick run (else a walk)
 SAVED = 5                      # its blocks are on the SD card
 EARLIER_BOOT = 6               # from an earlier boot (the card's index): id is boot << 20 | its id in that boot
@@ -1718,8 +1620,8 @@ GONE = 2                       # no data: the walk was dropped (the store needed
 
 [enums.walk_record]            # walk_record_header.kind: the records of a walk recording
 RX = 1                         # a body link frame the mind received: type u8, seq u8, then its payload
-TX = 2                         # a body link frame the mind wrote (FEET, goals, commands, HEARTBEAT): type, seq, payload
-PLAN = 3                       # walk_plan: one tick the planner planned, sent as FEET or skipped
+TX = 2                         # a body link frame the mind wrote (POSE, goals, commands, HEARTBEAT): type, seq, payload
+PLAN = 3                       # walk_plan: one tick the planner planned, sent as POSE or skipped
 PLANNER = 4                    # walk_planner: the planner's hold, catch or wait counters moved
 MARK = 5                       # ASCII "word key=value ...": walk, setup, stream, config, model, change, stop, end, result; trick, frames, play, key, end
 LOG = 6                        # one log line: level u8 (enum log_level), then its text (no null)
@@ -1817,16 +1719,16 @@ fields = [
   { name = "t_us", type = "u32", unit = "us", note = "mind time since the walk's t0 (its first MARK: t0_us)" },
 ]
 
-[structs.walk_plan]            # 17 B: PLAN, what the planner made of one tick (the FEET frame carries the rest)
+[structs.walk_plan]            # 17 B: PLAN, what the planner made of one tick (the POSE frame carries the rest)
 fields = [
-  { name = "tick", type = "u32", unit = "tick", note = "the body tick, unwrapped (FEET.tick is its low 16 bits)" },
-  { name = "sent", type = "u8", note = "1 = written as FEET; 0 = already past when planned (skipped), or the link did not take it" },
+  { name = "tick", type = "u32", unit = "tick", note = "the body tick, unwrapped (POSE.tick is its low 16 bits)" },
+  { name = "sent", type = "u8", note = "1 = written as POSE; 0 = already past when planned (skipped), or the link did not take it" },
   { name = "lifting", type = "u8", note = "bit i: leg i in the air (swinging) this tick" },
   { name = "support", type = "u8", note = "flags support_flags: the feet on the ground" },
   { name = "margin", type = "i16", unit = "0.1 mm", note = "the centre of mass inside the polygon of the feet down (- = outside); -32768 = none. The planner's min_margin counts ticks with one leg up only" },
   { name = "plan_pitch", type = "i16", unit = "a16", note = "the attitude these feet give, no servo lag" },
   { name = "plan_roll", type = "i16", unit = "a16" },
-  { name = "pitch", type = "i16", unit = "a16", note = "predicted at this tick, servo lag included (FEET.pitch before its clamp)" },
+  { name = "pitch", type = "i16", unit = "a16", note = "predicted at this tick, servo lag included (POSE.pitch before its clamp)" },
   { name = "roll", type = "i16", unit = "a16" },
 ]
 
@@ -2254,7 +2156,7 @@ fields = [
   { name = "duration_ms", type = "u32", unit = "ms", note = "setup to the end (so far, while recording)" },
   { name = "bytes", type = "u32", unit = "B", note = "the recording's size: what WALK_FETCH sends" },
   { name = "records", type = "u32" },
-  { name = "feet", type = "u32", note = "FEET frames sent" },
+  { name = "feet", type = "u32", note = "POSE frames sent" },
   { name = "flags", type = "u8", flags = "walk_flags" },
   { name = "text", type = "bytes", min = 0, max = 120 },
 ]

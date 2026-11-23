@@ -338,20 +338,21 @@ static void test_frames(const Json &frames) {
             kilo_param_value_t pv;
             memcpy(&pv, p.data(), sizeof pv);
             CHECK(pv.default_ == v["fields"]["default"].num && pv.min == v["fields"]["min"].num, "param struct");
-        } else if (v["name"].str == "trick_frames_4_max") {
-            kilo_trick_frames_t tf;
-            CHECK(p.size() == KILO_TRICK_FRAMES_LEN_FOR(4) && p.size() == KILO_TRICK_FRAMES_MAX_LEN, "tf len");
-            memcpy(&tf, p.data(), p.size());
-            CHECK(tf.count == 4 && tf.frames[1].ang[0] == -128 &&
-                      tf.frames[3].dur == v["fields"]["frames"].arr[3]["dur"].num,
-                  "trick frames struct");
-        } else if (v["msg"].str == "FEET") {
-            kilo_feet_t ft;
-            memcpy(&ft, p.data(), sizeof ft);
-            CHECK(ft.epoch == v["fields"]["epoch"].num && ft.tick == v["fields"]["tick"].num &&
-                      ft.x_mm[3] == v["fields"]["x_mm"].arr[3].num && ft.z_mm[2] == v["fields"]["z_mm"].arr[2].num &&
-                      ft.roll == v["fields"]["roll"].num && ft.support == v["fields"]["support"].num,
-                  "feet struct");
+        } else if (v["name"].str == "beep_8_max") {
+            kilo_beep_t bp;
+            CHECK(p.size() == KILO_BEEP_LEN_FOR(8) && p.size() == KILO_BEEP_MAX_LEN, "beep len");
+            memcpy(&bp, p.data(), p.size());
+            CHECK(bp.n == 8 && bp.notes[7].note == v["fields"]["notes"].arr[7]["note"].num &&
+                      bp.notes[7].dur_10ms == v["fields"]["notes"].arr[7]["dur_10ms"].num,
+                  "beep struct");
+        } else if (v["msg"].str == "POSE") {
+            kilo_pose_t ps;
+            memcpy(&ps, p.data(), sizeof ps);
+            CHECK(ps.epoch == v["fields"]["epoch"].num && ps.tick == v["fields"]["tick"].num &&
+                      ps.flags == v["fields"]["flags"].num && ps.leg[7] == v["fields"]["leg"].arr[7].num &&
+                      ps.head[2] == v["fields"]["head"].arr[2].num && ps.roll == v["fields"]["roll"].num &&
+                      ps.support == v["fields"]["support"].num,
+                  "pose struct");
         }
     }
 }

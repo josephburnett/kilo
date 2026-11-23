@@ -147,10 +147,10 @@ rule: Kilo fell off a desk once).
 **Who does what.** The mind plans every step (`kilo/planner/` here, its
 C++ port in `kernel/mind/planner/`): where each foot is, which feet are on
 the ground, and how the body leans, 50 times a second. It sends one tick of
-that plan at a time (a FEET message: four foot positions, the attitude the
-plan predicts, the feet that are down), about five ticks (100 ms) before
-the body needs it (`kilo/planner/walker.py`, the stream). The body plays
-each tick at its time, never faster than its servos may move, and corrects
+that plan at a time (a POSE message with four feet: four foot positions,
+the attitude the plan predicts, the feet that are down), about three ticks
+(60 ms) before the body needs it (`kilo/planner/walker.py`, the stream). The
+body reaches each pose on its tick, never faster than its servos may move, and corrects
 only what the plan did not predict (its balance loop compares the attitude
 it measures with the predicted one). The design and its history are in
 docs/walking-and-balance.md.
@@ -278,61 +278,42 @@ rejects it). A `Trick` has the frames, `loop_start`/`loop_end` (inclusive) and
   Head tilt is unchanged. It is an involution.
 - `speed(f)` plays `f` times faster: `dur` and `hold` are divided by `f`
   (`dur` ≥ 1; a result over 255 raises).
-- `validate()` / `problems()`: 1..24 frames (`TRICK_CAPACITY`), `dur`/`hold` in range, loop inside
+- `validate()` / `problems()`: 1..24 frames, `dur`/`hold` in range, loop inside
   the frames, angles within the joint limits of `body/src/core/joints.cpp`
   (a test cross-checks the table), no driven unused slot, no trigger.
-- Wire: `Keyframe.encode()`/`decode()` are the 14 B frame of
-  `protocol/spec.toml` via the generated `kilo_protocol.Keyframe`;
-  `Trick.upload_messages(trick_id)` gives `TRICK_BEGIN`, the `TRICK_FRAMES`
-  chunks (4 frames each) and `TRICK_COMMIT` with the CRC-16 of the frame
-  array; `Trick.from_wire()` rebuilds a trick. `TRICK_BEGIN` also carries the
-  expected roll/pitch in whole degrees (the balance reference for frames with
-  the balance bit). Angles are rounded half away from zero. On the body −128
-  ("unchanged") becomes the previous frame's angle by index; in frame 0 it is
-  the joint's pose when the trick started.
+- Wire form (what `kernel/mind/tricks/gen_library.py` compiles into the
+  mind): `Trick.begin()` the header fields (with the expected roll/pitch in
+  whole degrees, the balance reference for frames with the balance bit) and
+  `Keyframe.to_wire()` the 14 B frames, both local to `kilo.tricks.model`
+  (the body stores no tricks since protocol 3: the mind sends them as POSE
+  keys, kernel/mind/README.md "Tricks"). Angles are rounded half away from
+  zero; −128 ("unchanged") is the previous frame's angle by index.
 - `repeats` follows the legacy `loopCycle[2]`: the loop section is played
   `repeats` times in total, 0 and 1 both mean once, 255 until stopped.
 
-**Uploading and playing in Python** (`kilo/body/client.py`,
-`kilo/tricks/player.py`; the tests drive the virtual bodies with them).
-
-- `client.upload_trick(trick)` returns `(trick_id, uploaded)`. The body holds
-  one trick; `trick_id` is a 1..254 tag derived from the header and frames.
-  Cached: if this client committed it (no reboot since) nothing is sent;
-  otherwise `TRICK_COMMIT` alone asks the body (OK = it holds exactly this
-  trick; the body checks the CRC it computed while the frames arrived), and
-  only then the full upload goes out.
-- `await client.play(name_or_trick, mirror=False, speed=1.0)` uploads if
-  needed, releases the latched posture goal (the trick's end posture replaces
-  it), sends `TRICK_PLAY` (speed and mirror are applied by the body, so one
-  upload serves every variant) and resolves on `EVENT TRICK_DONE` with a
-  `TrickResult(reason, trick_id, elapsed_s, expected_ticks, epoch)`; reason is
-  DONE, STOPPED, PREEMPTED or FELL. Timeout: the expected duration plus 1 s
-  (none for `repeats` 255); on timeout it sends `TRICK_STOP` and raises.
-  A refusal is a `CommandError` (BUSY from LIMP, CALIB, under a reflex or
-  while playing; STALE; LOW_BATT; UNCALIBRATED). `client.stop_trick()` stops.
-- `kilo.tricks.player` is the body's player timing in Python: a phase of n
-  ticks takes ceil(n · 64 / speed_q6) ticks; TRICK_DONE comes the tick after
-  the last phase. The vbody plays with it, so its TRICK_DONE lands on the
-  body's tick (checked by `tests/test_crosscheck.py`).
+**Playing.** Only the C++ mind plays tricks (`kernel/mind/tricks/player.h`).
+`kilo.tricks.model` keeps the timing the design tools need: a phase of n
+ticks takes ceil(n · 64 / speed_q6) ticks (`phase_ticks`, `play_order`),
+`trick_id_for` (a 1..254 tag from the header and frames) and the guards'
+`GuardWatch`.
 
 **Head (architecture §3c layer 1).** `client.look(pan_deg, tilt_deg,
 tail_deg=None, speed_dps=120)` latches `SET_HEAD` mode HOLD (refreshed at
 5 Hz, epoch-stamped, dropped on an epoch change like every motion goal; the
 tail is sent as −32768, "not held", unless given; `speed_dps=0` leaves only
 the body's 500°/s safety slew). The body holds the head while its owner is
-IDLE or GAIT, without balance corrections, and lets go after 2 s without a
+IDLE (not a POSE stream that drives the head), without balance corrections, and lets go after 2 s without a
 refresh, on an epoch bump, or on `client.release_head()` (clears the goal
 and sends mode RELEASE once). TELEMETRY shows head owner `PI_HOLD` and the
 `head_held` flag.
 
 **Fall (architecture §3g).** The body's fall reflex sends `FELL` (±1 roll,
-±2 pitch) with a new epoch (the link clears the motion goals), plays the
-legacy `rc` itself and ends with `RECOVERED` (it then stands) or
-`RECOVERY_FAILED` (REST, then LIMP). Meanwhile current goals are refused
-`FALLEN` (`TRICK_PLAY`: `REFUSED_FALLEN`); only `SET_POSTURE LIMP` ends the
-reflex. The vbody's `trigger_fall(side)` mimics the events and refusals
-with a fixed 1 s + 1 s timeline.
+±2 pitch) with a new epoch (the link clears the motion goals), holds him
+until he is still, then lays him down and sends `LYING` (REST, then LIMP
+2 s later). It does not get him up. Meanwhile goals are refused `FALLEN`;
+`SET_POSTURE LIMP` ends the reflex, and a POSE with FALL_OK (the mind's
+righting moves) takes the joints from it. The vbody's `trigger_fall(side)`
+mimics the events and refusals.
 
 **Library layout.** One JSON file per trick in `kilo/tricks/library/`, named by
 the Kilo name. JSON because it is in the stdlib (TOML has no stdlib writer),
@@ -458,8 +439,8 @@ side up = +roll, degrees.
   moving itself), `tap` (1.5°+ impulse on a still body, rising within
   0.12 s, gone within 0.35 s), `pet` (gentle 1.5-10° rocking, ≥ 4 half
   cycles of 0.2-1.5 s in 4 s, never faster than 30°/s), `startle` (≥ 10°
-  within 0.2 s, or a gyro rate ≥ 250°/s). Each has a cooldown. During GAIT,
-  TRICK, RECOVERING and for 1 s after a mode change only `tilted` runs.
+  within 0.2 s, or a gyro rate ≥ 250°/s). Each has a cooldown. During a POSE
+  stream (mode STREAM) and for 1 s after a mode change only `tilted` runs.
   Tap/pet/startle need ≥ 10 Hz telemetry, pickup ≥ 5 Hz.
 - **Limits.** Telemetry has attitude and gyro but no accelerometer, so a
   straight lift or being held still in the air is invisible; pickup is an
@@ -585,7 +566,7 @@ Two stand-ins for the body, both speaking the real codec and messages:
   physics (`kilo/vbody/physics.py`: the body model's masses on four point
   feet that follow their commands one servo lag late, tipping over the
   nearest edge as an inverted pendulum when the centre of mass leaves the
-  feet that are down) and the FEET player (`kilo/vbody/feet.py`). A
+  feet that are down) and the POSE player (`kilo/vbody/pose.py`). A
   cross-check test compares it frame by frame with the body's C dispatch;
   `tests/test_corebody.py` lists where it differs from the real core (the
   core is right).
@@ -663,8 +644,8 @@ while walking): `t_s` (seconds from the file's first record), `uptime_s`
 (nose down +, as the body reports it), `nose_up_deg` (the same, nose up +,
 the trick designs' convention), `roll_deg`, `rate_pitch_dps`,
 `rate_roll_dps`, `batt_mv`, `dist_mm`, `body_keyframe` (the keyframe the
-body says it plays), `command` (the last command the mind sent: FEET,
-SET_POSTURE, TRICK_PLAY, ...), `run` ("walk 3", "trick 4"), `trick`,
+body said it played: protocol 2 recordings only), `command` (the last command
+the mind sent: POSE, SET_POSTURE, ...), `run` ("walk 3", "trick 4"), `trick`,
 `keyframe` (where the trick should be by the clock), `pred_nose_up_deg`
 (the design's predicted pitch then), `err_deg` (measured minus predicted),
 `key` (a remote key since the last row and what the remote did with it),
@@ -689,7 +670,7 @@ as fast as the laptop reads, one small chunk a pass while a walk is on.
 A walk still being recorded cannot be fetched yet.
 
 `kilo log walk` joins, for every body tick, what the plan predicted (the
-FEET frame's pitch and roll: the attitude a servo lag after the feet move)
+POSE frame's pitch and roll: the attitude a servo lag after the feet move)
 with what the body reported for that tick (TELEMETRY), and prints:
 
 - the error, measured minus predicted, per axis: RMS, the largest, and the
@@ -703,13 +684,13 @@ with what the body reported for that tick (TELEMETRY), and prints:
   correction in each;
 - the time the body held its corrections (BALANCE_HELD), the correction's
   mean and largest, the smallest stability margin with one leg up, how far
-  ahead each FEET frame arrived, the planner's holds, catches and waits, and
+  ahead each POSE frame arrived, the planner's holds, catches and waits, and
   the walk's parameters and changes.
 
 `--csv` writes the per-tick table (tick, time, mode, legs in the air,
 support planned and reported, held, balance, predicted / measured /
 error / no-lag plan / reference / correction for pitch and roll, margin,
-FEET sent and TELEMETRY times, lead, feet queued, rates) for modelling the
+POSE sent and TELEMETRY times, lead, poses queued, rates) for modelling the
 error elsewhere; `--plot` draws predicted against measured, the error and
 the correction, held and the legs in the air (matplotlib; CSV without it).
 On the virtual body the IMU is scripted (a fixed attitude), so there the
@@ -735,7 +716,7 @@ the codec against `protocol/vectors` and that the vendored copies match
 `protocol/`; `test_crosscheck.py` plays every vector through the body's C
 dispatch and the virtual body; `test_corebody.py` drives the firmware's
 core. The others are named for what they cover: the link rules, the body
-state, the virtual body and its FEET contract, the planner and the walking
+state, the virtual body and its POSE contract, the planner and the walking
 simulation (`tests/walksim.py`), the walker's stream, tricks and the
 rear-up design, behaviour, perception, the log tools and recordings, the
 host channel (`test_hostlink.py`, keys, mDNS), the flash image and the SD

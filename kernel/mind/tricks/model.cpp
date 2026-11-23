@@ -13,47 +13,26 @@ namespace {
 
 const int8_t kLimits[16][2] = KILO_JOINT_LIMITS_INIT;
 constexpr uint16_t kUnusedMask = 0x00F8;  // slots 3-7 (model.py UNUSED)
-constexpr uint8_t kEasingMask = 0x03;
-constexpr uint8_t kEasingReserved = 3;    // Easing.SPLINE_RESERVED
+constexpr uint16_t kLegMask = 0xFF00;     // slots 8-15: the stream drives every leg joint
 
 }  // namespace
 
-void trick_begin(const Trick& t, uint8_t trick_id, kilo_trick_begin_t* out) {
-  out->trick_id = trick_id;
-  out->n_frames = t.n_frames;
-  out->loop_start = t.loop_start;
-  out->loop_end = t.loop_end;
-  out->repeats = t.repeats;
-  out->joint_mask = t.joint_mask;
-  out->flags = t.flags;
-  out->end_posture = t.end_posture;
-  out->exp_roll = t.exp_roll;
-  out->exp_pitch = t.exp_pitch;
-}
-
-uint8_t trick_chunks(const Trick& t) { return (uint8_t)((t.n_frames + kFramesPerMsg - 1) / kFramesPerMsg); }
-
-uint8_t trick_frames_msg(const Trick& t, uint8_t chunk, kilo_trick_frames_t* out) {
-  uint8_t first = (uint8_t)(chunk * kFramesPerMsg);
-  uint8_t n = (uint8_t)(t.n_frames - first < kFramesPerMsg ? t.n_frames - first : kFramesPerMsg);
-  out->first = first;
-  out->count = n;
-  mem_copy(out->frames, t.frames + first, n * sizeof(kilo_keyframe_t));
-  return (uint8_t)KILO_TRICK_FRAMES_LEN_FOR(n);
-}
+static_assert(sizeof(Keyframe) == 14, "Keyframe: 14 B");
 
 uint16_t trick_crc16(const Trick& t) {
-  return kilo_crc16((const uint8_t*)t.frames, (uint16_t)(t.n_frames * sizeof(kilo_keyframe_t)));
+  return kilo_crc16((const uint8_t*)t.frames, (uint16_t)(t.n_frames * sizeof(Keyframe)));
 }
 
 uint8_t trick_id_for(const Trick& t) {
-  kilo_trick_begin_t b;
-  trick_begin(t, 0, &b);
+  // header(0) as packed: trick_id, n_frames, loop_start, loop_end, repeats,
+  // joint_mask (LE), flags, end_posture, exp_roll, exp_pitch; [1:] skips the id
+  const uint8_t h[10] = {t.n_frames, t.loop_start, t.loop_end, t.repeats, (uint8_t)(t.joint_mask & 0xFF),
+                         (uint8_t)(t.joint_mask >> 8), t.flags, t.end_posture, (uint8_t)t.exp_roll,
+                         (uint8_t)t.exp_pitch};
   uint16_t crc = KILO_CRC16_INIT;
-  const uint8_t* p = (const uint8_t*)&b;
-  for (uint32_t i = 1; i < sizeof b; i++) crc = kilo_crc16_update(crc, p[i]);  // begin(0).pack()[1:]
-  p = (const uint8_t*)t.frames;
-  for (uint32_t i = 0; i < t.n_frames * sizeof(kilo_keyframe_t); i++) crc = kilo_crc16_update(crc, p[i]);
+  for (uint32_t i = 0; i < sizeof h; i++) crc = kilo_crc16_update(crc, h[i]);
+  const uint8_t* p = (const uint8_t*)t.frames;
+  for (uint32_t i = 0; i < t.n_frames * sizeof(Keyframe); i++) crc = kilo_crc16_update(crc, p[i]);
   return (uint8_t)(crc % 254 + 1);
 }
 
@@ -62,15 +41,19 @@ const char* trick_problem(const Trick& t) {
   if (!(t.loop_start <= t.loop_end && t.loop_end < t.n_frames)) return "loop outside the frames";
   if (t.joint_mask == 0) return "no joint is driven";
   if (t.joint_mask & kUnusedMask) return "an unused joint slot is driven";
+  if ((t.joint_mask & kLegMask) != kLegMask) return "a leg joint is not driven (the stream drives every leg)";
   if (t.frames == nullptr) return "no frames";
   uint16_t mask = 0;
   for (uint8_t i = 0; i < t.n_frames; i++) {
-    const kilo_keyframe_t& f = t.frames[i];
+    const Keyframe& f = t.frames[i];
     if (f.dur < 1) return "a frame's dur is 0";
     if ((f.flags & kEasingMask) == kEasingReserved) return "easing 3 is reserved";
     for (uint32_t k = 0; k < KILO_JOINT_COUNT; k++) {
       int8_t a = f.ang[k];
-      if (a == kAngleUnchanged) continue;
+      if (a == kAngleUnchanged) {
+        if (i == 0 && k >= 3) return "frame 0 leaves a leg joint unchanged (the stream needs every leg's angle)";
+        continue;
+      }
       uint8_t j = kCanonical[k];
       mask = (uint16_t)(mask | (1u << j));
       if (a < kLimits[j][0] || a > kLimits[j][1]) return "an angle outside its joint's limits";
@@ -82,7 +65,7 @@ const char* trick_problem(const Trick& t) {
 
 uint8_t speed_q6(double speed) {
   double x = speed * 64.0;
-  if (!(x >= kSpeedMin - 0.5 && x < KILO_TRICK_PLAY_SPEED_Q6_MAX + 0.5)) return 0;
+  if (!(x >= kSpeedMin - 0.5 && x < 255.5)) return 0;
   return (uint8_t)(x + 0.5);
 }
 
@@ -215,37 +198,63 @@ const char* GuardWatch::feed(uint64_t t_us, int16_t pitch_a16, int16_t roll_a16)
   return nullptr;
 }
 
-uint32_t KeyframeTimer::len() const {
-  const kilo_keyframe_t& f = t_.frames[frame_];
-  return (uint32_t)(hold_ ? f.hold : f.dur) << 6;
+bool KeySeq::next(TrickKey* k) {
+  if (t_ == nullptr || done_) return false;
+  for (;;) {
+    const Keyframe& f = t_->frames[frame_];
+    uint8_t ease = f.flags & kEasingMask;
+    if (phase_ == 0) {  // the move
+      uint32_t n = phase_ticks(f.dur, speed_);
+      if (ease == kStep && n > 1) {
+        at_ += 1;  // the jump on the first tick (the safety slew paces it), then wait (phase 1)
+        phase_ = 1;
+        *k = {at_, frame_, kLinear, false};
+        return true;
+      }
+      at_ += n;
+      phase_ = 2;
+      *k = {at_, frame_, ease == kCosine ? kCosine : kLinear, false};
+      return true;
+    }
+    if (phase_ == 1) {  // a step's wait at its target
+      at_ += phase_ticks(f.dur, speed_) - 1;
+      phase_ = 2;
+      *k = {at_, frame_, kLinear, true};
+      return true;
+    }
+    // the hold, then the next frame in play order
+    phase_ = 0;
+    uint32_t h = phase_ticks(f.hold, speed_);
+    bool emit = h > 0;
+    if (emit) at_ += h;
+    TrickKey hk = {at_, frame_, kLinear, true};
+    bool again = false;
+    if (frame_ == t_->loop_end) {
+      plays_ = (uint8_t)(plays_ + 1 < 254 ? plays_ + 1 : 254);
+      again = t_->repeats == kRepeatForever || plays_ < t_->repeats;
+    }
+    if (again)
+      frame_ = t_->loop_start;
+    else if (++frame_ >= t_->n_frames)
+      done_ = true;
+    if (emit) {
+      *k = hk;
+      return true;
+    }
+    if (done_) return false;
+  }
 }
 
-bool KeyframeTimer::step() {
-  if (!running_) return false;
-  if (pos_ >= len()) {
-    pos_ = 0;
-    if (!hold_ && t_.frames[frame_].hold) {
-      hold_ = true;
-    } else {
-      hold_ = false;
-      bool again = false;
-      if (frame_ == t_.loop_end) {
-        plays_ = (uint8_t)(plays_ + 1 < 254 ? plays_ + 1 : 254);
-        again = t_.repeats == kRepeatForever || plays_ < t_.repeats;
-      }
-      if (again) {
-        frame_ = t_.loop_start;
-      } else {
-        frame_++;
-        if (frame_ >= t_.n_frames) {
-          running_ = false;
-          return true;
-        }
-      }
-    }
+int16_t trick_angle(const Trick& t, uint8_t f, uint8_t k, bool mirror) {
+  static const uint8_t kMirror[KILO_JOINT_COUNT] = {0, 1, 2, 4, 3, 6, 5, 8, 7, 10, 9};  // LF<->RF, RB<->LB
+  uint8_t src = mirror ? kMirror[k] : k;
+  for (int i = f; i >= 0; i--) {
+    int8_t v = t.frames[i].ang[src];
+    if (v == kAngleUnchanged) continue;
+    if (mirror && (k == 0 || k == 2)) v = (int8_t)-v;
+    return (int16_t)(v * 16);
   }
-  pos_ += speed_;
-  return false;
+  return KILO_HEAD_NOT_HELD;
 }
 
 }  // namespace tricks

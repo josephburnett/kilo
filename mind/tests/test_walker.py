@@ -1,5 +1,5 @@
 """The walk's plumbing: the body clock, the stream's ends, SerialLink's
-FEET path, and the walk in the log summary."""
+POSE path, and the walk in the log summary."""
 
 import time
 
@@ -35,8 +35,8 @@ def test_body_clock_takes_the_least_delayed_frame():
 def test_body_clock_follows_a_body_stall():
     """The body's tick falls back 80 ms (a stall over 40 ms makes its
     scheduler resync): within CLOCK_RESET_FRAMES frames the estimate follows,
-    instead of staying ahead for the window's 2 s (FEET more than the
-    queue's depth ahead are dropped)."""
+    instead of staying ahead for the window's 2 s (keys too far ahead are
+    dropped, or crowd the queue)."""
     bc = BodyClock()
     t = 10.0
     for i in range(100):
@@ -62,13 +62,13 @@ class _Link:
         self.sent = []
 
     def send_stream(self, name, payload):
-        self.sent.append(P.Feet.unpack(payload))
+        self.sent.append(P.Pose.unpack(payload))
         return True
 
     def mind_alive(self):
         return self.alive
 
-    def tel(self, tick, rx, mode=P.Mode.GAIT, epoch=3):
+    def tel(self, tick, rx, mode=P.Mode.STREAM, epoch=3):
         st = self.state
         st.on_telemetry(P.Telemetry(tick=tick, mode=mode, epoch=epoch), rx)
 
@@ -83,30 +83,32 @@ def _stream(link, done=None):
     link.tel(50, 1.001)
     bc = BodyClock()
     bc.add(50, 1.001)
-    s = Stream(link, Planner(BodyModel(), "trot", tick=55), 3, bc, done or (lambda: None))
+    s = Stream(link, Planner(BodyModel(), "trot", tick=53), 3, bc, done or (lambda: None))
     return s
 
 
-def test_stream_sends_five_ticks_ahead_and_catches_up():
+def test_stream_sends_three_ticks_ahead_and_catches_up():
     link = _Link()
     s = _stream(link)
-    assert s.wake(1.005) and [f.tick for f in link.sent] == [55]
-    assert link.sent[0].epoch == 3 and link.sent[0].z_mm == [76] * 4
+    assert s.wake(1.005) and [f.tick for f in link.sent] == [53]
+    # a POSE in foot mode: feet in q2 (whole mm x 4), the head left to IDLE, flags 0
+    f = link.sent[0]
+    assert f.epoch == 3 and f.flags == 0 and f.leg[1::2] == [76 * 4] * 4 and f.head == [-32768] * 3
     link.tel(51, 1.021)
-    assert s.wake(1.025) and link.sent[-1].tick == 56
+    assert s.wake(1.025) and link.sent[-1].tick == 54
     # three wakes missed: the next one sends what the body has not played yet
-    link.tel(55, 1.101)
-    assert s.wake(1.105) and [f.tick for f in link.sent[2:]] == [57, 58, 59, 60] and s.max_behind == 4
+    link.tel(54, 1.081)
+    assert s.wake(1.085) and [f.tick for f in link.sent[2:]] == [55, 56, 57] and s.max_behind == 3
     # far behind: ticks already past are planned (the plan stays continuous) but not sent
     link.tel(70, 1.401)
     s.wake(1.405)
-    assert s.skipped == 10 and link.sent[-1].tick == 75
+    assert s.skipped == 13 and link.sent[-1].tick == 73
 
 
 @pytest.mark.parametrize("what,why", [
-    (lambda l: l.event(EV.GAIT_STOPPED, 1), "settled after a FEET underrun"),
-    (lambda l: l.event(EV.GAIT_STOPPED, 0), "a posture or an epoch bump"),
-    (lambda l: l.event(EV.GOAL_REFUSED, M.FEET << 8 | R.FALLEN), "refused FEET: FALLEN"),
+    (lambda l: l.event(EV.STREAM_STOPPED, 1), "settled after a POSE underrun"),
+    (lambda l: l.event(EV.STREAM_STOPPED, 0), "a posture or an epoch bump"),
+    (lambda l: l.event(EV.GOAL_REFUSED, M.POSE << 8 | R.FALLEN), "refused POSE: FALLEN"),
     (lambda l: l.event(EV.FELL, 1, epoch=4), "Kilo fell"),
     (lambda l: setattr(l.state, "reboots", 1), "rebooted"),
     (lambda l: setattr(l.state, "epoch", 9), "epoch changed"),
@@ -127,13 +129,13 @@ def test_stream_ends_when_gait_never_comes_or_goes_away():
         link.tel(51 + i, 1.021 + i * 0.02, mode=P.Mode.IDLE)
         if not s.wake(1.025 + i * 0.02):
             break
-    assert "did not enter GAIT" in s.ended
+    assert "did not enter STREAM" in s.ended
     link = _Link()
     s = _stream(link)
     link.tel(51, 1.021)
     assert s.wake(1.025) and s.gait_seen
     link.tel(52, 1.041, mode=P.Mode.IDLE)
-    assert s.wake(1.045) is False and "left GAIT (mode IDLE)" in s.ended
+    assert s.wake(1.045) is False and "left STREAM (mode IDLE)" in s.ended
 
 
 def test_stream_stops_sending_while_the_mind_stalls():
@@ -159,44 +161,44 @@ def test_stream_handover_on_the_planned_stop():
         link.tel(tick, t - 0.004)
     assert calls == ["stance"]
     n = len(link.sent)
-    link.event(EV.GAIT_STOPPED, 0)
+    link.event(EV.STREAM_STOPPED, 0)
     assert s.wake(t + 0.02) is False and s.ended == "stopped" and s.ok and len(link.sent) == n
 
 
-# ---- SerialLink: FEET is a stream, not a goal ------------------------------------------------------
+# ---- SerialLink: POSE is a stream, not a goal ------------------------------------------------------
 
 def test_send_stream_bypasses_the_goal_machinery(make_link):
     link, peer = make_link()
-    payload = P.Feet(epoch=0, tick=5, z_mm=[76] * 4).pack()
-    assert link.send_stream("FEET", payload) is False  # the body not heard yet: nothing goes out
+    payload = P.Pose(epoch=0, tick=5, leg=[0, 304] * 4).pack()
+    assert link.send_stream("POSE", payload) is False  # the body not heard yet: nothing goes out
     peer.hello(epoch=0)
     peer.telemetry(tick=1, epoch=0)
     assert link.wait_until(lambda: link._contact, 1)
-    assert link.send_stream("FEET", payload) is True
-    assert peer.wait_for(lambda: peer.of("FEET"), 1)
-    assert "FEET" not in link.goals()
+    assert link.send_stream("POSE", payload) is True
+    assert peer.wait_for(lambda: peer.of("POSE"), 1)
+    assert "POSE" not in link.goals()
     time.sleep(0.5)
-    assert len(peer.of("FEET")) == 1  # never refreshed, never retried
+    assert len(peer.of("POSE")) == 1  # never refreshed, never retried
     assert link.send_stream("SET_POSTURE", payload) is False  # only Pi->body streams
     link.go_silent()
-    assert link.send_stream("FEET", payload) is False
+    assert link.send_stream("POSE", payload) is False
 
 
 # ---- the log summary --------------------------------------------------------------------------------
 
 def test_log_summary_renders_the_walk():
-    ss = [TelemetrySample(t=i * 0.02, tick=i, mode="GAIT", flags={"gait"}, pitch_deg=0.0, roll_deg=0.5,
+    ss = [TelemetrySample(t=i * 0.02, tick=i, mode="STREAM", flags={"stream"}, pitch_deg=0.0, roll_deg=0.5,
                           ref_pitch_deg=0.0, ref_roll_deg=0.0, corr_pitch_deg=0.0, corr_roll_deg=0.0)
           for i in range(100)]
     ss += [TelemetrySample(t=2.0 + i * 0.02, tick=100 + i, mode="IDLE", flags=set()) for i in range(10)]
-    events = [LogEvent(2.0, "GAIT_STOPPED", 1, 100, 0), LogEvent(1.9, "FEET_UNDERRUN", 1, 95, 0),
-              LogEvent(0.0, "GOAL_REFUSED", M.FEET << 8 | R.STALE, 0, 0)]
+    events = [LogEvent(2.0, "STREAM_STOPPED", 1, 100, 0), LogEvent(1.9, "POSE_UNDERRUN", 1, 95, 0),
+              LogEvent(0.0, "GOAL_REFUSED", M.POSE << 8 | R.STALE, 0, 0)]
     g = gait_summary(ss, events)
     assert (g["walking_s"], g["stops"], g["stopped_underrun"], g["underruns"], g["refused"]) == (
-        2.0, 1, 1, 1, ["FEET: STALE"])
+        2.0, 1, 1, 1, ["POSE: STALE"])
     assert g["error"]["offset_roll_deg"] == 0.5
     assert gait_summary(ss[100:], []) is None
     text = format_summary({"path": "x", "format": "kilolog", "duration_s": 2.2, "samples": 110, "gait": g,
-                           "events": [(0.0, "GOAL_REFUSED", M.FEET << 8 | R.STALE)]})
-    assert "gait: walking 2.0s, 1 GAIT_STOPPED (1 after an underrun), 1 FEET_UNDERRUN, refused FEET: STALE" in text
+                           "events": [(0.0, "GOAL_REFUSED", M.POSE << 8 | R.STALE)]})
+    assert "gait: walking 2.0s, 1 STREAM_STOPPED (1 after an underrun), 1 POSE_UNDERRUN, refused POSE: STALE" in text
     assert "model error: offset pitch +0.0° roll +0.5°" in text
