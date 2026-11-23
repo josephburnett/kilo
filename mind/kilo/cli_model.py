@@ -4,6 +4,10 @@
                                             unit, where it came from; then the numbers that disagree
                                             (what a part of the mind fitted for itself, against the
                                             model; with --fit, against a self-measurement too)
+    kilo model score [FILES] [--set NAME=VALUE] [--fit NAMES]
+                                            how well the model predicts the recordings (~/kilo-logs): the
+                                            FEET Kilo was sent, replayed in the model, against what his
+                                            tilt sensor read; --fit finds the numbers that predict best
     kilo model apply FILE.fit.json [--dry-run] [--no-rear-up]
                                             write what a self-measurement found (kilo measure fit)
                                             into protocol/spec.toml, regenerate everything made from
@@ -87,6 +91,17 @@ def add_parser(sub: Any) -> None:
     ap.add_argument("--no-rear-up", action="store_true",
                     help="skip rebuilding and checking the rear-up trick (several minutes)")
     ap.add_argument("--repo", type=Path, default=None, help=argparse.SUPPRESS)
+    sc = ms.add_parser("score", help="how well the model predicts the recordings: what Kilo was told, replayed in "
+                                     "the model, against what his tilt sensor read (kilo.measure.score)")
+    sc.add_argument("files", nargs="*", help="recordings (.krec) or saved segments (.json); default: ~/kilo-logs")
+    sc.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
+                    help="score the model with this number changed (names: kilo.measure.score PARAMS), e.g. "
+                         "com_x=-3; repeatable")
+    sc.add_argument("--fit", metavar="NAMES", help="find the numbers that predict the fit set best, e.g. "
+                                                  "imu_pitch,imu_roll,com_x (slow: minutes)")
+    sc.add_argument("--judge", default="rocking", choices=("rocking", "physics"),
+                    help="the virtual body's physics (default: RockingPhysics)")
+    sc.add_argument("--procs", type=int, default=0, help="processes (default: half the CPUs, at most 8)")
 
 
 # ---- the model, in words -------------------------------------------------------------------------
@@ -592,11 +607,64 @@ def report(before: dict, after: dict, changes: list[Change], rear_up: str) -> st
     return "\n".join(L)
 
 
+def score_cmd(args: argparse.Namespace) -> int:
+    """``kilo model score``: the table of kilo.measure.score, for the model as it is (and as changed by
+    --set, or as fitted by --fit)."""
+    from kilo.measure import score as SC
+    from kilo.planner.model import BodyModel
+
+    segs = SC.load_segments(args.files or None)
+    if not segs:
+        print("kilo model score: no recording with FEET in it", file=sys.stderr)
+        return EXIT_ERR
+    model, judge = BodyModel(), SC.Judge(args.judge)
+    changed = {}
+    for s in args.set:
+        k, _, v = s.partition("=")
+        if k not in SC.PARAMS:
+            raise ValueError(f"--set {k}: not one of " + ", ".join(SC.PARAMS))
+        changed[k] = float(v)
+    ev = SC.Evaluator(segs, args.procs)
+    try:
+        preds = {"the planner's own": SC.plan_preds(segs, model), "the model": ev.predict(model, judge)}
+        if changed:
+            m2, j2 = SC.with_values(model, judge, changed)
+            preds["changed"] = ev.predict(m2, j2)
+        if args.fit:
+            names = [n.strip() for n in args.fit.split(",") if n.strip()]
+            bad = [n for n in names if n not in SC.PARAMS]
+            if bad:
+                raise ValueError("--fit: not known: " + ", ".join(bad))
+            m0, j0 = SC.with_values(model, judge, changed)
+            fe = SC.Evaluator([s for s in segs if not s.held_out], args.procs)
+            try:
+                out = SC.fit(fe, m0, j0, names, say=print)
+            finally:
+                fe.close()
+            m3, j3 = SC.with_values(m0, j0, out.values)
+            print("fitted on the fit set; +-: each boot's own best value, every recording (their median and spread "
+                  "over the root of their number):")
+            for k in names:
+                step = SC.PARAMS[k][0] * 2
+                sp = SC.spread(ev, m3, j3, k, [out.values[k] + d * step for d in (-2, -1, 0, 1, 2)])
+                print(f"  {k:<10} {out.start[k]:8.2f} -> {out.values[k]:8.2f}   boots: median {sp['median']:.2f} "
+                      f"+- {sp['pm']:.2f} ({len(sp['boots'])} boots)   {SC.PARAMS[k][1]}")
+            preds["fitted"] = ev.predict(m3, j3)
+    finally:
+        ev.close()
+    print("rms of (read - predicted), degrees, pitch / roll; the predictions are the virtual body's on the "
+          f"{args.judge} physics with the model's IMU offset, \"the planner's own\" is what each FEET said")
+    print(SC.table(segs, preds))
+    return EXIT_OK
+
+
 def local(args: argparse.Namespace) -> int:
     try:
         if args.model_cmd == "show":
             print(show(load_fit(args.fit) if args.fit else None))
             return EXIT_OK
+        if args.model_cmd == "score":
+            return score_cmd(args)
         return apply(args.fit, repo=args.repo or REPO, dry_run=args.dry_run, rear_up=not args.no_rear_up)
     except (OSError, ValueError, RuntimeError) as e:
         print(f"kilo model: {e}", file=sys.stderr)

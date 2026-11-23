@@ -9,8 +9,8 @@ the fit of its rock to the floor recordings, and the trot's long swing
 
 Two physics: kilo.vbody.physics.Physics (the virtual body's own) and
 kilo.vbody.rocking.RockingPhysics (a pendulum on the diagonal's line,
-momentum kept across support changes, ROCKING's settings: the closest of
-those tried to the recordings, still about half their rock above 160 mm/s).
+momentum kept across support changes, ROCKING's settings: kilo.measure.score's
+judge, the one that predicts the floor recordings best with the body model).
 The fitted pendulum (kilo.planner.plan.TROT_FIT) is the model that
 matches the recordings; the physics check the mechanics (reach, joints,
 clearance, falls, the stop) and the direction of the effects.
@@ -41,7 +41,9 @@ from kilo.vbody.rocking import RockingPhysics  # noqa: E402
 from walksim import WalkSim  # noqa: E402
 
 M = BodyModel()
-ROCKING = dict(inset_mm=10.0, line_lag_ms=50.0)
+# RockingPhysics' settings: the judge that predicts the floor recordings best with the one body model
+# (kilo.measure.score.Judge, docs/model-fit-results.md; until 2026-11-22 inset 10, line lag 50)
+ROCKING = dict(inset_mm=0.0, line_lag_ms=55.0)
 TICK_S = phys.TICK_S
 
 

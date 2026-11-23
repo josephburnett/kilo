@@ -1786,9 +1786,18 @@ the servos follow (`servo_lag_ms`, `servo_tau_ms`); Kilo's servo zeros
 (`[model.outline]`), the frame's inertia, where the distance sensor sits; and
 `[model.correction]`: the corrections a self-measurement finds (centre of
 mass, how much the legs give, legs a little long or short, what the tilt
-sensor reads when he stands level). The corrections are all zero until a
-measurement is applied. `[model.about]` says for every number what it is and
-where it came from; `kilo model show` prints it in plain words.
+sensor reads when he stands level). Since 2026-11-22 they hold the numbers
+that predict the floor recordings best (`kilo model score`,
+docs/model-fit-results.md): the centre of mass 3 mm further back than the
+hand measurement, legs that give 4 degrees per kg cm, the tilt sensor reading
+2.3 degrees nose down and 0.5 of roll. `[model.about]` says for every number
+what it is and where it came from; `kilo model show` prints it in plain words.
+
+**How good it is.** `kilo model score` replays every recorded run in which
+the Pi streamed foot positions (walks, trots, crawls, the self-measurement)
+through the model and the virtual body, and compares the tilt it predicts
+with what Kilo's sensor read: on recordings the fitting never saw, 0.6
+degrees rms of pitch and 1.1 of roll (the model before: 2.5 and 1.6).
 
 **Who reads it.** The generator (`protocol/gen.py`) turns the file into
 constants for C and Python; `BodyModel` (`mind/kilo/planner/model.py`, and
@@ -1800,21 +1809,19 @@ reads the same leg parameters for its own leg arithmetic, and a test checks
 that it and the mind compute the same leg (within 0.15 degrees; measured
 0.07).
 
-**The views that remain.** Three parts of the mind had fitted numbers for
-themselves that disagree with the model. They keep them for now, because
-nothing may change what Kilo does before the next measurement on Kilo, but
-they now live in the same file as named views (`[model.views]`), so the
-disagreement is visible in one place:
+**The views that remain.** Two parts of the mind keep numbers fitted for
+themselves that disagree with the model, as named views (`[model.views]`),
+so the disagreement is visible in one place. The tricks' own view (its
+centre of mass 5 mm to the right) was deleted on 2026-11-22: the tricks, the
+rear-up, the moves between postures, the righting experiment and the state
+estimate all read the model itself.
 
 | View | Used by | What disagrees |
 |---|---|---|
-| `trot` | the trot's foot placement | centre of mass 3.5 mm ahead of the shoulders' middle (the model: 7.4) |
-| `tricks` | the rear-up's design and checks | centre of mass 5.5 mm further back and 5 mm to the right, legs that give (4 degrees per kg cm), the tail drooping 16 degrees (18), the tilt sensor reading 1.9 degrees nose down and 2 degrees of roll |
-| `tricks_rigid` | the rear-up's check against the falls of 2026-11-17 | centre of mass 2 mm to the right |
+| `trot` | the trot's foot placement | centre of mass 3.5 mm ahead of the shoulders' middle (the model: 4.4): the trot's effective one, fitted to its rock on the floor |
+| `tricks_rigid` | the rear-up's check against the falls of 2026-11-17 | centre of mass 2 mm to the right: a record of Kilo before his right hind shoulder was re-seated |
 
-Deleting a view's table makes its user read the model. That is a decision
-for after a measurement, one view at a time, with the walk or trick tried
-again on Kilo.
+Deleting a view's table makes its user read the model.
 
 **What is not on the model yet.** The postures (stand, sit, rest), the 13
 stock tricks, the sitting fidgets and getting up after a fall are still
@@ -2496,7 +2503,7 @@ the config block, 0x7FFF = default). The P0 body implements:
 | 13 | `LEG_L1_MM` | 45 | 20..120 | mm | Upper leg, shoulder axle to knee axle (B7; the default is Kilo's, measured) |
 | 14 | `LEG_L2_MM` | 50 | 20..120 | mm | Lower leg, knee axle to the round foot's centre (the floor is 6 mm lower; Kilo's, measured) |
 | 15 | `LEG_LB_MM` | 123 | 50..200 | mm | Front-back shoulder spacing (Kilo's, measured) |
-| 16 | `LEG_W_MM` | 65 | 30..150 | mm | Left-right foot track (Kilo's, measured) |
+| 16 | `LEG_W_MM` | 70 | 30..150 | mm | Left-right foot track (Kilo's, measured and fitted) |
 | 17 | `LEG_SH_ZERO_DEG` | 0 | -45..45 | deg | Upper link angle at joint angle 0 (θ1_0) |
 | 18 | `LEG_KN_ZERO_DEG` | 90 | 30..150 | deg | Knee bend at joint angle 0 (θ2_0) |
 | 19 | `FALL_RC` | 1 | 0..1 | bool | Fall reflex plays rc (0: the mind rights him) |

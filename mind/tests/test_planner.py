@@ -24,7 +24,8 @@ H = M.stance_height(205)  # 76 mm: STANCE's body height
 def test_model_masses_and_reach():
     assert M.total_g == pytest.approx(358.0)  # weighed 2026-11-14, the Pi mounted
     cx, cy, cz = M.com([0] * 4, [H] * 4)
-    assert abs(cy) < 1e-9 and cx == pytest.approx(7.5, abs=0.2) and cz == pytest.approx(-3.0, abs=0.3)  # as measured
+    # as measured by hand (7.5 ahead), moved by the correction the recordings predict best with (-3 mm)
+    assert abs(cy) < 1e-9 and cx == pytest.approx(7.5 + M.com_dx_mm, abs=0.2) and cz == pytest.approx(-3.0, abs=0.3)
     assert H == pytest.approx(76.0, abs=0.1)
     assert M.tau_s(80) == pytest.approx(0.090, abs=0.001)  # the 90 ms tip time constant of the doc
     for leg in LEGS:
@@ -66,8 +67,8 @@ def test_leg_lengths_and_attitude_conventions():
 def test_stability_margin():
     zs = [H] * 4
     four = stability(M, [0.0] * 4, zs, 0xF, 0.0, 0.0)
-    assert four == pytest.approx(32.5, abs=0.5)  # the half track
-    # on three feet the mass sits near the diagonal's edge (nose heavy: 7.5 mm ahead of the centre)
+    assert four == pytest.approx(M.track_mm / 2, abs=0.5)  # the half track
+    # on three feet the mass sits near the diagonal's edge (nose heavy: 4.4 mm ahead of the centre)
     for lifted in LEGS:
         m = stability(M, [0.0] * 4, zs, 0xF & ~(1 << lifted), 0.0, 0.0)
         assert abs(m) < 4.0
@@ -332,7 +333,9 @@ def test_the_lean_keeps_the_mass_inside_three_feet(name):
             j = i - lead
             while j + 1 < len(ticks) and ticks[j + 1].lifting:
                 j += 1
-                assert abs(ticks[j].plan_roll - held.plan_roll) < 0.05, (i, j)
+                # plan_roll is the plane through the feet in the whole mm FEET carries: a foot's z
+                # rounding the other way moves it up to 0.6 deg (the 70 mm track), the lean stays
+                assert abs(ticks[j].plan_roll - held.plan_roll) < 0.75, (i, j)
     # the side the mass goes to: away from the lifting leg (roll + = right up = mass left)
     for t in three:
         leg = t.lifting[0]

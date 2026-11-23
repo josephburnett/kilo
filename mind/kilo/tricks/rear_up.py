@@ -114,10 +114,8 @@ DESIGN = T.Geometry3(czp=DESIGN_CZP)
 # Kilo before the re-seat (the EEPROM dump of 2026-10-10: the right hind shoulder stops at -57):
 # the rigid model's fit of 2026-11-17 (the history: test_rear_up).
 AS_RECORDED = T.Geometry3(czp=T.KILO_CZP, com_dy=PM.view_numbers("tricks_rigid")["com_dy_mm"])
-# The model the trick is judged in: the tricks' fitted dynamics (dynamics.FITTED), with the centre of
-# mass sideways where the body model has it (0): the self-measurement of 2026-11-22 found it there
-# (-0.7 +- 0.6 mm), not 5 mm right as the "tricks" view still says for the other tricks.
-MODEL = D.FITTED.with_(com_dy=D.BODY.com_dy_mm)
+# The model the trick is judged in: the one body model in the compliant dynamics (dynamics.NOMINAL).
+MODEL = D.NOMINAL
 REACH_MARGIN = 2.0  # deg: every angle at least this far inside what the servo reaches (DESIGN)
 MIN_KNEE_BEND = 25.0  # the hind knee stays bent at least this much (the leg at most 98 % of its length)
 

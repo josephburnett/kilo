@@ -78,17 +78,17 @@ class RockingPhysics(Physics):
         from kilo.vbody.physics import SUBSTEPS, TICK_S
         p0, r0 = self.pitch, self.roll
         dt = TICK_S / SUBSTEPS
-        a_s = 1.0 - math.exp(-dt * 1000.0 / self.tau_ms) if self.tau_ms > 0 else 1.0
-        a_w = 1.0 - math.exp(-dt * 1000.0 / self.swing_tau_ms) if self.swing_tau_ms > 0 else 1.0
+        a_s = self._alphas(dt)
+        a_w = self._alphas(dt, self.swing_tau_ms)
         for k in range(SUBSTEPS):
             ux, uz = self._feet_at((k + 1) / SUBSTEPS)
             top = max(uz)
             yx, yz = self._resp
             for leg in LEGS:
-                a = a_w if uz[leg] < top - 1.0 or yz[leg] < top - 1.0 else a_s
+                a = a_w[leg] if uz[leg] < top - 1.0 or yz[leg] < top - 1.0 else a_s[leg]
                 yx[leg] += (ux[leg] - yx[leg]) * a
                 yz[leg] += (uz[leg] - yz[leg]) * a
-            self.xs, self.zs = list(yx), list(yz)
+            self._legs_now(yx, yz, dt)
             self._motion(dt)
             self._substep(dt)
             if self.fallen:

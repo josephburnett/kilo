@@ -122,15 +122,18 @@ def test_the_fitted_pendulum_matches_the_recorded_trots():
 @pytest.mark.parametrize("speed", (180, 207))
 def test_the_long_swing_walks_in_the_virtual_body(speed):
     """8 s on RockingPhysics and on Physics: no fall, no catch, no hold; within 4 deg of its plan (roll
-    rms under 1.2), less than half the rock of the same strides landing at half a stride
-    (RockingPhysics; the two physics put the best landing 3 mm either side of the fitted one)."""
+    rms under 2: the long trot on the floor rocked 2.0 rms about its plan, boot 14, kilo model score),
+    and less rock than the same strides landing at half a stride (RockingPhysics). Since the body
+    model's centre of mass came from the recordings (2026-11-22: 4.4 mm ahead, the trot's own fitted
+    pendulum keeps 3.5) the virtual body rocks 1.1 to 1.7 rms here (0.3 before) and the landing helps
+    it by a third, not by half: the trot is fitted to the floor, the virtual body only judges it."""
     r = walk(speed, ticks=400)
     r0 = walk(speed, physics="physics", ticks=400)
     flat = walk(speed, ticks=400, place=False)
     for x in (r, r0):
         assert not x["fell"] and x["catches"] == 0 and x["holds"] == 0, x
-        assert x["max_err"] < 4.0 and x["rms_roll"] < 1.2 and x["reach"] and x["fastest"] < 485, x
-    assert r["rms_roll"] < 0.5 * flat["rms_roll"], (r, flat)
+        assert x["max_err"] < 4.0 and x["rms_roll"] < 2.0 and x["reach"] and x["fastest"] < 485, x
+    assert r["rms_roll"] < 0.8 * flat["rms_roll"], (r, flat)
 
 
 def test_the_build_up_to_the_long_stride():

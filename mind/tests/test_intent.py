@@ -150,26 +150,25 @@ def test_the_plan_orders_the_legs_where_that_keeps_the_mass_further_inside():
     doc = {e["move"]: e for e in M.load_plan()["moves"]}
     # stand <-> sit: all joints at once is already 27 mm inside: nothing to order
     assert len(doc["stand_to_sit"]["stages"]) == 1 and min(doc["stand_to_sit"]["margin_mm"].values()) > 25
-    # rest -> stand: all at once comes within 7 mm; the hind legs first keeps 10
+    # rest -> stand: all at once comes within 7 mm; the hind legs first keeps 8.7
     e = doc["rest_to_stand"]
     assert e["stages"][0] == ["hind shoulders", "hind knees"] and len(e["stages"]) == 2
     assert min(e["one_stage_margin_mm"].values()) < M.MARGIN_MM <= min(e["margin_mm"].values())
-    # rest <-> sit: no staging keeps 10 mm: not shipped, the graph goes through STANDING
+    # rest <-> sit: no staging keeps 8.5 mm: not shipped, the graph goes through STANDING
     assert not doc["rest_to_sit"]["shipped"] and not doc["sit_to_rest"]["shipped"]
     assert "comes within" in doc["rest_to_sit"]["why_not"]
 
 
 @pytest.mark.parametrize("name", M.shipped())
 def test_every_shipped_move_in_the_dynamics(name):
-    """Played in the compliant dynamics on the model and on the tricks' fit, each shipped move ends
+    """Played in the compliant dynamics on the model, each shipped move ends
     where the state estimate reads its target, without a fall, a stop or an overloaded servo."""
     e = {x["move"]: x for x in M.load_plan()["moves"]}[name]
     pl = M.plan(S[e["from"]], S[e["to"]])
-    for band, p in (("model", D.NOMINAL), ("fitted", D.FITTED)):
-        run = M.judge(pl, band, p)
-        assert run.ok, (name, band, run.problems)
-        assert run.end_state == e["to"]
-        assert run.max_roll < M.ROLL_MAX - 10
+    run = M.judge(pl, "model", D.NOMINAL)
+    assert run.ok, (name, run.problems)
+    assert run.end_state == e["to"]
+    assert run.max_roll < M.ROLL_MAX - 10
 
 
 def test_a_bad_move_is_not_shipped():

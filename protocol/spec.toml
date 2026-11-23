@@ -960,12 +960,12 @@ brief = "Front-back shoulder spacing (Kilo's, measured)"
 [[params]]
 name = "LEG_W_MM"
 id = 16
-default = 65
+default = 70
 min = 30
 max = 150
 unit = "mm"
-doc = "Left-right foot track, foot centre to foot centre (roll lever arm). Kilo: 65 (measured 2026-10-11)."
-brief = "Left-right foot track (Kilo's, measured)"
+doc = "Left-right foot track, foot centre to foot centre (roll lever arm). Kilo: 70 (the owner's tape 2026-10-15, and what predicts the recordings best: docs/model-fit-results.md; 65 until 2026-11-22)."
+brief = "Left-right foot track (Kilo's, measured and fitted)"
 
 [[params]]
 name = "LEG_SH_ZERO_DEG"
@@ -1222,15 +1222,20 @@ servo_tau_ms = 70
 # the code had: moving them here changed nothing Kilo does.
 #
 # The foot rectangle. The model takes the feet at x 0 to stand LEG_LB_MM x
-# LEG_W_MM apart (123 x 65: the shoulder axles' spacing and the track). The
-# first self-measurement run (2026-11-21, docs/self-measurement-results.md)
-# tilts as if they stood about 133 x 69 mm apart, and the owner's tape on
-# 2026-10-15 said 133 x 70 (feet, standing). NOT changed here: the values
-# wait for the second measurement (`kilo model apply`).
+# LEG_W_MM apart (123 x 70: the shoulder axles' spacing and the track). The
+# track is 70 since 2026-11-22: the owner's tape (2026-10-15) and what predicts
+# the floor recordings best (docs/model-fit-results.md; 65 before). Front to
+# back the tape said 133 (the feet) and the self-measurement 132, but the
+# recordings' replay cannot tell 123 from 133 apart: left at the axles' 123.
 
 # Corrections to the model above for this robot: what a self-measurement
-# finds (`kilo model apply FIT.json` writes them). All zero today: nothing has
-# been applied yet. BodyModel adds them (com() moves by com_d*).
+# finds (`kilo model apply FIT.json` writes them), or what predicts the floor
+# recordings best (`kilo model score`, docs/model-fit-results.md: the values
+# below since 2026-11-22). BodyModel adds them (com() moves by com_d*).
+# imu_*_deg are what TELEMETRY reads, for everything in the mind that predicts
+# a reading; the board does not correct its sensor (IMU_OFFSETS_SET is not
+# sent): whether the 2.3 deg is the sensor's mounting or the front legs is not
+# known yet. If the board is ever told, these go to 0 (correct it in one place).
 #   com_d*_mm          the whole robot's centre of mass, moved forward / to the
 #                      left / up (body frame)
 #   sag_deg_per_kg_cm  how much every leg servo gives under load
@@ -1247,13 +1252,13 @@ servo_tau_ms = 70
 #   servo_give         it gives under load this many times sag_deg_per_kg_cm
 #                      (1 = like the others; 1.5 = half as stiff again)
 [model.correction]
-com_dx_mm = 0.0
+com_dx_mm = -3.0
 com_dy_mm = 0.0
 com_dz_mm = 0.0
-sag_deg_per_kg_cm = 0.0
+sag_deg_per_kg_cm = 4.0
 leg_dz_mm = [0.0, 0.0, 0.0, 0.0]
-imu_pitch_deg = 0.0
-imu_roll_deg = 0.0
+imu_pitch_deg = 2.3
+imu_roll_deg = 0.5
 servo_lag_d_ms = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 servo_tau_d_ms = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 servo_give = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
@@ -1332,28 +1337,6 @@ com_h_mm = 79.0
 extra_ms = 120.0
 clamp_deg = 2.3
 
-# The tricks' dynamics (kilo.tricks.dynamics FITTED; the rear-up is designed
-# and checked on it): fitted to the recorded rear-up plays of 2026-11-19..21
-# (mind/tests/fixtures/rear_up_2026_11_21.json; docs/rear-up-trick.md).
-# imu_pitch_deg in TELEMETRY's sense (nose down +): STAND reads 1.9 nose down
-# (2026-11-17 and the walks); it is the tricks' default too, not only the fit's.
-# imu_roll_deg 2.0: TELEMETRY reads about +2 (left side down) in the trick poses
-# that load the hind legs where the model is level. The self-measurement of
-# 2026-11-22 found the sensor's own roll offset 0.29, so most of it is the body
-# sitting lower on the left under that load (docs/rear-up-trick-results.md),
-# not the sensor; kept here as what TELEMETRY reads. com_dy_mm -5: the same
-# self-measurement found the centre of mass in the middle (-0.7 +- 0.6 mm).
-# The rear-up reads the model's (0) instead (kilo.tricks.rear_up MODEL: its
-# lean against this one tipped him left); the intent moves and the righting
-# experiment still use this one until their owners re-check them on 0.
-[model.views.tricks]
-com_dx_mm = -5.5
-com_dy_mm = -5.0
-sag_deg_per_kg_cm = 4.0
-tail_droop_deg = 16.0
-imu_pitch_deg = 1.9
-imu_roll_deg = 2.0
-
 # The rigid 3-D model's fit of the two falls of 2026-11-17, before the right
 # hind shoulder was re-seated (kilo.tricks.rear_up AS_RECORDED, with [model.servo] czp).
 [model.views.tricks_rigid]
@@ -1375,16 +1358,16 @@ lower_leg_g = ["one lower leg and foot", "g", "estimate"]
 lower_leg_at = ["...its centre this share of the way from knee to foot", "", "estimate"]
 servo_lag_ms = ["a leg starts moving this long after it is told", "ms", "fitted to the floor recordings of 2026-11-15"]
 servo_tau_ms = ["...and then closes 63 % of the gap in this time", "ms", "fitted to the floor recordings of 2026-11-15"]
-"correction.com_dx_mm" = ["centre of mass further forward than the model above", "mm", "nothing applied yet"]
-"correction.com_dy_mm" = ["centre of mass further to the left", "mm", "nothing applied yet"]
-"correction.com_dz_mm" = ["centre of mass higher", "mm", "nothing applied yet"]
-"correction.sag_deg_per_kg_cm" = ["how much the leg servos give under load", "deg per kg cm", "nothing applied yet"]
-"correction.leg_dz_mm" = ["each leg longer than commanded (left front, right front, right back, left back)", "mm", "nothing applied yet"]
-"correction.imu_pitch_deg" = ["what the tilt sensor reads nose-down when he stands level", "deg", "nothing applied yet"]
-"correction.imu_roll_deg" = ["...and rolled (right side up +)", "deg", "nothing applied yet"]
+"correction.com_dx_mm" = ["centre of mass further forward than the model above", "mm", "fitted by prediction to the floor recordings, 2026-11-22 (docs/model-fit-results.md)"]
+"correction.com_dy_mm" = ["centre of mass further to the left", "mm", "0: what the floor recordings say (docs/model-fit-results.md)"]
+"correction.com_dz_mm" = ["centre of mass higher", "mm", "not measured: the floor recordings cannot separate it (docs/model-fit-results.md)"]
+"correction.sag_deg_per_kg_cm" = ["how much the leg servos give under load", "deg per kg cm", "fitted by prediction to the floor recordings, 2026-11-22 (docs/model-fit-results.md)"]
+"correction.leg_dz_mm" = ["each leg longer than commanded (left front, right front, right back, left back)", "mm", "none found in the floor recordings (docs/model-fit-results.md)"]
+"correction.imu_pitch_deg" = ["what the tilt sensor reads nose-down when he stands level", "deg", "fitted by prediction to the floor recordings, 2026-11-22 (docs/model-fit-results.md)"]
+"correction.imu_roll_deg" = ["...and rolled (right side up +)", "deg", "fitted by prediction to the floor recordings, 2026-11-22 (docs/model-fit-results.md)"]
 "correction.servo_lag_d_ms" = ["each servo (joint id 0..15) starts this much later than servo_lag_ms", "ms", "nothing measured per servo yet"]
 "correction.servo_tau_d_ms" = ["...and closes the gap this much slower than servo_tau_ms", "ms", "nothing measured per servo yet"]
-"correction.servo_give" = ["...and gives under load this many times sag_deg_per_kg_cm", "", "nothing measured per servo yet"]
+"correction.servo_give" = ["...and gives under load this many times sag_deg_per_kg_cm", "", "all alike: the left hind probably 1.5 and the right hind 0.5, not applied (docs/model-fit-results.md)"]
 "servo.czp" = ["each servo's zero, by joint id 0..15", "servo deg", "Kilo's EEPROM, read 2026-10-10"]
 "servo.reseated_rb_shoulder_czp" = ["the right hind shoulder's zero after it was re-seated", "servo deg", "read from the plays since 2026-11-19, not confirmed"]
 "tail.pivot_x_mm" = ["the tail's pivot, forward of the shoulders' middle", "mm", "the owner's ruler, 2026-11-16"]
@@ -1407,7 +1390,6 @@ servo_tau_ms = ["...and then closes 63 % of the gap in this time", "ms", "fitted
 "sensor.ultrasonic_height_mm" = ["the distance sensor above the floor, standing", "mm", "estimate (taken a little low)"]
 "sensor.ultrasonic_floor_tilt_deg" = ["looking down more than this, the sensor sees the floor", "deg", "estimate"]
 "views.trot" = ["the trot's own fit of how he rocks on a diagonal", "", "floor recordings of 2026-11-15..17"]
-"views.tricks" = ["the tricks' own fit (the rear-up is designed on it)", "", "rear-up plays of 2026-11-19..21"]
 "views.tricks_rigid" = ["the rear-up's first, rigid fit, before the right hind shoulder was re-seated", "", "the two falls of 2026-11-17"]
 
 # ---------------------------------------------------------------------------

@@ -286,6 +286,14 @@ new centre of mass.
 4. The walk's margin is a design problem, not a model one: no number in
    this measurement brings it near the 3 mm it needs.
 
+**Later the same day** the model was judged by how well it predicts all
+the floor recordings (docs/model-fit-results.md). Applied from there: the
+tilt sensor's offset (2.3 and 0.5 degrees, in the mind's model only, not
+on the board), the legs' give (4), the centre of mass 3 mm back (4.4 mm
+ahead, this measurement's 4.3) and the feet 70 mm apart left to right.
+The 132 mm front to back is not applied: the recordings' replay cannot
+tell it from 123.
+
 ### What a further run should do differently
 
 - Lift the foot higher in the sideways-leaning tests (they tipped only a
