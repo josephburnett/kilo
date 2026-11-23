@@ -106,7 +106,8 @@ def _num(v: Any) -> str:
 
 SECTIONS = (("", "Masses, reach and servo timing"), ("correction", "Corrections from a self-measurement"),
             ("servo", "Servo zeros (calibration)"), ("tail", "The tail"), ("outline", "The frame's outline"),
-            ("inertia", "Inertia"), ("sensor", "The distance sensor"))
+            ("inertia", "Inertia"), ("sensor", "The distance sensor"),
+            ("travel", "How far the body goes for the feet's push (kilo log wall)"))
 LEG_PARAMS = (("LEG_L1_MM", "upper leg, shoulder to knee"), ("LEG_L2_MM", "lower leg, knee to the foot's centre"),
               ("LEG_LB_MM", "front feet to back feet (taken as the shoulders' spacing)"),
               ("LEG_W_MM", "left feet to right feet"))

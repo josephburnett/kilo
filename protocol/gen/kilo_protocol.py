@@ -3089,6 +3089,9 @@ MODEL_OUTLINE_HALF_WIDTH_MM = 30.0
 MODEL_INERTIA_FRAME_BOX_MM = (130, 60, 45)
 MODEL_SENSOR_ULTRASONIC_HEIGHT_MM = 80
 MODEL_SENSOR_ULTRASONIC_FLOOR_TILT_DEG = 12
+MODEL_TRAVEL_WALK_GROUND_FRAC = 1.0
+MODEL_TRAVEL_TROT_GROUND_FRAC = 1.0
+MODEL_TRAVEL_CRAWL_GROUND_FRAC = 1.0
 MODEL_VIEW_TROT_COM_X_MM = 3.5
 MODEL_VIEW_TROT_COM_H_MM = 79.0
 MODEL_VIEW_TROT_EXTRA_MS = 120.0
@@ -3150,6 +3153,9 @@ MODEL_ABOUT: dict[str, tuple[str, str, str]] = {
     'inertia.frame_box_mm': ("the frame's mass spread as a box this size", 'mm', 'estimate'),
     'sensor.ultrasonic_height_mm': ('the distance sensor above the floor, standing', 'mm', 'estimate (taken a little low)'),
     'sensor.ultrasonic_floor_tilt_deg': ('looking down more than this, the sensor sees the floor', 'deg', 'estimate'),
+    'travel.walk_ground_frac': ("the walk: the share of the feet's push the body really goes (1 = no slip)", '', 'assumed, not measured (kilo log wall)'),
+    'travel.trot_ground_frac': ('the trot: the same', '', 'assumed, not measured (kilo log wall)'),
+    'travel.crawl_ground_frac': ('the crawl: the same', '', 'assumed, not measured (kilo log wall)'),
     'views.trot': ("the trot's own fit of how he rocks on a diagonal", '', 'floor recordings of 2026-11-15..17'),
     'views.tricks': ("the tricks' own fit (the rear-up is designed on it)", '', 'rear-up plays of 2026-11-19..21'),
     'views.tricks_rigid': ("the rear-up's first, rigid fit, before the right hind shoulder was re-seated", '', 'the two falls of 2026-11-17'),

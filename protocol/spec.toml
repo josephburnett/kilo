@@ -1313,6 +1313,16 @@ frame_box_mm = [130, 60, 45]
 ultrasonic_height_mm = 80
 ultrasonic_floor_tilt_deg = 12
 
+# How far the body really goes for the plan's push: the share of the support
+# feet's travel under the hips (FEET, tick by tick) that the body goes over
+# the floor, by gait. 1 = no slip, which is what the planner takes today.
+# NOT MEASURED: `kilo log wall FILE.krec` measures it on a walk toward a wall
+# (docs/wall-walk.md) and says the value to put here.
+[model.travel]
+walk_ground_frac = 1.0
+trot_ground_frac = 1.0
+crawl_ground_frac = 1.0
+
 # VIEWS: numbers a part of Kilo's software fitted for itself that DISAGREE with
 # the model above, kept as they are until a self-measurement settles them
 # (`kilo model show` lists each against the model; mind/tests/test_one_model.py
@@ -1406,6 +1416,9 @@ servo_tau_ms = ["...and then closes 63 % of the gap in this time", "ms", "fitted
 "inertia.frame_box_mm" = ["the frame's mass spread as a box this size", "mm", "estimate"]
 "sensor.ultrasonic_height_mm" = ["the distance sensor above the floor, standing", "mm", "estimate (taken a little low)"]
 "sensor.ultrasonic_floor_tilt_deg" = ["looking down more than this, the sensor sees the floor", "deg", "estimate"]
+"travel.walk_ground_frac" = ["the walk: the share of the feet's push the body really goes (1 = no slip)", "", "assumed, not measured (kilo log wall)"]
+"travel.trot_ground_frac" = ["the trot: the same", "", "assumed, not measured (kilo log wall)"]
+"travel.crawl_ground_frac" = ["the crawl: the same", "", "assumed, not measured (kilo log wall)"]
 "views.trot" = ["the trot's own fit of how he rocks on a diagonal", "", "floor recordings of 2026-11-15..17"]
 "views.tricks" = ["the tricks' own fit (the rear-up is designed on it)", "", "rear-up plays of 2026-11-19..21"]
 "views.tricks_rigid" = ["the rear-up's first, rigid fit, before the right hind shoulder was re-seated", "", "the two falls of 2026-11-17"]
