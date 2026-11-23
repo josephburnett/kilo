@@ -97,14 +97,13 @@ been told to hold.
 - **The band is wide (11.9 degrees)** because the model is still off by up
   to 8 degrees for a posture: the model has him resting crooked (its left
   front knee stops short of its angle) where Kilo lies nearly level, and it
-  has no IMU offset yet. Once a self-measurement (C5 twice) has been put into the
-  model (`kilo model apply`), the band can come down
+  had no IMU offset until 2026-11-22 (now 2.3 degrees nose down and 0.5 of
+  roll, docs/model-fit-results.md); the band can come down once the
+  replay (`python -m kilo.intent.replay`) is rerun on the new table
   (`MODEL_ERROR_DEG` in `mind/kilo/intent/estimate.py`).
 
-The table is made from the model's own numbers, not from the tricks' fitted
-ones (the "tricks" view of docs/architecture.md): the estimate must not
-depend on a fit that a self-measurement may replace. The difference is
-under 3 degrees.
+The table is made from the model's own numbers, the one model the tricks
+use too.
 
 On every recording we have (2026-11-17 to 21: 37,000 readings with a
 posture asked and the body at rest), the estimate named the posture he had

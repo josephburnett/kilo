@@ -42,11 +42,9 @@ HOW IT DECIDES, in this order:
    the prior is LIMP: he cannot be standing.
 4. A new answer must hold for CONFIRM_US before it replaces the old one.
 
-THE TABLE comes from the model's own numbers (``BodyModel()``, no view:
-the estimate must not depend on a fit that a self-measurement may replace;
-the "tricks" view differs by its IMU offsets, 1.9 deg of pitch and 2 of
-roll, and by the centre of mass, which moves SIT's and REST's predicted
-attitude by under 3 deg: all inside the tolerance). The tolerance is
+THE TABLE comes from the model's own numbers (``BodyModel()``: its
+centre of mass, legs and IMU offset, the one model the tricks use too).
+The tolerance is
 
     MODEL_ERROR_DEG + 3 x SPREAD_DEG
 

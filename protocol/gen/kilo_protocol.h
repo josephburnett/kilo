@@ -1351,7 +1351,7 @@ enum kilo_param_id {
     KILO_PARAM_LEG_L1_MM = 13, /* mm: Upper leg: shoulder axle centre to knee axle centre. Kilo: 45 (measured 2026-10-11). */
     KILO_PARAM_LEG_L2_MM = 14, /* mm: Lower leg: knee axle centre to the centre of the round foot (radius 6 mm; the floor is 6 mm below that point). Kilo: 50 (56 to the tip; measured 2026-10-11). */
     KILO_PARAM_LEG_LB_MM = 15, /* mm: Front-to-back shoulder axle spacing (pitch lever arm for the pose/balance height terms). Kilo: 123 (measured 2026-10-11). */
-    KILO_PARAM_LEG_W_MM = 16, /* mm: Left-right foot track, foot centre to foot centre (roll lever arm). Kilo: 65 (measured 2026-10-11). */
+    KILO_PARAM_LEG_W_MM = 16, /* mm: Left-right foot track, foot centre to foot centre (roll lever arm). Kilo: 70 (the owner's tape 2026-10-15, and what predicts the recordings best: docs/model-fit-results.md; 65 until 2026-11-22). */
     KILO_PARAM_LEG_SH_ZERO_DEG = 17, /* deg: Upper link angle from straight down (+ = foot forward) at joint angle 0 (the calibration posture). Petoi: upper leg vertical = 0; verify on Kilo. */
     KILO_PARAM_LEG_KN_ZERO_DEG = 18, /* deg: Knee bend relative to the upper link at joint angle 0 (the calibration posture). Petoi: lower leg at 90 deg; verify on Kilo. */
     KILO_PARAM_FALL_RC = 19, /* bool: 1: after a roll fall the fall reflex plays rc (up to three tries). 0: it never does: once he is still, FAILED at once (REST, EVENT RECOVERY_FAILED, LIMP), and while the reflex holds the joints TRICK_PLAY of a FALL_OK trick is accepted and ends the reflex (the mind's righting, docs/righting.md). Set live, never persisted, by a mind built with KILO_RIGHTING=1. */
@@ -1405,7 +1405,7 @@ enum kilo_param_id {
 #define KILO_PARAM_LEG_LB_MM_DEFAULT 123
 #define KILO_PARAM_LEG_LB_MM_MIN 50
 #define KILO_PARAM_LEG_LB_MM_MAX 200
-#define KILO_PARAM_LEG_W_MM_DEFAULT 65
+#define KILO_PARAM_LEG_W_MM_DEFAULT 70
 #define KILO_PARAM_LEG_W_MM_MIN 30
 #define KILO_PARAM_LEG_W_MM_MAX 150
 #define KILO_PARAM_LEG_SH_ZERO_DEG_DEFAULT 0
@@ -1435,13 +1435,13 @@ enum kilo_param_id {
     {20, 120, 45}, /* LEG_L1_MM */ \
     {20, 120, 50}, /* LEG_L2_MM */ \
     {50, 200, 123}, /* LEG_LB_MM */ \
-    {30, 150, 65}, /* LEG_W_MM */ \
+    {30, 150, 70}, /* LEG_W_MM */ \
     {-45, 45, 0}, /* LEG_SH_ZERO_DEG */ \
     {30, 150, 90}, /* LEG_KN_ZERO_DEG */ \
     {0, 1, 1}, /* FALL_RC */ \
 }
 /* Initializer for an int16_t [KILO_PARAM_COUNT] array of defaults, in id order. */
-#define KILO_PARAM_DEFAULTS_INIT { 500, 1500, 10, 10, 25, 160, 6500, 6700, 6200, 6600, 6000, 2, 4, 45, 50, 123, 65, 0, 90, 1 }
+#define KILO_PARAM_DEFAULTS_INIT { 500, 1500, 10, 10, 25, 160, 6500, 6700, 6200, 6600, 6000, 2, 4, 45, 50, 123, 70, 0, 90, 1 }
 
 /* ---- Shared defaults and limits (spec [gait], [[joints]], [balance], [head], [battery], [model]) ---- */
 #define KILO_GAIT_STANCE_H_256 205 /* STANCE's body height, /256 of L1 + L2 */
@@ -1548,13 +1548,13 @@ enum kilo_param_id {
 /* One model: the corrections a self-measurement finds (CORRECTION_*), Kilo's servo zeros, tail,
    outline, inertia box and sensor, and the VIEW_<name>_* numbers a part of the mind fitted for
    itself that disagree with the model (spec [model.views]). Used by the mind only. */
-#define KILO_MODEL_CORRECTION_COM_DX_MM 0.0
+#define KILO_MODEL_CORRECTION_COM_DX_MM (-3.0)
 #define KILO_MODEL_CORRECTION_COM_DY_MM 0.0
 #define KILO_MODEL_CORRECTION_COM_DZ_MM 0.0
-#define KILO_MODEL_CORRECTION_SAG_DEG_PER_KG_CM 0.0
+#define KILO_MODEL_CORRECTION_SAG_DEG_PER_KG_CM 4.0
 #define KILO_MODEL_CORRECTION_LEG_DZ_MM_INIT {0.0, 0.0, 0.0, 0.0}
-#define KILO_MODEL_CORRECTION_IMU_PITCH_DEG 0.0
-#define KILO_MODEL_CORRECTION_IMU_ROLL_DEG 0.0
+#define KILO_MODEL_CORRECTION_IMU_PITCH_DEG 2.3
+#define KILO_MODEL_CORRECTION_IMU_ROLL_DEG 0.5
 #define KILO_MODEL_CORRECTION_SERVO_LAG_D_MS_INIT {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 #define KILO_MODEL_CORRECTION_SERVO_TAU_D_MS_INIT {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
 #define KILO_MODEL_CORRECTION_SERVO_GIVE_INIT {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}
@@ -1586,13 +1586,9 @@ enum kilo_param_id {
 #define KILO_MODEL_VIEW_TROT_COM_H_MM 79.0
 #define KILO_MODEL_VIEW_TROT_EXTRA_MS 120.0
 #define KILO_MODEL_VIEW_TROT_CLAMP_DEG 2.3
-#define KILO_MODEL_VIEW_TRICKS_COM_DX_MM (-5.5)
-#define KILO_MODEL_VIEW_TRICKS_COM_DY_MM (-5.0)
-#define KILO_MODEL_VIEW_TRICKS_SAG_DEG_PER_KG_CM 4.0
-#define KILO_MODEL_VIEW_TRICKS_TAIL_DROOP_DEG 16.0
-#define KILO_MODEL_VIEW_TRICKS_IMU_PITCH_DEG 1.9
-#define KILO_MODEL_VIEW_TRICKS_IMU_ROLL_DEG 2.0
+#define KILO_MODEL_VIEW_TRICKS_RIGID_COM_DX_MM 0.0
 #define KILO_MODEL_VIEW_TRICKS_RIGID_COM_DY_MM (-2.0)
+#define KILO_MODEL_VIEW_TRICKS_RIGID_IMU_PITCH_DEG 1.9
 /* The body's IK limits in integers: d <= REACH_256 / 256 (L1 + L2); d^2 >= L1^2 + L2^2 - L1 L2 KNEE_2COS_Q12
    / 4096, the knee bend <= KNEE_MAX_DEG. */
 #define KILO_MODEL_REACH_256 243

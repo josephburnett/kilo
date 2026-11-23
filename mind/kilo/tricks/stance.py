@@ -48,7 +48,7 @@ from typing import Mapping, Sequence
 import numpy as np
 
 from kilo.calibration import angle_window
-from kilo.planner.model import BodyModel, Outline, view_numbers
+from kilo.planner.model import BodyModel, Outline
 
 from . import sagittal as S
 from .model import JOINT_IDS, JOINT_LIMITS
@@ -114,8 +114,8 @@ class Geometry3:
     ``tail_offset``: the tail servo's angle off what was asked (a tail not
     quite centred); ``half_width``: half the frame's width (ESTIMATE, for
     the corners that may touch in a roll); ``imu_pitch``: what TELEMETRY
-    reads minus the model's pitch on four feet (STAND: -1.9 deg measured,
-    2026-11-17 and the walks; nose up positive); ``com_dy``: the centre of
+    reads minus the model's pitch on four feet (the body model's IMU offset;
+    nose up positive); ``com_dy``: the centre of
     mass this far to the left (mm; it was measured fore-aft and up-down
     only, and "taken as centred left to right")."""
     g: S.Geometry = field(default_factory=S.Geometry)
@@ -123,7 +123,7 @@ class Geometry3:
     offsets: tuple = ()
     tail_offset: float = 0.0
     half_width: float = Outline().half_width_mm
-    imu_pitch: float = -view_numbers("tricks")["imu_pitch_deg"]  # the model's "tricks" view, nose up +
+    imu_pitch: float = -BodyModel().imu_pitch_deg  # the model's IMU offset, nose up +
     com_dy: float = BodyModel().com_dy_mm
 
     @classmethod

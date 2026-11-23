@@ -2984,8 +2984,8 @@ PARAMS: dict[int, ParamInfo] = {
                          'Lower leg: knee axle centre to the centre of the round foot (radius 6 mm; the floor is 6 mm below that point). Kilo: 50 (56 to the tip; measured 2026-10-11).'),
     15: ParamInfo(15, 'LEG_LB_MM', 123, 50, 200, 'mm',
                          'Front-to-back shoulder axle spacing (pitch lever arm for the pose/balance height terms). Kilo: 123 (measured 2026-10-11).'),
-    16: ParamInfo(16, 'LEG_W_MM', 65, 30, 150, 'mm',
-                         'Left-right foot track, foot centre to foot centre (roll lever arm). Kilo: 65 (measured 2026-10-11).'),
+    16: ParamInfo(16, 'LEG_W_MM', 70, 30, 150, 'mm',
+                         "Left-right foot track, foot centre to foot centre (roll lever arm). Kilo: 70 (the owner's tape 2026-10-15, and what predicts the recordings best: docs/model-fit-results.md; 65 until 2026-11-22)."),
     17: ParamInfo(17, 'LEG_SH_ZERO_DEG', 0, -45, 45, 'deg',
                          'Upper link angle from straight down (+ = foot forward) at joint angle 0 (the calibration posture). Petoi: upper leg vertical = 0; verify on Kilo.'),
     18: ParamInfo(18, 'LEG_KN_ZERO_DEG', 90, 30, 150, 'deg',
@@ -3058,13 +3058,13 @@ MODEL_SERVO_TAU_MS = 70
 # One model: the corrections a self-measurement finds, Kilo's servo zeros, tail, outline, inertia box
 # and sensor; MODEL_VIEW_<NAME>_*: numbers a part of the mind fitted for itself that disagree with the
 # model (spec [model.views]), also as MODEL_VIEWS; MODEL_ABOUT: key -> (what, unit, source).
-MODEL_CORRECTION_COM_DX_MM = 0.0
+MODEL_CORRECTION_COM_DX_MM = -3.0
 MODEL_CORRECTION_COM_DY_MM = 0.0
 MODEL_CORRECTION_COM_DZ_MM = 0.0
-MODEL_CORRECTION_SAG_DEG_PER_KG_CM = 0.0
+MODEL_CORRECTION_SAG_DEG_PER_KG_CM = 4.0
 MODEL_CORRECTION_LEG_DZ_MM = (0.0, 0.0, 0.0, 0.0)
-MODEL_CORRECTION_IMU_PITCH_DEG = 0.0
-MODEL_CORRECTION_IMU_ROLL_DEG = 0.0
+MODEL_CORRECTION_IMU_PITCH_DEG = 2.3
+MODEL_CORRECTION_IMU_ROLL_DEG = 0.5
 MODEL_CORRECTION_SERVO_LAG_D_MS = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 MODEL_CORRECTION_SERVO_TAU_D_MS = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 MODEL_CORRECTION_SERVO_GIVE = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
@@ -3096,17 +3096,12 @@ MODEL_VIEW_TROT_COM_X_MM = 3.5
 MODEL_VIEW_TROT_COM_H_MM = 79.0
 MODEL_VIEW_TROT_EXTRA_MS = 120.0
 MODEL_VIEW_TROT_CLAMP_DEG = 2.3
-MODEL_VIEW_TRICKS_COM_DX_MM = -5.5
-MODEL_VIEW_TRICKS_COM_DY_MM = -5.0
-MODEL_VIEW_TRICKS_SAG_DEG_PER_KG_CM = 4.0
-MODEL_VIEW_TRICKS_TAIL_DROOP_DEG = 16.0
-MODEL_VIEW_TRICKS_IMU_PITCH_DEG = 1.9
-MODEL_VIEW_TRICKS_IMU_ROLL_DEG = 2.0
+MODEL_VIEW_TRICKS_RIGID_COM_DX_MM = 0.0
 MODEL_VIEW_TRICKS_RIGID_COM_DY_MM = -2.0
+MODEL_VIEW_TRICKS_RIGID_IMU_PITCH_DEG = 1.9
 MODEL_VIEWS: dict[str, dict[str, float]] = {
     'trot': {'com_x_mm': 3.5, 'com_h_mm': 79.0, 'extra_ms': 120.0, 'clamp_deg': 2.3},
-    'tricks': {'com_dx_mm': -5.5, 'com_dy_mm': -5.0, 'sag_deg_per_kg_cm': 4.0, 'tail_droop_deg': 16.0, 'imu_pitch_deg': 1.9, 'imu_roll_deg': 2.0},
-    'tricks_rigid': {'com_dy_mm': -2.0},
+    'tricks_rigid': {'com_dx_mm': 0.0, 'com_dy_mm': -2.0, 'imu_pitch_deg': 1.9},
 }
 MODEL_ABOUT: dict[str, tuple[str, str, str]] = {
     'foot_r_mm': ("the floor is this far below the centre of a foot's disc", 'mm', 'measured 2026-10-11'),
@@ -3122,16 +3117,16 @@ MODEL_ABOUT: dict[str, tuple[str, str, str]] = {
     'lower_leg_at': ('...its centre this share of the way from knee to foot', '', 'estimate'),
     'servo_lag_ms': ('a leg starts moving this long after it is told', 'ms', 'fitted to the floor recordings of 2026-11-15'),
     'servo_tau_ms': ('...and then closes 63 % of the gap in this time', 'ms', 'fitted to the floor recordings of 2026-11-15'),
-    'correction.com_dx_mm': ('centre of mass further forward than the model above', 'mm', 'nothing applied yet'),
-    'correction.com_dy_mm': ('centre of mass further to the left', 'mm', 'nothing applied yet'),
-    'correction.com_dz_mm': ('centre of mass higher', 'mm', 'nothing applied yet'),
-    'correction.sag_deg_per_kg_cm': ('how much the leg servos give under load', 'deg per kg cm', 'nothing applied yet'),
-    'correction.leg_dz_mm': ('each leg longer than commanded (left front, right front, right back, left back)', 'mm', 'nothing applied yet'),
-    'correction.imu_pitch_deg': ('what the tilt sensor reads nose-down when he stands level', 'deg', 'nothing applied yet'),
-    'correction.imu_roll_deg': ('...and rolled (right side up +)', 'deg', 'nothing applied yet'),
+    'correction.com_dx_mm': ('centre of mass further forward than the model above', 'mm', 'fitted by prediction to the floor recordings, 2026-11-22 (docs/model-fit-results.md)'),
+    'correction.com_dy_mm': ('centre of mass further to the left', 'mm', '0: what the floor recordings say (docs/model-fit-results.md)'),
+    'correction.com_dz_mm': ('centre of mass higher', 'mm', 'not measured: the floor recordings cannot separate it (docs/model-fit-results.md)'),
+    'correction.sag_deg_per_kg_cm': ('how much the leg servos give under load', 'deg per kg cm', 'fitted by prediction to the floor recordings, 2026-11-22 (docs/model-fit-results.md)'),
+    'correction.leg_dz_mm': ('each leg longer than commanded (left front, right front, right back, left back)', 'mm', 'none found in the floor recordings (docs/model-fit-results.md)'),
+    'correction.imu_pitch_deg': ('what the tilt sensor reads nose-down when he stands level', 'deg', 'fitted by prediction to the floor recordings, 2026-11-22 (docs/model-fit-results.md)'),
+    'correction.imu_roll_deg': ('...and rolled (right side up +)', 'deg', 'fitted by prediction to the floor recordings, 2026-11-22 (docs/model-fit-results.md)'),
     'correction.servo_lag_d_ms': ('each servo (joint id 0..15) starts this much later than servo_lag_ms', 'ms', 'nothing measured per servo yet'),
     'correction.servo_tau_d_ms': ('...and closes the gap this much slower than servo_tau_ms', 'ms', 'nothing measured per servo yet'),
-    'correction.servo_give': ('...and gives under load this many times sag_deg_per_kg_cm', '', 'nothing measured per servo yet'),
+    'correction.servo_give': ('...and gives under load this many times sag_deg_per_kg_cm', '', 'all alike: the left hind probably 1.5 and the right hind 0.5, not applied (docs/model-fit-results.md)'),
     'servo.czp': ("each servo's zero, by joint id 0..15", 'servo deg', "Kilo's EEPROM, read 2026-10-10"),
     'servo.reseated_rb_shoulder_czp': ("the right hind shoulder's zero after it was re-seated", 'servo deg', 'read from the plays since 2026-11-19, not confirmed'),
     'tail.pivot_x_mm': ("the tail's pivot, forward of the shoulders' middle", 'mm', "the owner's ruler, 2026-11-16"),
@@ -3157,7 +3152,6 @@ MODEL_ABOUT: dict[str, tuple[str, str, str]] = {
     'travel.trot_ground_frac': ('the trot: the same', '', 'assumed, not measured (kilo log wall)'),
     'travel.crawl_ground_frac': ('the crawl: the same', '', 'assumed, not measured (kilo log wall)'),
     'views.trot': ("the trot's own fit of how he rocks on a diagonal", '', 'floor recordings of 2026-11-15..17'),
-    'views.tricks': ("the tricks' own fit (the rear-up is designed on it)", '', 'rear-up plays of 2026-11-19..21'),
     'views.tricks_rigid': ("the rear-up's first, rigid fit, before the right hind shoulder was re-seated", '', 'the two falls of 2026-11-17'),
 }
 

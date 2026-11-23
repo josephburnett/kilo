@@ -85,17 +85,13 @@ def test_the_consumers_read_the_model():
                                                                      M.slew_deg_per_tick)
     assert (D.NOMINAL.com_dx, D.NOMINAL.com_dy, D.NOMINAL.com_dz, D.NOMINAL.sag) == (
         M.com_dx_mm, M.com_dy_mm, M.com_dz_mm, M.sag_deg_per_kg_cm)
-    # ...and FITTED is the "tricks" view, RU.AS_RECORDED the "tricks_rigid" one
-    v = PM.view_numbers("tricks")
-    f = D.FITTED
-    assert (f.com_dx, f.com_dy, f.sag, f.tail_droop_deg, f.imu_pitch, f.imu_roll) == (
-        v["com_dx_mm"], v["com_dy_mm"], v["sag_deg_per_kg_cm"], v["tail_droop_deg"], -v["imu_pitch_deg"],
-        v["imu_roll_deg"])
-    assert f == D.NOMINAL.with_(com_dx=f.com_dx, com_dy=f.com_dy, sag=f.sag, tail_droop_deg=f.tail_droop_deg,
-                                imu_roll=f.imu_roll)
-    # the rear-up reads the model's sideways centre of mass, not the view's (the self-measurement settled it)
-    assert RU.MODEL == f.with_(com_dy=M.com_dy_mm)
+    # ...all of it: the tricks, the rear-up and the intent moves are judged on the model itself (no view)
+    assert D.NOMINAL == D.Params.of(M) and RU.MODEL == D.NOMINAL
+    assert (D.NOMINAL.imu_pitch, D.NOMINAL.imu_roll, D.NOMINAL.tail_droop_deg) == (
+        -M.imu_pitch_deg, M.imu_roll_deg, M.tail.droop_deg)
+    assert T.Geometry3().imu_pitch == -M.imu_pitch_deg
     assert RU.AS_RECORDED.com_dy == PM.view_numbers("tricks_rigid")["com_dy_mm"]
+    assert RU.AS_RECORDED.g.com_dx == PM.view_numbers("tricks_rigid")["com_dx_mm"]
     # the trot's pendulum is the "trot" view
     v = PM.view_numbers("trot")
     assert (PL.TROT_FIT.com_x_mm, PL.TROT_FIT.com_h_mm, PL.TROT_FIT.extra_ms, PL.TROT_FIT.clamp_deg) == (
@@ -111,12 +107,10 @@ def test_kilo_czp_is_the_body_tests_table():
 
 
 def test_a_view_replaces_the_models_numbers():
-    v = M.view("tricks")
-    assert (v.com_dx_mm, v.com_dy_mm, v.sag_deg_per_kg_cm, v.tail.droop_deg, v.imu_roll_deg) == (
-        -5.5, -5.0, 4.0, 16.0, 2.0)
-    assert v.com([0.0] * 4, [76.0] * 4)[0] == pytest.approx(M.com([0.0] * 4, [76.0] * 4)[0] - 5.5)
-    assert D.Params.of(v) == D.FITTED
-    assert T.Geometry3.of(v).com_dy == -5.0 and S.Geometry.of(v).com_dx == -5.5
+    v = M.view("tricks_rigid")
+    assert (v.com_dx_mm, v.com_dy_mm) == (0.0, -2.0) and v.sag_deg_per_kg_cm == M.sag_deg_per_kg_cm
+    assert v.com([0.0] * 4, [76.0] * 4)[0] == pytest.approx(M.com([0.0] * 4, [76.0] * 4)[0] - M.com_dx_mm)
+    assert T.Geometry3.of(v).com_dy == -2.0 and S.Geometry.of(v).com_dx == 0.0
     assert M.view("trot") == M  # its numbers are the pendulum's own: nothing of BodyModel changes
 
 
@@ -125,11 +119,9 @@ def test_a_view_replaces_the_models_numbers():
 # view from protocol/spec.toml (its user then reads the model) or changing the model fails here
 # until this table says the same: one visible edit.
 VIEWS = {
-    "trot": {"com_x_mm": (3.5, 7.43), "com_h_mm": (79.0, 79.24), "extra_ms": (120.0, None),
+    "trot": {"com_x_mm": (3.5, 4.43), "com_h_mm": (79.0, 79.24), "extra_ms": (120.0, None),
                  "clamp_deg": (2.3, None)},
-    "tricks": {"com_dx_mm": (-5.5, 0.0), "com_dy_mm": (-5.0, 0.0), "sag_deg_per_kg_cm": (4.0, 0.0),
-               "tail_droop_deg": (16.0, 18.0), "imu_pitch_deg": (1.9, 0.0), "imu_roll_deg": (2.0, 0.0)},
-    "tricks_rigid": {"com_dy_mm": (-2.0, 0.0)},
+    "tricks_rigid": {"com_dx_mm": (0.0, -3.0), "com_dy_mm": (-2.0, 0.0), "imu_pitch_deg": (1.9, 2.3)},
 }
 
 
@@ -203,7 +195,7 @@ def test_model_show_says_where_every_number_comes_from_and_what_disagrees():
 
     text = cli_model.show(cli_model.load_fit(FIT))
     for word in ("LEG_LB_MM", "stand_com_x_mm", "the owner's ruler, 2026-11-16", "NUMBERS THAT DISAGREE",
-                 "trot", "tricks_rigid", "com_x_mm             3.5  against the model's 7.43",
+                 "trot", "tricks_rigid", "com_x_mm             3.5  against the model's 4.43",
                  "the measurement says 4.35 +- 0.31"):
         assert word in text, word
     assert "42.07" not in text  # the first run's height ran into the fit's limit: it says nothing
@@ -256,7 +248,8 @@ def test_each_servo_is_the_robots_until_measured_and_apply_sets_one():
     m = PM.BodyModel()
     assert m.servos_alike and len(m.servo_give) == len(m.servo_lag_d_ms) == len(m.servo_tau_d_ms) == 16
     assert all(m.joint_lag_ms(j) == m.servo_lag_ms and m.joint_tau_ms(j) == m.servo_tau_ms for j in range(16))
-    assert (D.FITTED.lag_d, D.FITTED.tau_d, D.FITTED.give) == ((), (), ())
+    assert (D.NOMINAL.lag_d, D.NOMINAL.tau_d, D.NOMINAL.give) == (D.Params.of(m).lag_d, D.Params.of(m).tau_d,
+                                                                 D.Params.of(m).give)
     spec = (REPO / "protocol" / "spec.toml").read_text()
     fit = {"parameters": {
         "lag_d_ms:lb_knee": {"value": 38.4, "sd": 9.0, "model": 0.0, "fitted": True, "significant": True},
@@ -289,8 +282,8 @@ def test_model_apply_dry_run_changes_nothing_and_reports():
     text = "\n".join(lines)
     assert rc == 0, text
     assert [p.read_bytes() for p in watched] == before
-    assert "centre of mass, standing: 7.4 -> 4.3 mm ahead" in text
-    assert "crawl" in text and "trot: still off: com_x_mm 3.5 vs 4.33" in text
+    assert "centre of mass, standing: 4.4 -> 1.3 mm ahead" in text
+    assert "crawl" in text and "trot: still off: com_x_mm 3.5 vs 1.33" in text
     assert "Dry run: nothing was changed" in text and "FAILED" not in text
     # the intent layer is made from the model too (kernel/host/test.sh checks gen_intent.py and its vectors)
     assert "gen_intent.py" in text and "the intent golden vectors" in text and "kilo.intent.moves" in text

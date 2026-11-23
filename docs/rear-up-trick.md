@@ -133,9 +133,12 @@ it.
    alike now.) On the tripod a millimetre of leg or of centre of mass to one
    side is worth about a degree of roll, and the legs' give makes it grow,
    so the Pi watches the roll while the hind legs push (section 8).
-3. The walking planner keeps its own centre of mass: the fitted one lives
-   only in the trick's model (`kilo.tricks.dynamics.FITTED`), so the walks
-   you tuned do not change.
+3. Since 2026-11-22 the trick is judged on the one body model
+   (`kilo.tricks.dynamics.NOMINAL`), the same numbers the walks are planned
+   with (docs/model-fit-results.md). The walks' recordings suggest the left
+   hind leg gives more than the right; the model does not carry that yet,
+   because with it the check predicts this stage still tips him left. The
+   next play of stage 1 is the test of it.
 
 **How it comes down.** At the end of the hold, the way up backwards: the
 hind legs fold and he sits back on his rear ("settle"), the paws come down

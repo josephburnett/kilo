@@ -350,7 +350,7 @@ def _rise_through_zero(t: np.ndarray, z: np.ndarray) -> float | None:
     return float(t[i[-1] + 1]) if len(i) else None
 
 
-def replay(fall: dict, n: int, p: D.Params = D.FITTED, ly: Lying | None = None, settle_s: float = 1.0) -> Replay:
+def replay(fall: dict, n: int, p: D.Params = D.NOMINAL, ly: Lying | None = None, settle_s: float = 1.0) -> Replay:
     """Try ``n`` (1..) of a recorded fall in the model: from the recorded attitude with the joints
     of start_joints, settled, then rc as the body mirrored it; against the recording."""
     tr = fall["tries"][n - 1]
@@ -473,7 +473,7 @@ def _job(job) -> Replay:
     return r
 
 
-def replay_all(p: D.Params = D.FITTED, ly: Lying | None = None, workers: int = 4,
+def replay_all(p: D.Params = D.NOMINAL, ly: Lying | None = None, workers: int = 4,
                floor_only: bool = False) -> list[Replay]:
     jobs = [(f, n, p, ly) for f, n in tries() if f.get("floor", True) or not floor_only]
     return _map(jobs, workers)
@@ -491,7 +491,7 @@ def bands(p: D.Params | None = None, ly: Lying | None = None) -> list[tuple[str,
     """The uncertain numbers one at a time: dynamics.bands (the centre of mass, the legs' give,
     the servos, the friction 0.3 and 1.0), the friction 0.4, 0.6 and 0.8, and each estimate of
     ``Lying`` a quarter either way (its signs both ways)."""
-    p = p or D.FITTED
+    p = p or D.NOMINAL
     ly = ly or Lying()
     out = [(name, q, ly) for name, q in D.bands(p)]
     for mu in (0.4, 0.6, 0.8):
@@ -591,7 +591,7 @@ def falls_table(fx: dict | None = None) -> str:
     return "\n".join(out)
 
 
-def rest_check(p: D.Params = D.FITTED, ly: Lying | None = None) -> list[tuple[str, float, tuple, tuple]]:
+def rest_check(p: D.Params = D.NOMINAL, ly: Lying | None = None) -> list[tuple[str, float, tuple, tuple]]:
     """(try, degrees the model moved from the recorded lying attitude while settling, the recorded
     (pitch, roll), the model's) for each try that began lying down."""
     out = []
@@ -618,7 +618,7 @@ def roll_angle(u: np.ndarray) -> float:
     return math.degrees(math.atan2(-u[1], u[2]))
 
 
-def phases(p: D.Params = D.FITTED, ly: Lying | None = None, workers: int = 4) -> list[dict]:
+def phases(p: D.Params = D.NOMINAL, ly: Lying | None = None, workers: int = 4) -> list[dict]:
     """Per floor try: the roll angle at the end of each rc frame, Kilo's and the model's."""
     fl = [(f, n) for f, n in tries() if f.get("floor", True)]
     rs = [replay(f, n, p, ly) for f, n in fl]

@@ -8,32 +8,32 @@ namespace intent {
 
 namespace {
 
-// stand_to_sit: 1 frame, end SIT; margin 26.9 mm, 21 bands of the dynamics
+// stand_to_sit: 1 frame, end SIT; margin 34.4 mm, 21 bands of the dynamics
 const kilo_keyframe_t kStandToSit[] = {
     {42, 10, 0x01, {10, -20, -60, 30, 30, -80, -80, 60, 60, 45, 45}},
 };
-// stand_to_rest: 2 frames, end REST; margin 10.3 mm, 21 bands of the dynamics
+// stand_to_rest: 2 frames, end REST; margin 8.7 mm, 21 bands of the dynamics
 const kilo_keyframe_t kStandToRest[] = {
-    {45, 5, 0x01, {-30, -80, -45, 60, 60, -30, -30, -45, -45, -30, -30}},
+    {45, 5, 0x01, {-30, -80, -45, 30, 30, -30, -30, -45, -45, -30, -30}},
     {42, 10, 0x01, {-30, -80, -45, 60, 60, -60, -60, -45, -45, 45, 45}},
 };
-// sit_to_stand: 1 frame, end STAND; margin 26.9 mm, 21 bands of the dynamics
+// sit_to_stand: 1 frame, end STAND; margin 34.4 mm, 21 bands of the dynamics
 const kilo_keyframe_t kSitToStand[] = {
     {42, 10, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
 };
-// rest_to_stand: 2 frames, end STAND; margin 10.3 mm, 21 bands of the dynamics
+// rest_to_stand: 2 frames, end STAND; margin 8.7 mm, 21 bands of the dynamics
 const kilo_keyframe_t kRestToStand[] = {
     {45, 5, 0x01, {0, 0, 0, 60, 60, -30, -30, -45, -45, -30, -30}},
     {42, 10, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
 };
-// righting_side: 4 frames, end REST, FALL_OK; the righting experiment: ends on his belly in 89 of 95 simulated runs (variants x starts), leg servos at most 1.13 kg cm
+// righting_side: 4 frames, end REST, FALL_OK; the righting experiment: ends on his belly in 69 of 95 simulated runs (variants x starts), leg servos at most 1.28 kg cm
 const kilo_keyframe_t kRightingSide[] = {
     {30, 25, 0x01, {0, 30, 0, -90, -90, 90, 90, 0, 70, -70, 0}},
     {3, 15, 0x01, {0, -75, 0, 30, -90, 90, -30, 30, 0, 0, -30}},
     {8, 10, 0x01, {0, -75, 0, 30, -90, 90, -30, 30, 90, -90, -30}},
     {25, 25, 0x01, {0, -80, 0, 60, 60, -60, -60, -45, -45, 45, 45}},
 };
-// righting_back: 3 frames, end REST, FALL_OK; the righting experiment: ends on his right side in 68 of 76 simulated runs (variants x starts), leg servos at most 1.06 kg cm
+// righting_back: 3 frames, end REST, FALL_OK; the righting experiment: ends on his right side in 52 of 76 simulated runs (variants x starts), leg servos at most 1.13 kg cm
 const kilo_keyframe_t kRightingBack[] = {
     {30, 25, 0x01, {0, 0, 0, -90, 30, -30, 90, 70, 30, -30, -70}},
     {3, 25, 0x01, {0, 0, 0, -90, 30, -30, 90, 0, 30, -30, 0}},
@@ -43,9 +43,9 @@ const kilo_keyframe_t kRightingBack[] = {
 }  // namespace
 
 const Row kRows[kRowCount] = {
-    {State::Standing, 0, 0, 190, 190},  // pitch +0.0 roll +0.0 deg, +-11.9 / 11.9; the model: margin 32.5 mm on lb_foot, lf_foot, rb_foot, rf_foot
-    {State::Sitting, -454, 0, 190, 190},  // pitch -28.4 roll +0.0 deg, +-11.9 / 11.9; the model: margin 31.9 mm on lb_foot, lf_foot, rb_foot, rf_foot
-    {State::Resting, 0, -143, 190, 190},  // pitch +0.0 roll -8.9 deg, +-11.9 / 11.9; the model: margin 10.3 mm on lf_foot, rb_foot, rf_foot
+    {State::Standing, 37, 8, 190, 190},  // pitch +2.3 roll +0.5 deg, +-11.9 / 11.9; the model: margin 35.0 mm on lb_foot, lf_foot, rb_foot, rf_foot
+    {State::Sitting, -417, 8, 190, 190},  // pitch -26.1 roll +0.5 deg, +-11.9 / 11.9; the model: margin 34.4 mm on lb_foot, lf_foot, rb_foot, rf_foot
+    {State::Resting, 37, -125, 190, 190},  // pitch +2.3 roll -7.8 deg, +-11.9 / 11.9; the model: margin 8.7 mm on lf_foot, rb_foot, rf_foot
 };
 
 const tricks::Trick kMoves[6] = {
@@ -59,7 +59,7 @@ const tricks::Trick kMoves[6] = {
 
 const MoveCheck kMoveCheck[6] = {
     {0xB8AF, 13, 52},  // stand_to_sit
-    {0x613F, 178, 102},  // stand_to_rest
+    {0x6654, 15, 102},  // stand_to_rest
     {0x3867, 117, 52},  // sit_to_stand
     {0x1464, 168, 102},  // rest_to_stand
     {0x5DCA, 187, 141},  // righting_side

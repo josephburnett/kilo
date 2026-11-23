@@ -49,6 +49,7 @@ struct TipPlant {
   double servo_tau = 0.15;                  // s
   double comply = 1.0;                      // mm: a foot this close to the support plane carries weight too
   int substeps = 20;                        // per 20 ms tick
+  static constexpr double kNearDeg = 5.0;   // a support plane this close (pitch + roll) is the one it is on
   // State.
   double ang[8] = {};      // the joints through the servo lag, deg (shoulders LF RF RB LB, knees)
   double R[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};  // body -> world
@@ -168,9 +169,12 @@ struct TipPlant {
         pos += x >= 0;
         neg += x <= 0;
       }
-      bool h = pos == m || neg == m;
       double p = std::asin(-nn[0]) / D2R, r = std::atan2(-nn[1], nn[2]) / D2R;
       double d = std::fabs(p - p0) + std::fabs(r - r0);
+      // it holds the mass, and the body is on it (within kNearDeg): a plane it would have to fall to
+      // first does not hold it now (with the 70 mm track the tripod onto a lifted foot 30 deg away held
+      // the mass, and the body jumped there)
+      bool h = (pos == m || neg == m) && d < kNearDeg;
       if ((h && !best_holds) || (h == best_holds && d < best - 1e-9)) {
         best = d, best_holds = h, on = set;
         if (pp) *pp = p, *rp = r;

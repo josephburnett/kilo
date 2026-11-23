@@ -5,6 +5,7 @@ run, on its own measurement model with noise and backlash and on the
 virtual body's physics (an independent model: rigid legs, a real tip)."""
 
 import json
+from dataclasses import replace
 import math
 
 import numpy as np
@@ -74,8 +75,14 @@ def test_script_1_is_kept_for_its_recordings():
     assert len(ticks) == 2431 and ticks[-1].x == (0, 0, 0, 0)
 
 
+# The model the routine's sweeps were placed on (2026-11-21): before the corrections the recordings
+# predict best with (docs/model-fit-results.md), which move the crossings by 1 to 3 mm.
+DESIGN_MODEL = replace(M, com_dx_mm=0.0, com_dy_mm=0.0, com_dz_mm=0.0, track_mm=65.0)
+
+
 def test_sweeps_start_on_the_tripod_side_of_the_models_crossing():
-    cr = SM.crossings()
+    cr = SM.crossings(DESIGN_MODEL)
+    now = SM.crossings()
     assert len(cr) == 8
     for i, st in enumerate(SC.STEPS):
         if st.kind != SC.SWEEP:
@@ -94,13 +101,15 @@ def test_sweeps_start_on_the_tripod_side_of_the_models_crossing():
         assert SC.STEPS[i - 4].phase == "to_start"
         assert abs((c - x0) * d - before) <= 1.0, (name, x0, c)
         assert abs((x1 - c) * d - after) <= 1.0 and after >= 5, (name, x1, c)
+        # the model as it is now still crosses inside the sweep, with room on both sides
+        assert (now[name] - x0) * d >= before - 4 and (x1 - now[name]) * d >= min(after, 5) - 1, (name, now[name])
 
 
 @pytest.mark.parametrize("version", [1, 2])
 def test_tip_vectors_are_the_models(version):
     sd = SC.SCRIPTS[version]
     ticks = SC.poses(script=sd)
-    rp = ST.rigid_path(M, ticks)
+    rp = ST.rigid_path(DESIGN_MODEL, ticks)  # the routine's tables were made on it
     for e, ex in enumerate(sd.experiments):
         if ex.lifted < 0:
             continue
@@ -216,10 +225,13 @@ def test_compliant_statics_vectorised_and_rigid_agree():
         cx = sum(Fz[k] * feet[k][0] for k in range(4)) / Fz.sum()
         cy = sum(Fz[k] * feet[k][1] for k in range(4)) / Fz.sum()
         assert abs(cx - com[0] - d[0]) < 0.6 and abs(cy - com[1] - d[1]) < 0.6, i  # the legs' sag moves the feet a little
-    # stiff legs: the rigid model's path (the C++ prediction)
-    c = ST.candidates(P, ST.Body(sag=ST.SAG_MIN))
+    # stiff legs: the rigid model's path (the C++ prediction), on the model the routine's poses were placed
+    # on: on another one a pose can sit on a support's edge, where the two solvers may pick either tripod
+    # (two poses of 4445 with the centre of mass 3 mm further back)
+    PD = ST.Poses(DESIGN_MODEL, u[:, :4], u[:, 4:])
+    c = ST.candidates(PD, ST.Body(sag=ST.SAG_MIN, model=DESIGN_MODEL))
     p, r, _ = ST.path(c, inv.ravel())
-    rp = np.array([x[:2] for x in ST.rigid_path(M, ticks)])
+    rp = np.array([x[:2] for x in ST.rigid_path(DESIGN_MODEL, ticks)])
     assert np.abs(rp - np.stack([p, r], 1)).max() < 0.02
 
 
@@ -238,9 +250,9 @@ def test_the_feet_rectangle_sets_the_tilt_per_mm():
     b = ST.rest(P, ST.Body(sag=ST.SAG_MIN, length=M.length_mm, track=M.track_mm))
     assert np.allclose(a.pitch, b.pitch) and np.allclose(a.roll, b.roll)
     c = ST.rest(P, ST.Body(sag=ST.SAG_MIN, length=133.0, track=70.0))
-    assert a.pitch[0] == pytest.approx(math.degrees(math.atan(12 / 123)), abs=0.05)
+    assert a.pitch[0] == pytest.approx(math.degrees(math.atan(12 / M.length_mm)), abs=0.05)
     assert c.pitch[0] == pytest.approx(math.degrees(math.atan(12 / 133)), abs=0.05)
-    assert a.roll[1] == pytest.approx(math.degrees(math.atan(8 / 65)), abs=0.05)
+    assert a.roll[1] == pytest.approx(math.degrees(math.atan(8 / M.track_mm)), abs=0.05)
     assert c.roll[1] == pytest.approx(math.degrees(math.atan(8 / 70)), abs=0.05)
     # the x scale: feet splayed 16 mm each way make the rectangle 32 mm longer, or 35.2 at 1.1
     P = ST.Poses(M, [[16, 16, -16, -16]], [[70, 70, 82, 82]])
@@ -348,7 +360,8 @@ def test_limits_and_unmeasured_are_said():
 def test_fit_on_the_virtual_bodys_physics():
     """An independent model (kilo.vbody.physics: rigid, a real inverted-pendulum tip): the centre of
     mass and the IMU offsets come back, and the rectangle is the model's."""
-    run = SM.physics_run((-4.0, -3.0, 0.0), (1.5, -2.0), seed=3)
+    # the centre of mass where it was against the routine's design (4 mm behind the hand measurement)
+    run = SM.physics_run((-4.0 - M.com_dx_mm, -3.0, 0.0), (1.5, -2.0), seed=3)
     assert [t["how"] for t in run.meta["tips"]] == ["tip"] * 8
     res = F.Fitter([run]).run()
     t = run.meta["truth"]

@@ -17,26 +17,24 @@
       ]
     ],
     "margin_mm": {
-      "model": 10.28,
-      "tricks view": 12.36
+      "model": 8.69
     },
     "one_stage_margin_mm": {
-      "model": 7.13,
-      "tricks view": 9.32
+      "model": 5.75
     },
     "dynamics": {
       "bands": 21,
       "failed": [],
       "end_nose_up_deg": [
-        -2.0,
-        -1.9
+        -2.4,
+        -2.3
       ],
       "end_roll_deg": [
-        0.0,
-        1.8
+        0.2,
+        0.6
       ],
-      "max_roll_deg": 8.8,
-      "max_torque_kg_cm": 0.84
+      "max_roll_deg": 7.0,
+      "max_torque_kg_cm": 0.73
     }
   },
   "notes": [

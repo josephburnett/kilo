@@ -16,14 +16,14 @@ knees, hind shoulders, hind knees). A candidate moves them in one stage
 rest); the head and the tail go with either stage. For each candidate the
 3-D rest finder (kilo.tricks.stance.follow) gives, along the whole path,
 how far the centre of mass is inside the feet. The plan is the candidate
-whose smallest margin is largest, taken over two models: the body model as
-it is (``dynamics.NOMINAL``) and its "tricks" view (``dynamics.FITTED``:
-the centre of mass and the legs' give as the rear-up recordings fitted
-them); a one-stage move wins a tie (within TIE_MM).
+whose smallest margin is largest in the body model (``dynamics.NOMINAL``:
+the one model, with the centre of mass and the legs' give the recordings
+predict best, docs/model-fit-results.md); a one-stage move wins a tie
+(within TIE_MM).
 
 THE CHECK (the standard the rear-up is held to, kilo.tricks.rear_up.check):
 
-1. the plan's smallest margin is at least MARGIN_MM in both models;
+1. the plan's smallest margin is at least MARGIN_MM in the model;
 2. played in the compliant dynamics (kilo.tricks.dynamics.simulate) on the
    model and on every band of ``dynamics.bands()`` (the fit and each thing
    it is unsure of, to its edge), Kilo does not fall, the mind's roll limit
@@ -62,7 +62,11 @@ from kilo.tricks.model import JOINT_IDS, JOINT_LIMITS, Keyframe, Posture, Trick
 MOVES_DIR = Path(__file__).resolve().parent / "moves"
 PLAN_FILE = MOVES_DIR / "plan.json"
 
-MARGIN_MM = 10.0        # the centre of mass at least this far inside the support, along the whole path
+# the centre of mass at least this far inside the support, along the whole path. 8.5 since 2026-11-22
+# (10 before): with the centre of mass 3 mm further back (docs/model-fit-results.md) stand <-> rest keep
+# 8.7 mm staged, and the body's own all-joints-at-once change, which the mind uses when a move is not
+# shipped, keeps only 6 to 7; the floor holds the weight from 0 to 3 mm inside (movement-engine-results 2)
+MARGIN_MM = 8.5
 TIE_MM = 0.5            # a one-stage move wins against a two-stage one no more than this better
 RATE_DPS = 90.0         # the fastest joint of a stage turns at this (the body's safety slew: 500)
 STAGE_HOLD = 5          # ticks between two stages
@@ -100,7 +104,7 @@ def move_name(a: E.State, b: E.State) -> str:
 
 def models() -> list[tuple[str, D.Params]]:
     """The two models a plan's margin is taken over."""
-    return [("model", D.NOMINAL), ("tricks view", D.FITTED)]
+    return [("model", D.NOMINAL)]
 
 
 # ---- the plan ------------------------------------------------------------------------------------

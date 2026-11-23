@@ -36,27 +36,28 @@ rocked back onto the tail, the nose up passing +5 deg 0.5-0.6 s into the
 (the right hind foot in the air) 3 of 7 plays went over the left-hind /
 right-front diagonal (+12..+14 nose up, roll -9..-12) and 4 did not.
 
-FITTED, and what it says about Kilo (2026-11-21):
+What the plays said about Kilo (the fit of 2026-11-21; since 2026-11-22 the
+model is the one body model, NOMINAL, whose numbers predict the floor
+recordings best, docs/model-fit-results.md):
 
 - Kilo is compliant: under load each leg servo gives about 4 deg per kg
-  cm (3.5..4.5 reproduce the rock's timing). On four feet that is a soft
+  cm (3.5..4.5 reproduce the rock's timing; the walks' recordings say the
+  same, and the body model carries 4). On four feet that is a soft
   pendulum: as the load moves onto the hind legs they give, the body
   pitches up, which moves the centre of mass further back over the hind
   feet, which loads them more. A rigid model's margin is eaten by it: the
-  second design's "gather" had 15 mm in the rigid model and rocked back.
-- the centre of mass is about 5.5 mm further back than kilo.planner.model's
-  (the lift_r knife edge: 3 of 7 went over, so it sits on it). The fit
-  also put it 5 mm right (back or right both put it over that diagonal);
-  the self-measurement of 2026-11-22 found it in the middle (-0.7 +- 0.6
-  mm): the rear-up uses the model's 0 (rear_up.MODEL), the view keeps -5
-  for the intent moves and the righting until they are re-checked;
-- the tail droops 16 deg, not 18 (the pitch on the tail);
-- the IMU reads +2 deg of roll (left side down) in every trick pose where
-  the model is level: an offset or a left leg 2 mm short, which the data
-  cannot tell apart; kept as an offset (imu_roll). The self-measurement
-  found the sensor's own offset 0.3, so it is mostly the body sitting
-  lower on the left when the hind legs carry him (servo_give and
-  servo_lag_d per joint are where a measured cause would go).
+  second design's "gather" had 15 mm in the rigid model and rocked back
+  (with the body model: +19.6 nose up at gather, the plays +22.6..+23.1).
+- the plays' fit put the centre of mass 5.5 mm back and 5 mm right of the
+  hand measurement; the body model has it 3 mm back and in the middle (the
+  walks and the self-measurement); from 2 mm back or less the gather here
+  rocks back only half way.
+  With it in the middle no play goes over at "lift_r" in the model, where
+  3 of 7 did on Kilo (before the right hind shoulder was re-seated);
+- the IMU reads about +2 deg of roll (left side down) in the trick poses
+  that load the hind legs; the sensor's own offset is 0.5: the rest is the
+  body sitting lower on the left (the walks suggest the left hind leg gives
+  more, docs/model-fit-results.md; not in the model yet).
 
 Not separated by the data: com_dx, com_dz and sag trade against each other
 at gather (``bands`` has the ends of that line); com_dy against a left /
@@ -82,7 +83,7 @@ from typing import Mapping, Sequence
 import numpy as np
 
 from kilo.calibration import POSTURES
-from kilo.planner.model import BodyModel, view_numbers
+from kilo.planner.model import BodyModel
 
 from . import model as M
 from . import sagittal as S
@@ -95,7 +96,7 @@ LEGS = T.LEGS                      # lf rf rb lb
 G_MM_PER_KG_CM = 9810.0 * 10000.0  # g mm^2/s^2 per kg cm (a torque of 1 kg cm)
 KIN_EVERY = 2                      # physics steps per kinematics update
 # Every number about Kilo's body here is the body model's (kilo.planner.model.BodyModel, from
-# protocol/spec.toml [model]); FITTED is its "tricks" view (mind/tests/test_one_model.py).
+# protocol/spec.toml [model]); NOMINAL is the model itself (mind/tests/test_one_model.py).
 BODY = BodyModel()
 SLEW_DEG_TICK = BODY.slew_deg_per_tick  # the body's safety slew (10 deg a tick)
 FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "rear_up_2026_11_21.json"
@@ -112,10 +113,15 @@ DESIGN_CZP = BODY.czp_reseated
 
 
 # ---- parameters -----------------------------------------------------------------------------------
+def _per_joint(by_id: Sequence[float], alike: float) -> tuple:
+    """(joint name, value) for the driven joints whose value (by legacy id) is not ``alike``."""
+    return tuple((M.JOINT_NAMES[j], float(by_id[j])) for j in M.CANONICAL if by_id[j] != alike)
+
+
 @dataclass(frozen=True)
 class Params:
-    """What the model is uncertain about. Defaults: kilo.tricks.stance's
-    nominal values (the re-seated calibration), stiff servos."""
+    """What the model is uncertain about. Defaults: the body model's (its corrections, servos and
+    tail; the re-seated calibration), so ``Params()`` is the one model (``NOMINAL``)."""
     com_dx: float = BODY.com_dx_mm  # mm: the whole robot's centre of mass moved forward (body frame; the model's)
     com_dy: float = BODY.com_dy_mm  # ...to the left
     com_dz: float = BODY.com_dz_mm  # ...up
@@ -131,12 +137,13 @@ class Params:
     offsets: tuple = ()          # (joint, deg): the joint really sits this far off what it is sent
     # each servo's own performance (the body model's [model.correction] servo_*): (joint, value) for the
     # servos that differ from the others; empty = all alike, the model as it was
-    lag_d: tuple = ()            # (joint, ms): this servo starts later than lag_ms
-    tau_d: tuple = ()            # (joint, ms): ...answers slower than tau_ms
-    give: tuple = ()             # (joint, x): ...gives this many times sag
-    # TELEMETRY nose up minus the model's, deg (STAND reads -1.9): the "tricks" view's, the tricks' default too
-    imu_pitch: float = -view_numbers("tricks")["imu_pitch_deg"]
-    imu_roll: float = 0.0
+    lag_d: tuple = _per_joint(BODY.servo_lag_d_ms, 0.0)  # (joint, ms): this servo starts later than lag_ms
+    tau_d: tuple = _per_joint(BODY.servo_tau_d_ms, 0.0)  # (joint, ms): ...answers slower than tau_ms
+    give: tuple = _per_joint(BODY.servo_give, 1.0)       # (joint, x): ...gives this many times sag
+    # TELEMETRY nose up and roll (left side down +) minus the body's, deg: the model's IMU offset (TELEMETRY's
+    # pitch is nose down +, this module's nose up +)
+    imu_pitch: float = -BODY.imu_pitch_deg
+    imu_roll: float = BODY.imu_roll_deg
     k_mm: float = 3.0e6          # contact stiffness, g/s^2 (3 N/mm)
     c_mm: float = 1.5e4          # contact damping, g/s
 
@@ -165,24 +172,15 @@ class Params:
         return T.Geometry3(g=g, czp=self.czp, com_dy=self.com_dy, imu_pitch=self.imu_pitch)
 
 
-def _per_joint(by_id: Sequence[float], alike: float) -> tuple:
-    """(joint name, value) for the driven joints whose value (by legacy id) is not ``alike``."""
-    return tuple((M.JOINT_NAMES[j], float(by_id[j])) for j in M.CANONICAL if by_id[j] != alike)
-
-
+# The one body model (protocol/spec.toml [model], with its corrections): what every trick is designed
+# and checked on (docs/model-fit-results.md: the numbers that predict the recordings best).
 NOMINAL = Params()
-# Fitted to the recorded plays (``validate``; the module's docstring).
-# The numbers are the body model's "tricks" view (protocol/spec.toml [model.views.tricks]: the
-# centre of mass 5.5 mm back and 5 mm right, sag 4, the tail's droop 16, an IMU roll offset of 2; the
-# rear-up reads the model's sideways centre of mass instead, kilo.tricks.rear_up MODEL):
-# they disagree with the model's own and stay the tricks' until a self-measurement settles them.
-FITTED = Params.of(BODY.view("tricks"))
 
 
 def bands(p: Params | None = None) -> list[tuple[str, Params]]:
     """The fit and one thing off it at a time, to the edges of what the
     recordings allow and a little past: the corners a design must survive."""
-    p = p or FITTED
+    p = p or NOMINAL
     out = [("fitted", p)]
     for k, vals in (("com_dx", (-4.0, +4.0)), ("com_dy", (-3.0, +3.0)), ("com_dz", (-10.0, +10.0)),
                     ("sag", (-1.0, +1.5)), ("tail_droop_deg", (-4.0, +4.0)), ("tail_len", (-3.0, +3.0))):
@@ -408,7 +406,7 @@ def _sent(kin: Kin, cmd: np.ndarray, prev: np.ndarray) -> np.ndarray:
     return out
 
 
-def simulate(frames, p: Params = FITTED, start: Mapping = STAND, settle_s: float = 0.6,
+def simulate(frames, p: Params = NOMINAL, start: Mapping = STAND, settle_s: float = 0.6,
              stop_tick: int | None = None, stop_ticks: int = 75, end: Mapping = SIT,
              t_end: float | None = None, dt: float = 1e-3, sample_s: float = 0.02,
              guards: Sequence[M.Guard] = (), roll_max: float | None = None,
@@ -666,7 +664,7 @@ def fixture(path: Path = FIXTURE) -> dict:
     return json.loads(path.read_text())
 
 
-def replay(run: dict, p: Params = FITTED) -> Prediction:
+def replay(run: dict, p: Params = NOMINAL) -> Prediction:
     """A recorded play (one of fixture()["runs"]) in the model, from the
     posture it started in, with the guards and the roll limit it had."""
     start = SIT if run["start"] == "SIT" else STAND
@@ -700,7 +698,7 @@ def features(t: np.ndarray, nu: np.ndarray, roll: np.ndarray, run: dict, t0: flo
     return out
 
 
-def replay_gather(run: dict, p: Params = FITTED) -> dict:
+def replay_gather(run: dict, p: Params = NOMINAL) -> dict:
     """"gather" alone: from "place_r" (all four feet planted under the
     body; the run's frames before it are not played, so the lift_r knife
     edge does not decide it), its move and hold. Its features."""
@@ -711,7 +709,7 @@ def replay_gather(run: dict, p: Params = FITTED) -> dict:
     return features(pr.t, pr.nose_up, pr.roll, run, t0=-starts(frames)[k])
 
 
-def lift_r_over(run: dict, p: Params = FITTED) -> bool:
+def lift_r_over(run: dict, p: Params = NOMINAL) -> bool:
     """Whether the play to the end of "lift_r" goes over the diagonal in the model."""
     k = run["names"].index("lift_r")
     pr = simulate(run["frames"][:k + 1], p, start=SIT if run["start"] == "SIT" else STAND,
@@ -719,10 +717,10 @@ def lift_r_over(run: dict, p: Params = FITTED) -> bool:
     return features(pr.t, pr.nose_up, pr.roll, run)["lift_r_over"]
 
 
-def validate(p: Params = FITTED) -> dict:
+def validate(p: Params = NOMINAL) -> dict:
     """The recorded plays against the model: per run the recorded features;
     the model's gather (from place_r); and lift_r with the centre of mass at
-    FITTED's and 0.5 mm further forward (it sits on the knife edge: 3 of 7
+    NOMINAL's and 0.5 mm further forward (it sits on the knife edge: 3 of 7
     plays went over)."""
     runs = fixture()["runs"]
     t1 = next(r for r in runs if r["label"] == "t1")
@@ -753,13 +751,13 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="The compliant model against the recorded rear_up plays.")
     ap.add_argument("--check", action="store_true", help="the fast kinematics against kilo.tricks.stance")
     ap.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
-                    help="a parameter off FITTED (e.g. com_dx=-6)")
+                    help="a parameter off NOMINAL (e.g. com_dx=-6)")
     args = ap.parse_args(argv)
     if args.check:
         d = check_kinematics()
         print(f"kinematics vs stance: largest difference {d:.3f} mm")
         return 0 if d < 0.01 else 1
-    p = FITTED.with_(**{k: float(v) for k, v in (s.split("=", 1) for s in args.set)})
+    p = NOMINAL.with_(**{k: float(v) for k, v in (s.split("=", 1) for s in args.set)})
     print(f"parameters: {p}")
     fmt = lambda v: "-" if v is None else (("yes" if v else "no") if isinstance(v, bool) else f"{v:+.2f}")  # noqa: E731
     v = validate(p)
@@ -767,7 +765,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  recorded {label:4} " + "  ".join(f"{k} {fmt(x)}" for k, x in rec.items()))
     print("  model    gather " + "  ".join(f"{k} {fmt(x)}" for k, x in v["model_gather"].items()))
     a, b = v["model_lift_r_over"]
-    print(f"  model    lift_r goes over: {fmt(a)} (FITTED), {fmt(b)} (the centre of mass 0.5 mm further forward)")
+    print(f"  model    lift_r goes over: {fmt(a)} (NOMINAL), {fmt(b)} (the centre of mass 0.5 mm further forward)")
     return 0
 
 

@@ -147,7 +147,7 @@ def ends_well(goal: str, rx: float) -> bool:
 PHI = np.radians(np.arange(-180, 181, 1.0))
 
 
-def profile(js: dict, p: D.Params = D.FITTED, ly: R.Lying | None = None) -> np.ndarray:
+def profile(js: dict, p: D.Params = D.NOMINAL, ly: R.Lying | None = None) -> np.ndarray:
     """The centre of mass's height above the floor (mm) for roll angles -180..180 (1 degree steps),
     rolling about his long axis with the nose level, in the pose ``js``."""
     kin = R.KinLying(p, ly)
@@ -195,7 +195,7 @@ def variants() -> list[tuple[str, D.Params, R.Lying]]:
     10 mm lower and higher, 3 mm either side; softer legs; each estimate of the outline a quarter
     either way; the outline under which rc's first frame rolls him onto his back as it did on Kilo
     (docs/righting-results.md); the tail the other way; slippery and grippy floors; slow servos."""
-    base, ly = D.FITTED, R.Lying()
+    base, ly = D.NOMINAL, R.Lying()
     out = [("fit", base, ly)]
     for k, v in (("com_dz", -10.0), ("com_dz", 10.0), ("com_dy", -3.0), ("com_dy", 3.0), ("sag", 1.5)):
         out.append((f"{k} {v:+g}", base.with_(**{k: getattr(base, k) + v}), ly))

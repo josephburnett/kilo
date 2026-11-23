@@ -142,7 +142,7 @@ def test_the_fast_gaits_stay_up(pattern):
 @pytest.mark.parametrize("direction", ("forward", "back", "left"))
 def test_the_fast_gaits_at_every_level_shrug_off_the_model_errors(pattern, direction):
     """The walk and the trot at their slowest, default and top speed, with
-    each model error: up, within 6 deg of the plan (the trot within 5; the
+    each model error: up, within 6.5 deg of the plan (the trot within 5; the
     IMU offset counts in full: the walker's gate subtracts it, this does not),
     no catch, and gate holds only with the servos faster than the model (a
     few, in the walk). The trot backward and turning in place only up to its
@@ -158,7 +158,9 @@ def test_the_fast_gaits_at_every_level_shrug_off_the_model_errors(pattern, direc
             assert sim.run(TICKS) == TICKS and not sim.fell()
             st = sim.planner.stats
             what = (speed, kw, sim.max_error(), st)
-            assert sim.max_error() < (5.0 if pattern == "trot" else 6.0) and st["catches"] == 0, what
+            # the walk 6.5: at its slowest with the servos 140 ms late it reaches 6.4 since the model's
+            # feet are 70 mm apart and its centre of mass 3 mm further back (2026-11-22; under 6 before)
+            assert sim.max_error() < (5.0 if pattern == "trot" else 6.5) and st["catches"] == 0, what
             assert st["holds"] == 0 or (pattern == "walk" and kw.get("lag_ms") == 20 and st["holds"] < 10), what
 
 

@@ -247,12 +247,12 @@ void test_estimate_in_the_mind() {
   r.put(KILO_POSTURE_STAND, "stand");
   CHECKF(r.state() == State::Standing, "state %s", state_name(r.state()));
   CHECK(r.log.has("state estimate on; intents off"));
-  CHECK(r.log.has("-> STANDING (pitch +0.0 roll +0.0, asked stand, confidence 100)"));
+  CHECK(r.log.has("-> STANDING (pitch +2.3 roll +0.5, asked stand, confidence 100)"));
   // on his left side while told to stand: the commanded posture is not the answer
   r.body.roll = 88 * kDeg;
   r.run_ms(1500);
   CHECKF(r.state() == State::OnLeftSide, "state %s", state_name(r.state()));
-  CHECK(r.log.has("state: STANDING -> ON_LEFT_SIDE (pitch +0.0 roll +88.0, asked stand, confidence 90)"));
+  CHECK(r.log.has("state: STANDING -> ON_LEFT_SIDE (pitch +2.3 roll +88.0, asked stand, confidence 90)"));
   r.body.roll = -92 * kDeg;
   r.run_ms(1500);
   CHECK(r.state() == State::OnRightSide);

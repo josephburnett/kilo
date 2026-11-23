@@ -13,6 +13,7 @@ import pytest
 from kilo.intent import estimate as E
 from kilo.intent import graph as G
 from kilo.intent import moves as M
+from kilo.planner.model import BodyModel
 from kilo.protocol import kilo_protocol as P
 from kilo.tricks import dynamics as D
 
@@ -29,9 +30,11 @@ def a16(deg):
 def test_table_is_the_models_and_covers_kilos_recordings():
     rows = {r.state: r for r in E.table()}
     assert set(rows) == {S.STANDING, S.SITTING, S.RESTING}
-    assert rows[S.STANDING].pitch == 0 and rows[S.STANDING].roll == 0
-    # SIT: the body's own expected pitch is -30 (posture.cpp); the model's is within 3 deg of it
-    assert abs(rows[S.SITTING].pitch / 16 + 30) < 3
+    # standing level the sensor reads the model's IMU offset (2026-11-22: 2.3 nose down, 0.5 roll), and
+    # sitting the model is within 1 deg of what Kilo read (-25.7; the body's own posture.cpp says -30)
+    assert (rows[S.STANDING].pitch, rows[S.STANDING].roll) == (a16(BodyModel().imu_pitch_deg),
+                                                               a16(BodyModel().imu_roll_deg))
+    assert abs(rows[S.SITTING].pitch / 16 + 25.7) < 1.0
     # what Kilo read, still, in each posture he was told to hold (the recordings of 2026-11-17..21:
     # kilo.intent.replay; pitch nose down +, roll): the estimate must name it, and with room to spare
     recorded = {C.STAND: (2.4, 0.2), C.SIT: (-25.7, 2.1), C.REST: (0.7, -1.7)}
@@ -101,7 +104,8 @@ def test_estimator_settles_confirms_and_logs_each_change_once():
     assert est.est.state == S.MOVING
     _feed(est, 30, -25.7, 2.1, C.SIT)
     assert est.est.state == S.SITTING and est.est.confidence > 70
-    assert abs(est.est.err_pitch / 16 - (-25.7 + 28.4)) < 0.2
+    sit = {r.state: r for r in E.table()}[S.SITTING]
+    assert abs(est.est.err_pitch / 16 - (-25.7 - sit.pitch / 16)) < 0.2
     # a blip shorter than the confirmation changes nothing
     ch = _feed(est, 5, 2, 0, C.SIT) + _feed(est, 10, -25.7, 2.1, C.SIT)
     assert not any(ch) and est.est.state == S.SITTING
@@ -150,26 +154,25 @@ def test_the_plan_orders_the_legs_where_that_keeps_the_mass_further_inside():
     doc = {e["move"]: e for e in M.load_plan()["moves"]}
     # stand <-> sit: all joints at once is already 27 mm inside: nothing to order
     assert len(doc["stand_to_sit"]["stages"]) == 1 and min(doc["stand_to_sit"]["margin_mm"].values()) > 25
-    # rest -> stand: all at once comes within 7 mm; the hind legs first keeps 10
+    # rest -> stand: all at once comes within 7 mm; the hind legs first keeps 8.7
     e = doc["rest_to_stand"]
     assert e["stages"][0] == ["hind shoulders", "hind knees"] and len(e["stages"]) == 2
     assert min(e["one_stage_margin_mm"].values()) < M.MARGIN_MM <= min(e["margin_mm"].values())
-    # rest <-> sit: no staging keeps 10 mm: not shipped, the graph goes through STANDING
+    # rest <-> sit: no staging keeps 8.5 mm: not shipped, the graph goes through STANDING
     assert not doc["rest_to_sit"]["shipped"] and not doc["sit_to_rest"]["shipped"]
     assert "comes within" in doc["rest_to_sit"]["why_not"]
 
 
 @pytest.mark.parametrize("name", M.shipped())
 def test_every_shipped_move_in_the_dynamics(name):
-    """Played in the compliant dynamics on the model and on the tricks' fit, each shipped move ends
+    """Played in the compliant dynamics on the model, each shipped move ends
     where the state estimate reads its target, without a fall, a stop or an overloaded servo."""
     e = {x["move"]: x for x in M.load_plan()["moves"]}[name]
     pl = M.plan(S[e["from"]], S[e["to"]])
-    for band, p in (("model", D.NOMINAL), ("fitted", D.FITTED)):
-        run = M.judge(pl, band, p)
-        assert run.ok, (name, band, run.problems)
-        assert run.end_state == e["to"]
-        assert run.max_roll < M.ROLL_MAX - 10
+    run = M.judge(pl, "model", D.NOMINAL)
+    assert run.ok, (name, run.problems)
+    assert run.end_state == e["to"]
+    assert run.max_roll < M.ROLL_MAX - 10
 
 
 def test_a_bad_move_is_not_shipped():

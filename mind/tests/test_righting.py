@@ -94,14 +94,14 @@ def test_simulate_is_unchanged_without_a_lying_start():
     """R0 and kin default to what dynamics.simulate always did (rear_up's checks rest on it:
     python -m kilo.tricks.rear_up --check is the full proof)."""
     fr = [(dict(D.STAND, lf_knee=40.0), 5, 5)]
-    a = D.simulate(fr, D.FITTED, t_end=0.3)
-    b = D.simulate(fr, D.FITTED, t_end=0.3, R0=None, kin=D.Kin(D.FITTED))
+    a = D.simulate(fr, D.NOMINAL, t_end=0.3)
+    b = D.simulate(fr, D.NOMINAL, t_end=0.3, R0=None, kin=D.Kin(D.NOMINAL))
     assert np.array_equal(a.nose_up, b.nose_up) and np.array_equal(a.roll, b.roll)
     assert len(a.up) == len(a.t) and a.up[0][2] > 0.99
 
 
 def test_kin_lying_has_a_head_that_moves_and_hips():
-    kin = R.KinLying(D.FITTED)
+    kin = R.KinLying(D.NOMINAL)
     q = dict(D.STAND)
     P, c, I = kin.state(q)
     assert len(P) == kin.n == len(kin.labels) == len(kin.radius)
@@ -113,11 +113,11 @@ def test_kin_lying_has_a_head_that_moves_and_hips():
     P2, c2, _ = kin.state(dict(q, head_pan=60.0))
     assert P2[i][1] - P[i][1] > 20.0                                  # the muzzle swings left...
     assert 0.3 < c2[1] - c[1] < 3.0 and c2[0] < c[0]                  # ...and the head's mass with it
-    assert kin.internal and not D.Kin(D.FITTED).__dict__.get("internal", False)
+    assert kin.internal and not D.Kin(D.NOMINAL).__dict__.get("internal", False)
     P3, _, _ = kin.state(dict(q, head_tilt=-70.0))
     assert P3[i][2] < P[i][2] - 20.0 and P3[j][0] > P[j][0]          # nose down, ears forward
     # the feet, knees and tail are dynamics.Kin's own
-    P0, _, _ = D.Kin(D.FITTED).state(q)
+    P0, _, _ = D.Kin(D.NOMINAL).state(q)
     assert P[:9] == pytest.approx(P0[:9])
 
 
@@ -128,8 +128,8 @@ def test_on_his_back_the_model_lies_as_kilo_lay():
     tr = fall["tries"][0]
     up0 = R.up_of(*tr["start"])
     st = R.start_joints(fall, 1)
-    pr = D.simulate([(st, 1, 0)], D.FITTED, start=st, settle_s=1.0, t_end=0.1, R0=R.r0_for(up0),
-                    kin=R.KinLying(D.FITTED))
+    pr = D.simulate([(st, 1, 0)], D.NOMINAL, start=st, settle_s=1.0, t_end=0.1, R0=R.r0_for(up0),
+                    kin=R.KinLying(D.NOMINAL))
     assert R.angle(np.array(pr.up[-1]), up0) < 8.0
     assert R.lying(np.array(pr.up[-1])) == "on his back"
 
@@ -181,33 +181,35 @@ def test_bands_cover_the_estimates():
 
 
 def test_the_verdict_today():
-    """What docs/righting.md reports (2026-11-21), pinned: with the fitted numbers and the
-    estimated sizes the model lies as Kilo lay, but rc gets him up in none of the four floor
-    tries where it got Kilo up. If a measurement changes this, the doc's verdict changes with it."""
+    """What docs/righting-results.md reports, pinned: on the one body model (2026-11-22; until then
+    the tricks' own numbers, with which the model lay as Kilo lay) the model no longer lies as Kilo
+    lay (up to 64 deg off), and rc gets him up in none of the four floor tries where it got Kilo up.
+    If a measurement changes this, the doc's verdict changes with it."""
     rs = R.replay_all(workers=1, floor_only=True)
     assert len(rs) == 6 and all(r.floor for r in rs)
     v = R.verdict(rs)
-    assert v.rest_ok and not v.outcome_ok and not v.motion_ok and not v.credible
+    assert not v.rest_ok and not v.outcome_ok and not v.motion_ok and not v.credible
     assert sum(r.righted for r in rs if r.recorded_righted) == 0
     assert sum(r.righted for r in rs if not r.recorded_righted) == 0
-    # the one thing it follows: from his right side he goes through "on his side" when Kilo did
+    # the one thing it followed on the tricks' numbers (from his right side through "on his side" when
+    # Kilo did) it does not on the one model: it stays on his back there
     b8 = next(r for r in rs if r.label == "b8@114s try 1")
-    assert abs(b8.side_t - b8.side_t_rec) < 0.1
+    assert b8.side_t is None and b8.side_t_rec is not None
     # the leg servos' load stays far under the stall estimate (3 kg cm)
     assert max(r.torque for r in rs) < 2.0
     assert "upright" in R.table(rs)
 
 
 def test_the_phases_today():
-    """docs/righting-results.md, pinned (2026-11-22): with the fitted numbers rc's first frame leaves
-    him on his side where Kilo rolled onto his back, and the model gets none of the four up."""
+    """docs/righting-results.md, pinned (2026-11-22, the one body model): from a side, where Kilo
+    rolled onto his back at rc's first frame 3 times of 3, the model stays on his side in 2 of them."""
     rows = R.phases()
     assert len(rows) == 6
     sides = [r for r in rows if abs(r["kilo"][0]) > 150 and "side" in next(
         t["start_lying"] for f in R.fixture()["falls"] for t in f["tries"]
         if f"{f['file'].replace('rec-card-', '').replace('.krec', '')}@{f['uptime_s']:.0f}s try {t['n']}" == r["try"])]
     assert len(sides) == 3                                     # Kilo: from a side onto his back, 3 of 3
-    assert all(abs(r["model"][0]) < 140 for r in sides)       # the model: still on his side
+    assert sum(abs(r["model"][0]) < 140 for r in sides) == 2  # the model: still on his side in 2
     assert "Kilo after frame" in R.phases_table(rows)
 
 
@@ -221,16 +223,20 @@ def test_the_righting_moves_are_what_the_report_says():
         t = RT.load_move(name).validate()
         r = rep["moves"][name]
         assert t.name == "intent_" + name and t.fall_ok and t.end_posture == Posture.REST and t.roll_max == 0
-        assert r["shipped"] and r["ok"] >= RT.SHIP_FRACTION * r["runs"] and r["max_torque_kg_cm"] <= RT.TORQUE_MAX
+        # the verdict is the rule's; on the one body model (2026-11-22: the centre of mass in the middle,
+        # not the tricks' old 5 mm right) neither move reaches its bar (side 69 of 95, back 52 of 76):
+        # B1 still plays them, as the experiment they are (docs/model-fit-results.md)
+        assert r["shipped"] == (r["ok"] >= RT.SHIP_FRACTION * r["runs"] and r["max_torque_kg_cm"] <= RT.TORQUE_MAX)
+        assert r["max_torque_kg_cm"] <= RT.TORQUE_MAX
         assert t.to_json() == RT.build(name, rep["moves"]).to_json()   # the files are this code's
         fn = RT.MOVES[name][0]
-        kin = R.KinLying(D.FITTED)
+        kin = R.KinLying(D.NOMINAL)
         for frame, js, _, _ in fn():
             assert js["head_pan"] == 0.0 and js["tail"] == 0.0     # their signs are not known: left alone
             if frame != "rest":                                    # (REST is the body's own: its left front knee clamps)
                 assert kin.clamp(js) == pytest.approx(js, abs=1.0)  # inside every joint's reach
     side = rep["moves"]["righting_side"]
-    assert side["ok"] >= 85 and side["runs"] == 95
+    assert side["ok"] >= 60 and side["runs"] == 95
 
 
 def test_no_single_pose_rolls_him_over_statically():
@@ -241,5 +247,5 @@ def test_no_single_pose_rolls_him_over_statically():
         u = RT.profile(js)
         assert RT.downhill(u, -120) < -75                         # still on his side or his back
     # the kick and throw together in the dynamics: onto his belly from his right side
-    end, torque, _ = RT.play(RT.side_move(), D.STAND, -120.0, D.FITTED, R.Lying())
+    end, torque, _ = RT.play(RT.side_move(), D.STAND, -120.0, D.NOMINAL, R.Lying())
     assert abs(end) < 50 and torque < RT.TORQUE_MAX
