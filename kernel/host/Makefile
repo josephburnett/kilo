@@ -1,11 +1,11 @@
 # The mind core on the Linux host: the kilo-mind-host program, the unit
 # tests, and a freestanding build that proves the core needs nothing from
 # libc or libstdc++ beyond memcpy/memset/memcmp and from libm beyond the
-# planner's float functions (what Circle gives).
+# engine's float functions (what Circle gives).
 #
-#   make              build/kilo-mind-host, build/walk-demo
-#   make check        unit tests (sanitizers), the planner against the Python vectors
-#   make bench        the planner's cost per tick, the Noise handshake's (no sanitizers)
+#   make              build/kilo-mind-host, build/walk-demo, build/engine-judge
+#   make check        unit tests (sanitizers)
+#   make bench        the engine's cost per tick, the Noise handshake's (no sanitizers)
 #   make freestanding the core built and linked with -ffreestanding -nostdlib
 #
 # kernel/host/test.sh runs all three and the integration run against vbody.
@@ -20,9 +20,8 @@ PYTHON ?= python3
 B := build
 
 WARN := -Wall -Wextra -Werror
-# -ffp-contract=off: no fused multiply-add, so the planner's prediction of
-# a slot's end matches what next() then computes (as on the Cortex-A7, which
-# has FMA). -fno-math-errno: sqrtf is an instruction, not a libm call.
+# -ffp-contract=off: no fused multiply-add, so the solver's look-ahead
+# matches what next() then computes (as on the Cortex-A7, which has FMA). -fno-math-errno: sqrtf is an instruction, not a libm call.
 FPFLAGS := -ffp-contract=off -fno-math-errno
 CXXFLAGS := -std=c++17 $(WARN) -O2 -fno-exceptions -fno-rtti $(FPFLAGS) -I$(KERNEL)/mind -I.
 CFLAGS := -std=c99 $(WARN) -O2
@@ -31,8 +30,7 @@ SAN := -fsanitize=address,undefined -fno-sanitize-recover=all -g
 CORE_CXX := $(filter %.cpp,$(MIND_SRCS))
 CORE_C := $(filter %.c,$(MIND_SRCS))
 HOST_SRCS := main.cpp posix.cpp baud.cpp
-TESTS := test_fmt test_frames test_link test_names test_planner test_walker
-PLANNER_VECTORS := tests/planner_vectors.txt
+TESTS := test_fmt test_frames test_link test_names test_engine test_walker
 # The Noise layer's known answers (tests/gen_noise_vectors.py; test.sh checks they are current).
 NOISE_VECTORS := tests/noise_vectors.txt
 
@@ -76,7 +74,7 @@ TESTS += test_measure
 TESTS += test_intent
 
 .PHONY: all check bench freestanding clean
-all: $(B)/kilo-mind-host $(B)/walk-demo
+all: $(B)/kilo-mind-host $(B)/walk-demo $(B)/engine-judge
 
 # ---- the program ----------------------------------------------------------
 CORE_OBJS := $(CORE_CXX:%.cpp=$(B)/obj/%.o) $(CORE_C:%.c=$(B)/obj/%.o)
@@ -114,6 +112,10 @@ $(B)/obj/gen/sounds.gen.o: $(SOUNDS_GEN)
 $(B)/walk-demo: $(CORE_OBJS) $(B)/obj/host/walk_demo.o $(B)/obj/host/posix.o $(B)/obj/host/baud.o
 	$(CXX) $^ -o $@
 
+# The engine's walks, planned with no body, for the judge (mind/tests/enginejudge.py).
+$(B)/engine-judge: $(CORE_OBJS) $(B)/obj/host/engine_judge.o
+	$(CXX) $^ -o $@
+
 # ---- unit tests (sanitizers, own objects) ----------------------------------
 SAN_OBJS := $(CORE_CXX:%.cpp=$(B)/san/%.o) $(CORE_C:%.c=$(B)/san/%.o)
 
@@ -131,43 +133,21 @@ $(B)/vectors.txt: tests/flatten_vectors.py $(wildcard $(REPO)/protocol/vectors/*
 	@mkdir -p $(B)
 	$(PYTHON) tests/flatten_vectors.py $(REPO) > $@
 
-# The planner in double precision throughout (-DKILO_PLANNER_DOUBLE), for
-# the vector test's twin: it shows how much of a deviation from Python is
-# the port and how much is float.
-PLANNER_CXX := $(filter mind/planner/%,$(CORE_CXX))
-DBL_OBJS := $(filter-out $(PLANNER_CXX:%.cpp=$(B)/san/%.o),$(SAN_OBJS)) $(PLANNER_CXX:%.cpp=$(B)/dbl/%.o)
-$(B)/dbl/%.o: $(KERNEL)/%.cpp
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -DKILO_PLANNER_DOUBLE $(SAN) -O1 -MMD -c $< -o $@
-$(B)/test_planner_vectors: tests/test_planner_vectors.cpp $(SAN_OBJS)
-	$(CXX) $(CXXFLAGS) $(SAN) -O1 -MMD $< $(SAN_OBJS) -o $@
-$(B)/test_planner_vectors_double: tests/test_planner_vectors.cpp $(DBL_OBJS)
-	$(CXX) $(CXXFLAGS) -DKILO_PLANNER_DOUBLE $(SAN) -O1 -MMD $< $(DBL_OBJS) -o $@
-
-check: $(TESTS:%=$(B)/%) $(B)/vectors.txt $(B)/test_planner_vectors $(B)/test_planner_vectors_double $(B)/test_noise
+check: $(TESTS:%=$(B)/%) $(B)/vectors.txt $(B)/test_noise
 	@fail=0; for t in $(TESTS); do $(B)/$$t $(B)/vectors.txt || fail=1; done; \
-	$(B)/test_noise $(NOISE_VECTORS) || fail=1; \
-	$(B)/test_planner_vectors $(PLANNER_VECTORS) || fail=1; \
-	$(B)/test_planner_vectors_double $(PLANNER_VECTORS) || fail=1; exit $$fail
+	$(B)/test_noise $(NOISE_VECTORS) || fail=1; exit $$fail
 
-# ---- the planner's cost per tick (optimised as the kernel is, no sanitizers) --------
-BENCH_DBL_OBJS := $(PLANNER_CXX:%.cpp=$(B)/bdbl/%.o) $(filter-out $(PLANNER_CXX:%.cpp=$(B)/obj/%.o),$(CORE_OBJS))
-$(B)/bdbl/%.o: $(KERNEL)/%.cpp
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -DKILO_PLANNER_DOUBLE -MMD -c $< -o $@
-$(B)/bench_planner: tests/bench_planner.cpp $(CORE_OBJS)
+# ---- the engine's cost per tick (optimised as the kernel is, no sanitizers) --------
+$(B)/bench_engine: tests/bench_engine.cpp $(CORE_OBJS)
 	$(CXX) $(CXXFLAGS) $< $(CORE_OBJS) -o $@
-$(B)/bench_planner_double: tests/bench_planner.cpp $(BENCH_DBL_OBJS)
-	$(CXX) $(CXXFLAGS) -DKILO_PLANNER_DOUBLE $< $(BENCH_DBL_OBJS) -o $@
 # The host channel's Noise handshake and records (as the kernel's boot bench).
 $(B)/bench_noise: tests/bench_noise.cpp $(CORE_OBJS)
 	$(CXX) $(CXXFLAGS) $< $(CORE_OBJS) -o $@
 # The flight recorder's per-tick cost and a host pass during a download.
 $(B)/bench_walks: tests/bench_walks.cpp $(CORE_OBJS)
 	$(CXX) $(CXXFLAGS) $< $(CORE_OBJS) -o $@
-bench: $(B)/bench_planner $(B)/bench_planner_double $(B)/bench_noise $(B)/bench_walks
-	$(B)/bench_planner
-	$(B)/bench_planner_double
+bench: $(B)/bench_engine $(B)/bench_noise $(B)/bench_walks
+	$(B)/bench_engine
 	$(B)/bench_noise
 	$(B)/bench_walks
 

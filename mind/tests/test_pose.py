@@ -9,7 +9,7 @@ TELEMETRY fields."""
 
 import pytest
 
-from kilo.planner.walker import pack_pose_feet
+from kilo.engine import pack_pose_feet
 from kilo.protocol import kilo_link_codec as C
 from kilo.protocol import kilo_protocol as P
 from kilo.vbody.sim import VirtualBody

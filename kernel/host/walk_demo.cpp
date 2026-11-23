@@ -1,7 +1,7 @@
 // walk-demo: the portable mind core walks the virtual body (python -m
 // kilo.vbody.core prints its pty) or a NyBoard: HELLO, then a walk for
-// --seconds, then the planned stop, with the planner (kernel/mind/planner)
-// streaming FEET five ticks ahead as the Circle kernel will.
+// --seconds, then the planned stop, with the engine (kernel/mind/engine)
+// streaming POSE three ticks ahead as the Circle kernel does.
 //
 //   walk-demo --port /dev/pts/N [--seconds S] [--pattern trot|walk|crawl]
 //             [--direction forward|back|left|right|march] [--speed MM_S] [--verbose]
@@ -18,12 +18,12 @@
 #include <string.h>
 #include "link/names.h"
 #include "link/serial_link.h"
-#include "planner/walker.h"
+#include "engine/walker.h"
 #include "posix.h"
 #include "util/log.h"
 
 using namespace kilo;
-using namespace kilo::planner;
+using namespace kilo::engine;
 
 namespace {
 
@@ -82,8 +82,8 @@ int main(int argc, char** argv) {
     } else if (strcmp(a, "--seconds") == 0) {
       seconds = atof(argv[++i]);
     } else if (strcmp(a, "--pattern") == 0) {
-      goal.pattern = find_pattern(argv[++i]);
-      if (goal.pattern == nullptr) return usage();
+      goal.gait = find_gait(argv[++i]);
+      if (goal.gait == nullptr) return usage();
     } else if (strcmp(a, "--direction") == 0) {
       if (!find_direction(argv[++i], &goal.direction)) return usage();
     } else if (strcmp(a, "--speed") == 0) {
@@ -109,7 +109,7 @@ int main(int argc, char** argv) {
   }
   serial.set_baud(KILO_BAUD);
   SerialLink link(serial, clock, log);
-  static Walker walker(link, clock, log);  // static: the walker holds the planner, a few KB
+  static Walker walker(link, clock, log);  // static: the walker holds the solver, a few KB
   Watch watch(walker);
   link.set_listener(&watch);
   link.connect();

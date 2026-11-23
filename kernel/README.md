@@ -16,7 +16,7 @@ docs/fast-boot-first-boot.md is the procedure on the Pi.
 | Path | What |
 |---|---|
 | `circle/` | Circle, a git submodule pinned to `Step51.1.1` |
-| `src/` | the mind kernel (`kernel7.img`): the core's seams on Circle (`seams.*`), the main loop (`kernel.*`), the network and its seams, mDNS (`net.*`), the SD card: the body image and kernel updates (`bootcard.*`), the planner bench (`plannerbench.*`), the boot probe (`bootprobe.*`) |
+| `src/` | the mind kernel (`kernel7.img`): the core's seams on Circle (`seams.*`), the main loop (`kernel.*`), the network and its seams, mDNS (`net.*`), the SD card: the body image and kernel updates (`bootcard.*`), the engine bench (`plannerbench.*`), the boot probe (`bootprobe.*`) |
 | `netboot/` | the network loader: Circle's `sample/38-bootloader` with our `kernel.cpp`, `kernel.h`, `main.cpp` (see below) |
 | `boot/config.txt` | the Pi's `config.txt` |
 | `tools/make-sd.sh` | writes a boot card |
@@ -255,7 +255,7 @@ change of build, not of a flag.
 `Mind` (first, so every later line is in its ring), the body link's
 serial device (below), the flasher (attached through `mind.host()`),
 `mind.start()` (balance on, then `link.connect()`: HELLO_REQ), the
-planner bench, and last the net task. Then one loop, every 1 ms:
+engine bench, and last the net task. Then one loop, every 1 ms:
 
 ```
 mind.poll()                       timed: the loop stats line
@@ -272,7 +272,7 @@ end of a flash: log it; --persist: write the image to SD
 boot flash check                  once, after the first HELLO (or 3 s): SD image, flash if another build,
                                   the outcome in body-result.txt ("Flashing the body")
 link.connect() again              once a second, only if the Serial failed
-planner bench step                once, after the first laptop client (below)
+engine bench step                  once, after the first laptop client (below)
 Circle's log events -> the ring   (USB, Ethernet, DHCP lines for `kilo log --host`)
 stats once a second, the ACT LED
 reboot                            after a laptop's REBOOT: 200 ms more passes (the OK leaves), then
@@ -346,11 +346,11 @@ plus whatever the other tasks took; *work* is one pass without the sleep;
 *mind.poll* is the mind core's share (the laptop, the link, the walker,
 the trick player, the remote, the behaviour runner); `(bench)` marks
 seconds when the
-planner bench ran. Timed with `CTimer::GetClockTicks()` (1 MHz), so with no
+engine bench ran. Timed with `CTimer::GetClockTicks()` (1 MHz), so with no
 scope.
 
 Estimate per pass (est., from the host: `make -C kernel/host bench` gives
-`Planner::next()` p99 about 4 us, start about 30 us on the laptop; the
+`Solver::next()` (the engine) p99 about 20 us on the laptop; the
 Cortex-A7 at 900 MHz is taken as 20 times slower): `link.poll()` a few us
 (a 66-byte frame's COBS and CRC), `host.poll()` tens of us with four
 clients streaming TELEM at 50 Hz, `walker.poll()` near 0 between wakes and
@@ -359,21 +359,21 @@ perception a few us per TELEMETRY; the behaviour runner's tick every
 100 ms (with `KILO_BEHAVIOUR=1`) is not estimated.
 That is under 0.2 ms of a 1 ms pass, so the 1 ms sleep stays: shorter
 gains nothing (the walker's grid is 20 ms, the link's deadlines 10 ms and
-up), longer delays the walker's wake. The planner's real cost on the Pi 2 B
+up), longer delays the walker's wake. The engine's real cost on the Pi 2 B
 is still to be measured: the bench and this line do it at the first boot.
 
-### Planner bench
+### Engine bench
 
 Once, from 1 s after the first laptop client connects (so a `kilo log
 --host` tail shows its lines live: the 64-line ring holds only about 15 s
-of log), one call per loop pass, a `Planner` of its own (not
+of log), one call per loop pass, a `Solver` of its own (the engine's; not
 the walker's; nothing goes to the body) walks trot, walk and crawl as
-`kernel/host/tests/bench_planner.cpp` does once each (a speed change, a
-turn, a change of pattern, the planned stop), about 1400 ticks each, then
-logs one line per pattern:
+`kernel/host/tests/bench_engine.cpp` does once each (a speed change, a
+turn, a change of gait, the planned stop), about 1400 ticks each, then
+logs one line per gait:
 
 ```
-planner bench trot: start 612 us; next() x1450 mean 31.20 us max 140 us (a tick is 20000 us; Python on the Pi: max 4500 us)
+engine bench trot: start 612 us; next() x1450 mean 31.20 us max 140 us (a tick is 20000 us; Python on the Pi: max 4500 us)
 ```
 
 (numbers made up.) Then the host channel's handshake ("Who may talk to
@@ -492,7 +492,7 @@ reference):
   2-4 ms; about 0.1 ms on the laptop), so the mind's three (its ephemeral
   key, ee, se) run one per main-loop pass, for all connections together,
   round robin: a handshake takes three passes, and no pass does more than
-  one. The boot bench measures them ("Planner bench"). A record costs a few
+  one. The boot bench measures them ("Engine bench"). A record costs a few
   microseconds per KB on the laptop; the server opens at most 1 KB of
   records and seals at most two records per client per pass.
 - **Randomness**: the mind's ephemeral key comes from a new seam,
@@ -824,8 +824,8 @@ round slowly).
 1.4 times the trot's default speed (the walk's and the crawl's: 0.4, 0.7,
 1, 1.15, 1.25), and -1 to -5 walk backward at the same factors (the trot to
 -3). There is no level 0: from +1, B5 goes to -1, and from -1, B7 goes to
-+1. B7 stops at +5 and B5 at -5. The planner limits each gait's speed
-(mind/planner/), and the log line shows the real speed. In mm/s, levels 1
++1. B7 stops at +5 and B5 at -5. The engine limits each gait's speed
+(mind/engine/gait.cpp), and the log line shows the real speed. In mm/s, levels 1
 to 5: crawl 8.9, 15.6, 22.2, 25.6, 26.9; walk 23.2, 40.6, 58, 66.7, 72.5 (since
 2026-11-22; the walk of docs/walking-and-balance.md §16); trot 57.6,
 100.8, 144, 180, 201.6.
@@ -840,7 +840,7 @@ keep the steer; the gait key in use straightens it; every stop forgets it.
 
 **Stops.** B6, A7, C5 and C7 stop a walk with the quick stop: the feet go
 down where they are, the body stops in about 0.2 s, and the legs square up
-(`mind/planner/plan.h` halt(); docs/walking-and-balance.md section 14). It
+(`mind/engine/solve.h` halt(); docs/walking-and-balance.md section 14). It
 ends in STANCE (the standing pose the walk uses) with the servos on. Every
 stop sets the speed level back to +3, the heading to straight and the steer
 to 0. A playing trick is stopped first (its end posture).
@@ -1255,7 +1255,7 @@ history lines (`kernel/host/tests/test_record.cpp`
 `test_play_session_log`: a walk makes four, a remote key one or two), and
 `kilo log --host` asked for only the last 20 by default. With the cable
 in, the network's lines (Circle's DHCP and Ethernet lines, the address,
-mDNS), each laptop connection's three or four lines and the planner bench's
+mDNS), each laptop connection's three or four lines and the engine bench's
 lines came on top, and once a client watched the log, 64 lines were
 twenty seconds of counters: the session's keys and walks were gone.
 
@@ -1344,7 +1344,7 @@ on the Cortex-A7 (the loop line's `mind.poll`), a download over the cable
 during a walk and after it (`kilo runs --host`), and the recordings of a
 real walk or trick (the IMU's real attitude against the plan: the virtual
 body's IMU is scripted, so the lag and the error by phase have only been
-checked on synthetic data, `mind/tests/test_walks.py`). The card saver:
+checked on synthetic data). The card saver:
 every number about the card (`kilo bench sd` gives them), FatFs's
 `f_mkdir`, `f_opendir`, `f_lseek`, `f_sync` and `FA_OPEN_APPEND` on
 Circle, whether a write's stall shows in the loop line as expected, and a

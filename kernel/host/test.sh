@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Every check of the mind core on the Linux host:
 #   1. the C++ unit tests (sanitizers): formatter, framing vectors, names, link state machine,
-#      planner, walker, and the planner against the Python planner's vectors (float and double);
-#   2. the planner's cost per tick on this machine;
+#      the engine (step clock and solver), the walker;
+#   2. the engine's cost per tick on this machine;
 #   3. the freestanding build (no libc or libstdc++ beyond memcpy/memset/memcmp, libm's
 #      float sinf cosf sincosf tanf atanf atan2f);
 #   4. kilo-mind-host against the virtual body (the real body core on a pty), and
@@ -61,7 +61,7 @@ make -s -C "$HERE" -j"$JOBS" all
 echo "== unit tests"
 make -s -C "$HERE" -j"$JOBS" check
 
-echo "== planner cost per tick"
+echo "== engine cost per tick"
 make -s -C "$HERE" -j"$JOBS" bench
 
 echo "== freestanding core"
@@ -700,8 +700,8 @@ echo "== P3: generated tables up to date (tricks, personality)"
 "$PYTHON" "$REPO/kernel/mind/tricks/gen_library.py" --check  # (each generator imports this checkout's mind/)
 "$PYTHON" "$REPO/kernel/mind/behaviour/gen_personality.py" --check
 "$PYTHON" "$REPO/kernel/mind/intent/gen_intent.py" --check
-echo "== P3: golden vectors up to date with the Python reference (perception, behaviour, planner, measure, intent)"
-for v in perception behaviour planner measure intent; do  # (the planner's takes about 1 s)
+echo "== P3: golden vectors up to date with the Python reference (perception, behaviour, measure, intent)"
+for v in perception behaviour measure intent; do
     vectors_current "$v"
 done
 

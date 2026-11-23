@@ -227,7 +227,7 @@ void test_walk_run() {
   for (const char* x : words) CHECKF(mark(rs, x) != nullptr, "no MARK %s", x);
   CHECK(mark(rs, "end")->payload == "end ok=1 streamed=1 reason=stopped");
   CHECK(count_kind(rs, KILO_WALK_RECORD_RUN) == 2);
-  const planner::StreamStats& ss = r.mind.walker().stream_stats();
+  const engine::StreamStats& ss = r.mind.walker().stream_stats();
   CHECK(count_kind(rs, KILO_WALK_RECORD_PLAN) == ss.sent + ss.skipped && run->feet == ss.sent &&
         count_kind(rs, KILO_WALK_RECORD_TX, KILO_MSG_POSE) == ss.sent);
   // the keys that drove it are marked in the run, and the walk's summary is in the log

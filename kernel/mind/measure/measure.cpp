@@ -281,7 +281,7 @@ void Measure::begin_stream(uint64_t now) {
   }
   int64_t cur = (int64_t)body;
   if ((double)cur > body) cur--;
-  tick0_ = cur + planner::kLookahead;
+  tick0_ = cur + engine::kLookahead;
   planned_ = tick0_;
   last_tick_ = tick0_ - 1;
   phase_ = Phase::Streaming;
@@ -352,7 +352,7 @@ void Measure::wake(uint64_t now) {
     if (cur >= last_tick_ + 2) finish("DONE", "done", true);
     return;
   }
-  int64_t target = cur + planner::kLookahead;
+  int64_t target = cur + engine::kLookahead;
   while (planned_ <= target) {
     Pose pose;
     bool first = false;

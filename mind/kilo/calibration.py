@@ -25,7 +25,7 @@ limits, from
 - the postures (body/src/core/posture.cpp: REST, SIT, STAND, CALIB;
   ``POSTURES`` below, checked against the C table by
   mind/tests/test_calibration.py),
-- the gaits: the planner (kilo.planner) at every remote level the walk, the
+- the gaits: the engine (kilo.engine: the kernel's own solver) at every remote level the walk, the
   trot and the crawl have, forward, backward, turning and steering as the
   remote drives them (the trot backward to -3 and at +4, +5 steering one
   level; each trot ended by the quick stop, whose square-up starts from
@@ -156,6 +156,8 @@ def _note(acc: dict, j: int, a: float, by: str) -> None:
 # kSpeedFactors, kTrotSpeedFactors, kSteerLevels; the trot backward only to -3 (kTrotBackSteps) and
 # steering one level at +4 and +5 (kTrotLongFrom, kTrotFastSteerSteps).
 SPEED_FACTORS = (0.4, 0.7, 1.0, 1.15, 1.25)
+# each gait's default speed (kernel/mind/engine/gait.cpp: the crawl's, its stride over its stance)
+DEFAULT_SPEED = {"walk": 58.0, "trot": 144.0, "crawl": 50.0 / ((127.5 - 15) * 0.02)}
 TROT_SPEED_FACTORS = (0.4, 0.7, 1.0, 1.25, 1.4)
 STEER_LEVELS = (0.25, 0.5, 1.0)
 
@@ -182,9 +184,8 @@ CATEGORIES = ("postures", "gaits", "tricks")
 def compute_asked(ticks: int = 200) -> dict[str, dict[int, Asked]]:
     """Per category (postures, gaits, tricks): every joint's lowest and highest
     asked angle (degrees, after the joint limits) and what asks it."""
-    from kilo.planner import patterns as pat
+    from kilo import engine
     from kilo.planner.model import BodyModel
-    from kilo.planner.plan import Planner
     from kilo.tricks import library
 
     cats: dict[str, dict] = {c: {} for c in CATEGORIES}
@@ -195,12 +196,10 @@ def compute_asked(ticks: int = 200) -> dict[str, dict[int, Asked]]:
     acc = cats["gaits"]
     model = BodyModel()
     for gait, d, f, steer, label in _gait_cases():
-        p = Planner(model, gait, d, pat.default_speed(gait) * f, steer=steer)
-        plans = [p.next() for _ in range(ticks)]
-        if gait == "trot":  # the trot's quick stop from its long stride squares up from near the reach
-            p.halt()
-            while not p.done and len(plans) < 3 * ticks:
-                plans.append(p.next())
+        # the trot's quick stop from its long stride squares up from near the reach
+        at = [f"{ticks}:halt"] if gait == "trot" else []
+        plans, _, _ = engine.plan(gait, DEFAULT_SPEED[gait] * f, ticks=3 * ticks if at else ticks, at=at,
+                                  direction=d, steer=steer)
         for tp in plans:
             for leg in range(4):
                 t1, t2 = model.ik(leg, float(tp.x[leg]), float(tp.z[leg]))
@@ -234,14 +233,14 @@ ASKED: dict[str, dict[int, Asked]] = {
         15: Asked(-30.0, 45.0, 'STAND', 'REST'),
     },
     'gaits': {
-        8: Asked(-9.3, 75.3, 'crawl -5', 'crawl -5'),
-        9: Asked(-10.8, 75.8, 'crawl -1 steer 0.5', 'crawl -4'),
-        10: Asked(-80.0, -5.2, 'crawl -5', 'trot +5 steer 0.25'),
-        11: Asked(-79.9, -2.8, 'crawl -2', 'trot +5 steer -0.25'),
-        12: Asked(-16.1, 48.4, 'crawl -1 steer 1', 'crawl -5'),
-        13: Asked(-16.5, 50.3, 'crawl turn 4', 'crawl -1 steer 0.5'),
-        14: Asked(-34.5, 21.0, 'walk -2 steer 1', 'crawl +1 steer 0.5'),
-        15: Asked(-35.6, 19.3, 'trot +5 steer -0.25', 'crawl +4'),
+        8: Asked(-5.1, 69.1, 'walk -5', 'crawl +3'),
+        9: Asked(-3.8, 70.4, 'walk -3 steer 0.25', 'crawl -4'),
+        10: Asked(-73.1, -3.4, 'crawl -4', 'walk -3 steer 0.25'),
+        11: Asked(-73.1, -1.5, 'crawl -2', 'walk -5'),
+        12: Asked(-21.3, 48.2, 'crawl +3', 'walk -5'),
+        13: Asked(-20.9, 46.7, 'crawl +1 steer 1', 'walk -2 steer 1'),
+        14: Asked(-36.9, 24.0, 'walk -3 steer 0.25', 'crawl +5 steer 1'),
+        15: Asked(-39.0, 24.7, 'walk -5', 'crawl +5 steer -1'),
     },
     'tricks': {
         0: Asked(-45.0, 95.0, 'wash_face', 'wash_face'),

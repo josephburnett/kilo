@@ -16,7 +16,7 @@ int posture_code(const char* name) {
   return -1;
 }
 
-bool client_posture(SerialLink& link, planner::Walker* walker, const char* name, int8_t balance,
+bool client_posture(SerialLink& link, engine::Walker* walker, const char* name, int8_t balance,
                     uint8_t transition_ticks) {
   int code = posture_code(name);
   if (code < 0 || link.state().proto_ok == 0) return false;

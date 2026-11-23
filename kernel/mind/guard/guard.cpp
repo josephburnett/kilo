@@ -141,7 +141,7 @@ Zone next_zone(Zone now, bool has, double mm, double blue, double red, double bl
 
 // ---- the guard ------------------------------------------------------------------------------
 
-DistanceGuard::DistanceGuard(SerialLink& link, planner::Walker& walker, Clock& clock, Log& log)
+DistanceGuard::DistanceGuard(SerialLink& link, engine::Walker& walker, Clock& clock, Log& log)
     : link_(link), walker_(walker), clock_(clock), log_(log) {}
 
 void DistanceGuard::set_enabled(bool on) {
@@ -156,20 +156,20 @@ void DistanceGuard::set_enabled(bool on) {
 // What the walker does now, as the guard sees it: the forward walk's speed and gait in *v, *gait.
 DistanceGuard::Walk DistanceGuard::walk_kind(double* v, const char** gait) const {
   if (!walker_.active()) return Walk::None;
-  if (walker_.planner().stopping() && walker_.phase() == planner::WalkPhase::Streaming) return Walk::Stopping;
-  const planner::WalkGoal& g = walker_.goal();
+  if (walker_.solver().stopping() && walker_.phase() == engine::WalkPhase::Streaming) return Walk::Stopping;
+  const engine::WalkGoal& g = walker_.goal();
   switch (g.direction) {
-    case planner::Direction::Forward: {
-      double s = walker_.phase() == planner::WalkPhase::Streaming ? (double)walker_.planner().timing().speed_mm_s
+    case engine::Direction::Forward: {
+      double s = walker_.phase() == engine::WalkPhase::Streaming ? (double)walker_.solver().timing().speed_mm_s
                                                                     : (double)g.speed_mm_s;
-      if (s < 0) s = (double)planner::default_speed(*g.pattern);
+      if (s < 0) s = (double)engine::default_speed(*g.gait);
       *v = s;
-      *gait = g.pattern->name;
+      *gait = g.gait->name;
       return Walk::Forward;
     }
-    case planner::Direction::Left:
-    case planner::Direction::Right: return Walk::Turn;
-    case planner::Direction::Back: return Walk::Back;
+    case engine::Direction::Left:
+    case engine::Direction::Right: return Walk::Turn;
+    case engine::Direction::Back: return Walk::Back;
     default: return Walk::Other;
   }
 }
@@ -268,7 +268,7 @@ void DistanceGuard::set_action(Action a, const char* why) {
 // The quick stop of whatever walk runs, then (Stopping) sit and the sitting variant.
 void DistanceGuard::quick_stop(uint64_t now, const char* why) {
   walker_.halt();
-  deadline_ = now + (uint64_t)(remote::stop_timeout_s((double)walker_.planner().timing().period_ms) * 1e6);
+  deadline_ = now + (uint64_t)(remote::stop_timeout_s((double)walker_.solver().timing().period_ms) * 1e6);
   set_action(Action::Stopping, why);
 }
 
@@ -277,15 +277,15 @@ void DistanceGuard::back_off(uint64_t now, const char* why) {
   pullbacks_++;
   hisses_++;
   backs_++;
-  planner::WalkGoal g = walker_.goal();
+  engine::WalkGoal g = walker_.goal();
   if (!walker_.active()) {  // standing: a slow walk (the walk pattern: three feet down at every tick)
-    g = planner::WalkGoal();
-    g.pattern = planner::find_pattern("walk");
+    g = engine::WalkGoal();
+    g.gait = engine::find_gait("walk");
   }
-  g.direction = planner::Direction::Back;
+  g.direction = engine::Direction::Back;
   g.speed_mm_s = (planner::real)kBackSpeedMmS;
   g.steer = 0;
-  bool streaming = walker_.active() && walker_.phase() == planner::WalkPhase::Streaming && !walker_.planner().stopping();
+  bool streaming = walker_.active() && walker_.phase() == engine::WalkPhase::Streaming && !walker_.solver().stopping();
   const char* err = walker_.start(g);
   if (err == nullptr) {
     back_started_ = streaming;  // a walk already streaming turns backward at once (the strides slew through zero)
@@ -411,19 +411,19 @@ void DistanceGuard::poll() {
     }
     case Action::Stopping:
       if (zone_ == Zone::Red && backs_ < kMaxBacks && walker_.active() && !turns_slowly(gait_) &&
-          walker_.goal().direction == planner::Direction::Forward) {
+          walker_.goal().direction == engine::Direction::Forward) {
         // RED during BLUE's stop: back off once it has stopped (the back walk waits for the stop)
         red_new_ = false;
         pullbacks_++;
         hisses_++;
         backs_++;
-        planner::WalkGoal g = walker_.goal();
-        g.direction = planner::Direction::Back;
+        engine::WalkGoal g = walker_.goal();
+        g.direction = engine::Direction::Back;
         g.speed_mm_s = (planner::real)kBackSpeedMmS;
         g.steer = 0;
         if (walker_.start(g) == nullptr) {  // queued after the stop: kBackS from when it walks back
           back_started_ = false;
-          deadline_ = now + (uint64_t)((remote::stop_timeout_s((double)walker_.planner().timing().period_ms) + 1) * 1e6);
+          deadline_ = now + (uint64_t)((remote::stop_timeout_s((double)walker_.solver().timing().period_ms) + 1) * 1e6);
           set_action(Action::Backing, "very close while stopping: backing off");
           return;
         }
@@ -437,8 +437,8 @@ void DistanceGuard::poll() {
     case Action::Backing:
       decide(state, "backing off");
       if (!back_started_) {  // a back walk queued behind the stop or still in its setup: kBackS once it walks back
-        bool back = walker_.active() && walker_.phase() == planner::WalkPhase::Streaming &&
-                    walker_.goal().direction == planner::Direction::Back && !walker_.planner().stopping();
+        bool back = walker_.active() && walker_.phase() == engine::WalkPhase::Streaming &&
+                    walker_.goal().direction == engine::Direction::Back && !walker_.solver().stopping();
         if (back) {
           back_started_ = true;
           deadline_ = now + (uint64_t)(kBackS * 1e6);

@@ -2564,7 +2564,8 @@ mind/                     the Python side (pip install -e mind): the laptop's `k
                           loopback)  serial_link.py (reader/writer threads, goals, commands)
     body/                 state.py (BodyState)  client.py (BodyClient: postures, balance, head,
                           POSE streams, calibration, params, stats; drives the virtual bodies in the tests)
-    planner/              walking: body model, patterns and speed, the step planner, error
+    planner/              the body model and the model's error from the telemetry
+    engine/               walking: the gaits, the step clock, the tick solver, the walker
                           estimates, the POSE stream
     tricks/               trick model and timing, legacy importer, library/*.json (generated), the body
                           models (sagittal, stance, dynamics), rear_up, righting

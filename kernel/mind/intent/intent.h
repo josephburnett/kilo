@@ -50,7 +50,7 @@
 #include <stdint.h>
 #include "intent/estimate.h"
 #include "link/serial_link.h"
-#include "planner/walker.h"
+#include "engine/walker.h"
 #include "platform.h"
 #include "tricks/player.h"
 
@@ -86,7 +86,7 @@ class Intent {
   static constexpr int kMaxSteps = 6;                  // steps in all
   static constexpr int kMaxRightings = 3;              // righting moves per intent (the experiment)
 
-  Intent(SerialLink& link, Clock& clock, Log& log, tricks::TrickPlayer& player, planner::Walker& walker,
+  Intent(SerialLink& link, Clock& clock, Log& log, tricks::TrickPlayer& player, engine::Walker& walker,
          const Estimator& estimator)
       : link_(link), clock_(clock), log_(log), player_(player), walker_(walker), est_(estimator) {}
   void set_host(IntentHost* h) { host_ = h; }
@@ -143,7 +143,7 @@ class Intent {
   Clock& clock_;
   Log& log_;
   tricks::TrickPlayer& player_;
-  planner::Walker& walker_;
+  engine::Walker& walker_;
   const Estimator& est_;
   IntentHost* host_ = nullptr;
 

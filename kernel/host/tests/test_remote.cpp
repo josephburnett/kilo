@@ -14,7 +14,7 @@
 #include <set>
 #include <string>
 #include "link/serial_link.h"
-#include "planner/walker.h"
+#include "engine/walker.h"
 #include "remote/client.h"
 #include "remote/remote.h"
 #include "tests/body_rig.h"
@@ -59,7 +59,7 @@ void test_key_table(uint8_t stage) {
       if (rear_up) CHECKF(tricks::find_trick(a1->name) != nullptr, "trick %s", a1->name);
     }
     if (k.kind == Kind::Posture) CHECKF(posture_code(k.name) >= 0, "posture %s", k.name);
-    if (k.kind == Kind::Gait) CHECKF(planner::find_pattern(k.name) != nullptr, "gait %s", k.name);
+    if (k.kind == Kind::Gait) CHECKF(engine::find_gait(k.name) != nullptr, "gait %s", k.name);
     if (k.kind == Kind::Trick) CHECKF(tricks::find_trick(k.name) != nullptr, "trick %s", k.name);
     // rows 1-3 do nothing, but A1 (the rear-up), B1 (the righting experiment) and B2 (the meow)
     CHECKF((k.grid[1] <= '3' && std::strcmp(k.grid, "A1") != 0 && std::strcmp(k.grid, "B1") != 0 &&
@@ -158,7 +158,7 @@ struct Rig : LinkListener {
   FakeBody body;
   CaptureLog log;
   SerialLink link{body.serial, body.clock, log};
-  planner::Walker walker{link, body.clock, log};
+  engine::Walker walker{link, body.clock, log};
   tricks::TrickPlayer player{link, body.clock, log};
   RemoteControl remote{link, walker, player, body.clock, log};
   FakeRunner runner;
@@ -225,8 +225,8 @@ struct Rig : LinkListener {
     const Goal* g = const_cast<SerialLink&>(link).goal(KILO_MSG_SET_POSTURE);
     return g == nullptr ? -1 : g->payload[1];
   }
-  planner::Direction dir() { return walker.planner().direction(); }
-  double speed() { return (double)walker.planner().timing().speed_mm_s; }
+  engine::Direction dir() { return walker.solver().direction(); }
+  double speed() { return (double)walker.solver().timing().speed_mm_s; }
 };
 
 #define LAST_IS(r, grid, want)                                                            \
@@ -313,8 +313,8 @@ void test_gait_keys() {
   // not walking: a gait key starts walking forward in it at 1x
   LAST_IS(r, "C4", "walk forward (walk) 58.0 mm/s");
   r.run_ms(800);
-  CHECK(r.walker.active() && r.dir() == planner::Direction::Forward && r.remote.level() == 3);
-  CHECK(std::strcmp(r.walker.planner().pattern().name, "walk") == 0);
+  CHECK(r.walker.active() && r.dir() == engine::Direction::Forward && r.remote.level() == 3);
+  CHECK(std::strcmp(r.walker.solver().gait().name, "walk") == 0);
   CHECK(r.log.has("remote C4 (0xB0, walk): walk forward (walk) 58.0 mm/s"));
   // the same gait again: nothing (no restart, the speed kept)
   size_t feet = r.body.count(KILO_MSG_POSE);
@@ -329,7 +329,7 @@ void test_gait_keys() {
   for (int i = 0; i < 5; i++) r.key("B5");  // +4 +3 +2 +1 -1 -2
   CHECK(r.remote.level() == -2);
   LAST_IS(r, "B4", "walk forward (crawl) 15.6 mm/s");
-  CHECK(r.remote.level() == 2 && r.dir() == planner::Direction::Forward);
+  CHECK(r.remote.level() == 2 && r.dir() == engine::Direction::Forward);
   // every stop puts the level back: B6, then a gait key starts at 1x
   CHECK(std::strcmp(r.key_done("B6"), "posture stand") == 0 && !r.walker.active());
   CHECK(r.remote.level() == 3 && r.remote.heading() == Heading::Straight);
@@ -358,7 +358,7 @@ void test_speed_ladder() {
   LAST_IS(r, "B5", "speed 0.7x (trot 100.8 mm/s forward)");
   LAST_IS(r, "B5", "speed 0.4x (trot 57.6 mm/s forward)");
   LAST_IS(r, "B5", "speed -0.4x (trot 57.6 mm/s back)");
-  CHECK(r.remote.level() == -1 && r.dir() == planner::Direction::Back);
+  CHECK(r.remote.level() == -1 && r.dir() == engine::Direction::Back);
   LAST_IS(r, "B5", "speed -0.7x (trot 100.8 mm/s back)");
   LAST_IS(r, "B5", "speed -1x (trot 144.0 mm/s back)");
   LAST_IS(r, "B5", "speed -1x (trot 144.0 mm/s back): already the fastest back");
@@ -367,13 +367,13 @@ void test_speed_ladder() {
   for (int i = 0; i < 2; i++) r.key("B7");
   CHECK(r.remote.level() == -1);
   LAST_IS(r, "B7", "speed 0.4x (trot 57.6 mm/s forward)");
-  CHECK(r.dir() == planner::Direction::Forward);
+  CHECK(r.dir() == engine::Direction::Forward);
   for (int i = 0; i < 3; i++) r.key("B7");
   LAST_IS(r, "B7", "speed 1.4x (trot 201.6 mm/s forward)");
   LAST_IS(r, "B7", "speed 1.4x (trot 201.6 mm/s forward): already the fastest");
   CHECK(r.remote.level() == 5);
   r.run_ms(2500);  // the long swing built up a tick a step
-  CHECK(r.walker.planner().swing_ticks() == 11);
+  CHECK(r.walker.solver().swing_ticks() == 11);
   LAST_IS(r, "B5", "speed 1.25x (trot 180.0 mm/s forward)");
   LAST_IS(r, "B5", "speed 1x (trot 144.0 mm/s forward)");
   CHECK(r.log.has("remote B5 (0xA8, slower): speed 1.25x (trot 180.0 mm/s forward)"));
@@ -387,29 +387,29 @@ void test_turn_keys() {
   // from standing: the turn in place in the selected gait at 1x
   LAST_IS(r, "A6", "walk left (trot) 144.0 mm/s");
   r.run_ms(800);
-  CHECK(r.walker.active() && r.dir() == planner::Direction::Left);
+  CHECK(r.walker.active() && r.dir() == engine::Direction::Left);
   LAST_IS(r, "A6", "walk left (trot) 144.0 mm/s: unchanged");
   LAST_IS(r, "C6", "walk right (trot) 144.0 mm/s");  // turning in place: the other key turns the other way
-  CHECK(r.dir() == planner::Direction::Right);
+  CHECK(r.dir() == engine::Direction::Right);
   // B7 while turning: straight forward at once, the walk going on (no planned stop)
   LAST_IS(r, "B7", "turn ended: walk forward (trot) 144.0 mm/s");
-  CHECK(r.walker.active() && !r.walker.planner().stopping() && r.dir() == planner::Direction::Forward);
+  CHECK(r.walker.active() && !r.walker.solver().stopping() && r.dir() == engine::Direction::Forward);
   CHECK(r.remote.level() == 3 && r.remote.heading() == Heading::Straight);
   CHECK(r.log.has("remote B7 (0x62, faster): turn ended: walk forward (trot) 144.0 mm/s"));
   r.run_ms(1400);  // the trot's strides 0.75 mm a tick: straight within 1.4 s
-  CHECK(r.walker.planner().s_cur()[0] == r.walker.planner().s_cur()[1]);
+  CHECK(r.walker.solver().strides()[0] == r.walker.solver().strides()[1]);
   LAST_IS(r, "B7", "speed 1.25x (trot 180.0 mm/s forward)");  // then the ladder as ever
   // B5 while turning: straight backward
   CHECK(std::strcmp(r.key_done("B6"), "posture stand") == 0);
   r.key("C6", 800);
   LAST_IS(r, "B5", "turn ended: walk back (trot) 144.0 mm/s");
-  CHECK(r.remote.level() == -3 && r.dir() == planner::Direction::Back && r.walker.active());
+  CHECK(r.remote.level() == -3 && r.dir() == engine::Direction::Back && r.walker.active());
   // the gait in use during a turn: straight forward; another gait: the turn goes on in it
   CHECK(std::strcmp(r.key_done("B6"), "posture stand") == 0);
   r.key("C6", 800);
   LAST_IS(r, "C4", "walk right (walk) 58.0 mm/s");
   LAST_IS(r, "C4", "walk forward (walk) 58.0 mm/s");
-  CHECK(r.remote.heading() == Heading::Straight && r.dir() == planner::Direction::Forward);
+  CHECK(r.remote.heading() == Heading::Straight && r.dir() == engine::Direction::Forward);
 }
 
 void test_steering() {
@@ -418,32 +418,32 @@ void test_steering() {
   CHECK(r.walker.active());
   // A6 while walking forward: steer a level more to the left, without stopping (kSteerLevels)
   LAST_IS(r, "A6", "walk forward (trot) 144.0 mm/s, steering left 1");
-  CHECK(r.dir() == planner::Direction::Forward && std::fabs(r.walker.planner().steer() - 0.25) < 1e-6);
-  CHECK(r.walker.goal().steer == (planner::real)0.25 && !r.walker.planner().stopping());
+  CHECK(r.dir() == engine::Direction::Forward && std::fabs(r.walker.solver().steer() - 0.25) < 1e-6);
+  CHECK(r.walker.goal().steer == (planner::real)0.25 && !r.walker.solver().stopping());
   LAST_IS(r, "A6", "walk forward (trot) 144.0 mm/s, steering left 2");
   LAST_IS(r, "A6", "walk forward (trot) 144.0 mm/s, steering left 3");
   LAST_IS(r, "A6", "walk forward (trot) 144.0 mm/s, steering left 3: already the tightest");
-  CHECK(r.remote.steer() == 3 && std::fabs(r.walker.planner().steer() - 1.0) < 1e-6);
+  CHECK(r.remote.steer() == 3 && std::fabs(r.walker.solver().steer() - 1.0) < 1e-6);
   r.run_ms(2000);  // the inner (left) side steps in place, the outer at the 8-tick swing's longest: 37.5 mm
-  const planner::real* s = r.walker.planner().s_cur();
+  const planner::real* s = r.walker.solver().strides();
   CHECKF(std::fabs(s[0]) < 1e-4 && std::fabs(s[1] - 37.5) < 1e-3, "%g %g", (double)s[0], (double)s[1]);
   CHECK(r.log.has("remote A6 (0x22, turn left): walk forward (trot) 144.0 mm/s, steering left 3"));
   // C6 back through straight to the right
   LAST_IS(r, "C6", "walk forward (trot) 144.0 mm/s, steering left 2");
   LAST_IS(r, "C6", "walk forward (trot) 144.0 mm/s, steering left 1");
   LAST_IS(r, "C6", "walk forward (trot) 144.0 mm/s");
-  CHECK(r.walker.planner().steer() == 0);
+  CHECK(r.walker.solver().steer() == 0);
   LAST_IS(r, "C6", "walk forward (trot) 144.0 mm/s, steering right 1");
   // the speed keys keep the bend, into backward too
   LAST_IS(r, "B7", "speed 1.25x (trot 180.0 mm/s forward, steering right 1)");
   for (int i = 0; i < 4; i++) r.key("B5");
-  CHECK(r.remote.level() == -1 && r.dir() == planner::Direction::Back);
-  CHECK(std::fabs(r.walker.planner().steer() + 0.25) < 1e-6);
+  CHECK(r.remote.level() == -1 && r.dir() == engine::Direction::Back);
+  CHECK(std::fabs(r.walker.solver().steer() + 0.25) < 1e-6);
   LAST_IS(r, "C6", "walk back (trot) 57.6 mm/s, steering right 2");
   // another gait keeps it; the gait in use straightens it, forward
   LAST_IS(r, "C4", "walk back (walk) 23.2 mm/s, steering right 2");
   LAST_IS(r, "C4", "walk forward (walk) 23.2 mm/s");
-  CHECK(r.remote.steer() == 0 && r.walker.planner().steer() == 0);
+  CHECK(r.remote.steer() == 0 && r.walker.solver().steer() == 0);
   // a stop forgets it
   r.key("A6");
   CHECK(std::strcmp(r.key_done("B6"), "posture stand") == 0 && r.remote.steer() == 0);
@@ -459,11 +459,11 @@ void test_trot_long_swing() {
   r.key("A6");
   CHECK(r.remote.steer() == 2);
   LAST_IS(r, "B7", "speed 1.25x (trot 180.0 mm/s forward, steering left 1), the steer eased to 1 (the trot's long swing)");
-  CHECK(r.remote.steer() == 1 && std::fabs(r.walker.planner().steer() - 0.25) < 1e-6);
+  CHECK(r.remote.steer() == 1 && std::fabs(r.walker.solver().steer() - 0.25) < 1e-6);
   LAST_IS(r, "A6", "walk forward (trot) 180.0 mm/s, steering left 1: already the tightest at this speed (B5 for more)");
   LAST_IS(r, "B7", "speed 1.4x (trot 201.6 mm/s forward, steering left 1)");
   r.run_ms(3000);
-  CHECK(r.walker.planner().swing_ticks() == 11);
+  CHECK(r.walker.solver().swing_ticks() == 11);
   LAST_IS(r, "C6", "walk forward (trot) 201.6 mm/s");
   for (int i = 0; i < 2; i++) r.key("B5");
   CHECK(r.remote.level() == 3);
@@ -489,7 +489,7 @@ void test_freeze() {
     r.key("A4", 800);
     CHECK(r.walker.active() && r.body.mode == KILO_MODE_STREAM);
     LAST_IS(r, "C7", "frozen (walk: the quick stop): only B6 or A7 act now");
-    CHECK(r.walker.active() && r.walker.planner().halting() && r.remote.frozen());
+    CHECK(r.walker.active() && r.walker.solver().halting() && r.remote.frozen());
     r.run_ms(2000);
     CHECKF(!r.walker.active() && r.walker.ended_ok() && std::strcmp(r.walker.ended(), "stopped") == 0, "ended %s",
            r.walker.ended() ? r.walker.ended() : "-");
@@ -528,7 +528,7 @@ void test_freeze() {
     r.key("A7", 8);
     CHECK(r.remote.busy() && r.walker.active());
     LAST_IS(r, "C7", "frozen (walk: the quick stop): only B6 or A7 act now");
-    CHECK(!r.remote.busy() && r.walker.planner().halting());
+    CHECK(!r.remote.busy() && r.walker.solver().halting());
     r.run_ms(2000);
     CHECK(!r.walker.active() && r.posture_goal() == -1);
     CHECK(r.log.has("remote B6 (0x02, stand): cancelled (C7 froze Kilo)") &&

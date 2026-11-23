@@ -33,7 +33,8 @@ link/goals        latched goals, one per type
 link/consts       message classes and timings (kilo/link/consts.py, LinkConfig)
 link/names        names of message types and enums, for logs
 link/stats.h      link counters (kilo/body/state.py LinkStats)
-planner/          the walking planner: a port of mind/kilo/planner (model, patterns, trot: the trot's schedule and fitted pendulum, plan, errors, walker)
+planner/          the body model (model.h, as mind/kilo/planner/model.py) and the model's error from the telemetry (errors)
+engine/           the movement engine (docs/movement-engine.md): gait (the gaits as table rows), clock (the one step clock), solve (the tick solver: feet and weight every tick), walker (its ticks streamed to the body as POSE)
 flash/image       the body image in RAM (32 KB) and its manifest (body.json parse and write)
 flash/crc32       the image's CRC-32, as zlib.crc32
 flash/flasher     the STK500v1 flasher: RESET, optiboot, pages, verify, the HELLO after
@@ -181,17 +182,21 @@ controller is killed, `kilo.link` through the bridge,
 `tests/bridge_client.py`, `kilo reboot`: exit status 3, and `kilo update`
 into `--card DIR`: exit status 3, then the card's files).
 
-## The planner
+## The engine's walks
 
-`planner/` is a port of `mind/kilo/planner` and the stream part of
-`kilo/planner/walker.py`: the same algorithms, constants (margin 14 mm,
-hold 25 ticks, catch 7 deg, ...) and outputs, one file per Python module.
+`engine/` is the movement engine's walking (docs/movement-engine.md, step
+2): one step clock (`clock.h`), the gaits as rows of a table (`gait.h`:
+when each leg lifts, its swing, the weight target), and the tick solver
+(`solve.h`) that every tick works out the feet and where the weight goes.
+It is written only here, in C++ (no Python copy); the laptop runs it through
+`kernel/host`'s `engine-judge` (`kilo.engine`), and
+`mind/tests/enginejudge.py` judges it on the virtual body.
 `Walker` drives a walk from the mind's loop:
 
 ```cpp
-Walker walker(link, clock, log);      // owns a Planner; fixed size, no heap
+Walker walker(link, clock, log);      // owns a Solver; fixed size, no heap
 // in your LinkListener: walker.on_telemetry(t); walker.on_event(e);
-WalkGoal g;                           // pattern (find_pattern), direction, speed, balance
+WalkGoal g;                           // gait (find_gait), direction, speed, steer, cadence, balance
 const char* why = walker.start(g);    // null: accepted; while walking it changes the walk
 for (;;) { link.mark_alive(); link.poll(); walker.poll(); }   // every few ms
 walker.stop();                        // the planned stop; abort() ends at once
@@ -670,7 +675,7 @@ behaviour runner (`remote/remote.h` says what each key does):
 | C5 | the quick stop, then the calibration posture (CALIB) |
 | C5 again (no other key between) | the self-measurement (`measure/`, docs/self-measurement.md): he stands (STAND), and once he is still the routine starts: small poses streamed as POSE (four feet) with the balance off, recorded as a run of its own; any key stops it into STAND; refused (logged, he stands) if he is not still within 6 s, below 7400 mV at rest or on USB power |
 | A4, B4, C4 | trot, crawl, walk: walk forward in that gait from standing; change the gait while walking; the gait in use: straight forward again |
-| B7, B5 | faster, slower by one speed level (the trot 0.4, 0.7, 1, 1.25, 1.4 × its speed: 58 to 202 mm/s, its swing 8 ticks up to +3, 10 and 11 at +4 and +5 (`planner/trot.h`, docs/walking-and-balance.md §15); the walk and the crawl 0.4, 0.7, 1, 1.15, 1.25); past the slowest B5 goes backward (the trot to -3 only, 144 mm/s); only while walking. Turning in place: stop turning and walk straight forward (B7) or backward (B5) at once |
+| B7, B5 | faster, slower by one speed level (the trot 0.4, 0.7, 1, 1.25, 1.4 × its speed: 58 to 202 mm/s, its swing 8 ticks up to +3, 10 and 11 at +4 and +5 (`engine/gait.h`, docs/walking-and-balance.md §15); the walk and the crawl 0.4, 0.7, 1, 1.15, 1.25); past the slowest B5 goes backward (the trot to -3 only, 144 mm/s); only while walking. Turning in place: stop turning and walk straight forward (B7) or backward (B5) at once |
 | A6, C6 | from standing: turn left, right in place; walking forward or backward: steer one level left or right (0.25, 0.5, 1 of the stride off the inner side, at most 3 each way; the trot at +4 and +5 one, a sharper steer eased to it), without stopping (docs/walking-and-balance.md §13) |
 | C7 | freeze: the quick stop of the walk (as B6, ending in STANCE, powered), a trick and the behaviour runner stopped; then only B6 and A7 act |
 | A5 | start the behaviour runner (the random mode); while it runs: one of its tricks at random, at once or after the move playing ("The random mode's tricks") |

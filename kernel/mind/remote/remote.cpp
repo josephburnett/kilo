@@ -14,7 +14,7 @@ const double kSpeedFactors[kSpeedSteps] = {0.4, 0.7, 1.0, 1.15, 1.25};
 const double kTrotSpeedFactors[kSpeedSteps] = {0.4, 0.7, 1.0, 1.25, 1.4};  // 57.6 .. 201.6 mm/s: 8, 8, 8, 10, 11-tick swings
 const double kSteerLevels[kSteerSteps] = {0.25, 0.5, 1.0};
 
-const double* speed_factors(const planner::Pattern& p) {
+const double* speed_factors(const engine::Gait& p) {
   return str_eq(p.name, "trot") ? kTrotSpeedFactors : kSpeedFactors;
 }
 
@@ -40,30 +40,32 @@ bool calib_key(const Key& k) { return k.kind == Kind::Posture && str_eq(k.name, 
 }  // namespace
 
 double stop_timeout_s(double period_ms) {
-  if (period_ms <= 0) {  // the slowest pattern's cycle
-    for (const planner::Pattern& p : planner::kPatternTable)
-      if (p.period_ms > period_ms) period_ms = p.period_ms;
+  if (period_ms <= 0) {  // the slowest gait's cycle at its default speed
+    for (const engine::Gait& p : engine::kGaitTable) {
+      double t = (double)engine::timing(p, engine::default_speed(p)).period_ms;
+      if (t > period_ms) period_ms = t;
+    }
   }
   return 2 * period_ms / 1000.0 + 3.5;  // walker.py stop_timeout(): the stride's ramp-down is up to 2 s
 }
 
-RemoteControl::RemoteControl(SerialLink& link, planner::Walker& walker, tricks::TrickPlayer& player, Clock& clock,
+RemoteControl::RemoteControl(SerialLink& link, engine::Walker& walker, tricks::TrickPlayer& player, Clock& clock,
                              Log& log)
-    : link_(link), walker_(walker), player_(player), clock_(clock), log_(log), pattern_(planner::find_pattern("trot")) {}
+    : link_(link), walker_(walker), player_(player), clock_(clock), log_(log), pattern_(engine::find_gait("trot")) {}
 
-bool RemoteControl::direction(planner::Direction* d) const {
+bool RemoteControl::direction(engine::Direction* d) const {
   if (!walking_ || !walker_.active()) return false;
   *d = dir();
   return true;
 }
 
 double RemoteControl::speed_mm_s() const {
-  return speed_factors(*pattern_)[iabs(level_) - 1] * (double)planner::default_speed(*pattern_);
+  return speed_factors(*pattern_)[iabs(level_) - 1] * (double)engine::default_speed(*pattern_);
 }
 
 // The steer levels allowed now: the trot's long swing (+4, +5) at most kTrotFastSteerSteps.
 int RemoteControl::steer_most() const {
-  return planner::is_trot(*pattern_) && level_ > kTrotLongFrom - 1 ? kTrotFastSteerSteps : kSteerSteps;
+  return engine::is_trot(*pattern_) && level_ > kTrotLongFrom - 1 ? kTrotFastSteerSteps : kSteerSteps;
 }
 
 // The steer eased to what steer_most() allows (true if it was); before every walk the remote starts.
@@ -94,9 +96,9 @@ void RemoteControl::steer_text(char* buf, uint32_t cap) const {
   else format(buf, cap, ", steering %s %d", steer_ > 0 ? "left" : "right", iabs(steer_));
 }
 
-planner::WalkGoal RemoteControl::walk_goal() const {
-  planner::WalkGoal g;
-  g.pattern = pattern_;
+engine::WalkGoal RemoteControl::walk_goal() const {
+  engine::WalkGoal g;
+  g.gait = pattern_;
   g.direction = dir();
   g.speed_mm_s = (planner::real)speed_mm_s();
   g.balance = true;
@@ -104,10 +106,10 @@ planner::WalkGoal RemoteControl::walk_goal() const {
   return g;
 }
 
-planner::Direction RemoteControl::dir() const {
-  if (heading_ == Heading::Left) return planner::Direction::Left;
-  if (heading_ == Heading::Right) return planner::Direction::Right;
-  return level_ > 0 ? planner::Direction::Forward : planner::Direction::Back;
+engine::Direction RemoteControl::dir() const {
+  if (heading_ == Heading::Left) return engine::Direction::Left;
+  if (heading_ == Heading::Right) return engine::Direction::Right;
+  return level_ > 0 ? engine::Direction::Forward : engine::Direction::Back;
 }
 
 int RemoteControl::mode() const {
@@ -176,10 +178,10 @@ void RemoteControl::done(const char* what, bool failed) {
 // The walk as it now is ("walk forward (trot) 55.6 mm/s, steering left 1").
 void RemoteControl::walk_done(const char* suffix, const char* prefix) {
   char what[112], v[16], st[24];
-  planner::Timing t = planner::timing(*pattern_, (planner::real)speed_mm_s(), dir());
+  engine::Timing t = engine::timing(*pattern_, (planner::real)speed_mm_s(), dir());
   format_speed(v, sizeof v, (double)t.speed_mm_s);
   steer_text(st, sizeof st);
-  format(what, sizeof what, "%swalk %s (%s) %s mm/s%s%s", prefix, planner::direction_name(dir()), pattern_->name, v,
+  format(what, sizeof what, "%swalk %s (%s) %s mm/s%s%s", prefix, engine::direction_name(dir()), pattern_->name, v,
          st, suffix);
   done(what, false);
 }
@@ -303,7 +305,7 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
       stop_then_act(now);
       return;
     case Kind::Gait: {
-      const planner::Pattern* p = planner::find_pattern(key.name);
+      const engine::Gait* p = engine::find_gait(key.name);
       if (p == nullptr) {
         done("walk failed: no such gait", true);
         return;
@@ -378,7 +380,7 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
         return;
       }
       int l = level_;
-      int back_most = planner::is_trot(*pattern_) ? kTrotBackSteps : kSpeedSteps;  // the trot backward: its 8-tick swing
+      int back_most = engine::is_trot(*pattern_) ? kTrotBackSteps : kSpeedSteps;  // the trot backward: its 8-tick swing
       if (up) {
         l = l == -1 ? 1 : l < kSpeedSteps ? l + 1 : l;
       } else {
@@ -391,11 +393,11 @@ void RemoteControl::begin(const Key& key, uint16_t arg) {
       if (end[0] == '\0') why = walker_.start(walk_goal());
       char factor[16], v[16], st[24], what[160];
       behaviour::format_g(factor, sizeof factor, speed_factors(*pattern_)[iabs(level_) - 1]);
-      planner::Timing t = planner::timing(*pattern_, (planner::real)speed_mm_s(), dir());
+      engine::Timing t = engine::timing(*pattern_, (planner::real)speed_mm_s(), dir());
       format_speed(v, sizeof v, (double)t.speed_mm_s);
       steer_text(st, sizeof st);
       format(what, sizeof what, "speed %s%sx (%s %s mm/s %s%s)%s%s%s%s", level_ < 0 ? "-" : "", factor, pattern_->name,
-             v, planner::direction_name(dir()), st, end, eased, why != nullptr ? ": walk failed: " : "",
+             v, engine::direction_name(dir()), st, end, eased, why != nullptr ? ": walk failed: " : "",
              why != nullptr ? why : "");
       done(what, why != nullptr);
       return;
@@ -420,7 +422,7 @@ void RemoteControl::stop_then_act(uint64_t now) {
   reset_motion();
   if (body_walking()) {
     walker_.halt();
-    double period = walker_.active() ? (double)walker_.planner().timing().period_ms : 0.0;
+    double period = walker_.active() ? (double)walker_.solver().timing().period_ms : 0.0;
     phase_ = Phase::StopWalk;
     deadline_ = now + (uint64_t)(stop_timeout_s(period) * 1e6);
     return;

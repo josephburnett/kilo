@@ -23,7 +23,7 @@ geometry of kilo.planner.model.BodyModel, at 2 ms steps:
   the floor traces of 2026-10-14 show.
 - **Fallen.** Past ``fall_deg`` of pitch or roll the body reports a fall.
 - **Momentum** (``inertia``, off by default; on for the stopping study,
-  mind/tests/stopsim.py). The body's speed over the ground is the speed
+  the stopping study of 2026-11). The body's speed over the ground is the speed
   at which its feet on the ground move back under it; when it changes, the
   body's inertia acts at the centre of mass like a shift of it by
   ``-a h / g`` (a the body's acceleration, h the centre of mass's height):

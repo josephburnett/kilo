@@ -7,7 +7,7 @@
 //
 // A play (start()):
 // 1. Waits for the body to be heard on this connection, its epoch and its
-//    clock (TELEMETRY: planner::BodyClock), at most kStartWaitUs.
+//    clock (TELEMETRY: engine::BodyClock), at most kStartWaitUs.
 // 2. Clears the latched SET_POSTURE goal (a refresh would end the stream),
 //    then sends the keys (KeySeq: per frame its move's end, a step's jump,
 //    its hold's end) as POSE with every leg as joint angles, the head joints
@@ -37,7 +37,7 @@
 #define KILO_MIND_TRICKS_PLAYER_H
 #include <stdint.h>
 #include "link/serial_link.h"
-#include "planner/walker.h"
+#include "engine/walker.h"
 #include "platform.h"
 #include "tricks/model.h"
 
@@ -132,7 +132,7 @@ class TrickPlayer {
   SerialLink& link_;
   Clock& clock_;
   Log& log_;
-  planner::BodyClock body_;
+  engine::BodyClock body_;
 
   Step step_ = Step::Idle;
   const Trick* trick_ = nullptr;

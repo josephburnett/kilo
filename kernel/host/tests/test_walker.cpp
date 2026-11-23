@@ -1,19 +1,19 @@
-// The walker (planner/walker) on the real link over a fake Serial and a
+// The walker (engine/walker) on the real link over a fake Serial and a
 // stepped clock: the body clock, the setup (SET_STREAM, STANCE), the stream
 // three ticks ahead and its catch-up, every way a stream ends, the planned
-// stop's handover and the teardown. Cases follow mind/tests/test_walker.py.
+// stop's handover and the teardown.
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
 #include "link/serial_link.h"
-#include "planner/walker.h"
+#include "engine/walker.h"
 #include "tests/check.h"
 #include "tests/fakes.h"
 
 using namespace kilo;
-using namespace kilo::planner;
+using namespace kilo::engine;
 
 namespace {
 
@@ -231,8 +231,8 @@ void test_stream_handover_on_the_planned_stop() {
   r.walk();
   r.run_ms(300);
   r.walker.stop();
-  for (int i = 0; i < 400 && !r.walker.planner().done(); i++) r.run_ms(20);
-  CHECK(r.walker.planner().done());
+  for (int i = 0; i < 400 && !r.walker.solver().done(); i++) r.run_ms(20);
+  CHECK(r.walker.solver().done());
   r.run_ms(8);
   const Goal* g = r.link.goal(KILO_MSG_SET_POSTURE);
   CHECK(g != nullptr && g->payload[1] == KILO_POSTURE_STANCE);  // the posture ends the stream
@@ -247,7 +247,7 @@ void test_stream_handover_on_the_planned_stop() {
   CHECK(r.link.goal(KILO_MSG_SET_POSTURE) == nullptr);       // the STANCE goal cleared again
   const Sent* s = r.last_of(KILO_MSG_SET_STREAM);
   CHECK(s != nullptr && s->payload[0] == KILO_TELEMETRY_DEFAULT_DIV);
-  const TickPlan& last = r.walker.planner().last();
+  const TickPlan& last = r.walker.solver().last();
   CHECK(last.support == 0xF);
 }
 
@@ -273,16 +273,16 @@ void test_changes_while_walking_and_a_start_during_the_stop() {
   r.walk();
   r.run_ms(100);
   WalkGoal g;
-  g.pattern = find_pattern("walk");
+  g.gait = find_gait("walk");
   g.direction = Direction::Left;
   g.speed_mm_s = 8;
   CHECK(r.walker.start(g) == nullptr);
-  CHECK(r.walker.planner().changing() && r.walker.planner().direction() == Direction::Left);
+  CHECK(r.walker.solver().changing() && r.walker.solver().direction() == Direction::Left);
   r.walker.stop();
-  CHECK(r.walker.planner().stopping() && !r.walker.planner().changing());
+  CHECK(r.walker.solver().stopping() && !r.walker.solver().changing());
   WalkGoal t;  // a trot asked for during the stop: after it
   CHECK(r.walker.start(t) == nullptr);
-  for (int i = 0; i < 600 && !r.walker.planner().done(); i++) r.run_ms(20);
+  for (int i = 0; i < 600 && !r.walker.solver().done(); i++) r.run_ms(20);
   r.mode = KILO_MODE_IDLE;
   r.run_ms(60);
   CHECKF(r.walker.ended_ok() || r.walker.phase() != WalkPhase::Streaming, "%s",

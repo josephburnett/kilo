@@ -428,25 +428,25 @@ void Recorder::on_frame(bool tx, uint8_t type, uint8_t seq, const uint8_t* paylo
 
 // ---- walks ----------------------------------------------------------------------------------
 
-void Recorder::walk_text(const planner::Walker& w, const char* end) {
+void Recorder::walk_text(const engine::Walker& w, const char* end) {
   Run* r = run(walk_);
   if (r == nullptr) return;
-  const planner::WalkGoal& g = w.goal();
-  real speed = (r->flags & KILO_WALK_FLAGS_STREAMED) ? w.planner().timing().speed_mm_s : g.speed_mm_s;
+  const engine::WalkGoal& g = w.goal();
+  real speed = (r->flags & KILO_WALK_FLAGS_STREAMED) ? w.solver().timing().speed_mm_s : g.speed_mm_s;
   // "gait=trot dir=forward speed=55.6[ end=REASON]" (Line puts a space before each key)
   Line s("");
-  s.str("gait", g.pattern->name);
-  s.str("dir", planner::direction_name(g.direction));
+  s.str("gait", g.gait->name);
+  s.str("dir", engine::direction_name(g.direction));
   if (speed >= 0) s.fixed("speed", speed, 1);
   else s.str("speed", "default");
   if (end != nullptr) s.str("end", end);
   set_text(r, s.text() + 1);  // without the leading space
 }
 
-void Recorder::goal_line(const char* word, const planner::WalkGoal& g, uint64_t now) {
+void Recorder::goal_line(const char* word, const engine::WalkGoal& g, uint64_t now) {
   Line l(word);
-  l.str("pattern", g.pattern->name);
-  l.str("dir", planner::direction_name(g.direction));
+  l.str("pattern", g.gait->name);
+  l.str("dir", engine::direction_name(g.direction));
   if (g.steer != 0) l.fixed("steer", g.steer, 2);  // the remote's A6 / C6 while walking (+ left)
   if (g.speed_mm_s >= 0) l.fixed("speed_asked", g.speed_mm_s, 1);
   else l.str("speed_asked", "default");
@@ -454,31 +454,30 @@ void Recorder::goal_line(const char* word, const planner::WalkGoal& g, uint64_t 
   mark_line(l.text(), now);
 }
 
-void Recorder::timing_line(const char* word, const planner::Walker& w, uint64_t now) {
-  const planner::Planner& p = w.planner();
-  planner::Timing tm = p.timing();
+void Recorder::timing_line(const char* word, const engine::Walker& w, uint64_t now) {
+  const engine::Solver& p = w.solver();
+  engine::Timing tm = p.timing();
   Line l(word);
   l.unum("tick", (unsigned)p.tick());
-  l.str("pattern", p.pattern().name);
-  l.str("dir", planner::direction_name(p.direction()));
+  l.str("pattern", p.gait().name);
+  l.str("dir", engine::direction_name(p.direction()));
   if (p.steer() != 0) l.fixed("steer", p.steer(), 2);
   l.fixed("speed", tm.speed_mm_s, 1);
   l.fixed("speed_set", p.speed_mm_s(), 1);
   l.fixed("stride_mm", tm.stride_mm, 1);
   l.fixed("period_ms", tm.period_ms, 1);
-  l.fixed("shift_ms", tm.shift_ms, 1);
-  l.fixed("stance_ms", tm.stance_ms, 1);
-  l.num("swing_ticks", p.swing_ticks());
-  l.num("lead", p.lead());
-  if (p.changing()) l.str("pending", p.pending_pattern()->name);
+  l.fixed("stance_ms", tm.stance_ticks * (real)KILO_TICK_MS, 1);
+  l.num("swing_ticks", tm.swing_ticks);
+  l.fixed("cadence", tm.cadence, 2);
+  if (p.changing()) l.str("pending", p.pending_gait()->name);
   if (p.stopping()) l.unum("stopping", 1);
   mark_line(l.text(), now);
 }
 
-void Recorder::on_walk_mark(const planner::Walker& w, planner::WalkMark mark) {
+void Recorder::on_walk_mark(const engine::Walker& w, engine::WalkMark mark) {
   if (!attached()) return;
   uint64_t now = clock_.now_us();
-  using planner::WalkMark;
+  using engine::WalkMark;
   if (mark == WalkMark::Setup) {
     if (walk_ != 0) end_run(walk_, now);  // cannot be: a walk ends before the next one's setup
     Run* r = begin_run(KILO_RUN_KIND_WALK, now);
@@ -514,24 +513,24 @@ void Recorder::on_walk_mark(const planner::Walker& w, planner::WalkMark mark) {
     case WalkMark::Stream: {
       if (r != nullptr) r->flags |= KILO_WALK_FLAGS_STREAMED;
       timing_line("stream", w, now);
-      const planner::PlannerConfig& c = w.planner().config();
+      const engine::SolverConfig& c = w.solver().config();
+      const engine::Gait& gt = w.solver().gait();
       Line l("config");
-      l.fixed("margin_mm", c.margin_mm, 1);
+      l.fixed("margin_mm", gt.margin_mm, 1);
+      l.fixed("roll_max_deg", gt.roll_max_deg, 1);
+      l.fixed("roll_cost", gt.roll_cost, 1);
       l.fixed("dx_max_mm", c.dx_max_mm, 1);
-      l.fixed("dx_speed_mm_s", c.dx_speed_mm_s, 1);
-      l.fixed("roll_max_deg", c.roll_max_deg, 1);
-      l.fixed("pitch_max_deg", c.pitch_max_deg, 1);
-      l.fixed("dx_scale_mm", c.dx_scale_mm, 1);
-      l.fixed("pitch_scale_deg", c.pitch_scale_deg, 1);
-      l.fixed("roll_scale_deg", c.roll_scale_deg, 1);
+      l.fixed("dx_step_mm", c.dx_step_mm, 2);
+      l.fixed("roll_step_deg", c.roll_step_deg, 2);
+      l.fixed("smooth", c.smooth, 1);
+      l.fixed("smooth2", c.smooth2, 1);
+      l.fixed("lean_tol_mm", c.lean_tol_mm, 2);
       l.fixed("gate_deg", c.gate_deg, 1);
       l.num("hold_max", c.hold_max);
       l.fixed("catch_deg", c.catch_deg, 1);
       l.unum("lean", c.lean ? 1u : 0u);
-      l.unum("fixed_shift", c.fixed_shift ? 1u : 0u);
-      l.fixed("shift_ms", c.shift_ms, 1);
       mark_line(l.text(), now);
-      const planner::BodyModel& m = w.planner().model();
+      const planner::BodyModel& m = w.solver().model();
       Line g("model");
       g.fixed("l1_mm", m.l1_mm, 1);
       g.fixed("l2_mm", m.l2_mm, 1);
@@ -567,13 +566,13 @@ void Recorder::on_walk_mark(const planner::Walker& w, planner::WalkMark mark) {
     }
     case WalkMark::Change:
       goal_line("change", w.goal(), now);
-      if (w.phase() == planner::WalkPhase::Streaming) timing_line("timing", w, now);
+      if (w.phase() == engine::WalkPhase::Streaming) timing_line("timing", w, now);
       walk_text(w, nullptr);
       break;
     case WalkMark::Stop: {
       Line l("stop");
-      l.unum("tick", (unsigned)w.planner().tick());
-      if (w.planner().halting()) {  // the quick stop: from this tick on, the ticks before it planned again
+      l.unum("tick", (unsigned)w.solver().tick());
+      if (w.solver().halting()) {  // the quick stop: from this tick on, the ticks before it planned again
         l.unum("quick", 1);
         l.unum("replanned", w.replanned());
       }
@@ -586,8 +585,8 @@ void Recorder::on_walk_mark(const planner::Walker& w, planner::WalkMark mark) {
     case WalkMark::End: {
       bool streamed = r != nullptr && (r->flags & KILO_WALK_FLAGS_STREAMED);
       const char* why = w.ended() != nullptr ? w.ended() : "?";
-      const planner::StreamStats& s = w.stream_stats();
-      const planner::PlannerStats& ps = w.planner().stats();
+      const engine::StreamStats& s = w.stream_stats();
+      const engine::SolverStats& ps = w.solver().stats();
       Line res("result");
       res.unum("sent", s.sent);
       res.unum("skipped", s.skipped);
@@ -599,7 +598,7 @@ void Recorder::on_walk_mark(const planner::Walker& w, planner::WalkMark mark) {
         res.unum("catches", ps.catches);
         res.unum("waits", ps.waits);
         res.fixed("min_margin_mm", ps.min_margin, 1);
-        res.unum("tick", (unsigned)w.planner().tick());
+        res.unum("tick", (unsigned)w.solver().tick());
       }
       res.unum("clock_resets", w.body_clock().resets());
       mark_line(res.text(), now);
@@ -640,7 +639,7 @@ void Recorder::on_walk_mark(const planner::Walker& w, planner::WalkMark mark) {
   }
 }
 
-void Recorder::on_walk_tick(const planner::Walker& w, const planner::TickPlan& tp, bool sent) {
+void Recorder::on_walk_tick(const engine::Walker& w, const engine::TickPlan& tp, bool sent) {
   if (walk_ == 0) return;
   uint64_t now = clock_.now_us();
   kilo_walk_plan_t p;
@@ -654,7 +653,7 @@ void Recorder::on_walk_tick(const planner::Walker& w, const planner::TickPlan& t
   p.pitch = a16(tp.pitch);
   p.roll = a16(tp.roll);
   flight_.append(KILO_WALK_RECORD_PLAN, now, &p, sizeof p);
-  const planner::PlannerStats& s = w.planner().stats();
+  const engine::SolverStats& s = w.solver().stats();
   if (s.holds != last_.holds || s.catches != last_.catches || s.waits != last_.waits) {
     kilo_walk_planner_t q;
     q.tick = tp.tick;

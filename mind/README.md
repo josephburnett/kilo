@@ -7,7 +7,8 @@ rest:
 - **the laptop's `kilo` command**, which talks to the C++ mind over its
   host channel (below);
 - **the reference implementations** the C++ mind was ported from and is
-  tested against: the walk planner (`kilo/planner/`), perception
+  tested against (the walking engine is not one: it exists only in C++,
+  `kilo.engine` runs it): perception
   (`kilo/perception/`), behaviour (`kilo/behaviour/`), the trick model
   (`kilo/tricks/`) and the state estimate and intents (`kilo/intent/`,
   docs/intent.md: `python -m kilo.intent.moves` plans and checks the moves
@@ -139,21 +140,23 @@ messages and the timings in kernel/mind/README.md "Flashing".
   (the manifest defaults to body.json next to the image).
 - `--rollback` is not implemented yet.
 
-## Walking: the planner
+## Walking: the engine
 
 **Kilo walks on the floor only, never on a desk or a table** (the owner's
 rule: Kilo fell off a desk once).
 
-**Who does what.** The mind plans every step (`kilo/planner/` here, its
-C++ port in `kernel/mind/planner/`): where each foot is, which feet are on
-the ground, and how the body leans, 50 times a second. It sends one tick of
-that plan at a time (a POSE message with four feet: four foot positions,
-the attitude the plan predicts, the feet that are down), about three ticks
-(60 ms) before the body needs it (`kilo/planner/walker.py`, the stream). The
-body reaches each pose on its tick, never faster than its servos may move, and corrects
-only what the plan did not predict (its balance loop compares the attitude
-it measures with the predicted one). The design and its history are in
-docs/walking-and-balance.md.
+**Who does what.** The mind's movement engine plans every step
+(`kernel/mind/engine/`, written only in C++; docs/movement-engine.md):
+where each foot is, which feet are on the ground, and where the body puts
+its weight, 50 times a second. It sends one tick at a time (a POSE message:
+four foot positions in quarter millimetres, the attitude it predicts, the
+feet that are down), three ticks (60 ms) before the body needs it. The body
+reaches each pose on its tick, never faster than its servos may move, and
+corrects only what the plan did not predict (its balance loop compares the
+attitude it measures with the predicted one). From the laptop,
+`kilo.engine` runs the kernel's own engine (`kernel/host`'s `engine-judge`,
+no body) and `mind/tests/enginejudge.py` judges its walks on the virtual
+body.
 
 A walk ends the planned way: each leg takes one more step to under its
 shoulder, the body levels at the standing height, and Kilo stands in
@@ -161,86 +164,49 @@ STANCE. Directions: forward, back, left / right (turn in place), march
 (step in place). The body ends a walk on a fall, a refusal, an underrun it
 settled from, or a reboot.
 
-**The patterns.** A pattern is the order in which legs lift. Each lift gets
-a slot: first a *shift* (all four feet down while the body moves over the
-feet that will stay down), then the *swing* (the leg or pair in the air).
-So one cycle is `slots x (shift + swing)` and each foot is on the ground
-for the cycle less its swing. The code is `kilo/planner/patterns.py`:
+**The gaits.** One step clock runs every gait: a phase going round once a
+cycle, each leg lifting when the phase passes its point. A gait is a row of
+a table (`kernel/mind/engine/gait.cpp`): the order the legs lift in, how the
+four-foot time is shared out before each lift, the swing, the lift, the
+height and the weight target:
 
-| pattern | lifts (in order) | swing | stride | step height | body height | cycle at the default speed | default speed | speed range |
+| gait | lifts (in order) | swing | stride | step height | body height | cycle at the default speed | default speed | weight target |
 |---|---|---|---|---|---|---|---|---|
-| trot | LF+RB, RF+LB (diagonal pairs) | 150 ms | up to 44 mm (27.4 by default; 35 until 2026-11-17) | 8 mm, tapering to 6 mm from a 35 mm to a 44 mm stride | 205/256 of (L1 + L2) = 76 mm | 340 ms at every speed (shift 20) | 144 mm/s | 42..232 mm/s (184 until 2026-11-17) |
-| walk | LB, LF, RB, RF (one leg at a time, the footfalls evenly spaced; backward LB, RF, RB, LF), the strides centred under the centre of mass | 220 ms | up to 54 mm (42.9 by default) | 8 mm | 205/256 = 76 mm | 960 ms at every speed (shift 20) | 58 mm/s | 11..73 mm/s |
-| crawl | LB, LF, RB, RF (one leg at a time, with the lean) | 300 ms | 50 mm | 15 mm | 179/256 = 66 mm | 2550 ms (shift 338) | 22.2 mm/s | 2..26.9 mm/s |
+| walk | LB, LF, RB, RF, one leg at a time (three shares of the four-foot time before a hind leg's lift, one before a fore leg's) | 200 ms (220 past a 50 mm stride) | up to 54 mm | 8 mm | 205/256 of (L1 + L2) = 76 mm | 960 ms | 58 mm/s | 3.5 mm inside the three feet down |
+| trot | LF+RB, RF+LB (diagonal pairs), one tick on four feet between | 160 ms up to 150 mm/s, then a tick more every 18 mm/s, at most 220 ms | the speed x (swing + 1.5 ticks) | 8 mm | 76 mm | 360 ms | 144 mm/s | none: each pair lands where the body ends its diagonal upright (the fitted pendulum) |
+| crawl | LB, LF, RB, RF, one leg at a time | 300 ms | 50 mm (shorter below 12.5 mm/s) | 15 mm | 179/256 = 66 mm | 2550 ms (the stance from the speed) | 22.2 mm/s | 8 mm inside |
 
 (Legs: LF left front, RF right front, RB right back, LB left back. L1 + L2
 = 45 + 50 mm, Kilo's measured legs; heights are from the shoulder axle to
 the centre of the foot disc, the floor is 6 mm lower.)
 
-Since 2026-11-22 (docs/walking-and-balance.md §16) the walk is the cat's
-lateral-sequence walk: one leg at a time, a foot down every 220 or 260 ms
-(more four-foot time before a back leg lifts, where the weight crosses a
-diagonal; backward every 240 ms), always three feet on the ground, never
-two, each foot landing half a stride plus the model's centre of mass
-(7.4 mm) ahead of its shoulder, and a small sway (1° of roll, 3 mm fore and
-aft) moving the weight away from the foot about to lift: by the model the
-centre of mass stays 1 to 2 mm inside the three feet (§16.8). It does not
-lean first: it is the gait for 11 to 73 mm/s. (It replaced a walk with diagonal
-couplets, 2026-11-16 to 11-22, that stood on two feet a third of the time:
-the stutter of §16.1.) The crawl is the careful gait, statically
-stable, one leg at a time with the lean (below). What limits each top
-speed, as far as the virtual body can show: the walk and the trot, the
-servos (the fastest joint at 448 and 476°/s at their tops, under the body's
-500°/s slew; the floor runs of 2026-11-15 asked 414 and kept up; the trot's
-476 since 2026-11-17 has not run on the floor, docs/walking-and-balance.md
-§13); the crawl, the body's move over the next three feet before each lift
-(a side may drop no faster than gravity lets it).
+**The weight.** For the walk and the crawl the engine looks 40 ticks
+(0.8 s) ahead: it knows from the clock where every foot will be, and on
+every one of those ticks with a foot in the air the centre of mass must be
+the gait's target inside the three feet down. It finds the smoothest body
+path, a shift fore and aft over the feet and a roll, that keeps it there,
+again every tick from where the feet are now. A lift waits (the clock
+stands) while the weight is not yet where it needs it. The trot has no
+weight target: on two feet there is no triangle to keep it in, so its
+landing balances it instead.
 
-**Speed** (docs/walking-and-balance.md §2, §3, §12): the swing time is
-fixed per pattern (short enough that the body does not tip far while a leg
-is up, long enough for the servos). The walk and the trot have a fixed
-cadence: one tick on four feet at every speed, the speed sets the stride
-alone (8 mm at the slowest). That keeps the body's balance loop out of
-them: it corrects only on four feet and holds for two ticks after a
-touchdown, so with one tick on four feet it never acts. The crawl: the
-speed sets the stride and the time a foot is on the ground (ground time =
-stride / speed, the shift takes up the rest of the slot); slower than its
-longest ground time (4000 ms) the stride shrinks, down to 8 mm; faster than
-its stride at the shortest shift allows (240 ms), the speed is capped. The
-speed can change at any tick while walking (the stride moves at most 1.5 mm
-per tick toward the new one in the trot, 1 mm in the walk, 0.5 mm in the crawl,
-and the crawl's ground time at most 2 % per tick, so nothing jumps); a
-direction change and a steer do the same. A change between the trot and
-the long trot takes over at the next slot once the strides fit the new gait
-(under a second); a change into or out of the walk or the crawl goes
-through the legs' way home (the walk's four one-leg slots and the trot's
-pairs do not hand over directly, since 2026-11-22): the strides go to 0 and each leg steps under its shoulder as for
-a stop, then the new pattern starts from its first lift. A turn in place
-moves each side 0.8 of the stride. **Steering** (since 2026-11-17; the
-remote's A6 / C6 while walking): a forward or backward walk bends with S
-from -1 to 1 (+ left: the nose turns left, forward and backward alike). The
-left side's stride is the stride less S times it, the right side's the
-stride plus it, both scaled down together when the longer one passes the
-pattern's longest stride; S = 1 keeps the inner side stepping in place.
-With the feet scrubbing as the recordings show, the radius is about
-0.25 m / S (docs/walking-and-balance.md §13).
+**Speed and cadence** are separate dials: the speed sets the stride at the
+gait's own cadence; a goal may ask for another cadence (0.6 to 1.6 of it:
+a faster cadence takes shorter steps for the same speed), and a stride past
+the gait's longest raises the cadence instead. Speed, cadence, steer and
+direction change at any tick while walking (each side's stride moves at
+most 1 mm a tick in the walk, 0.75 in the trot, 0.5 in the crawl; nothing
+jumps). A change of gait goes through the legs' way home: the strides go to
+0 and each leg steps under its shoulder as for a stop, then the new gait
+starts. A turn in place moves each side 0.8 of the stride. **Steering**
+(the remote's A6 / C6 while walking): a forward or backward walk bends with
+S from -1 to 1 (+ left): the left side's stride is the stride less S times
+it, the right side's the stride plus it, both scaled down together when the
+longer one passes the gait's longest stride.
 
-**The lean** (the crawl). On three feet the body stands on a triangle
-whose long edge runs right under its middle, so a leg that lifts leaves
-the centre of mass on that edge: the body tips toward the lifted leg. So
-before every lift the planner moves the body over the three feet that stay
-down, at least 14 mm inside their triangle for the whole swing, using the
-smallest move of three kinds: shifting the body forward or back over its
-feet, rolling it (one side's legs longer than the other's) and, a little,
-pitching it. The foot lifts 60 ms before the move is finished, and the move
-is held until the foot is down again; a side the body drops is lowered no
-faster than gravity can follow. The trot and the walk do not lean: on a
-diagonal pair there is no triangle to lean into, so their time off four
-feet stays short.
-
-**From what the body reports.** Every tick the planner gets the body's
+**From what the body reports.** Every tick the engine gets the body's
 error (measured minus predicted attitude, less the steady offset). A leg
-does not lift while the body is more than 5° off the plan (the plan waits,
+does not lift while the body is more than 5° off the plan (the clock waits,
 every foot where it is, up to 0.5 s); a swinging leg comes down at once
 where it is when the body tips toward it by more than 7°.
 
@@ -716,8 +682,8 @@ the codec against `protocol/vectors` and that the vendored copies match
 `protocol/`; `test_crosscheck.py` plays every vector through the body's C
 dispatch and the virtual body; `test_corebody.py` drives the firmware's
 core. The others are named for what they cover: the link rules, the body
-state, the virtual body and its POSE contract, the planner and the walking
-simulation (`tests/walksim.py`), the walker's stream, tricks and the
+state, the virtual body and its POSE contract, the engine's judge
+(`tests/enginejudge.py`, a study, not a test), tricks and the
 rear-up design, behaviour, perception, the log tools and recordings, the
 host channel (`test_hostlink.py`, keys, mDNS), the flash image and the SD
 card, power and sound.
