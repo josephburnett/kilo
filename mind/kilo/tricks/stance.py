@@ -181,7 +181,7 @@ def points(g3: Geometry3, js: Mapping) -> list[tuple[str, np.ndarray, float]]:
         h, k, f = _leg(g3, js, leg)
         out.append((FOOT[leg], np.array(f), r))
         out.append((KNEE[leg], np.array(k), 0.0))
-        out.append((f"{leg}_hip", np.array(h), 8.0))  # the shoulder servo's housing, beside the axle
+        out.append((f"{leg}_hip", np.array(h), g.body.outline.hip_r_mm))  # the shoulder servo's housing
     out.append((TAIL, np.array(S.tail_point(g, g3.joint(js, "tail"))), 0.0))
     w = g3.half_width
     for side, y in (("l", w), ("r", -w)):

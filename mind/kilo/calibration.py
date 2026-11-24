@@ -45,12 +45,13 @@ import math
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
+from kilo.protocol import kilo_protocol as P
 from kilo.tricks.model import CANONICAL as DRIVEN
 from kilo.tricks.model import JOINT_LIMITS
 from kilo.tricks.model import JOINT_NAMES as NAMES
 
 # ---- the body's joint table (body/src/core/joints.cpp JOINTS: dir, mid) --------------------------
-JOINT_DIR = {0: 1, 1: -1, 2: 1, 8: 1, 9: -1, 10: -1, 11: 1, 12: -1, 13: 1, 14: 1, 15: -1}
+JOINT_DIR = {j: int(P.MODEL_SERVO_DIR[j]) for j in DRIVEN}  # the one model's (spec [model.servo] dir)
 JOINT_MID = {0: 0, 1: 15, 2: 0, 8: 10, 9: 10, 10: -10, 11: -10, 12: -30, 13: -30, 14: 30, 15: 30}
 JOINT_CHANNEL = {0: 12, 1: 11, 2: 4, 8: 14, 9: 9, 10: 6, 11: 1, 12: 15, 13: 8, 14: 7, 15: 0}
 LIMITS = {j: (float(lo), float(hi)) for j, (lo, hi) in JOINT_LIMITS.items()}
@@ -62,9 +63,9 @@ WHAT = {"head_pan": "head pan", "head_tilt": "head tilt", "tail": "tail",
 
 # servo = zero + dir * angle (degrees), pulse = (A2P * servo + B_US * 1000) / 1000 us, clamped to
 # PULSE_MIN..PULSE_MAX (joints.cpp; a2p and b from Kilo's legacy EEPROM, kilo.tricks.stance).
-A2P = 10963            # us per servo degree x 1000 (every joint)
-B_US = 600
-PULSE_MIN, PULSE_MAX = 500, 2500
+A2P = int(P.MODEL_SERVO_A2P_X1000)   # us per servo degree x 1000 (every joint; spec [model.servo])
+B_US = int(P.MODEL_SERVO_B_US)
+PULSE_MIN, PULSE_MAX = (int(v) for v in P.MODEL_SERVO_PULSE_US)
 OFFSET_MAX = 25.0      # the body's CAL_SET range, degrees (+-400 a16)
 
 # ---- the postures (body/src/core/posture.cpp POSTURES, canonical order: pan, tilt, tail,

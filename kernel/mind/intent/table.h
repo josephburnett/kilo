@@ -53,7 +53,7 @@ inline int goal_index(State s) { return s == State::Standing ? 0 : s == State::S
 // One step toward a goal (graph.py Kind, Edge).
 enum class EdgeKind : uint8_t {
   None = 0,
-  Move = 1,        // a move planned and checked from the model, played by the trick player
+  Engine = 1,      // stand, sit, rest: the move the engine makes from the model when asked (engine/posture.h)
   Posture = 2,     // the body's own posture change (SET_POSTURE)
   WaitReflex = 3,  // fallen: wait for the body's fall reflex (without the righting experiment)
   Right = 4,       // a side or his back: a righting move, a FALL_OK trick (the experiment, docs/righting.md)
@@ -61,7 +61,7 @@ enum class EdgeKind : uint8_t {
 struct Edge {
   State from, to;
   EdgeKind kind;
-  const tricks::Trick* move;  // Move, Right
+  const tricks::Trick* move;  // Right
   uint8_t posture;            // Posture: KILO_POSTURE_*
   bool mirror;                // Right: played mirrored
 };

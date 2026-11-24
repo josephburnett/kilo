@@ -1105,7 +1105,7 @@ start_ctl_body "$OUT/vbody_intent.log"
 trap stop_body EXIT
 run_mind "$OUT/host_intent.log" --remote --intent --seed 3 --duration 34
 sleep 2
-ctl ir 0x02                   # B6 from LIMP: REST first (a move is refused in LIMP), then the model's move
+ctl ir 0x02                   # B6 from LIMP: REST first (a move is refused in LIMP), then the engine's move
 sleep 6
 ctl ir 0xA2                   # A7: be RESTING
 sleep 4.5
@@ -1124,12 +1124,12 @@ expect "$OUT/host_intent.log" "state estimate on; intents ON" "intents on"
 expect "$OUT/host_intent.log" "state: MOVING -> RESTING \(pitch \+0\.0 roll \+0\.0, asked none" "limp at the start reads RESTING"
 expect "$OUT/host_intent.log" "intent: be STANDING \(remote B6; he is RESTING\)" "B6 is an intent"
 expect "$OUT/host_intent.log" "intent: the servos are off: REST first" "REST before a move from LIMP"
-expect "$OUT/host_intent.log" "intent: step 1: RESTING -> STANDING by the move intent_rest_to_stand" "the model's move from REST"
-expect "$OUT/host_intent.log" "trick intent_rest_to_stand: DONE after" "the body played it"
+expect "$OUT/host_intent.log" "intent: step 1: RESTING -> STANDING by the engine's move \(hind shoulders\+hind knees, then front" "the engine's move from REST, the hind legs first"
+expect "$OUT/host_intent.log" "trick be_standing: DONE after" "the body played it"
 # (the virtual body reads level; the model expects the 2.3 deg of Kilo's sensor: confidence 91, not 100)
 expect "$OUT/host_intent.log" "state: MOVING -> STANDING \(pitch \+0\.0 roll \+0\.0, asked stand, confidence (9[0-9]|100)\)" "the estimate saw him stand"
 expect "$OUT/host_intent.log" "intent: STANDING reached \(1 step" "STANDING reached"
-expect "$OUT/host_intent.log" "intent: step 1: STANDING -> RESTING by the move intent_stand_to_rest" "A7's move"
+expect "$OUT/host_intent.log" "intent: step 1: STANDING -> RESTING by the engine's move \(front shoulders\+front knees, then hind" "A7's move, the front first"
 expect "$OUT/host_intent.log" "intent: RESTING reached \(1 step" "RESTING reached"
 expect "$OUT/host_intent.log" "event FELL arg=1" "the body's fall reflex tripped"
 expect "$OUT/host_intent.log" "state: STANDING -> ON_LEFT_SIDE \(pitch \+0\.0 roll \+88\.0, asked rest, confidence 90\)" "the estimate saw him on his side (the reflex laid him down: REST asked)"
@@ -1172,7 +1172,7 @@ expect "$OUT/host_righting.log" "event LYING arg=-1" "the body laid him down (no
 expect "$OUT/host_righting.log" "intent: the servos are off: REST first" "from LIMP: REST first"
 expect "$OUT/host_righting.log" "intent: step [0-9]: ON_RIGHT_SIDE -> RESTING by the righting move intent_righting_side \(try 1 of 3" "the side move"
 expect "$OUT/host_righting.log" "trick intent_righting_side: DONE after" "the body played it"
-expect "$OUT/host_righting.log" "intent: step [0-9]: RESTING -> STANDING by the move intent_rest_to_stand" "then up by the model's move"
+expect "$OUT/host_righting.log" "intent: step [0-9]: RESTING -> STANDING by the engine's move" "then up by the engine's move"
 expect "$OUT/host_righting.log" "intent: STANDING reached" "STANDING reached"
 expect "$OUT/host_righting.log" "intent: step [0-9]: ON_LEFT_SIDE -> RESTING by the righting move intent_righting_side mirrored \(try 3 of 3" "three mirrored tries"
 expect "$OUT/host_righting.log" "intent: righting gave up: he is left LIMP on the floor" "limp after three"

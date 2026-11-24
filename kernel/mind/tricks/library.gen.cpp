@@ -184,31 +184,6 @@ const TrickGuard kRearUp3Guards[] = {
     {7, 528, 656, 96, "mid"},
     {9, 736, 880, 96, "top"},
 };
-// alive_stretch_sit (authored): 10 frames, loop 0..0 x0, end SIT, stop over 25 ticks
-const Keyframe kAliveStretchSit[] = {
-    {25, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
-    {20, 69, 0x01, {10, 45, -30, -75, -75, -45, -45, 60, 60, -45, -45}},
-    {3, 0, 0x01, {10, 45, -10, -75, -75, -45, -45, 60, 60, -50, -50}},
-    {5, 0, 0x01, {10, 45, -50, -75, -75, -45, -45, 60, 60, -41, -41}},
-    {5, 0, 0x01, {10, 45, -10, -75, -75, -45, -45, 60, 60, -50, -50}},
-    {5, 0, 0x01, {10, 45, -50, -75, -75, -45, -45, 60, 60, -41, -41}},
-    {5, 0, 0x01, {10, 45, -10, -75, -75, -45, -45, 60, 60, -50, -50}},
-    {5, 0, 0x01, {10, 45, -50, -75, -75, -45, -45, 60, 60, -41, -41}},
-    {3, 0, 0x01, {10, 45, -30, -75, -75, -45, -45, 60, 60, -45, -45}},
-    {25, 0, 0x01, {10, -20, -60, 30, 30, -80, -80, 60, 60, 45, 45}},
-};
-// alive_stretch_stand (authored): 9 frames, loop 0..0 x0, end STAND, stop over 25 ticks
-const Keyframe kAliveStretchStand[] = {
-    {20, 69, 0x01, {10, 45, -30, -75, -75, -45, -45, 60, 60, -45, -45}},
-    {3, 0, 0x01, {10, 45, -10, -75, -75, -45, -45, 60, 60, -50, -50}},
-    {5, 0, 0x01, {10, 45, -50, -75, -75, -45, -45, 60, 60, -41, -41}},
-    {5, 0, 0x01, {10, 45, -10, -75, -75, -45, -45, 60, 60, -50, -50}},
-    {5, 0, 0x01, {10, 45, -50, -75, -75, -45, -45, 60, 60, -41, -41}},
-    {5, 0, 0x01, {10, 45, -10, -75, -75, -45, -45, 60, 60, -50, -50}},
-    {5, 0, 0x01, {10, 45, -50, -75, -75, -45, -45, 60, 60, -41, -41}},
-    {3, 0, 0x01, {10, 45, -30, -75, -75, -45, -45, 60, 60, -45, -45}},
-    {25, 0, 0x01, {0, 0, 0, 30, 30, -30, -30, 30, 30, -30, -30}},
-};
 // alive_wash_face_sit (authored): 11 frames, loop 0..0 x0, end SIT, stop over 25 ticks
 const Keyframe kAliveWashFaceSit[] = {
     {11, 5, 0x01, {95, -30, -82, 30, 30, -80, -80, 60, 60, 45, 45}},
@@ -312,8 +287,6 @@ const Trick kLibrary[kLibrarySize] = {
     {"rear_up", "", 9, 0, 0, 0, 0xFF07, 0x00, 2, 0, 0, kRearUp, 75, kRearUpGuards, 3, 128},
     {"rear_up_2", "", 13, 0, 0, 0, 0xFF07, 0x00, 2, 0, 0, kRearUp2, 100, kRearUp2Guards, 4, 128},
     {"rear_up_3", "", 17, 0, 0, 0, 0xFF07, 0x00, 2, 0, 0, kRearUp3, 125, kRearUp3Guards, 5, 128},
-    {"alive_stretch_sit", "", 10, 0, 0, 0, 0xFF07, 0x00, 2, 0, 0, kAliveStretchSit, 25, nullptr, 0, 0},
-    {"alive_stretch_stand", "", 9, 0, 0, 0, 0xFF07, 0x00, 3, 0, 0, kAliveStretchStand, 25, nullptr, 0, 0},
     {"alive_wash_face_sit", "", 11, 0, 0, 0, 0xFF07, 0x00, 2, 0, 0, kAliveWashFaceSit, 25, nullptr, 0, 0},
     {"alive_pee_sit", "", 9, 0, 0, 0, 0xFF07, 0x00, 2, 0, 0, kAlivePeeSit, 25, nullptr, 0, 0},
     {"alive_pee_stand", "", 8, 0, 0, 0, 0xFF07, 0x00, 3, 0, 0, kAlivePeeStand, 25, nullptr, 0, 0},
@@ -340,8 +313,6 @@ const TrickCheck kLibraryCheck[kLibrarySize] = {
     {0x6843, 140, 313},  // rear_up
     {0xC271, 222, 601},  // rear_up_2
     {0x2148, 79, 915},  // rear_up_3
-    {0xDC1C, 76, 170},  // alive_stretch_sit
-    {0x0F8D, 249, 145},  // alive_stretch_stand
     {0x7118, 249, 226},  // alive_wash_face_sit
     {0x3D86, 179, 183},  // alive_pee_sit
     {0xA96F, 210, 158},  // alive_pee_stand

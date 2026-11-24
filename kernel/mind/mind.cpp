@@ -472,7 +472,7 @@ const char* Mind::RightingHookImpl::start() {
 }
 
 // A posture by name (mind.h): an intent when they are on and the name is one of the three states.
-bool Mind::posture(const char* name, int8_t balance, const char* who) {
+bool Mind::posture(const char* name, int8_t balance, const char* who, double tempo) {
   if (cfg_.intent) {
     intent::State goal = str_eq(name, "stand") || str_eq(name, "balance") ? intent::State::Standing
                          : str_eq(name, "sit") ? intent::State::Sitting
@@ -480,7 +480,7 @@ bool Mind::posture(const char* name, int8_t balance, const char* who) {
                                                 : intent::State::Unknown;
     if (goal != intent::State::Unknown) {
       if (str_eq(name, "balance") && balance < 0) balance = 1;
-      return intent_.be(goal, balance, who);
+      return intent_.be(goal, balance, who, nullptr, (planner::real)tempo);
     }
     intent_.cancel("another posture was asked for");
   }

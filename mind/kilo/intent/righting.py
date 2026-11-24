@@ -85,7 +85,7 @@ REST = dict(zip(J, map(float, POSTURES["rest"])))
 REST0 = dict(REST, head_pan=0.0, tail=0.0)
 SIT = dict(zip(J, map(float, POSTURES["sit"])))
 
-TORQUE_MAX = 2.4        # kg cm on a leg servo (kilo.intent.moves, rear_up: 80 % of the estimated stall)
+TORQUE_MAX = 2.4        # kg cm on a leg servo (rear_up: 80 % of the estimated stall)
 SHIP_FRACTION = 0.75    # ends where it means to in at least this share of the variants and starts (set to
                         # 0.75 after the back move came out at 79 %: an experiment's bar, not a proof)
 STOP_TICKS = 25         # a stopped move goes to REST over this (0.5 s)

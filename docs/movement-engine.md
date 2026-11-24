@@ -1,8 +1,9 @@
 # One movement engine
 
 Written 2026-11-22 as a design; **steps 1 and 2 are built** (step 1 the
-same day, step 2 on 2026-11-23: "What exists now" just below), **step 4 in
-part** (the paw lift and face wash, 2026-11-23); steps 3, 5 and 6 are not. The owner's four decisions
+same day, step 2 on 2026-11-23: "What exists now" just below), **step 3**
+(postures as goals, 2026-11-23, used by the intents), **step 4 in part**
+(the paw lift and face wash, 2026-11-23); steps 5 and 6 are not. The owner's four decisions
 on it are at the end. Numbers marked **(est.)** are estimates; every other
 number is read from the code, the docs or the recordings named next to
 it, most of them from
@@ -112,6 +113,61 @@ it, the walks on the virtual body).
   The laptop reaches the engine only through that program (`kilo.engine`);
   there is no Python copy of it.
 
+## What exists now (step 3, postures as goals, 2026-11-23)
+
+- **The model knows what he sits and lies on.** The engine has a rest
+  finder (`kernel/mind/engine/rest.h`): given any joint angles, it puts
+  the rigid body down on the floor and tips it until it is steady, the way
+  the tricks' Python model (`kilo.tricks.stance`) does, and says at what
+  pitch and roll he comes to rest, on which points, and how far his centre
+  of mass is inside them. The points that may carry him are the feet, the
+  knees, the **haunches** (the rear corners of his underside), the
+  **belly** (its front corners) and the tail's tip; anything else on the
+  floor (his back, the Pi, the nose, a shoulder) counts as a fall. It
+  takes each joint as the servo really reaches it (the pulse limits of
+  Kilo's calibration, which stop some joints short of what is asked), so
+  the one body model (`protocol/spec.toml` `[model.servo]`) now holds how
+  the body turns an angle into a servo pulse (`dir`, `a2p_x1000`, `b_us`,
+  `pulse_us`), and `[model.outline]` the shoulder housing's size
+  (`hip_r_mm`). The outline's numbers are **estimates** (nobody has put a
+  ruler to the frame's underside); what the recordings confirm is in the
+  results ("Step 3").
+- **Stand, sit and rest are goals.** Asked for one, the engine works out
+  the move from the posture he is in (`engine/posture.h`), each time,
+  from the model: the eight leg joints in four groups (front shoulders,
+  front knees, hind shoulders, hind knees), moved all at once (the board's
+  own way) or in two or three stages in any order, and the way whose
+  centre of mass stays furthest inside what carries him is the move (at
+  least 7.5 mm at its worst moment; all at once wins a tie). Where no
+  straight way keeps that, it goes through another posture: sitting to
+  lying goes up to standing first. The tempo is a dial (0.5 to 1.5; at 1
+  a stage takes as long as the board's own posture change: 0.5 s for the
+  largest). The move ends exactly in the board's posture, which the board
+  then holds (with its balance correction if the goal asks for it).
+- **Who uses it**: the intents (`kernel/mind/intent/`, docs/intent.md),
+  which play the engine's move for every step between standing, sitting
+  and resting; the Python-planned moves (`kilo.intent.moves` and its JSON)
+  are deleted. The intents are still behind the `KILO_INTENT=1` switch
+  (their first floor try, docs/intent.md, has not been done): **without
+  the switch B6 and A7 change posture as before**, the board turning
+  every joint at once.
+- **Judged in simulation** (`mind/tests/test_engine_postures.py`; results,
+  "Step 3"): standing to sitting and back stay as they were (all at
+  once, 0.5 s, 34 mm inside). Lying down goes front legs first, then the
+  hind (8.9 mm inside at the worst moment; the board's all-at-once 3.2);
+  getting up from lying goes hind legs first, then the front (8.0; the
+  board's 3.2). Sitting to lying and back go through standing (8.9 and
+  8.0; straight there 1.8). Played on the tricks' dynamics with the
+  servos' lag and the legs' give, in the fit and at every corner of what
+  the recordings allow: no fall, no stop, no servo over its limit, and he
+  ends where the state estimate reads the posture asked for.
+- **What the owner should see** (with `KILO_INTENT=1`, not yet tried):
+  lying down (A7), the front folds first and then the rear, about 1.2 s in
+  all instead of 0.5 s; getting up (B6), the rear rises first (the nose
+  dips for a moment, like a cat's stretch), then the front; from sitting
+  to lying he stands up on the way. Sitting down and standing up from
+  sitting look as before.
+
 ## What exists now (step 4, the first trick, 2026-11-23)
 
 - **The paw wash** (`kernel/mind/engine/paw.h`): the owner's first trick
@@ -146,12 +202,33 @@ it, the walks on the virtual body).
   mode, now and then he leans back and a little to one side, lifts a front
   paw up beside his face, dips his head to it and wipes a few times, then
   stands again. It has never run on Kilo.
-- **Not built in step 4**: the other tricks as goals (the stretch, with its
-  shake as an overlay, the sniff, the rear-up as "nose up to N degrees").
-  **Step 3** (postures as goals) is not built: sitting and lying rest the
-  body on his haunches and belly, which the engine has no model of; the
-  moves between postures stay the intent layer's, planned and checked in
-  Python's statics and dynamics (docs/intent.md).
+- **The stretch** (`kernel/mind/engine/stretch.h`, 2026-11-23), sitting or
+  standing: the original Nybble's "str" as wishes on the model, made each
+  time at the tempo asked (0.5 to 2; the random mode's 0.75): the front
+  feet forward along the floor until the legs are straight out in front,
+  the hind feet drawn forward under him at standing height (so the front
+  goes down and the rear stays up, about 24 degrees nose down), the head
+  up; held two seconds, the last 0.6 s of it the **shake** (both hind feet
+  4 mm forward and back together three times, the tail swinging with them:
+  `shake_frames()`, an overlay any held pose can take); then back. The
+  moves down and back are the posture planner's (step 3), so from sitting
+  he goes straight into the stretch and straight back to sitting, instead
+  of standing up first and sitting down after. Judged on the laptop
+  (`mind/tests/test_engine_tricks.py`; results, "Step 4"): as far inside
+  his feet as the library stretch it replaces (34.4 mm), the head further
+  from the front legs (30.3 mm; the library's 27.6, the rule 10), no fall,
+  stop or overload in the dynamics. The library's `alive_stretch_sit` and
+  `_stand` are deleted.
+- **What the owner should see** (not yet tried): the stretch looks as
+  before, a degree less deep (the model's leg stops at 95 % of its length,
+  the original's at 97 %); from sitting he no longer stands up first: the
+  front reaches forward as the rear comes up, and after the shake he sits
+  straight back down (the trick takes 3.9 s instead of 4.5 at the random
+  mode's pace).
+- **Not built in step 4**: the other tricks as goals (the pee, the sniff,
+  check_around, the sitting face wash, the rear-up as "nose up to N
+  degrees"). They stay the library's keyframes, played as poses.
+
 
 ## Summary (half a page)
 
@@ -323,16 +400,12 @@ observer (mind, every TELEMETRY) -> state, errors, contact guesses -> back to th
 - **A shake is an overlay, not a pose.** The owner asked (2026-11-22) for
   the stretch to end with a little shake of the raised rear, and how that
   is expressed here. In the engine the stretch is a held goal: front low,
-  rear high, the weight where the solver keeps it over the feet, head up. The shake is not part of
-  that goal: it is an overlay, a small oscillation with an amplitude (a few
-  mm of the rear) and a rate (a few swings a second) added on top of
-  whatever goal is being held. So the same shake can be put on any pose
-  (standing, sitting, the stretch), at any tempo, and the board keeps
-  correcting balance underneath it as it does for the held pose. Today,
-  with tricks still recorded keyframes, the shake is only extra keyframes
-  at the end of the stretch's hold (the hind feet 4 mm forward and back
-  three times, the tail with them: `mind/kilo/tricks/alive_set.py`
-  `SHAKES`); it cannot be put on another pose without writing it again.
+  rear high, head up. The shake is not part of that goal: it is an
+  overlay, a small oscillation with an amplitude (a few mm of the rear) and
+  a rate (a few swings a second) added on top of whatever pose is being
+  held. Built (step 4): `engine/stretch.h` `shake_frames()` puts it on any
+  held pose (the hind feet 4 mm forward and back three times, the tail
+  with them), at any tempo; the stretch is its first user.
 
 ### Balance: the board's layer, and what the mind does above it
 
@@ -519,9 +592,12 @@ what it replaces.
    without a stop (it did before, too). Not built: walk to trot without
    squaring up (the offsets could slew from one to the other, the clock
    allows it; judged in simulation only through home so far).
-3. **Postures as goals.** Stand, sit, rest from any measured state through
-   the solver; `intent/` moves and the graph go. Floor try: B6, A7, the
-   random mode's sitting and lying down, from odd starts.
+3. **Postures as goals (built 2026-11-23, not yet tried on the floor).**
+   Stand, sit, rest from the state he is in, the move made from the model
+   each time at a tempo; the intents' Python-planned moves are gone (the
+   intents' graph stays for the fallen states). Floor try (a `KILO_INTENT=1`
+   build, docs/intent.md "First floor try"): B6, A7, the random mode's
+   sitting and lying down, from odd starts.
 4. **Tricks as goals (begun 2026-11-23: the paw lift on three feet and the
    face wash, standing).** The kept tricks (item 11) rewritten as tasks with
    a tempo; the keyframe library goes. Floor try: A5 twice, A1 (rear up as

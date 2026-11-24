@@ -3,8 +3,10 @@
 //    (tests/intent_vectors.txt, made by tests/gen_intent_vectors.py from mind/kilo/intent);
 // 2. the estimate in the Mind: it always runs, logs every change and counts it;
 // 3. intents off (the default): the remote's posture keys latch SET_POSTURE as before;
-// 4. intents on, in the Mind against the scripted body: REST -> B6 plays the model's move and
-//    ends STANDING; a body that does not end where the model says (failed steps, then REST);
+// 4. the engine's moves (engine/posture.h) as the intents play them: staged where that keeps the
+//    weight further inside, through STANDING between sitting and resting, at the tempo asked;
+// 5. intents on, in the Mind against the scripted body: REST -> B6 plays the engine's move and ends STANDING;
+//    a body that does not end where the model says (failed steps, then REST);
 //    Kilo on his side (the commanded posture is not believed; the fall reflex is waited for);
 //    LIMP (REST first); a walk key drops the intent.
 #include <cstdio>
@@ -118,7 +120,7 @@ void test_table() {
         const Edge& e = kEdges[idx];
         CHECK(e.from == st && e.to != State::Moving);
         if (fallen(st)) CHECK(e.kind == EdgeKind::WaitReflex);
-        if (e.kind == EdgeKind::Move) CHECK(e.move != nullptr && e.move->end_posture == posture_of(e.to));
+        if (e.kind == EdgeKind::Engine) CHECK(e.move == nullptr && !fallen(e.from) && e.from != State::Unknown);
         st = e.to;
         steps++;
       }
@@ -286,6 +288,51 @@ void test_off_is_as_before() {
   CHECK(r.mind.intent().counters().asked == 0);
 }
 
+// The engine's moves between the postures (engine/posture.h), from each posture to each other.
+void test_engine_moves() {
+  planner::BodyModel m;
+  engine::PostureMove mv;
+  engine::PostureGoal g;
+  const uint8_t ps[3] = {KILO_POSTURE_STAND, KILO_POSTURE_SIT, KILO_POSTURE_REST};
+  for (uint8_t a : ps)
+    for (uint8_t b : ps) {
+      if (a == b) continue;
+      g.posture = b;
+      g.tempo = 1;
+      CHECKF(mv.build_from(m, a, g), "%s to %s: %s", engine::posture_word(a), engine::posture_word(b),
+             mv.why() != nullptr ? mv.why() : "-");
+      const tricks::Trick& t = mv.trick();
+      engine::Joints to;
+      engine::posture_joints(b, &to);
+      // it ends exactly in the posture (the body then holds it: no move), stops past 25 deg of roll
+      for (int k = 0; k < engine::kJoints; k++) CHECK(t.frames[t.n_frames - 1].ang[k] == (int8_t)to.a[k]);
+      CHECK(t.end_posture == b && t.flags == 0 && t.roll_max_a16 == 25 * 16 && tricks::trick_problem(t) == nullptr);
+      CHECKF(mv.margin() >= engine::kPostureMarginMm && mv.margin() >= mv.direct_margin(), "%s to %s: %d mm",
+             engine::posture_word(a), engine::posture_word(b), (int)mv.margin());
+      // the tempo: half the pace takes twice as long, the same way
+      uint32_t t1 = 0, t2 = 0;
+      tricks::total_ticks(t, tricks::kSpeedUnity, &t1);
+      g.tempo = (planner::real)0.5;
+      CHECK(mv.build_from(m, a, g));
+      tricks::total_ticks(mv.trick(), tricks::kSpeedUnity, &t2);
+      CHECKF(t2 >= 2 * t1 - 2 && t2 <= 2 * t1 + 2, "%u then %u ticks", (unsigned)t1, (unsigned)t2);
+    }
+  // stand <-> sit: all at once, as the body's own change, over its 25 ticks
+  g.posture = KILO_POSTURE_SIT;
+  g.tempo = 1;
+  CHECK(mv.build_from(m, KILO_POSTURE_STAND, g) && mv.stages() == 1 && mv.trick().frames[0].dur == 25);
+  // up from REST: the hind legs first (the body's own all-at-once comes within 4 mm of the edge)
+  g.posture = KILO_POSTURE_STAND;
+  CHECK(mv.build_from(m, KILO_POSTURE_REST, g) && mv.stages() == 2 && mv.direct_margin() < 4);
+  CHECKF(std::strncmp(mv.plan_text(), "hind shoulders+hind knees, then front", 37) == 0, "%s", mv.plan_text());
+  // down to REST: the front first; between sitting and resting: through standing, in one move
+  g.posture = KILO_POSTURE_REST;
+  CHECK(mv.build_from(m, KILO_POSTURE_STAND, g) && mv.stages() == 2);
+  CHECK(mv.build_from(m, KILO_POSTURE_SIT, g) && mv.via() == KILO_POSTURE_STAND && mv.stages() == 3);
+  g.posture = KILO_POSTURE_SIT;
+  CHECK(mv.build_from(m, KILO_POSTURE_REST, g) && mv.via() == KILO_POSTURE_STAND && mv.stages() == 3);
+}
+
 void test_rest_to_stand() {
   Rig r(true);
   r.attach_recorder();
@@ -297,31 +344,33 @@ void test_rest_to_stand() {
   CHECK(r.mind.intent().active() && r.mind.intent().goal() == State::Standing);
   CHECK(r.log.has("intent: be STANDING (remote B6; he is RESTING)"));
   r.run_ms(400);
-  CHECKF(r.plays == 1 && r.log.has("step 1: RESTING -> STANDING by the move intent_rest_to_stand"), "plays %d",
-         r.plays);
+  CHECKF(r.plays == 1 && r.log.has("step 1: RESTING -> STANDING by the engine's move (hind shoulders+hind knees, "
+                                    "then front shoulders+front knees; tempo 100%"),
+         "plays %d", r.plays);
   CHECK(r.posture_goal() == -1);  // the trick has the body: no posture goal under it
   r.run_ms(3000);
   CHECKF(!r.mind.intent().active() && r.mind.intent().reached(), "phase %d, ended %s", (int)r.mind.intent().phase(),
          r.mind.intent().ended() != nullptr ? r.mind.intent().ended() : "-");
   CHECK(r.state() == State::Standing && r.posture_goal() == KILO_POSTURE_STAND);
   CHECK(r.log.has("intent: STANDING reached (1 step,"));
-  // sit from there (the behaviour's posture goes the same way), then rest: two moves, through STANDING
-  r.mind.posture("sit", -1, "test");
+  // sit from there (the behaviour's posture goes the same way, here quicker), then rest: one move,
+  // through standing
+  r.mind.posture("sit", -1, "test", 1.5);
   r.run_ms(4000);
   CHECK(r.state() == State::Sitting && r.plays == 2 && r.posture_goal() == KILO_POSTURE_SIT);
+  CHECK(r.log.has("step 1: STANDING -> SITTING by the engine's move (all at once; tempo 150%"));
   r.key(0xA2, 200);  // A7: be RESTING
   r.run_ms(8000);
-  CHECKF(r.state() == State::Resting && r.plays == 4 && r.mind.intent().reached(), "state %s plays %d",
+  CHECKF(r.state() == State::Resting && r.plays == 3 && r.mind.intent().reached(), "state %s plays %d",
          state_name(r.state()), r.plays);
-  CHECK(r.log.has("step 1: SITTING -> STANDING by the move intent_sit_to_stand") &&
-        r.log.has("step 2: STANDING -> RESTING by the move intent_stand_to_rest"));
-  CHECK(r.log.has("intent: RESTING reached (2 steps,"));
+  CHECK(r.log.has("step 1: SITTING -> RESTING by the engine's move (all at once; stand; front shoulders"));
+  CHECK(r.log.has("intent: RESTING reached (1 step,"));
   const Intent::Counters& c = r.mind.intent().counters();
-  CHECKF(c.asked == 3 && c.reached == 3 && c.moves == 4 && c.gave_up == 0 && c.failed_steps == 0,
+  CHECKF(c.asked == 3 && c.reached == 3 && c.moves == 3 && c.gave_up == 0 && c.failed_steps == 0,
          "asked %u reached %u moves %u", (unsigned)c.asked, (unsigned)c.reached, (unsigned)c.moves);
   // asked for where he is: nothing plays, the posture is latched
   r.key(0xA2, 600);
-  CHECK(r.plays == 4 && r.posture_goal() == KILO_POSTURE_REST && r.mind.intent().reached());
+  CHECK(r.plays == 3 && r.posture_goal() == KILO_POSTURE_REST && r.mind.intent().reached());
 }
 
 // The body does not end where the model says (whatever is played, he ends sitting): three failed
@@ -455,6 +504,7 @@ int main(int argc, char** argv) {
   test_table_righting();
   test_estimate_in_the_mind();
   test_off_is_as_before();
+  test_engine_moves();
   test_rest_to_stand();
   test_failed_steps();
   test_on_his_side();

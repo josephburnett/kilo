@@ -1,7 +1,6 @@
 """intent: what state Kilo is in and how he gets to the one he is asked for.
 
     kilo.intent.estimate   the state estimate (STANDING, SITTING, ..., from TELEMETRY and the model)
-    kilo.intent.moves      the moves between the resting states, planned and checked from the model
     kilo.intent.graph      which move leads from a state to a goal
 
 docs/intent.md is the owner's description; the C++ mind's port is

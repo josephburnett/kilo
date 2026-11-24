@@ -444,3 +444,112 @@ about 16 mm by the model's head, which is an estimate). Not known: whether
 Kilo holds the lean as the model says (the self-measurement's 3-foot tips
 came only after the mass crossed the edge, results §2), whether a paw at
 the cheek looks like washing, and whether the head model is right.
+
+### The stretch (kernel/mind/engine/stretch.h)
+
+**How** (simulation only; `mind/tests/test_engine_tricks.py`): the
+engine's stretch from STAND and from SIT at tempos 0.5 to 2, on the checks
+the random mode's library tricks are held to (`alive_set.check`: the rigid
+model as designed and as recorded, the head against the front legs) and on
+the tricks' dynamics with the roll limit (15 degrees), against the library
+stretch it replaced (`alive_stretch_stand`, `_sit` as of 7e45e73).
+
+| check | engine, standing | library, standing | engine, from SIT | library, from SIT |
+|---|---|---|---|---|
+| least margin, designed | 34.4 mm | 34.4 | 34.4 | 34.4 |
+| least margin, as recorded | 32.4 mm | 32.4 | 0.6 | 0.1 |
+| nose down, held | 24.2 deg | 24.9 | 24.2 | 24.9 |
+| largest topple, designed (recorded) | 2.5 mm (2.5) | 2.5 (2.5) | 3.5 (4.5) | 3.5 (3.9) |
+| least gap, head to a front leg | 30.3 mm | 27.6 | 30.3 | 27.6 |
+| dynamics (fit): largest roll, servo load | 0.8 deg, 0.72 kg cm | 0.8, 0.74 | 0.8, 0.72 | 0.5, 0.74 |
+| time at the random mode's 0.75 | 3.9 s | 3.9 | 3.9 | 4.5 |
+
+On the dynamics at five corners of the bands (the centre of mass 4 mm
+forward or 3 mm to the right, slow servos, softer legs): no fall, no stop,
+the roll under 3 degrees, every servo under 2.4 kg cm. The shake: both hind
+feet 4.1 mm forward and back together, three swings in 0.6 s, nothing else
+moving but the tail. As recorded (before the right hind shoulder was
+re-seated), SIT itself rests on three feet: that is the 0.6 and 0.1 mm,
+the sitting start, not the stretch.
+
+## Step 3: stand, sit and rest as goals, judged on the body model (2026-11-23)
+
+**Question.** What does the engine need to reason about sitting and lying,
+what do the recordings say about those postures, and are the engine's
+moves between them (kernel/mind/engine/posture.h) at least as safe as the
+board's own posture change (every joint at once over 25 ticks, 0.5 s)?
+
+**What the recordings say** (measured; every `.krec` of 2026-11-17 to
+11-21, the stretches where a posture had been held 3 s or more, the board
+idle; the same boot appears in several files, so the counts are of
+distinct runs). TELEMETRY's pitch is nose down +, its roll right side up +.
+
+| posture | what Kilo read | the model (the rest finder, the right hind shoulder re-seated) |
+|---|---|---|
+| SIT, 13 runs | nose up 26.1 to 27.2 (median 26.8); roll -1.7 to +2.1, one run +6.3 | nose up 26.1, roll +0.5, on all four feet; the haunches 2.8 mm above the floor |
+| REST, 8 runs | nose down 1.4 (median, -1.8 to +1.8); roll -7.6 in the two runs of build b6, within 3 of level in the others | nose down 2.3, roll -7.8, on three feet (the left hind knee's pulse limit keeps that foot 10 mm up) |
+
+The board's own changes, as recorded: STAND to SIT and back (42 and 30
+recorded) reach 90 % of their pitch change in 0.50 to 0.53 s and never
+pass their end pitch by more than 0.3; the roll stays within 1.5 (once
+4.1). STAND to REST (5 recorded): the roll reaches 7.5 to 8.1 within
+0.6 s (once 28, not explained); in the b6 runs it stays there, as the
+model's three-foot rest says.
+
+**What the model lacked, and what was added.** The Python tricks' model
+(`kilo.tricks.stance`) already put him down on his feet, knees, haunches,
+belly and tail; the engine had only the feet. The engine now has the same
+rest finder in C++ (`engine/rest.h`), and the one model the numbers it
+needs: how the board turns an angle into a servo pulse (`[model.servo]`
+`dir`, `a2p_x1000`, `b_us`, `pulse_us`, which were typed in
+`kilo.calibration` only) and the shoulder housing's size
+(`[model.outline]` `hip_r_mm`, typed in `stance.py`). The two rest
+finders agree on the three postures and 18 poses between them, with the
+servos as asked, as the EEPROM has them and re-seated: pitch and roll
+within 0.1 degree, the margin within 0.2 mm, the same contacts
+(`mind/tests/test_engine_postures.py`).
+
+**Estimated, not measured**: every number of `[model.outline]` (where the
+haunches and the belly are: the frame's underside 24 mm below the
+shoulder axles, its rear end 88 mm behind their middle, 30 mm to each
+side). The recordings agree with the model where the feet carry him
+(SIT's pitch within 0.7 degree), so they cannot say whether the haunches
+touch when he sits (the model: 2.8 mm off the floor) or the belly when he
+lies (11 mm off). **A movement that would measure them** (not built): from
+SIT, the hind knees folded further 2 degrees at a time and held a second
+each, the pitch logged: while the hind feet carry him the nose rises with
+each step as the model predicts; from the step where the haunches touch,
+it stops following. The same from REST with all four knees, for the belly.
+
+**The moves** (the engine's at tempo 1; the rigid model with Kilo as
+designed and as recorded, sampled 40 times a stage; the tricks' dynamics
+with the servos' lag, the legs' give and friction, on the fit):
+
+| move | the engine's way | time | least margin, designed (the board's own) | as recorded (the board's own) | largest roll in the dynamics (the board's own) | largest servo load, kg cm (the board's own) |
+|---|---|---|---|---|---|---|
+| stand to sit | all at once | 0.6 s | 34.4 (34.4) | 1.5 (1.5) | 0.5 (0.5) | 0.43 (0.43) |
+| sit to stand | all at once | 0.6 s | 34.4 (34.4) | 0.2 (0.2) | 0.5 (0.5) | 0.42 (0.42) |
+| stand to rest | front legs, then hind | 1.2 s | 8.9 (3.2) | 12.2 (6.3) | 7.3 (6.3) | 0.72 (0.77) |
+| rest to stand | hind legs, then front | 1.2 s | 8.4 (3.2) | 11.5 (6.0) | 6.7 (6.7) | 0.67 (0.63) |
+| sit to rest | up to stand, then as stand to rest | 1.8 s | 8.9 (2.7) | 0.2 (0.1) | 7.3 (6.7) | 0.72 (0.69) |
+| rest to sit | up to stand (hind first), then down to sit | 1.8 s | 8.4 (2.6) | 1.5 (0.6) | 6.7 (6.7) | 0.67 (0.61) |
+
+(The engine's own sampling, every 2 degrees, finds rest to stand's worst
+moment at 8.0 mm; its rule is 7.5. "As recorded" is Kilo before his
+right hind shoulder was re-seated: SIT itself is then on three feet, 0.2
+to 1.5 mm inside, for the board's change as for the engine's.) In the
+dynamics, at tempos 0.5, 1 and 1.5 and, at 1 and 1.5, at all 19 corners
+of `dynamics.bands()`: no fall, no stop by the roll limit (25 degrees),
+no servo over 2.4 kg cm, and he ends where the state estimate reads the
+posture asked for.
+
+**What it means.** By the models the engine's moves keep his weight two
+to three times further inside his feet than the board's own change when
+he lies down or gets up, and are the same move when he sits or stands.
+Lying down, the dynamics roll him 1.0 degree further on the way than the
+board's change does (both end rolled 6 degrees onto three feet). Getting
+up and lying down take 1.2 s instead of 0.5 s. Not known: whether the
+floor agrees (none of this has run on Kilo), and whether the haunches or
+the belly carry him, which would change the attitudes the estimate
+expects, not the safety of the moves (the model's are on the feet,
+further from the edge).

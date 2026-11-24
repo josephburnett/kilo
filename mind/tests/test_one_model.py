@@ -83,7 +83,7 @@ def test_the_consumers_read_the_model():
                                                                      M.slew_deg_per_tick)
     assert (D.NOMINAL.com_dx, D.NOMINAL.com_dy, D.NOMINAL.com_dz, D.NOMINAL.sag) == (
         M.com_dx_mm, M.com_dy_mm, M.com_dz_mm, M.sag_deg_per_kg_cm)
-    # ...all of it: the tricks, the rear-up and the intent moves are judged on the model itself (no view)
+    # ...all of it: the tricks, the rear-up and the engine's moves are judged on the model itself (no view)
     assert D.NOMINAL == D.Params.of(M) and RU.MODEL == D.NOMINAL
     assert (D.NOMINAL.imu_pitch, D.NOMINAL.imu_roll, D.NOMINAL.tail_droop_deg) == (
         -M.imu_pitch_deg, M.imu_roll_deg, M.tail.droop_deg)
@@ -284,4 +284,4 @@ def test_model_apply_dry_run_changes_nothing_and_reports():
     assert "crawl" in text and "trot: still off: com_x_mm 3.5 vs 1.33" in text
     assert "Dry run: nothing was changed" in text and "FAILED" not in text
     # the intent layer is made from the model too (kernel/host/test.sh checks gen_intent.py and its vectors)
-    assert "gen_intent.py" in text and "the intent golden vectors" in text and "kilo.intent.moves" in text
+    assert "gen_intent.py" in text and "the intent golden vectors" in text and "kilo.intent.righting" in text

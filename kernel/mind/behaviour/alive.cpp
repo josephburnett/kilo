@@ -183,6 +183,15 @@ bool Alive::play_trick(double now) {
     if (paw_.build(model_, pg)) t = &paw_.trick();
     else why = paw_.why();
     q6 = tricks::kSpeedUnity;  // the tempo is in its frames
+  } else if (str_eq(pers_.alive_tricks[k], "stretch")) {
+    // the stretch is the engine's (engine/stretch.h): front down, rear up, held, the rear's shake, back,
+    // made from the body model at the personality's pace, from the pose he holds
+    engine::StretchGoal sg;
+    sg.from = standing ? KILO_POSTURE_STAND : KILO_POSTURE_SIT;
+    sg.tempo = (planner::real)d_clamp(speed, (double)engine::kStretchTempoMin, (double)engine::kStretchTempoMax);
+    if (stretch_.build(model_, sg)) t = &stretch_.trick();
+    else why = stretch_.why();
+    q6 = tricks::kSpeedUnity;
   } else {
     t = tricks::find_trick(name);
   }

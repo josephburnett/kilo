@@ -37,9 +37,11 @@
 // occasional movements in the random mode"): now and then, sitting or
 // standing, one of the personality's alive.tricks instead of a small move
 // (the library's alive_<name>_sit or alive_<name>_stand, mind/kilo/tricks/
-// alive_set.py: from that pose and back to it, held to the body model; standing,
-// the face wash is the engine's instead: a front paw lifted on three feet,
-// engine/paw.h, either side, two to four strokes), at
+// alive_set.py: from that pose and back to it, held to the body model; the
+// engine's instead for the stretch, sitting or standing, front down and rear up
+// with the rear's shake, engine/stretch.h, and standing for the face wash, a
+// front paw lifted on three feet, engine/paw.h, either side, two to four
+// strokes), at
 // alive.trick_speed x the original's pace; the wait between two is drawn
 // from 0.5 to 1.5 x alive.trick_every_s, and the same trick never comes
 // twice in a row. request_trick() (the remote's A5 while the runner runs,
@@ -66,6 +68,7 @@
 #include "behaviour/personality.h"
 #include "behaviour/random.h"
 #include "engine/paw.h"
+#include "engine/stretch.h"
 #include "link/serial_link.h"
 #include "planner/model.h"
 #include "platform.h"
@@ -198,6 +201,7 @@ class Alive {
   const Personality& pers_;
   PyRandom trick_rng_;
   engine::PawWash paw_;                 // standing, the face wash: the engine's, made when asked
+  engine::Stretch stretch_;             // the stretch, standing or sitting: the engine's, made when asked
   const tricks::Trick* lib_ = nullptr;  // the last one started
   uint32_t lib_play_ = 0;
   int last_trick_ = -1, pending_k_ = -1;

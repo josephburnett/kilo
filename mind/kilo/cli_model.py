@@ -459,9 +459,10 @@ def _metrics_of(tree: Path) -> dict:
 
 
 VECTORS = ("measure", "behaviour", "perception", "intent")
-# The intent layer's moves and the righting experiment's, planned and checked on the model (committed JSON that
-# kernel/mind/intent/gen_intent.py reads): re-planned before the intent tables are generated.
-INTENT_PLANS = ("kilo.intent.moves", "kilo.intent.righting")
+# The righting experiment's moves, planned and checked on the model (committed JSON that
+# kernel/mind/intent/gen_intent.py reads): re-planned before the intent tables are generated. (The moves
+# between standing, sitting and resting are the engine's, made in the mind from the model when asked.)
+INTENT_PLANS = ("kilo.intent.righting",)
 
 
 def regenerate(tree: Path, rear_up: bool, say=print) -> tuple[list[str], str]:
