@@ -119,6 +119,23 @@ def paw_wash(tempo: float = 1.0, strokes: int = 3, path: str | None = None):
     return t, info
 
 
+def stretch(base: str = "stand", tempo: float = 1.0, depth: float = 1.0, path: str | None = None):
+    """The engine's stretch (kernel/mind/engine/stretch.h: front down, rear up, held, the shake, back) from
+    and back to ``base`` (stand or sit) as a kilo.tricks.model.Trick, and what the engine says of it:
+    (trick, {margin, pitch, shake_from})."""
+    from kilo.tricks.model import Posture, Trick
+
+    out = subprocess.run([binary(path), "--trick", "stretch", "--from", base, "--tempo", str(tempo), "--depth",
+                          str(depth)], check=True, capture_output=True, text=True).stdout.split("\n")
+    lines = [ln.split() for ln in out if ln.strip()]
+    h = lines[0]
+    info = {"margin": float(h[2]), "pitch": float(h[4]), "shake_from": int(h[6])}
+    frames = _frames([f for f in lines if f[0] == "frame"])
+    t = Trick(f"stretch_{base}", tuple(frames), end_posture=Posture(POSTURE_CODE[base]), stop_ticks=25,
+              roll_max=15.0)
+    return t, info
+
+
 def _frames(lines):
     """The "frame dur hold flags a0..a10" lines engine-judge prints, as kilo.tricks.model Keyframes."""
     from kilo.tricks.model import CANONICAL, JOINT_SLOTS, Easing, Keyframe

@@ -618,15 +618,17 @@ move, he does one of the original Nybble's tricks:
 
 | Trick | What he does | From sitting | From standing |
 |---|---|---|---|
-| stretch | front low, rear high, head up (the original's `str`), held 2 s; at the end of the hold his rear shakes a little (3 quick swings, the hind feet 4 mm forward and back, the tail with them: not the original's) | stands up first | as the original |
-| wash_face | sits and lifts his left front paw beside his muzzle three times, then puts it down (`wsf`; the original's head turned into the paw, which bumped his head, so here it faces straight ahead, 14 mm from the paw) | as the original | sits first (the original's own first row) |
+| stretch | front low, rear high, head up (the original's `str`), held 2 s; at the end of the hold his rear shakes a little (3 quick swings, the hind feet 4 mm forward and back, the tail with them: not the original's). Made by the movement engine from the body model (`engine/stretch.h`) | goes straight into it and straight back to sitting | as the original |
+| wash_face | sits and lifts his left front paw beside his muzzle three times, then puts it down (`wsf`; the original's head turned into the paw, which bumped his head, so here it faces straight ahead, 14 mm from the paw) | as the original | the movement engine's paw wash (`engine/paw.h`): standing on three feet, a front paw up beside his face, two to four strokes |
 | pee | lifts a hind leg (`pee`) | stands up first | as the original |
 | sniff | head down, sniffing the floor (`snf`) | stands up first | as the original |
 | check_around | looks round to each side (`ck`) | stands up first | as the original |
 
 - Each trick ends exactly in the pose it started from (SIT or STAND; standing
   he goes back to STANCE afterwards), so he never jumps at the end.
-- They are the library's `alive_<name>_sit` and `alive_<name>_stand`, written by
+- But for the stretch and the standing face wash (the movement engine's, made
+  each time from the body model: docs/movement-engine.md step 4), they are the
+  library's `alive_<name>_sit` and `alive_<name>_stand`, written by
   `mind/kilo/tricks/alive_set.py` from the original skill tables with the
   original's timing (`mind/README.md` "The original firmware's trick timing"), each checked against the
   body model (`mind/tests/test_alive_tricks.py`): standing on his feet, and the

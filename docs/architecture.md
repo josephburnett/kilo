@@ -1762,8 +1762,10 @@ estimate all read the model itself.
 Deleting a view's table makes its user read the model.
 
 **What is not on the model yet.** The postures (stand, sit, rest), the 13
-stock tricks and the sitting fidgets are still tables of joint angles
-(`body/src/core/posture.cpp`, the trick library). The body no longer gets
+stock tricks, the random mode's pee, sniff, check_around and sitting face
+wash, and the sitting fidgets are still tables of joint angles
+(`body/src/core/posture.cpp`, the trick library); the random mode's stretch
+and standing face wash are made from the model (`kernel/mind/engine/`). The body no longer gets
 up after a fall; the mind's righting move (the B1 experiment,
 `docs/righting.md`) is the only get-up.
 The way from one posture to another is made from it, in the movement

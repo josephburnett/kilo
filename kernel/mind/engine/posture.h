@@ -62,6 +62,7 @@ const char* posture_word(uint8_t posture);  // "stand", "sit", "rest"
 struct PostureGoal {
   uint8_t posture = KILO_POSTURE_STAND;  // STAND, SIT or REST
   real tempo = 1;                        // kPostureTempoMin..Max
+  real rate = kRateDegPerTick;           // tempo 1's pace: the largest joint's degrees a tick, on average
 };
 
 // The way a move goes (whatever its tempo): the joints after each stage, and what the model says of it.
@@ -82,6 +83,9 @@ class PostureMove {
   // The same from the body posture `from` (STAND, SIT or REST): the way is worked out once per pair of
   // postures (it does not change with the tempo) and kept.
   bool build_from(const BodyModel& m, uint8_t from, const PostureGoal& g);
+  // The move from joints `from` to joints `to` (a trick's pose), the same way; g.posture is the posture the
+  // board takes at its end.
+  bool build_to(const BodyModel& m, const Joints& from, const Joints& to, const PostureGoal& g);
   const tricks::Trick& trick() const { return trick_; }
   const char* why() const { return why_; }
   const PostureWay& way() const { return way_; }
@@ -92,7 +96,7 @@ class PostureMove {
   const char* plan_text() const { return way_.text; }
 
  private:
-  bool timed(const BodyModel& m, const Joints& from, const PostureGoal& g);
+  bool timed(const BodyModel& m, const Joints& from, const Joints& to, const PostureGoal& g);
   tricks::Keyframe frames_[kMaxStages] = {};
   tricks::Trick trick_ = {};
   const char* why_ = nullptr;

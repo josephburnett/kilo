@@ -39,8 +39,9 @@ inertia, the legs' give, a foot sliding. The tricks left out are in DROPPED, wit
 same samples the head (the righting model's estimate, kilo.tricks.righting.Lying) must stay
 HEAD_CLEAR_MM from the front legs, with a positive pan turning the nose either way (not known).
 
-Two changes to the original, both the owner's (2026-11-22): the paw lick's head (HEAD_ROWS: the
-original turns it into the raised paw) and a shake of the rear at the end of the stretch (SHAKES).
+One change to the original, the owner's (2026-11-22): the paw lick's head (HEAD_ROWS: the
+original turns it into the raised paw). The stretch, with the shake of the rear the owner asked for,
+is the movement engine's (ENGINE).
 
     python -m kilo.tricks.alive_set [--check]      (from mind/; then kernel/mind/tricks/gen_library.py)
 """
@@ -78,13 +79,14 @@ DROPPED = {
 }
 BASES = ("sit", "stand")
 # Variants the movement engine makes instead of the library (docs/movement-engine.md, step 4):
-# standing, the face wash is a front paw lifted on three feet (kernel/mind/engine/paw.h; its checks:
-# mind/tests/test_engine_tricks.py, the same as below). No library file for these.
-ENGINE = {("wash_face", "stand")}
+# standing, the face wash is a front paw lifted on three feet (kernel/mind/engine/paw.h); the stretch,
+# standing and sitting, front down and rear up with the shake of the rear at the end of its hold
+# (kernel/mind/engine/stretch.h). Their checks: mind/tests/test_engine_tricks.py, the same as below. No
+# library file for these.
+ENGINE = {("wash_face", "stand"), ("stretch", "stand"), ("stretch", "sit")}
 # Where a trick's original rows start from, when that is not the base (the move there first).
 # The legacy skills all start from `up`; wash_face sits first itself (its first row is a sit).
 VIA = {
-    ("stretch", "sit"): "stand",
     ("pee", "sit"): "stand",
     ("sniff", "sit"): "stand",
     ("check_around", "sit"): "stand",
@@ -113,36 +115,6 @@ HEAD_CLEAR_MM = 10.0  # the least gap between the head and a front leg (knee ser
 # original's timing is kept (the head moves less than the leg in every row).
 HEAD_ROWS = {"wash_face": {2: (0, 10), 3: (0, 0)}}
 
-
-@dataclass(frozen=True)
-class Shake:
-    """A small shake of the raised rear at the end of a posture's hold (the owner, 2026-11-22: "when
-    Kilo goes butt up (stretching) make him shake a little before coming back up"): both hind feet
-    swing ``amp_mm`` forward and back together (the rear shifts back and forth over them), with the
-    tail swinging ``tail_deg`` to each side in step; ``cycles`` full swings of 2 x ``half_ticks``
-    ticks each (at speed 1; the alive layer plays at trick_speed), eased in and out over half a
-    swing. Fore and aft, not side to side: the legs cannot move sideways, so a side-to-side shake
-    is the hind feet up and down in turn, which rocks him onto a diagonal pair of feet (the model,
-    as designed: the centre of mass 8.5 mm inside the support instead of 32). The shake ends where
-    the posture was, at the end of its hold: the hold is as long as before, the still part shorter."""
-    amp_mm: float
-    half_ticks: int
-    cycles: int
-    tail_deg: float
-
-    @property
-    def ticks(self) -> int:
-        return (2 * self.cycles - 1) * self.half_ticks + 2 * self._edge
-
-    @property
-    def _edge(self) -> int:
-        return (self.half_ticks + 1) // 2
-
-
-# 4 mm a foot, 5 ticks a half swing (100 ms; 133 ms at trick_speed 0.75: 3.75 swings a second),
-# 3 swings, the tail 20 deg: gentle. The servos lag about 120 ms and close 63 % of a gap in 70 ms
-# ([model] servo_lag_ms + servo_tau_ms), so at 3.75 Hz the feet move about half of the 4 mm.
-SHAKES = {"stretch": Shake(amp_mm=4.0, half_ticks=5, cycles=3, tail_deg=20.0)}
 
 _SKILLS = legacy.parse_file()
 # The bases as the body holds them (its joint limits applied: SIT's rear shoulders -90 -> -80), 16
@@ -198,42 +170,6 @@ def _with_head(f: Keyframe, head) -> Keyframe:
     return replace(f, angles=tuple(a))
 
 
-def _hind_leg_dx(shoulder: float, knee: float, dx: float) -> tuple[int, int]:
-    """A hind leg's (shoulder, knee), whole degrees, with its foot ``dx`` mm further forward and at
-    the same height (the side view's leg, sagittal.leg_points): Newton on the two angles."""
-    g = S.Geometry()
-    def foot(s, k):
-        _, _, f = S.leg_points(g, False, s, k)
-        return np.array(f)
-    target = foot(shoulder, knee) + np.array([dx, 0.0])
-    s, k = float(shoulder), float(knee)
-    for _ in range(20):
-        e = target - foot(s, k)
-        if np.hypot(*e) < 1e-3:
-            break
-        J = np.column_stack([(foot(s + 1e-3, k) - foot(s, k)) / 1e-3, (foot(s, k + 1e-3) - foot(s, k)) / 1e-3])
-        s, k = (np.array([s, k]) + np.linalg.solve(J, e)).tolist()
-    return round(s), round(k)
-
-
-def shake_frames(pose: tuple, shake: Shake) -> list[Keyframe]:
-    """The shake's keyframes from the 16-slot ``pose`` (where it starts and ends): each a swing to
-    the next side, cosine eased."""
-    sides = []
-    for side in (1, -1):  # +1: the hind feet forward (the rear back over them), the tail one way
-        a = list(pose)
-        for leg in ("lb", "rb"):
-            sh, kn = JOINT_IDS[f"{leg}_shoulder"], JOINT_IDS[f"{leg}_knee"]
-            a[sh], a[kn] = _hind_leg_dx(pose[sh], pose[kn], side * shake.amp_mm)
-        a[JOINT_IDS["tail"]] = round(pose[JOINT_IDS["tail"]] + side * shake.tail_deg)
-        sides.append(_clamped(tuple(a)))
-    out = [Keyframe(sides[0], dur=shake._edge, easing=Easing.COSINE)]
-    for i in range(1, 2 * shake.cycles):
-        out.append(Keyframe(sides[i % 2], dur=shake.half_ticks, easing=Easing.COSINE))
-    out.append(Keyframe(tuple(pose), dur=shake._edge, easing=Easing.COSINE))
-    return out
-
-
 def build(trick: str, base: str) -> Trick:
     skill = _SKILLS[FIRST_VERSION[trick]]
     via = VIA.get((trick, base))
@@ -250,16 +186,10 @@ def build(trick: str, base: str) -> Trick:
         here = to
     if skill.kind == "posture":
         to = skill.angles(0)
-        shake = SHAKES.get(trick)
-        still = POSTURE_HOLD_TICKS - (shake.ticks if shake else 0)
-        frames.append(Keyframe(_clamped(to), dur=_posture_ticks(here, to), hold=still, easing=Easing.COSINE))
+        frames.append(Keyframe(_clamped(to), dur=_posture_ticks(here, to), hold=POSTURE_HOLD_TICKS,
+                               easing=Easing.COSINE))
         notes.append(f"the posture at the original's posture rate (2 deg a pass of {legacy.LEGACY_STEP_MS} ms), "
                      f"held {POSTURE_HOLD_TICKS} ticks")
-        if shake:
-            frames += shake_frames(_clamped(to), shake)
-            notes.append(f"the last {shake.ticks} ticks of the hold: the rear shakes ({shake.cycles} swings, "
-                         f"the hind feet {shake.amp_mm:g} mm forward and back, {2 * shake.half_ticks} ticks "
-                         f"a swing, the tail {shake.tail_deg:g} deg), not the original's")
         last = to
     else:
         core = legacy.to_trick(skill, name=trick, skills=_SKILLS, start=here)

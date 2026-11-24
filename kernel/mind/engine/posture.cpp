@@ -98,10 +98,10 @@ Plan best_direct(const BodyModel& m, const Joints& a, const Joints& b, real* dir
   return best;
 }
 
-int span_ticks(const Joints& a, const Joints& b, real tempo) {
+int span_ticks(const Joints& a, const Joints& b, real tempo, real rate) {
   real span = 0;
   for (int k = 0; k < kJoints; k++) span = m_max(span, m_fabs(b.a[k] - a.a[k]));
-  real t = m_max((real)kStageMinTicks, span / kRateDegPerTick);
+  real t = m_max((real)kStageMinTicks, span / m_max(rate, (real)0.5));
   int n = round_i(t / tempo);
   return n < 1 ? 1 : n > 255 ? 255 : n;
 }
@@ -195,7 +195,13 @@ bool PostureMove::build(const BodyModel& m, const Joints& from, const PostureGoa
     return false;
   }
   plan_way(m, from, g.posture, to, &way_);
-  return timed(m, from, g);
+  return timed(m, from, to, g);
+}
+
+bool PostureMove::build_to(const BodyModel& m, const Joints& from, const Joints& to, const PostureGoal& g) {
+  why_ = nullptr;
+  plan_way(m, from, g.posture, to, &way_);
+  return timed(m, from, to, g);
 }
 
 bool PostureMove::build_from(const BodyModel& m, uint8_t from, const PostureGoal& g) {
@@ -211,12 +217,12 @@ bool PostureMove::build_from(const BodyModel& m, uint8_t from, const PostureGoal
     cached_[a][b] = true;
   }
   way_ = cache_[a][b];
-  return timed(m, fj, g);
+  return timed(m, fj, to, g);
 }
 
 // The trick of way_ from `from` at the goal's tempo: each stage along the cosine ease, kStageHoldTicks
 // apart, the last held kEndHoldTicks.
-bool PostureMove::timed(const BodyModel& m, const Joints& from, const PostureGoal& g) {
+bool PostureMove::timed(const BodyModel& m, const Joints& from, const Joints& to, const PostureGoal& g) {
   if (way_.margin < kPostureMarginMm || way_.n == 0) {
     why_ = "no way there keeps the weight inside what carries him";
     return false;
@@ -225,15 +231,13 @@ bool PostureMove::timed(const BodyModel& m, const Joints& from, const PostureGoa
   Joints prev = from;
   for (int i = 0; i < way_.n; i++) {
     tricks::Keyframe& f = frames_[i];
-    f.dur = (uint8_t)span_ticks(prev, way_.at[i], tempo);
+    f.dur = (uint8_t)span_ticks(prev, way_.at[i], tempo, g.rate);
     int hold = i == way_.n - 1 ? kEndHoldTicks : kStageHoldTicks;
     f.hold = (uint8_t)m_max((real)1, (real)round_i((real)hold / tempo));
     f.flags = tricks::kCosine;
     for (int k = 0; k < kJoints; k++) f.ang[k] = (int8_t)clamp((real)round_i(way_.at[i].a[k]), -127, 127);
     prev = way_.at[i];
   }
-  Joints to;
-  posture_joints(g.posture, &to);
   Rest end = rest(m, kServos, to);
   trick_ = {};
   trick_.name = g.posture == KILO_POSTURE_SIT ? "be_sitting" : g.posture == KILO_POSTURE_REST ? "be_resting"

@@ -5,6 +5,7 @@
 //                [--steer S] [--ticks N] [--at TICK:CMD]... [--set KEY=VALUE]...
 //
 //   engine-judge --trick paw_wash [--tempo T] [--strokes N]
+//   engine-judge --trick stretch [--from stand|sit] [--tempo T] [--depth D]
 //   engine-judge --posture FROM TO [--tempo T]
 //   engine-judge --rest asked|eeprom|reseated A0 .. A10
 //
@@ -12,6 +13,7 @@
 // loop A B end STAND", then per frame "frame dur hold flags pan tilt tail sh_LF sh_RF sh_RB sh_LB kn_LF ..
 // kn_LB" (degrees), then "guard frame lo hi roll" (a16).
 //
+// --trick stretch prints "trick margin M pitch P shake_from F end stand|sit", then the frames.
 // --posture prints the move the engine makes (engine/posture.h) from FROM (stand, sit, rest, or eleven
 // joint angles a0,..,a10) to TO (stand, sit, rest): "posture margin M direct D via V stages N plan TEXT",
 // then the frames as for a trick, or "no posture move: WHY" (exit 1).
@@ -30,6 +32,7 @@
 #include <string.h>
 #include "engine/paw.h"
 #include "engine/posture.h"
+#include "engine/stretch.h"
 #include "engine/solve.h"
 
 using namespace kilo;
@@ -154,10 +157,29 @@ int rest_of(int argc, char** argv) {
   return 0;
 }
 
+int stretch(int argc, char** argv) {
+  StretchGoal g;
+  for (int i = 1; i + 1 < argc; i += 2) {
+    if (!strcmp(argv[i], "--tempo")) g.tempo = (real)atof(argv[i + 1]);
+    else if (!strcmp(argv[i], "--depth")) g.depth = (real)atof(argv[i + 1]);
+    else if (!strcmp(argv[i], "--from")) g.from = posture_code(argv[i + 1]);
+  }
+  static Stretch s;
+  if (!s.build(planner::BodyModel(), g)) {
+    fprintf(stderr, "engine-judge: no stretch: %s\n", s.why());
+    return 1;
+  }
+  printf("trick margin %.3f pitch %.3f shake_from %d end %s\n", (double)s.margin(), (double)s.pitch(), s.shake_from(),
+         posture_word(s.trick().end_posture));
+  print_frames(s.trick());
+  return 0;
+}
+
 int main(int argc, char** argv) {
   if (argc >= 2 && !strcmp(argv[1], "--posture")) return posture(argc - 1, argv + 1);
   if (argc >= 2 && !strcmp(argv[1], "--rest")) return rest_of(argc - 1, argv + 1);
   if (argc >= 3 && !strcmp(argv[1], "--trick")) {
+    if (!strcmp(argv[2], "stretch")) return stretch(argc - 2, argv + 2);
     if (strcmp(argv[2], "paw_wash")) return usage();
     return trick(argc - 2, argv + 2);
   }

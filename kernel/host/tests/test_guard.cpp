@@ -30,6 +30,7 @@
 #include "mind.h"
 #include "engine/paw.h"
 #include "engine/solve.h"
+#include "engine/stretch.h"
 #include "power/battery.h"
 #include "remote/client.h"
 #include "tests/check.h"
@@ -1126,6 +1127,16 @@ void test_alive_tricks_through_the_mind() {
         CHECKF(w.build(planner::BodyModel(), engine::PawGoal()) && tricks::trick_problem(w.trick()) == nullptr &&
                    w.trick().end_posture == KILO_POSTURE_STAND,
                "the engine's paw wash: %s", w.why() ? w.why() : "");
+        continue;
+      }
+      if (std::strncmp(name, "alive_stretch_", 14) == 0) {  // the engine's (engine/stretch.h), made when asked
+        static engine::Stretch s;
+        engine::StretchGoal g;
+        g.from = base[1] == 'i' ? KILO_POSTURE_SIT : KILO_POSTURE_STAND;
+        g.tempo = (planner::real)p.alive_trick_speed;
+        CHECKF(s.build(planner::BodyModel(), g) && tricks::trick_problem(s.trick()) == nullptr &&
+                   s.trick().end_posture == g.from,
+               "the engine's stretch: %s", s.why() ? s.why() : "");
         continue;
       }
       const tricks::Trick* t = tricks::find_trick(name);

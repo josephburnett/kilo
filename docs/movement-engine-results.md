@@ -445,6 +445,33 @@ Kilo holds the lean as the model says (the self-measurement's 3-foot tips
 came only after the mass crossed the edge, results §2), whether a paw at
 the cheek looks like washing, and whether the head model is right.
 
+### The stretch (kernel/mind/engine/stretch.h)
+
+**How** (simulation only; `mind/tests/test_engine_tricks.py`): the
+engine's stretch from STAND and from SIT at tempos 0.5 to 2, on the checks
+the random mode's library tricks are held to (`alive_set.check`: the rigid
+model as designed and as recorded, the head against the front legs) and on
+the tricks' dynamics with the roll limit (15 degrees), against the library
+stretch it replaced (`alive_stretch_stand`, `_sit` as of 7e45e73).
+
+| check | engine, standing | library, standing | engine, from SIT | library, from SIT |
+|---|---|---|---|---|
+| least margin, designed | 34.4 mm | 34.4 | 34.4 | 34.4 |
+| least margin, as recorded | 32.4 mm | 32.4 | 0.6 | 0.1 |
+| nose down, held | 24.2 deg | 24.9 | 24.2 | 24.9 |
+| largest topple, designed (recorded) | 2.5 mm (2.5) | 2.5 (2.5) | 3.5 (4.5) | 3.5 (3.9) |
+| least gap, head to a front leg | 30.3 mm | 27.6 | 30.3 | 27.6 |
+| dynamics (fit): largest roll, servo load | 0.8 deg, 0.72 kg cm | 0.8, 0.74 | 0.8, 0.72 | 0.5, 0.74 |
+| time at the random mode's 0.75 | 3.9 s | 3.9 | 3.9 | 4.5 |
+
+On the dynamics at five corners of the bands (the centre of mass 4 mm
+forward or 3 mm to the right, slow servos, softer legs): no fall, no stop,
+the roll under 3 degrees, every servo under 2.4 kg cm. The shake: both hind
+feet 4.1 mm forward and back together, three swings in 0.6 s, nothing else
+moving but the tail. As recorded (before the right hind shoulder was
+re-seated), SIT itself rests on three feet: that is the 0.6 and 0.1 mm,
+the sitting start, not the stretch.
+
 ## Step 3: stand, sit and rest as goals, judged on the body model (2026-11-23)
 
 **Question.** What does the engine need to reason about sitting and lying,

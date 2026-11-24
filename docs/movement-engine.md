@@ -202,8 +202,32 @@ it, the walks on the virtual body).
   mode, now and then he leans back and a little to one side, lifts a front
   paw up beside his face, dips his head to it and wipes a few times, then
   stands again. It has never run on Kilo.
-- **Not built in step 4**: the other tricks as goals (the stretch, with its
-  shake as an overlay, the sniff, the rear-up as "nose up to N degrees").
+- **The stretch** (`kernel/mind/engine/stretch.h`, 2026-11-23), sitting or
+  standing: the original Nybble's "str" as wishes on the model, made each
+  time at the tempo asked (0.5 to 2; the random mode's 0.75): the front
+  feet forward along the floor until the legs are straight out in front,
+  the hind feet drawn forward under him at standing height (so the front
+  goes down and the rear stays up, about 24 degrees nose down), the head
+  up; held two seconds, the last 0.6 s of it the **shake** (both hind feet
+  4 mm forward and back together three times, the tail swinging with them:
+  `shake_frames()`, an overlay any held pose can take); then back. The
+  moves down and back are the posture planner's (step 3), so from sitting
+  he goes straight into the stretch and straight back to sitting, instead
+  of standing up first and sitting down after. Judged on the laptop
+  (`mind/tests/test_engine_tricks.py`; results, "Step 4"): as far inside
+  his feet as the library stretch it replaces (34.4 mm), the head further
+  from the front legs (30.3 mm; the library's 27.6, the rule 10), no fall,
+  stop or overload in the dynamics. The library's `alive_stretch_sit` and
+  `_stand` are deleted.
+- **What the owner should see** (not yet tried): the stretch looks as
+  before, a degree less deep (the model's leg stops at 95 % of its length,
+  the original's at 97 %); from sitting he no longer stands up first: the
+  front reaches forward as the rear comes up, and after the shake he sits
+  straight back down (the trick takes 3.9 s instead of 4.5 at the random
+  mode's pace).
+- **Not built in step 4**: the other tricks as goals (the pee, the sniff,
+  check_around, the sitting face wash, the rear-up as "nose up to N
+  degrees"). They stay the library's keyframes, played as poses.
 
 
 ## Summary (half a page)
@@ -376,16 +400,12 @@ observer (mind, every TELEMETRY) -> state, errors, contact guesses -> back to th
 - **A shake is an overlay, not a pose.** The owner asked (2026-11-22) for
   the stretch to end with a little shake of the raised rear, and how that
   is expressed here. In the engine the stretch is a held goal: front low,
-  rear high, the weight where the solver keeps it over the feet, head up. The shake is not part of
-  that goal: it is an overlay, a small oscillation with an amplitude (a few
-  mm of the rear) and a rate (a few swings a second) added on top of
-  whatever goal is being held. So the same shake can be put on any pose
-  (standing, sitting, the stretch), at any tempo, and the board keeps
-  correcting balance underneath it as it does for the held pose. Today,
-  with tricks still recorded keyframes, the shake is only extra keyframes
-  at the end of the stretch's hold (the hind feet 4 mm forward and back
-  three times, the tail with them: `mind/kilo/tricks/alive_set.py`
-  `SHAKES`); it cannot be put on another pose without writing it again.
+  rear high, head up. The shake is not part of that goal: it is an
+  overlay, a small oscillation with an amplitude (a few mm of the rear) and
+  a rate (a few swings a second) added on top of whatever pose is being
+  held. Built (step 4): `engine/stretch.h` `shake_frames()` puts it on any
+  held pose (the hind feet 4 mm forward and back three times, the tail
+  with them), at any tempo; the stretch is its first user.
 
 ### Balance: the board's layer, and what the mind does above it
 

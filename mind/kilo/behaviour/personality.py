@@ -164,8 +164,8 @@ def validate(cfg: dict[str, Any]) -> None:
     tricks = cfg["alive"]["tricks"]
     from kilo.tricks.library import AUTHORED  # names only: no JSON is read
     # each trick sitting and standing: in the library, or made by the movement engine (the standing
-    # face wash: kilo.tricks.alive_set.ENGINE, kernel/mind/engine/paw.h)
-    engine = {("wash_face", "stand")}
+    # face wash and the stretch: kilo.tricks.alive_set.ENGINE, kernel/mind/engine/paw.h, stretch.h)
+    engine = {("wash_face", "stand"), ("stretch", "stand"), ("stretch", "sit")}
 
     def known(t, base):
         return f"alive_{t}_{base}" in AUTHORED or (t, base) in engine
