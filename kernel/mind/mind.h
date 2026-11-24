@@ -213,7 +213,8 @@ class Mind final : public LinkListener,
   // A posture by name, as the remote's keys, the behaviour layer and the guard ask for it: with
   // MindConfig.intent "stand", "sit" and "rest" are intents (be(STANDING) ...), everything else and
   // everything without it the body's own posture change (client_posture). who: for the log.
-  bool posture(const char* name, int8_t balance, const char* who);
+  // tempo: with intents, the engine's moves at this many times their own pace (engine::kPostureTempoMin..Max).
+  bool posture(const char* name, int8_t balance, const char* who, double tempo = 1.0);
 
   guard::DistanceGuard& guard() { return guard_; }
   sound::SoundPlayer& sound() { return sound_; }

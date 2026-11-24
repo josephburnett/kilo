@@ -1716,7 +1716,9 @@ such a number again (`mind/tests/test_one_model.py` fails if one does).
 
 **What is in it.** The masses and where they sit, the legs' reach, how late
 the servos follow (`servo_lag_ms`, `servo_tau_ms`); Kilo's servo zeros
-(`[model.servo]`), his tail (`[model.tail]`), the outline of his frame
+and how the body turns an angle into a servo pulse, which decides the
+angles a joint really reaches (`[model.servo]`), his tail (`[model.tail]`),
+the outline of his frame (what he sits and lies on: the haunches, the belly)
 (`[model.outline]`), the frame's inertia, where the distance sensor sits,
 how far the body goes for the feet's push (`[model.travel]`, 1 until it is
 measured against a wall: `docs/wall-walk.md`); and
@@ -1764,8 +1766,9 @@ stock tricks and the sitting fidgets are still tables of joint angles
 (`body/src/core/posture.cpp`, the trick library). The body no longer gets
 up after a fall; the mind's righting move (the B1 experiment,
 `docs/righting.md`) is the only get-up.
-The way from one posture to another is on it since 2026-11-21, behind a
-switch (below).
+The way from one posture to another is made from it, in the movement
+engine (`kernel/mind/engine/posture.h`, docs/movement-engine.md step 3),
+each time it is asked for, behind the intents' switch (below).
 
 **The state estimate and intents** (`docs/intent.md`, `mind/kilo/intent/`,
 `kernel/mind/intent/`). Two things read the model at build time and are
@@ -1787,13 +1790,14 @@ generated into the mind (`kernel/mind/intent/gen_intent.py`):
   sit become `be(STANDING | SITTING | RESTING)`: read the state, take the
   first step toward the goal from a generated table, play it, read the
   state again, go on from where he is; three failed steps and it gives up
-  (REST). A step is a *move* planned from the model
-  (`kilo.intent.moves`: the order of the leg joints that keeps the centre
-  of mass furthest inside the feet, at least 10 mm in the rest finder, then
-  played over every band of `kilo.tricks.dynamics` as the rear-up is: no
-  fall, no stop, ends in the target state), played by the trick player; or
-  the body's own posture change where no checked move leads (today only
-  from UNKNOWN; REST to SIT goes through STANDING by two checked moves); or,
+  (REST). A step between the upright states is the movement engine's
+  move, made from the model when asked (`engine/posture.h`: the order of
+  the leg joints that keeps the centre of mass furthest inside what
+  carries him, at least 7.5 mm in the engine's rest finder `engine/rest.h`,
+  through another posture when that keeps more; checked on the laptop over
+  every band of `kilo.tricks.dynamics`, `mind/tests/test_engine_postures.py`),
+  played by the trick player; or the body's own posture change from
+  UNKNOWN (or if the engine finds no way); or,
   from a fallen state, waiting for the body's fall reflex to lay him down
   (`EVENT LYING`: the intent gives up, he needs a hand), or, with the
   righting experiment (`KILO_RIGHTING`), the mind's righting move, a

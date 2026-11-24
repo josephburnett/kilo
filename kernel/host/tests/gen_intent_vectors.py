@@ -14,8 +14,8 @@ current). Lines:
     edge I FROM TO KIND POSTURE MOVE MIRROR         the edges ("-" for no move)
     next STATE I0 I1 I2                             the first step to STANDING, SITTING, RESTING
     nextr STATE I0 I1 I2                            ...with the righting experiment
-    move NAME CRC16 TRICK_ID TOTAL_TICKS            each shipped move, then each righting move, as the trick
-                                                    player uploads it
+    move NAME CRC16 TRICK_ID TOTAL_TICKS            each righting move, as the trick player plays it
+                                                    (standing, sitting, resting: the engine's, made when asked)
 
 States, priors and kinds are their numbers (estimate.py State and Cmd, graph.py Kind).
 """
@@ -31,7 +31,6 @@ sys.path.insert(0, str(REPO / "mind"))
 from kilo.tricks.model import trick_id_for  # noqa: E402
 from kilo.intent import estimate as E  # noqa: E402
 from kilo.intent import graph as G  # noqa: E402
-from kilo.intent import moves as M  # noqa: E402
 from kilo.intent import righting as RT  # noqa: E402
 from kilo.protocol import kilo_protocol as P  # noqa: E402
 
@@ -142,8 +141,8 @@ def main() -> int:
         out.append(f"next {int(s)} " + " ".join(str(v) for v in row))
     for s, row in zip(E.State, G.next_table(edges, righting=True)):
         out.append(f"nextr {int(s)} " + " ".join(str(v) for v in row))
-    for name in M.shipped() + list(RT.NAMES):
-        t = RT.load_move(name) if name in RT.NAMES else M.load_move(name)
+    for name in RT.NAMES:
+        t = RT.load_move(name)
         out.append(f"move {t.name} {t.crc16()} {trick_id_for(t)} {t.duration_ticks or 0}")
     sys.stdout.write("\n".join(out) + "\n")
     return 0

@@ -100,6 +100,7 @@ class Outline:
     nose_x_mm: float = float(P.MODEL_OUTLINE_NOSE_X_MM)
     nose_z_mm: float = float(P.MODEL_OUTLINE_NOSE_Z_MM)
     half_width_mm: float = float(P.MODEL_OUTLINE_HALF_WIDTH_MM)  # half the frame's width
+    hip_r_mm: float = float(P.MODEL_OUTLINE_HIP_R_MM)  # the shoulder servo's housing about its axle
 
 
 # A view's keys that are BodyModel fields (the others are the view's own: view_numbers).

@@ -11,9 +11,10 @@ rest:
   `kilo.engine` runs it): perception
   (`kilo/perception/`), behaviour (`kilo/behaviour/`), the trick model
   (`kilo/tricks/`) and the state estimate and intents (`kilo/intent/`,
-  docs/intent.md: `python -m kilo.intent.moves` plans and checks the moves
-  between the postures from the body model, `python -m kilo.intent.replay
-  FILE.krec` runs the state estimate over a recording).
+  docs/intent.md: `python -m kilo.intent.graph` prints the steps toward
+  each goal, `python -m kilo.intent.replay FILE.krec` runs the state
+  estimate over a recording; the moves between the postures are the
+  movement engine's, in C++ only, `kilo.engine.posture()` asks for one).
   `kernel/host/tests/gen_*_vectors.py` run them to make
   the golden vectors the C++ tests check, and `kernel/host/test.sh` fails
   when the committed vectors are stale;

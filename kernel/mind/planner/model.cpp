@@ -11,6 +11,18 @@ V2 BodyModel::hip(int leg) const {
   return {kFront[leg] ? length_mm / 2 : -length_mm / 2, kLeft[leg] ? track_mm / 2 : -track_mm / 2};
 }
 
+void BodyModel::reach(int id, real zero, real lo_limit, real hi_limit, real* lo, real* hi) const {
+  *lo = lo_limit;
+  *hi = hi_limit;
+  real d = servo_dir[id & 15];
+  if (d == 0 || a2p_x1000 <= 0) return;
+  // the joint angles at the pulse range's ends (calibration.angle_window)
+  real s_lo = (pulse_us[0] - b_us) * 1000 / a2p_x1000, s_hi = (pulse_us[1] - b_us) * 1000 / a2p_x1000;
+  real a = (s_lo - zero) * d, b = (s_hi - zero) * d;
+  *lo = m_max(*lo, m_min(a, b));
+  *hi = m_min(*hi, m_max(a, b));
+}
+
 real BodyModel::min_reach_mm() const {
   real c = m_cos(radians(knee_max_deg));
   return m_sqrt(l1_mm * l1_mm + l2_mm * l2_mm + 2 * l1_mm * l2_mm * c);

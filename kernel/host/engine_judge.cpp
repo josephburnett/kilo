@@ -5,10 +5,18 @@
 //                [--steer S] [--ticks N] [--at TICK:CMD]... [--set KEY=VALUE]...
 //
 //   engine-judge --trick paw_wash [--tempo T] [--strokes N]
+//   engine-judge --posture FROM TO [--tempo T]
+//   engine-judge --rest asked|eeprom|reseated A0 .. A10
 //
 // prints the trick the engine makes (engine/paw.h): "trick lean_dx D lean_roll R margin M repeats N
 // loop A B end STAND", then per frame "frame dur hold flags pan tilt tail sh_LF sh_RF sh_RB sh_LB kn_LF ..
 // kn_LB" (degrees), then "guard frame lo hi roll" (a16).
+//
+// --posture prints the move the engine makes (engine/posture.h) from FROM (stand, sit, rest, or eleven
+// joint angles a0,..,a10) to TO (stand, sit, rest): "posture margin M direct D via V stages N plan TEXT",
+// then the frames as for a trick, or "no posture move: WHY" (exit 1).
+// --rest prints where the rest finder (engine/rest.h) puts the body for those joint angles (degrees,
+// canonical order): "rest pitch P roll R margin M com_h H topples T telemetry TP TR contacts NAME..".
 //
 // --set changes the solver's config (SolverConfig's fields) or the gait's (margin, roll_max, roll_cost,
 // swing, cycle) for a study.
@@ -21,6 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "engine/paw.h"
+#include "engine/posture.h"
 #include "engine/solve.h"
 
 using namespace kilo;
@@ -57,6 +66,8 @@ void apply(Solver& s, const char* cmd) {
 
 }  // namespace
 
+void print_frames(const tricks::Trick& t);
+
 int trick(int argc, char** argv) {
   PawGoal g;
   for (int i = 1; i + 1 < argc; i += 2) {
@@ -71,19 +82,81 @@ int trick(int argc, char** argv) {
   const tricks::Trick& t = w.trick();
   printf("trick lean_dx %.3f lean_roll %.3f margin %.3f repeats %u loop %u %u\n", (double)w.lean_dx(),
          (double)w.lean_roll(), (double)w.margin(), (unsigned)t.repeats, (unsigned)t.loop_start, (unsigned)t.loop_end);
-  for (int i = 0; i < t.n_frames; i++) {
-    const tricks::Keyframe& f = t.frames[i];
-    printf("frame %u %u %u", (unsigned)f.dur, (unsigned)f.hold, (unsigned)f.flags);
-    for (int k = 0; k < (int)KILO_JOINT_COUNT; k++) printf(" %d", (int)f.ang[k]);
-    printf("\n");
-  }
+  print_frames(t);
   for (int i = 0; i < t.n_guards; i++)
     printf("guard %u %d %d %d\n", (unsigned)t.guards[i].frame, (int)t.guards[i].lo_a16, (int)t.guards[i].hi_a16,
            (int)t.guards[i].roll_a16);
   return 0;
 }
 
+void print_frames(const tricks::Trick& t) {
+  for (int i = 0; i < t.n_frames; i++) {
+    const tricks::Keyframe& f = t.frames[i];
+    printf("frame %u %u %u", (unsigned)f.dur, (unsigned)f.hold, (unsigned)f.flags);
+    for (int k = 0; k < (int)KILO_JOINT_COUNT; k++) printf(" %d", (int)f.ang[k]);
+    printf("\n");
+  }
+}
+
+bool parse_joints(const char* s, Joints* j) {
+  if (!strcmp(s, "stand")) return posture_joints(KILO_POSTURE_STAND, j);
+  if (!strcmp(s, "sit")) return posture_joints(KILO_POSTURE_SIT, j);
+  if (!strcmp(s, "rest")) return posture_joints(KILO_POSTURE_REST, j);
+  for (int k = 0; k < kJoints; k++) {
+    char* end = nullptr;
+    j->a[k] = (real)strtod(s, &end);
+    if (end == s) return false;
+    s = *end == ',' ? end + 1 : end;
+  }
+  return true;
+}
+
+uint8_t posture_code(const char* s) {
+  return !strcmp(s, "stand") ? KILO_POSTURE_STAND : !strcmp(s, "sit") ? KILO_POSTURE_SIT
+         : !strcmp(s, "rest") ? KILO_POSTURE_REST : 0;
+}
+
+int posture(int argc, char** argv) {
+  if (argc < 3) return usage();
+  Joints from;
+  PostureGoal g;
+  g.posture = posture_code(argv[2]);
+  if (!parse_joints(argv[1], &from) || g.posture == 0) return usage();
+  for (int i = 3; i + 1 < argc; i += 2)
+    if (!strcmp(argv[i], "--tempo")) g.tempo = (real)atof(argv[i + 1]);
+  static PostureMove mv;
+  if (!mv.build(planner::BodyModel(), from, g)) {
+    printf("no posture move: %s (margin %.3f)\n", mv.why(), (double)mv.margin());
+    return 1;
+  }
+  const tricks::Trick& t = mv.trick();
+  printf("posture margin %.3f direct %.3f via %s stages %d exp %d %d plan %s\n", (double)mv.margin(),
+         (double)mv.direct_margin(), mv.via() ? posture_word(mv.via()) : "-", mv.stages(), (int)t.exp_pitch,
+         (int)t.exp_roll, mv.plan_text());
+  print_frames(t);
+  return 0;
+}
+
+int rest_of(int argc, char** argv) {
+  if (argc < 2 + kJoints) return usage();
+  Servos s = !strcmp(argv[1], "asked") ? Servos::Asked : !strcmp(argv[1], "reseated") ? Servos::Reseated
+                                                                                      : Servos::Eeprom;
+  Joints j;
+  for (int k = 0; k < kJoints; k++) j.a[k] = (real)atof(argv[2 + k]);
+  planner::BodyModel m;
+  Rest r = rest(m, s, j);
+  printf("rest pitch %.4f roll %.4f margin %.4f com_h %.3f topples %d telemetry %.3f %.3f contacts", (double)r.pitch,
+         (double)r.roll, (double)r.margin, (double)r.com_h, r.topples, (double)telemetry_pitch(m, r),
+         (double)telemetry_roll(m, r));
+  for (int p = 0; p < kPoints; p++)
+    if (r.contacts >> p & 1) printf(" %s", point_name(p));
+  printf("\n");
+  return 0;
+}
+
 int main(int argc, char** argv) {
+  if (argc >= 2 && !strcmp(argv[1], "--posture")) return posture(argc - 1, argv + 1);
+  if (argc >= 2 && !strcmp(argv[1], "--rest")) return rest_of(argc - 1, argv + 1);
   if (argc >= 3 && !strcmp(argv[1], "--trick")) {
     if (strcmp(argv[2], "paw_wash")) return usage();
     return trick(argc - 2, argv + 2);

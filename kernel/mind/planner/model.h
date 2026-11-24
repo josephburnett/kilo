@@ -69,10 +69,40 @@ struct BodyModel {
   real knee_max_deg = KILO_MODEL_KNEE_MAX_DEG;
   // corrections for this robot (spec [model.correction]): what a self-measurement finds, all
   // zero until one is applied (kilo model apply); com() adds them. model.py has the others
-  // (the legs' give, the IMU's offsets, the tail, the outline), which nothing here uses.
+  // (the legs' give, the legs' lengths), which nothing here uses.
   real com_dx_mm = (real)KILO_MODEL_CORRECTION_COM_DX_MM;  // the whole robot's centre of mass, forward
   real com_dy_mm = (real)KILO_MODEL_CORRECTION_COM_DY_MM;  // ...to the left
   real com_dz_mm = (real)KILO_MODEL_CORRECTION_COM_DZ_MM;  // ...up
+  // what TELEMETRY reads when he stands level: pitch nose down +, roll right side up + (the rest
+  // finder's attitudes as TELEMETRY shows them, engine/rest.h)
+  real imu_pitch_deg = (real)KILO_MODEL_CORRECTION_IMU_PITCH_DEG;
+  real imu_roll_deg = (real)KILO_MODEL_CORRECTION_IMU_ROLL_DEG;
+  // the tail (spec [model.tail]) and the frame's outline ([model.outline], ESTIMATES): what may touch
+  // the floor sitting and lying, for the rest finder (engine/rest.h)
+  struct Tail {
+    real pivot_x = (real)KILO_MODEL_TAIL_PIVOT_X_MM, pivot_z = (real)KILO_MODEL_TAIL_PIVOT_Z_MM;
+    real len = (real)KILO_MODEL_TAIL_LEN_MM, droop_deg = (real)KILO_MODEL_TAIL_DROOP_DEG;
+    real axis_deg = (real)KILO_MODEL_TAIL_AXIS_DEG, sign = (real)KILO_MODEL_TAIL_SIGN;
+    real g = (real)KILO_MODEL_TAIL_G, com_frac = (real)KILO_MODEL_TAIL_COM_FRAC;
+  } tail;
+  struct Outline {
+    real rear_x = (real)KILO_MODEL_OUTLINE_REAR_X_MM, belly_z = (real)KILO_MODEL_OUTLINE_BELLY_Z_MM;
+    real back_z = (real)KILO_MODEL_OUTLINE_BACK_Z_MM, pi_rear_x = (real)KILO_MODEL_OUTLINE_PI_REAR_X_MM;
+    real pi_top_z = (real)KILO_MODEL_OUTLINE_PI_TOP_Z_MM, nose_x = (real)KILO_MODEL_OUTLINE_NOSE_X_MM;
+    real nose_z = (real)KILO_MODEL_OUTLINE_NOSE_Z_MM, half_width = (real)KILO_MODEL_OUTLINE_HALF_WIDTH_MM;
+    real hip_r = (real)KILO_MODEL_OUTLINE_HIP_R_MM;
+  } outline;
+  // what the body does with a joint angle (spec [model.servo], body/src/core/joints.cpp): servo =
+  // czp + dir * angle, pulse = a2p / 1000 * servo + b us, clamped to pulse_lo..pulse_hi
+  real czp[16] = KILO_MODEL_SERVO_CZP_INIT;
+  real servo_dir[16] = KILO_MODEL_SERVO_DIR_INIT;
+  real a2p_x1000 = KILO_MODEL_SERVO_A2P_X1000;
+  real b_us = KILO_MODEL_SERVO_B_US;
+  real pulse_us[2] = KILO_MODEL_SERVO_PULSE_US_INIT;
+  // The angles joint `id` (legacy id 0..15) really reaches with servo zero `zero` (czp[id]: Kilo's):
+  // its limits and its pulse window (kilo.tricks.stance reach()). A joint the body does not drive: its
+  // limits.
+  void reach(int id, real zero, real lo_limit, real hi_limit, real* lo, real* hi) const;
   // each servo's own performance, by legacy joint id 0..15 (model.py; none measured yet: all as the robot's)
   real servo_lag_d_ms[16] = KILO_MODEL_CORRECTION_SERVO_LAG_D_MS_INIT;  // later than servo_lag_ms
   real servo_tau_d_ms[16] = KILO_MODEL_CORRECTION_SERVO_TAU_D_MS_INIT;  // slower than servo_tau_ms

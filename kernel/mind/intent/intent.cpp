@@ -37,7 +37,7 @@ bool Intent::latch(uint8_t posture, bool balance) {
   return link_.set_goal(KILO_MSG_SET_POSTURE, (const uint8_t*)&g, sizeof g);
 }
 
-bool Intent::be(State goal, int8_t balance, const char* who, const char** why) {
+bool Intent::be(State goal, int8_t balance, const char* who, const char** why, planner::real tempo) {
   if (goal_index(goal) < 0) {
     if (why != nullptr) *why = "not a state to ask for";
     return false;
@@ -50,6 +50,7 @@ bool Intent::be(State goal, int8_t balance, const char* who, const char** why) {
   bool again = active() && goal == goal_;
   goal_ = goal;
   balance_ = balance == 1;
+  tempo_ = planner::clamp(tempo, engine::kPostureTempoMin, engine::kPostureTempoMax);
   format(who_, sizeof who_, "%s", who != nullptr ? who : "");
   if (again) return true;  // the same goal while it is on its way: nothing new
   n_.asked++;
@@ -179,8 +180,6 @@ void Intent::start_edge(const Edge& e, State st, uint64_t now) {
       }
       rightings_++;
       n_.rightings++;
-      [[fallthrough]];
-    case EdgeKind::Move: {
       from_ = st;
       to_ = e.to;
       move_ = e.move;
@@ -189,9 +188,27 @@ void Intent::start_edge(const Edge& e, State st, uint64_t now) {
       steps_++;
       enter(Phase::Move, now);
       return;  // poll() starts it once the trick player is free
+    case EdgeKind::Engine: {
+      engine::PostureGoal pg;
+      pg.posture = posture_of(e.to);
+      pg.tempo = tempo_;
+      if (!posture_.build_from(model_, posture_of(st), pg)) {
+        logf(log_, LogLevel::Warn, "intent: the engine has no move from %s to %s: %s", state_name(st),
+             state_name(e.to), posture_.why() != nullptr ? posture_.why() : "?");
+        body_posture(e.to, now, "the engine found no way");
+        return;
+      }
+      from_ = st;
+      to_ = e.to;
+      move_ = &posture_.trick();
+      mirror_ = false;
+      move_started_ = false;
+      steps_++;
+      enter(Phase::Move, now);
+      return;
     }
     case EdgeKind::Posture:
-      body_posture(e.to, now, st == State::Unknown ? "no pose the model knows" : "no checked move leads there");
+      body_posture(e.to, now, "no pose the model knows");
       return;
     case EdgeKind::WaitReflex:
       to_ = e.to;
@@ -201,6 +218,7 @@ void Intent::start_edge(const Edge& e, State st, uint64_t now) {
       give_up(st, "no step leads from there");
   }
 }
+
 
 void Intent::decide(State st, uint64_t now) {
   const BodyState& b = link_.state();
@@ -285,8 +303,11 @@ void Intent::poll() {
                steps_, state_name(from_), state_name(to_), move_->name, mirror_ ? " mirrored" : "", rightings_,
                kMaxRightings);
         else
-          logf(log_, LogLevel::Info, "intent: step %d: %s -> %s by the move %s (planned from the model)", steps_,
-               state_name(from_), state_name(to_), move_->name);
+          logf(log_, LogLevel::Info,
+               "intent: step %d: %s -> %s by the engine's move (%s; tempo %d%%; the weight %d mm inside at "
+               "its worst, %d all at once)",
+               steps_, state_name(from_), state_name(to_), posture_.plan_text(), planner::round_i(tempo_ * 100),
+               planner::round_i(posture_.margin()), planner::round_i(posture_.direct_margin()));
         char l[120];
         format(l, sizeof l, "intent step=%d kind=move move=%s from=%s to=%s play=%u", steps_, move_->name,
                state_name(from_), state_name(to_), (unsigned)play_);

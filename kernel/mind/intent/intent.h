@@ -3,14 +3,19 @@
 // state estimate, intent/estimate.h), takes the first step toward the goal
 // from the generated table (intent.gen.h kNext, kEdges: mind/kilo/intent/
 // graph.py), plays it, waits until he is settled, looks again, and goes on
-// from where he really is.
+// from where he really is. Since engine step 3 (docs/movement-engine.md)
+// this is how stand, sit and rest are always reached: the remote's B6 and A7,
+// the behaviour, the guard.
 //
 // A step (an edge) is one of:
-//   Move        a move planned and checked from the body model
-//               (mind/kilo/intent/moves.py), played through the trick player
-//               (tricks/player.h) with its roll limit;
-//   Posture     the body's own posture change (SET_POSTURE): where no checked
-//               move leads, and from UNKNOWN;
+//   Engine      from standing, sitting or resting to another of the three:
+//               the move the engine works out from the body model when it is
+//               asked (engine/posture.h: from the posture he is in, through
+//               another posture if that keeps more weight inside what carries
+//               him, at the tempo asked), played through the trick player
+//               (tricks/player.h) with its roll limit; if the engine finds no
+//               way, the body's own posture change, with a warning;
+//   Posture     the body's own posture change (SET_POSTURE): from UNKNOWN;
 //   WaitReflex  fallen: wait for the body's fall reflex to lay him down
 //               (EVENT LYING: given up, he needs a hand; the body has no
 //               get-up of its own) or for a hand to right him, up to
@@ -42,12 +47,10 @@
 //
 // cancel(): someone else takes the body (a walk, a trick, the laptop): a
 // move under way is stopped (its end posture) and the intent forgotten.
-//
-// Nothing here runs unless the mind is built or started with intents on
-// (KILO_INTENT=1, kilo-mind-host --intent): MindConfig.intent.
 #ifndef KILO_MIND_INTENT_INTENT_H
 #define KILO_MIND_INTENT_INTENT_H
 #include <stdint.h>
+#include "engine/posture.h"
 #include "intent/estimate.h"
 #include "link/serial_link.h"
 #include "engine/walker.h"
@@ -99,7 +102,11 @@ class Intent {
   // Be in goal (Standing, Sitting or Resting). balance: the posture's balance flag once there (1 on, else
   // off). who: for the log ("remote B6", "behaviour"). False (and *why) when the goal is none of the three or
   // the body's protocol is not ours; nothing is sent then.
-  bool be(State goal, int8_t balance = -1, const char* who = "", const char** why = nullptr);
+  // tempo: the engine's moves this many times their own pace (engine::kPostureTempoMin..Max).
+  bool be(State goal, int8_t balance = -1, const char* who = "", const char** why = nullptr,
+          planner::real tempo = 1);
+  // The engine's last move (its way, margin and trick), for the tests and the log.
+  const engine::PostureMove& posture_move() const { return posture_; }
   // Someone else takes the body: stop a move under way, forget the intent.
   void cancel(const char* why);
   // From the owner's LinkListener.
@@ -155,6 +162,9 @@ class Intent {
   State from_ = State::Unknown;     // the state the step under way began in
   State to_ = State::Unknown;       // ...and where it means to end
   const tricks::Trick* move_ = nullptr;
+  engine::PostureMove posture_;     // the engine's move under way (Engine edges)
+  planner::BodyModel model_;
+  planner::real tempo_ = 1;
   bool mirror_ = false;             // the move plays mirrored (a righting move from his left side)
   bool righting_ = false;
   int rightings_ = 0;               // righting moves this intent

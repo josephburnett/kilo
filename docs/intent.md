@@ -142,8 +142,8 @@ and the guard.
 
    | From | Step |
    |---|---|
-   | RESTING | the move "rest to stand": the hind legs first, then the front ones |
-   | SITTING | the move "sit to stand" |
+   | RESTING | the movement engine's move, worked out from the model when it is asked: the hind legs first, then the front ones |
+   | SITTING | the engine's move: every joint at once, as the body's own change |
    | servos off (after A7's sleep, or at power-on) | REST first (the body refuses a move with the servos off), 1.5 seconds, then as from RESTING |
    | on a side, on his back, on end | wait for the body's fall reflex to right him (up to 15 seconds). With the righting experiment built in (`KILO_RIGHTING=1`, docs/righting.md): the mind's own righting moves instead, from a side or his back; on end, nothing |
    | UNKNOWN | the body's own change to STAND, as before |
@@ -155,33 +155,39 @@ and the guard.
    the log, and if he is upright leaves him in REST.
 
 "Be RESTING" and "be SITTING" work the same way. From REST to SIT and back
-he goes through standing (two moves): no direct move passed the check.
+the engine's move goes through standing (one move: no straight way keeps
+his weight far enough inside his feet).
 
 Any key stops a walk as before. A walking key, the rear-up or the self-measurement while a
 move is playing stops the move and drops the intent.
 
 ## What is planned from the model today, and what is not
 
-**Planned and checked from the model** (`python -m kilo.intent.moves`):
-the four moves between the postures. For each, the model tries moving all
-leg joints at once (what the body does today) and every way of moving them
-in two groups, and keeps the one where his centre of mass stays furthest
-inside his feet all the way:
+**Made from the model when asked** (the movement engine,
+`kernel/mind/engine/posture.h`; docs/movement-engine.md, step 3): every
+move between standing, sitting and resting. The engine tries moving all
+leg joints at once (what the body does by itself) and every way of moving
+them in two or three groups, follows each in its model of how he rests on
+the floor (his feet, knees, haunches, belly and tail may carry him), and
+keeps the one where his centre of mass stays furthest inside what carries
+him all the way (at least 7.5 mm). Where no straight way keeps that, it
+goes through another posture. The moves can be played slower or quicker
+(a tempo of 0.5 to 1.5; the remote and the behaviour use 1).
 
-| Move | The plan | Centre of mass inside the feet, at the worst moment | The body's all-at-once way |
+| Move | The engine's way | Centre of mass inside the feet, at the worst moment | The body's all-at-once way |
 |---|---|---|---|
-| stand to sit | all joints together | 26.9 mm | the same |
-| sit to stand | all joints together | 26.9 mm | the same |
-| rest to stand | hind legs first, then front | 10.3 mm | 7.1 mm |
-| stand to rest | front legs first, then hind | 10.3 mm | 7.1 mm |
-| rest to sit, sit to rest | not shipped: 5.0 mm at best (needs 10) | | he goes through standing |
+| stand to sit, sit to stand | all joints together, 0.5 s | 34 mm | the same |
+| rest to stand | hind legs first, then front, 1.2 s | 8.0 mm | 3.2 mm |
+| stand to rest | front legs first, then hind, 1.2 s | 8.9 mm | 3.2 mm |
+| sit to rest, rest to sit | through standing, 1.8 s | 8.9 and 8.0 mm | 1.8 mm |
 
-Each shipped move was then played in the simulator that the rear-up is
-checked in (soft legs, real contact with the floor), 21 times with the
-model's uncertain numbers pushed to their edges (centre of mass, how much
-the legs give, friction, slow servos): he never fell, never rolled past 9
-degrees (the mind stops a move at 25), no servo carried more than 0.95 kg cm
-(limit 2.4), and he ended where the estimate reads the target state.
+Each was played in the simulator that the rear-up is checked in (soft
+legs, real contact with the floor), with the model's uncertain numbers
+pushed to their edges (centre of mass, how much the legs give, friction,
+slow servos): he never fell, never rolled past 8 degrees (the mind stops a
+move at 25), no servo carried more than 0.8 kg cm (limit 2.4), and he
+ended where the estimate reads the target state
+(docs/movement-engine-results.md, "Step 3").
 
 Getting up from rest hind legs first means his rear comes up before his
 front: the nose points about 20 degrees down for a moment, like a cat's
@@ -244,7 +250,7 @@ kilo card /mnt/e KILO_INTENT=1
 4. **B6** again (now from limp once more), then **A5** to let the behaviour
    runner sit him down and stand him up for a minute; **B6** stops it.
    Look: does sitting down and standing up look as before? (Those two moves
-   follow the same path as the body's own change, over 0.8 seconds.)
+   follow the same path as the body's own change, over 0.5 seconds.)
 5. If you want to try the fall: standing, tip him onto a side by hand.
    Press **B6** while he lies there. Nothing new should happen: the body's
    reflex gets him up as before, and the log should say the mind saw him on
@@ -260,18 +266,20 @@ postures as before.
 ## Where the code is
 
 - `mind/kilo/intent/`: the Python reference. `estimate.py` (the estimate),
-  `moves.py` (the plan and the check; `moves/*.json` are its results),
   `graph.py` (which step leads where), `replay.py` (a recording through the
   estimate).
 - `kernel/mind/intent/`: the mind's own (C++): `estimate.cpp`, `intent.cpp`,
-  and `intent.gen.*`, generated from the Python by `gen_intent.py`.
-- Tests: `mind/tests/test_intent.py`, `kernel/host/tests/test_intent.cpp`
+  and `intent.gen.*`, generated from the Python by `gen_intent.py`. The
+  moves between the postures: `kernel/mind/engine/posture.h` (C++ only;
+  `kilo.engine.posture()` asks the laptop build for one).
+- Tests: `mind/tests/test_intent.py`, `mind/tests/test_engine_postures.py`
+  (the engine's moves on the model and the dynamics), `kernel/host/tests/test_intent.cpp`
   (the two estimates agree on every sample of `intent_vectors.txt`), and
   `kernel/host/test.sh` runs the mind with intents on against the virtual
   body: stand from limp, rest, stand, a fall onto his side.
-- After a change to the model or the moves: `python -m kilo.intent.moves
-  --write` (two minutes), then `kernel/mind/intent/gen_intent.py`, then the
-  vectors (`kernel/host/tests/gen_intent_vectors.py`).
+- After a change to the model: `kernel/mind/intent/gen_intent.py`, then the
+  vectors (`kernel/host/tests/gen_intent_vectors.py`); the engine's moves
+  follow the model by themselves.
 - The righting experiment's moves: `mind/kilo/intent/righting.py` (and
   `righting/*.json`, its results; `python -m kilo.intent.righting --write`,
   a few minutes), wired in at one place: `RIGHTING` in

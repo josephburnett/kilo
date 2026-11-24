@@ -100,27 +100,71 @@ def paw_wash(tempo: float = 1.0, strokes: int = 3, path: str | None = None):
     """The engine's paw wash (kernel/mind/engine/paw.h: the left paw lifted on three feet, the face
     washed with it) as a kilo.tricks.model.Trick, and the lean it chose: (trick, {lean_dx, lean_roll,
     margin})."""
-    from kilo.tricks.model import CANONICAL, JOINT_SLOTS, Easing, Guard, Keyframe, Posture, Trick
+    from kilo.tricks.model import Guard, Posture, Trick
 
     out = subprocess.run([binary(path), "--trick", "paw_wash", "--tempo", str(tempo), "--strokes", str(strokes)],
                          check=True, capture_output=True, text=True).stdout.split("\n")
-    frames, guards, info, loop = [], [], {}, (0, 0, 0)
-    for line in out:
-        f = line.split()
-        if not f:
-            continue
+    lines = [ln.split() for ln in out if ln.strip()]
+    guards, info, loop = [], {}, (0, 0, 0)
+    for f in lines:
         if f[0] == "trick":
             info = {f[i]: float(f[i + 1]) for i in (1, 3, 5)}
             loop = (int(f[10]), int(f[11]), int(f[8]))
-        elif f[0] == "frame":
-            dur, hold, flags = int(f[1]), int(f[2]), int(f[3])
-            a: list = [None] * JOINT_SLOTS
-            for k, j in enumerate(CANONICAL):
-                a[j] = int(f[4 + k])
-            frames.append(Keyframe(tuple(a), dur=dur, hold=hold, easing=Easing(flags & 3), balance=bool(flags & 4)))
         elif f[0] == "guard":
             guards.append(Guard(int(f[1]), (int(f[2]) / 16, int(f[3]) / 16), int(f[4]) / 16, "three feet"))
+    frames = _frames([f for f in lines if f[0] == "frame"])
     t = Trick("paw_wash", tuple(frames), loop_start=loop[0], loop_end=loop[1], repeats=loop[2],
               expected_roll=round(info["lean_roll"]), end_posture=Posture.STAND, stop_ticks=25, guards=tuple(guards),
               roll_max=round(abs(info["lean_roll"]) + 10, 4))
     return t, info
+
+
+def _frames(lines):
+    """The "frame dur hold flags a0..a10" lines engine-judge prints, as kilo.tricks.model Keyframes."""
+    from kilo.tricks.model import CANONICAL, JOINT_SLOTS, Easing, Keyframe
+
+    out = []
+    for f in lines:
+        dur, hold, flags = int(f[1]), int(f[2]), int(f[3])
+        a: list = [None] * JOINT_SLOTS
+        for k, j in enumerate(CANONICAL):
+            a[j] = int(f[4 + k])
+        out.append(Keyframe(tuple(a), dur=dur, hold=hold, easing=Easing(flags & 3), balance=bool(flags & 4)))
+    return out
+
+
+POSTURE_CODE = {"stand": 3, "sit": 2, "rest": 1}
+
+
+def posture(frm: str, to: str, tempo: float = 1.0, path: str | None = None):
+    """The engine's move (kernel/mind/engine/posture.h) from ``frm`` (stand, sit, rest, or eleven joint
+    angles in the tricks' canonical order, comma-separated) to ``to`` (stand, sit, rest) as a
+    kilo.tricks.model.Trick, and what the engine says of it: (trick, {margin, direct, via, stages,
+    plan}); (None, {why}) when it finds no way."""
+    from kilo.tricks.model import Posture, Trick
+
+    r = subprocess.run([binary(path), "--posture", frm, to, "--tempo", str(tempo)], capture_output=True, text=True)
+    lines = [ln.split() for ln in r.stdout.split("\n") if ln.strip()]
+    if r.returncode != 0:
+        return None, {"why": r.stdout.strip()}
+    h = lines[0]
+    info = {"margin": float(h[2]), "direct": float(h[4]), "via": h[6], "stages": int(h[8]),
+            "exp_pitch": int(h[10]), "exp_roll": int(h[11]), "plan": " ".join(h[13:])}
+    frames = _frames([f for f in lines if f[0] == "frame"])
+    t = Trick(f"be_{to}", tuple(frames), end_posture=Posture(POSTURE_CODE[to]), expected_roll=info["exp_roll"],
+              expected_pitch=info["exp_pitch"], stop_ticks=40, roll_max=25.0)
+    return t, info
+
+
+def rest(angles, servos: str = "eeprom", path: str | None = None) -> dict:
+    """Where the engine's rest finder (kernel/mind/engine/rest.h) puts the body for joint ``angles``
+    (eleven, the tricks' canonical order, degrees), with the servos ``asked`` (no pulse clamp),
+    ``eeprom`` (Kilo's calibration) or ``reseated`` (the right hind shoulder re-seated): pitch (nose up
+    +), roll (left side down +), margin, com_h, topples, telemetry (pitch, roll) and contacts."""
+    out = subprocess.run([binary(path), "--rest", servos, *[str(float(a)) for a in angles]], check=True,
+                         capture_output=True, text=True).stdout.split()
+    v = dict(zip(out[1:12:2], out[2:13:2]))
+    i = out.index("contacts")
+    return {"pitch": float(v["pitch"]), "roll": float(v["roll"]), "margin": float(v["margin"]),
+            "com_h": float(v["com_h"]), "topples": int(v["topples"]),
+            "telemetry": (float(out[i - 2]), float(out[i - 1])), "contacts": set(out[i + 1:])}

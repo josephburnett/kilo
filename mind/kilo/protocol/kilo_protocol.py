@@ -2747,6 +2747,10 @@ MODEL_CORRECTION_SERVO_TAU_D_MS = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
 MODEL_CORRECTION_SERVO_GIVE = (1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
 MODEL_SERVO_CZP = (73, 69, 85, 90, 45, 135, 45, 135, 111, 83, 116, 82, 141, 67, 127, 59)
 MODEL_SERVO_RESEATED_RB_SHOULDER_CZP = 88
+MODEL_SERVO_DIR = (1, -1, 1, 0, 0, 0, 0, 0, 1, -1, -1, 1, -1, 1, 1, -1)
+MODEL_SERVO_A2P_X1000 = 10963
+MODEL_SERVO_B_US = 600
+MODEL_SERVO_PULSE_US = (500, 2500)
 MODEL_TAIL_PIVOT_X_MM = -70.5
 MODEL_TAIL_PIVOT_Z_MM = 24.0
 MODEL_TAIL_LEN_MM = 94.0
@@ -2763,6 +2767,7 @@ MODEL_OUTLINE_PI_TOP_Z_MM = 36.0
 MODEL_OUTLINE_NOSE_X_MM = 110.0
 MODEL_OUTLINE_NOSE_Z_MM = -5.0
 MODEL_OUTLINE_HALF_WIDTH_MM = 30.0
+MODEL_OUTLINE_HIP_R_MM = 8.0
 MODEL_INERTIA_FRAME_BOX_MM = (130, 60, 45)
 MODEL_SENSOR_ULTRASONIC_HEIGHT_MM = 80
 MODEL_SENSOR_ULTRASONIC_FLOOR_TILT_DEG = 12
@@ -2806,6 +2811,10 @@ MODEL_ABOUT: dict[str, tuple[str, str, str]] = {
     'correction.servo_give': ('...and gives under load this many times sag_deg_per_kg_cm', '', 'all alike: the left hind probably 1.5 and the right hind 0.5, not applied (docs/model-fit-results.md)'),
     'servo.czp': ("each servo's zero, by joint id 0..15", 'servo deg', "Kilo's EEPROM, read 2026-10-10"),
     'servo.reseated_rb_shoulder_czp': ("the right hind shoulder's zero after it was re-seated", 'servo deg', 'read from the plays since 2026-11-19, not confirmed'),
+    'servo.dir': ('each servo turns this way for a positive joint angle, by joint id 0..15', '', "the body's joint table (body/src/core/joints.cpp)"),
+    'servo.a2p_x1000': ('the servo pulse per servo degree, times 1000', 'us', "Kilo's EEPROM, read 2026-10-10"),
+    'servo.b_us': ('the servo pulse at servo angle 0', 'us', "Kilo's EEPROM, read 2026-10-10"),
+    'servo.pulse_us': ('the body clamps every pulse to this range', 'us', 'the body (body/src/core/joints.cpp)'),
     'tail.pivot_x_mm': ("the tail's pivot, forward of the shoulders' middle", 'mm', "the owner's ruler, 2026-11-16"),
     'tail.pivot_z_mm': ('...and above the shoulder axles', 'mm', "the owner's ruler, 2026-11-16"),
     'tail.len_mm': ('the tail, pivot to tip', 'mm', "the owner's ruler, 2026-11-16"),
@@ -2822,6 +2831,7 @@ MODEL_ABOUT: dict[str, tuple[str, str, str]] = {
     'outline.nose_x_mm': ('the nose, forward', 'mm', 'estimate'),
     'outline.nose_z_mm': ('the nose, height', 'mm', 'estimate'),
     'outline.half_width_mm': ("half the frame's width", 'mm', 'estimate'),
+    'outline.hip_r_mm': ("the shoulder servo's housing, as a ball this big about the axle", 'mm', 'estimate'),
     'inertia.frame_box_mm': ("the frame's mass spread as a box this size", 'mm', 'estimate'),
     'sensor.ultrasonic_height_mm': ('the distance sensor above the floor, standing', 'mm', 'estimate (taken a little low)'),
     'sensor.ultrasonic_floor_tilt_deg': ('looking down more than this, the sensor sees the floor', 'deg', 'estimate'),

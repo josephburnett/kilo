@@ -1173,9 +1173,21 @@ servo_give = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1
 #                      offset +12, may end +7..+25): what the rear-up is
 #                      designed for; read from the plays since 2026-11-19, not
 #                      confirmed with `kilo cal show`
+#   dir, a2p_x1000, b_us, pulse_us  what the body does with a joint angle
+#                      (body/src/core/joints.cpp): servo = czp + dir * angle
+#                      (degrees), pulse = a2p_x1000 / 1000 * servo + b_us
+#                      microseconds, clamped to pulse_us. Past the clamp the
+#                      servo goes no further: the angles a joint really reaches
+#                      (kilo.calibration angle_window, engine/rest.h). a2p and b
+#                      from Kilo's legacy EEPROM dump of 2026-10-10, dir from the
+#                      body's joint table (0 for the joints 3..7 it never drives)
 [model.servo]
 czp = [73, 69, 85, 90, 45, 135, 45, 135, 111, 83, 116, 82, 141, 67, 127, 59]
 reseated_rb_shoulder_czp = 88
+dir = [1, -1, 1, 0, 0, 0, 0, 0, 1, -1, -1, 1, -1, 1, 1, -1]
+a2p_x1000 = 10963
+b_us = 600
+pulse_us = [500, 2500]
 
 # The tail: the owner's ruler, 2026-11-16 (docs/rear-up-trick.md section 2).
 # A straight lever whose servo turns it left and right about an axis tipped
@@ -1196,9 +1208,15 @@ sign = 1.0
 g = 6.0
 com_frac = 0.5
 
-# The frame's outline, for what may touch the floor in a trick. ESTIMATES
-# (docs/rear-up-trick.md T3, T4): rear end, underside (battery), top at the
-# rear, the Pi's rear edge and highest point, the nose, half the frame's width.
+# The frame's outline, for what may touch the floor in a trick, sitting and
+# lying. ESTIMATES (docs/rear-up-trick.md T3, T4): rear end, underside
+# (battery), top at the rear, the Pi's rear edge and highest point, the nose,
+# half the frame's width, the shoulder servo's housing (a ball this big about
+# each shoulder axle). The haunches are the underside's rear corners (rear_x,
+# belly_z); the belly the underside's front corners, under the front axles.
+# The movement engine's rest finder (kernel/mind/engine/rest.h) and the
+# tricks' (kilo.tricks.stance) put him down on these, the feet, the knees and
+# the tail tip (docs/movement-engine.md, step 3).
 [model.outline]
 rear_x_mm = -88.0
 belly_z_mm = -24.0
@@ -1208,6 +1226,7 @@ pi_top_z_mm = 36.0
 nose_x_mm = 110.0
 nose_z_mm = -5.0
 half_width_mm = 30.0
+hip_r_mm = 8.0
 
 # The frame lump's moment of inertia, as a box of this size (x, y, z mm). ESTIMATE.
 [model.inertia]
@@ -1288,6 +1307,10 @@ servo_tau_ms = ["...and then closes 63 % of the gap in this time", "ms", "fitted
 "correction.servo_give" = ["...and gives under load this many times sag_deg_per_kg_cm", "", "all alike: the left hind probably 1.5 and the right hind 0.5, not applied (docs/model-fit-results.md)"]
 "servo.czp" = ["each servo's zero, by joint id 0..15", "servo deg", "Kilo's EEPROM, read 2026-10-10"]
 "servo.reseated_rb_shoulder_czp" = ["the right hind shoulder's zero after it was re-seated", "servo deg", "read from the plays since 2026-11-19, not confirmed"]
+"servo.dir" = ["each servo turns this way for a positive joint angle, by joint id 0..15", "", "the body's joint table (body/src/core/joints.cpp)"]
+"servo.a2p_x1000" = ["the servo pulse per servo degree, times 1000", "us", "Kilo's EEPROM, read 2026-10-10"]
+"servo.b_us" = ["the servo pulse at servo angle 0", "us", "Kilo's EEPROM, read 2026-10-10"]
+"servo.pulse_us" = ["the body clamps every pulse to this range", "us", "the body (body/src/core/joints.cpp)"]
 "tail.pivot_x_mm" = ["the tail's pivot, forward of the shoulders' middle", "mm", "the owner's ruler, 2026-11-16"]
 "tail.pivot_z_mm" = ["...and above the shoulder axles", "mm", "the owner's ruler, 2026-11-16"]
 "tail.len_mm" = ["the tail, pivot to tip", "mm", "the owner's ruler, 2026-11-16"]
@@ -1304,6 +1327,7 @@ servo_tau_ms = ["...and then closes 63 % of the gap in this time", "ms", "fitted
 "outline.nose_x_mm" = ["the nose, forward", "mm", "estimate"]
 "outline.nose_z_mm" = ["the nose, height", "mm", "estimate"]
 "outline.half_width_mm" = ["half the frame's width", "mm", "estimate"]
+"outline.hip_r_mm" = ["the shoulder servo's housing, as a ball this big about the axle", "mm", "estimate"]
 "inertia.frame_box_mm" = ["the frame's mass spread as a box this size", "mm", "estimate"]
 "sensor.ultrasonic_height_mm" = ["the distance sensor above the floor, standing", "mm", "estimate (taken a little low)"]
 "sensor.ultrasonic_floor_tilt_deg" = ["looking down more than this, the sensor sees the floor", "deg", "estimate"]
